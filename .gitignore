@@ -1,0 +1,15 @@
+# Secrets
+.env
+backend/.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Temp / generated files
+backend/tmp/
+backend/__pycache__/
+
+# Node
+node_modules/

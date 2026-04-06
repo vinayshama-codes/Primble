@@ -1,0 +1,12 @@
+{
+  "form_id": "ACORD_131",
+  "form_name": "ACORD 131 - Umbrella or Excess Liability Application",
+  "form_type": "application",
+  "template_file": "ACORD_131.pdf",
+  "description": "Umbrella/excess policies and confirmation of underlying coverage.",
+  "always_include": false,
+  "matching_flags": ["has_umbrella"],
+  "matching_keywords": ["umbrella","excess","attachment point","self-insured retention","SIR","underlying policy","excess liability"],
+  "coverage_types": ["umbrella"],
+  "policy_types": ["commercial"]
+}

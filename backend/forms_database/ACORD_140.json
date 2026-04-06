@@ -1,0 +1,141 @@
+{
+  "form_id": "ACORD_140",
+  "form_name": "ACORD 140 - Commercial Property Section",
+  "form_type": "application_section",
+  "template_file": "ACORD_140.pdf",
+  "description": "Commercial Property coverage section used with ACORD 125 to collect detailed underwriting data regarding buildings, business personal property, construction details, protection class, valuation methods, and requested limits. Captures COPE (Construction, Occupancy, Protection, Exposure) data required for carrier-grade property submissions.",
+  "always_include": false,
+  "matching_flags": [
+    "has_property_coverage"
+  ],
+  "coverage_types": [
+    "commercial_property",
+    "building_coverage",
+    "business_personal_property",
+    "business_income"
+  ],
+  "policy_types": [
+    "commercial"
+  ],
+  "typical_use_cases": [
+    "Applying for commercial property insurance",
+    "Insuring buildings and contents",
+    "Submitting construction and protection details (COPE)",
+    "Underwriting review of property risks",
+    "Business income coverage applications"
+  ],
+  "required_fields": [
+    "applicant_name",
+    "premises_address",
+    "construction_type",
+    "year_built",
+    "roof_year",
+    "occupancy_type",
+    "building_limit_requested",
+    "business_personal_property_limit",
+    "valuation_method",
+    "deductible_requested",
+    "protection_class",
+    "distance_to_hydrant",
+    "sprinkler_system",
+    "fire_protection_details",
+    "business_income_limit",
+    "business_income_period_of_restoration",
+    "coinsurance_percentage",
+    "prior_loss_history"
+  ],
+  "tier1_cope_fields": [
+    "premises_address",
+    "occupancy_type",
+    "construction_type",
+    "building_limit_requested",
+    "business_personal_property_limit"
+  ],
+  "tier2_carrier_grade_cope_fields": [
+    "year_built",
+    "roof_year",
+    "sprinkler_system",
+    "fire_protection_details",
+    "distance_to_hydrant",
+    "protection_class",
+    "valuation_method",
+    "business_income_limit",
+    "business_income_period_of_restoration",
+    "coinsurance_percentage"
+  ],
+  "matching_keywords": [
+    "ACORD 140",
+    "commercial property",
+    "building coverage",
+    "BPP",
+    "business personal property",
+    "business income",
+    "construction type",
+    "protection class",
+    "property application",
+    "COPE",
+    "occupancy",
+    "sprinkler",
+    "valuation",
+    "RCV",
+    "ACV",
+    "replacement cost",
+    "actual cash value",
+    "coinsurance",
+    "building limit",
+    "property schedule",
+    "fire protection",
+    "roof year"
+  ],
+  "matching_criteria": {
+    "requires_property_coverage": true,
+    "requires_commercial_policy": true,
+    "requires_master_application": "ACORD_125",
+    "min_coverage_types": 1
+  },
+  "validation_rules": {
+    "minimum_viable_cope": {
+      "required": ["premises_address", "occupancy_type", "construction_type", "building_limit_requested"],
+      "failure_action": "hard_stop",
+      "sqs_cap": 0
+    },
+    "carrier_grade_cope": {
+      "required": ["year_built", "roof_year", "sprinkler_system", "fire_protection_details", "valuation_method", "business_income_period_of_restoration"],
+      "failure_action": "sqs_penalty",
+      "sqs_cap": 85
+    },
+    "valuation_method": {
+      "required": true,
+      "valid_values": ["RCV", "ACV", "Replacement Cost Value", "Actual Cash Value"],
+      "failure_action": "soft_block"
+    },
+    "deductible_structure": {
+      "required_perils": ["AOP", "Wind/Hail", "Earthquake", "Flood"],
+      "failure_action": "hard_stop_if_peril_referenced_but_undefined"
+    }
+  },
+  "cross_form_validations": [
+    {
+      "form": "ACORD_133",
+      "rule": "prevent_value_duplication",
+      "description": "Builders Risk values must not duplicate completed property values"
+    },
+    {
+      "form": "ACORD_160",
+      "rule": "prevent_value_duplication",
+      "description": "Inland Marine scheduled items must not be double-counted in property"
+    },
+    {
+      "form": "ACORD_125",
+      "rule": "location_count_reconciliation",
+      "description": "Location counts must match between ACORD 125 and ACORD 140"
+    }
+  ],
+  "sqs_impact": {
+    "component": "property_integrity",
+    "weight": 0.15,
+    "minimum_viable_cope_missing": 0,
+    "minimum_viable_only": 65,
+    "carrier_grade_complete": 100
+  }
+}

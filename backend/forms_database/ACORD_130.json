@@ -1,0 +1,12 @@
+{
+  "form_id": "ACORD_130",
+  "form_name": "ACORD 130 - Workers Compensation Application",
+  "form_type": "application",
+  "template_file": "ACORD_130.pdf",
+  "description": "Payroll by class and WC exposures. State rules apply.",
+  "always_include": false,
+  "matching_flags": ["has_workers_comp"],
+  "matching_keywords": ["workers compensation","WC","payroll","class code","NCCI","experience mod","x-mod","employees","state fund","employer liability"],
+  "coverage_types": ["workers_comp"],
+  "policy_types": ["commercial"]
+}

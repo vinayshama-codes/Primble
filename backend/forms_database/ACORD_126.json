@@ -1,0 +1,12 @@
+{
+  "form_id": "ACORD_126",
+  "form_name": "ACORD 126 - Commercial General Liability Section",
+  "form_type": "section",
+  "template_file": "ACORD_126.pdf",
+  "description": "Captures GL exposures, class codes, limits, operations, and claims info.",
+  "always_include": false,
+  "matching_flags": ["has_general_liability"],
+  "matching_keywords": ["general liability","GL","BI","PD","products completed","premises operations","personal advertising injury","class code","additional insured","subcontractor"],
+  "coverage_types": ["general_liability"],
+  "policy_types": ["commercial"]
+}

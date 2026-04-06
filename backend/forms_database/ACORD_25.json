@@ -1,0 +1,14 @@
+{
+  "form_id": "ACORD_25",
+  "form_name": "ACORD 25 - Certificate of Liability Insurance",
+  "form_type": "certificate",
+  "template_file": "ACORD_25.pdf",
+  "description": "Proof-of-coverage certificate for third parties. Lists policy numbers, limits, dates, and additional insureds.",
+  "always_include": false,
+  "matching_flags": ["is_commercial_policy", "has_certificate_request", "is_certificate_doc"],
+  "matching_keywords": ["certificate", "certificate holder", "proof of insurance",
+                        "evidence of insurance", "additional insured", "lender",
+                        "this is to certify", "acord 25"],
+  "coverage_types": ["general_liability", "auto", "workers_comp"],
+  "policy_types": ["commercial"]
+}

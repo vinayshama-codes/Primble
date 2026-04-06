@@ -1,0 +1,12 @@
+{
+  "form_id": "ACORD_141",
+  "form_name": "ACORD 141 - Property Schedule",
+  "form_type": "schedule",
+  "template_file": "ACORD_141.pdf",
+  "description": "Per-location property schedule supplement to ACORD 140.",
+  "always_include": false,
+  "matching_flags": ["has_property_coverage","has_multiple_locations"],
+  "matching_keywords": ["property schedule","multiple locations","location schedule","building schedule","BPP schedule"],
+  "coverage_types": ["property"],
+  "policy_types": ["commercial"]
+}

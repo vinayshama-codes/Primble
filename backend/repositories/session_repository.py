@@ -1,0 +1,113 @@
+import json
+import logging
+import uuid
+import psycopg2
+from datetime import datetime, timezone
+from typing import Optional
+
+from config.database import get_db
+from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
+
+
+def _session_to_db(data: dict) -> dict:
+    generated  = data.get("generated_forms", {})
+    clean_gen  = {fid: {k: v for k, v in fd.items() if k != "pdf_bytes"} for fid, fd in generated.items()}
+    clean      = {k: v for k, v in data.items() if k != "generated_forms"}
+    clean["generated_forms"] = clean_gen
+    return clean
+
+
+def _session_from_db(data: dict, sid: str) -> dict:
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute("SELECT form_id, pdf_bytes FROM session_pdf_bytes WHERE session_id = %s", (sid,))
+    rows   = cur.fetchall()
+    cur.close()
+    conn.close()
+    pb_map    = {r["form_id"]: bytes(r["pdf_bytes"]) for r in rows}
+    generated = data.get("generated_forms", {})
+    for fid, form_data in generated.items():
+        if fid in pb_map:
+            form_data["pdf_bytes"] = pb_map[fid]
+    return data
+
+
+def _save_pdf_bytes(sid: str, generated: dict):
+    if not generated:
+        return
+    now  = datetime.now(timezone.utc).isoformat()
+    conn = get_db()
+    cur  = conn.cursor()
+    for fid, form_data in generated.items():
+        pb = form_data.get("pdf_bytes")
+        if pb is not None:
+            cur.execute(
+                """INSERT INTO session_pdf_bytes (session_id, form_id, pdf_bytes, updated_at)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (session_id, form_id)
+                   DO UPDATE SET pdf_bytes = EXCLUDED.pdf_bytes, updated_at = EXCLUDED.updated_at""",
+                (sid, fid, psycopg2.Binary(pb), now),
+            )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def new_processing_session(data: dict) -> str:
+    sid  = str(uuid.uuid4())
+    now  = datetime.now(timezone.utc).isoformat()
+    _save_pdf_bytes(sid, data.get("generated_forms", {}))
+    clean = _session_to_db(data)
+    conn  = get_db()
+    cur   = conn.cursor()
+    cur.execute(
+        "INSERT INTO processing_sessions (id, user_id, data, created_at, updated_at) VALUES (%s,%s,%s,%s,%s)",
+        (sid, data.get("user_id", ""), json.dumps(clean), now, now),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    logger.info(f"Processing session created: {sid}")
+    return sid
+
+
+def get_processing_session(sid: str) -> dict:
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute("SELECT data FROM processing_sessions WHERE id = %s", (sid,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        raise HTTPException(404, f"Processing session {sid} not found")
+    data = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
+    return _session_from_db(data, sid)
+
+
+def upd_processing_session(sid: str, updates: dict):
+    current = get_processing_session(sid)
+    if "generated_forms" in updates:
+        existing_gen = current.get("generated_forms", {})
+        for fid, form_data in updates["generated_forms"].items():
+            if fid not in existing_gen:
+                existing_gen[fid] = form_data
+            else:
+                existing_gen[fid].update(form_data)
+        current["generated_forms"] = existing_gen
+        _save_pdf_bytes(sid, current["generated_forms"])
+    for k, v in updates.items():
+        if k != "generated_forms":
+            current[k] = v
+    clean = _session_to_db(current)
+    now   = datetime.now(timezone.utc).isoformat()
+    conn  = get_db()
+    cur   = conn.cursor()
+    cur.execute(
+        "UPDATE processing_sessions SET data = %s, updated_at = %s WHERE id = %s",
+        (json.dumps(clean), now, sid),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()

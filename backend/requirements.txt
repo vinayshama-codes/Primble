@@ -1,0 +1,62 @@
+# Acordly API v12.3.1 - Python Backend Requirements
+# Generated from main.py imports
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Database
+psycopg2-binary>=2.9.9
+
+# Authentication & Security
+bcrypt>=4.1.0
+python-multipart>=0.0.6
+PyJWT>=2.8.1
+
+# Google OAuth
+google-auth>=2.25.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+
+# Payment Processing
+stripe>=7.4.0
+
+# PDF Processing
+pdfplumber>=0.10.3
+pikepdf>=8.11.0
+reportlab>=4.0.7
+
+# Image Processing
+Pillow>=10.1.0
+
+# AI/LLM
+groq>=0.4.2
+
+# Email (Optional providers - install as needed)
+resend>=0.3.0
+
+# Scheduling
+APScheduler>=3.10.4
+
+# Data Validation
+pydantic>=2.5.0
+pydantic[email]>=2.5.0
+email-validator>=2.1.0
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# OCR (Optional - install based on OCR_PROVIDER)
+# easyocr>=1.7.0  # Uncomment if using EasyOCR
+# google-cloud-vision>=3.4.0  # Uncomment if using Google Vision
+ boto3>=1.29.0  
+
+# Logging & Monitoring (Optional)
+# sentry-sdk>=1.38.0
+
+# Development (Optional)
+pytest>=7.4.3
+pytest-asyncio>=0.21.1
+httpx>=0.25.2
+
+

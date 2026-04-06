@@ -1,0 +1,12 @@
+{
+  "form_id": "ACORD_127",
+  "form_name": "ACORD 127 - Business Auto Section",
+  "form_type": "section",
+  "template_file": "ACORD_127.pdf",
+  "description": "Vehicle schedules, driver exposures, radius of operation, auto limits.",
+  "always_include": false,
+  "matching_flags": ["has_auto_coverage"],
+  "matching_keywords": ["auto","vehicle","VIN","hired auto","non-owned","garage","driver","fleet","business auto","liability limit","physical damage","collision","comprehensive"],
+  "coverage_types": ["auto"],
+  "policy_types": ["commercial"]
+}
