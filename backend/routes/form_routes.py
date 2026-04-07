@@ -292,8 +292,13 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
     current_state = r.get("field_state", dict(r.get("mapped", {})))
     current_state.update(req.field_updates)
     confidence = r.get("confidence", {})
-    for k in req.field_updates:
-        confidence[k] = "filled"
+    for k, v in req.field_updates.items():
+        val = str(v).strip() if v is not None else ""
+        if val and val not in ("null", "None"):
+            confidence[k] = "filled"
+        # If user cleared a field, restore to low_confidence so it shows up in ARQ again
+        elif confidence.get(k) == "filled":
+            confidence[k] = "low_confidence"
 
     sqs = calculate_sqs(
         facts=session["facts"], flags=session["flags"],

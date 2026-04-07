@@ -49,6 +49,7 @@ export default function PDFJsViewer({
   const [applySigStage, setApplySigStage] = useState("idle");
   const [loadingStage,  setLoadingStage]  = useState("idle");
   const [refreshing,    setRefreshing]    = useState(false);
+  const [pdfRefreshKey, setPdfRefreshKey] = useState(0);
   const [highlightCounts, setHighlightCounts] = useState({ pink: 0, yellow: 0, green: 0 });
 
   useEffect(() => { clientFilledRef.current = clientFilledFields; }, [clientFilledFields]);
@@ -95,7 +96,7 @@ export default function PDFJsViewer({
         }
       });
     return () => { try { task.destroy(); } catch (_) {} };
-  }, [formId, pdfjsReady]); // eslint-disable-line
+  }, [formId, pdfjsReady, pdfRefreshKey]); // eslint-disable-line
 
   // Render page to canvas
   useEffect(() => {
@@ -210,23 +211,16 @@ const handleRefresh = async () => {
   if (!sessionId || !formId || !token) return;
   setRefreshing(true);
   try {
-    // Step 1: get updated clientFilledFields from parent (ARQ answered fields)
     if (onRefreshFields) {
       const freshClientFilled = await onRefreshFields();
       if (Array.isArray(freshClientFilled)) {
         clientFilledRef.current = freshClientFilled;
       }
     }
-    // Step 2: re-fetch fields with updated confidence + values
     await fetchFields();
-    // Step 3: redraw
-    const canvas = canvasRef.current;
-    const pd     = pageDimsRef.current[pageNum - 1];
-    if (canvas && pd && canvas.width > 0) {
-      const avail = containerRef.current ? containerRef.current.clientWidth - 48 : 720;
-      const scale = Math.min(2.2, Math.max(1.0, avail / pd.width));
-      buildOverlay(scale, canvas.width, canvas.height, fieldValuesRef.current);
-    }
+    // Force PDF.js to reload PDF from server (backend updated pdf_bytes after client submit)
+    manuallyRenderedRef.current = { doc: null, pageNum: -1 };
+    setPdfRefreshKey(k => k + 1);
   } finally { setRefreshing(false); }
 };
 

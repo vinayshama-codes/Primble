@@ -243,6 +243,8 @@ async def submit_arq(token: str, request: Request):
                 client_name=arq.get("client_name", ""),
                 client_email=arq["email"],
                 fields_filled=len(applied_fields),
+                session_id=arq["session_id"],
+                frontend_url=FRONTEND_URL,
             )
     except Exception as ex:
         logger.error(f"ARQ submit: notification email failed: {ex}")

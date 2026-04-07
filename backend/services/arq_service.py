@@ -130,9 +130,11 @@ def generate_arq_questions(
             elif conf_val == "low_confidence" and is_empty:
                 pass  # empty low_confidence → include
             elif conf_val == "low_confidence" and not is_empty:
-                continue
-            elif conf_val == "filled":
-                continue
+                continue  # AI filled with value → skip
+            elif conf_val == "filled" and is_empty:
+                pass  # marked filled but actually empty → include
+            elif conf_val == "filled" and not is_empty:
+                continue  # genuinely filled → skip
             else:
                 continue
 
