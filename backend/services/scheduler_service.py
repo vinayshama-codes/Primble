@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -60,10 +60,52 @@ async def run_daily_payment_lifecycle():
         logger.error(f"Lifecycle cron failed: {ex}")
 
 
+async def run_arq_auto_reminders():
+    """Send automatic reminders for ARQ sessions pending > 3 days with no submission."""
+    try:
+        from services.arq_service import send_arq_reminder, get_arq_by_id
+
+        now         = datetime.now(timezone.utc)
+        cutoff      = (now - timedelta(days=3)).isoformat()
+        conn        = get_db()
+        cur         = conn.cursor()
+        # Pending ARQs created more than 3 days ago, not yet submitted, not expired, reminder_count < 1
+        cur.execute("""
+            SELECT a.id, a.user_id
+            FROM arq_sessions a
+            WHERE a.status = 'pending'
+              AND a.created_at <= %s
+              AND a.expires_at > %s
+              AND COALESCE(a.reminder_count, 0) < 1
+        """, (cutoff, now.isoformat()))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+        for row in rows:
+            try:
+                conn2 = get_db()
+                cur2  = conn2.cursor()
+                cur2.execute("SELECT email, full_name FROM users WHERE id=%s", (row["user_id"],))
+                user_row = cur2.fetchone()
+                cur2.close()
+                conn2.close()
+                if user_row:
+                    user = dict(user_row)
+                    user["id"] = row["user_id"]
+                    ok = send_arq_reminder(row["id"], user)
+                    logger.info(f"ARQ auto-reminder: arq_id={row['id']} ok={ok}")
+            except Exception as ex:
+                logger.error(f"ARQ auto-reminder error arq_id={row['id']}: {ex}")
+    except Exception as ex:
+        logger.error(f"ARQ auto-reminder cron failed: {ex}")
+
+
 def start_scheduler():
     scheduler.add_job(run_daily_payment_lifecycle, "cron", hour=9, minute=0)
+    scheduler.add_job(run_arq_auto_reminders, "cron", hour=10, minute=0)
     scheduler.start()
-    logger.info("Daily payment lifecycle scheduler started")
+    logger.info("Schedulers started: payment lifecycle + ARQ auto-reminders")
 
 
 def stop_scheduler():

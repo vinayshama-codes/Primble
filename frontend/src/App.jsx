@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import "./App.css";
-import "../src/styles/injected.js";
+import "./styles/injected.js";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 
 import { GOOGLE_CLIENT_ID, API_BASE } from "./config/constants";
@@ -17,8 +17,15 @@ import CompleteProfileModal   from "./components/auth/CompleteProfileModal";
 import AcordModal             from "./components/form/AcordModal";
 import UpgradeModal           from "./components/billing/UpgradeModal";
 import SignatureModal         from "./components/signature/SignatureModal";
+import ClientQuestionnaire    from "./components/arq/ClientQuestionnaire";
 
 export default function App() {
+  // Route /questionnaire/:token without react-router-dom
+  const path                = window.location.pathname;
+  const questionnaireMatch  = path.match(/^\/questionnaire\/([^/]+)$/);
+  if (questionnaireMatch) {
+    return <ClientQuestionnaire token={questionnaireMatch[1]} />;
+  }
   return (
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
       <AppContent />
@@ -29,6 +36,12 @@ export default function App() {
 function AppContent() {
   const { user, setUser, token, login, logout } = useAuth();
   const { savedSignature, updateSignature }      = useSignature(token, user);
+
+  // Issue 1: check ?resume_session= from producer email link
+  const _resumeFromUrl = () => {
+    const p = new URLSearchParams(window.location.search);
+    return p.get("resume_session") || null;
+  };
 
   const [showModal, setShowModal]               = useState(false);
   const [showAuthModal, setShowAuthModal]       = useState(false);
@@ -45,6 +58,21 @@ function AppContent() {
   useUpgradePolling(token, setUser, setUpgradeChecking, setUpgradeFailed);
   useBillingReturnPolling(token, setUser, setUpgradeChecking);
 
+  // Handle ?resume_session= — open modal after auth
+  useEffect(() => {
+    const sid = _resumeFromUrl();
+    if (!sid) return;
+    window.history.replaceState({}, "", "/");
+    if (token && user) {
+      setResumeSessionId(sid);
+      setShowModal(true);
+    } else {
+      // Store it, open auth first
+      sessionStorage.setItem("acordly_resume_after_login", sid);
+      setShowAuthModal(true);
+    }
+  }, []); // eslint-disable-line
+
   useEffect(() => {
     const params          = new URLSearchParams(window.location.search);
     if (params.get("overage_paid") !== "true") return;
@@ -55,18 +83,14 @@ function AppContent() {
     localStorage.removeItem("acordly_overage_session");
     localStorage.removeItem("acordly_prev_limit");
     if (!token || !stripeSessionId) return;
-
     applyOverage(token, stripeSessionId, parseInt(qty) || 1)
       .then(({ data }) => {
         fetch(`${API_BASE}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((me) => { if (me) setUser(me); });
+          .then(r => r.ok ? r.json() : null).then(me => { if (me) setUser(me); });
         const applied = data.credited || data.already_applied;
-        setOverageToast(
-          applied
-            ? `✅ ${qty} extra package${qty !== "1" ? "s" : ""} added! You can continue downloading.`
-            : `⚠️ Could not verify payment. Please contact support if packages were not credited.`
-        );
+        setOverageToast(applied
+          ? `✅ ${qty} extra package${qty !== "1" ? "s" : ""} added! You can continue downloading.`
+          : `⚠️ Could not verify payment. Please contact support if packages were not credited.`);
         setTimeout(() => setOverageToast(null), 8000);
         if (savedSid && applied) { setResumeSessionId(savedSid); setShowModal(true); }
       })
@@ -82,12 +106,8 @@ function AppContent() {
     try {
       const res  = await fetch(`${API_BASE}/api/stripe/create-portal-session`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        setUpgradeChecking(false);
-        setHeaderError(data.detail || "Could not open billing portal.");
-      }
+      if (data.url) { window.location.href = data.url; }
+      else { setUpgradeChecking(false); setHeaderError(data.detail || "Could not open billing portal."); }
     } catch { setUpgradeChecking(false); setHeaderError("Network error. Please try again."); }
   };
 
@@ -100,9 +120,7 @@ function AppContent() {
           {overageToast}
         </div>
       )}
-
       {upgradeChecking && <UpgradeStageOverlay />}
-
       {signingIn && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(255,255,255,0.97)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
           <div className="loading-spinner" style={{ width: 40, height: 40, marginBottom: 16 }} />
@@ -111,25 +129,16 @@ function AppContent() {
       )}
 
       <Header
-        user={user}
-        token={token}
-        savedSignature={savedSignature}
+        user={user} token={token} savedSignature={savedSignature}
         onSignatureClick={() => setShowSignatureModal(true)}
         onUpgradeClick={() => setShowUpgradeModal(true)}
-        onLogout={logout}
-        openBillingPortal={openBillingPortal}
-        upgradeChecking={upgradeChecking}
-        upgradeFailed={upgradeFailed}
-        setUpgradeFailed={setUpgradeFailed}
-        setUpgradeChecking={setUpgradeChecking}
-        setUser={setUser}
+        onLogout={logout} openBillingPortal={openBillingPortal}
+        upgradeChecking={upgradeChecking} upgradeFailed={upgradeFailed}
+        setUpgradeFailed={setUpgradeFailed} setUpgradeChecking={setUpgradeChecking} setUser={setUser}
       />
 
       {headerError && (
-        <div className="header-error-bar">
-          ⚠️ {headerError}
-          <button onClick={() => setHeaderError("")}>✕</button>
-        </div>
+        <div className="header-error-bar">⚠️ {headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
       )}
 
       <LandingPage user={user} onGetStarted={handleGetStarted} />
@@ -143,17 +152,24 @@ function AppContent() {
             setSigningIn(true);
             setTimeout(() => {
               setSigningIn(false);
-              if (profileIncomplete) setShowCompleteProfile(true);
-              else setShowModal(true);
+              // Check if we need to resume a session after login
+              const pendingResume = sessionStorage.getItem("acordly_resume_after_login");
+              sessionStorage.removeItem("acordly_resume_after_login");
+              if (profileIncomplete) {
+                setShowCompleteProfile(true);
+              } else if (pendingResume) {
+                setResumeSessionId(pendingResume);
+                setShowModal(true);
+              } else {
+                setShowModal(true);
+              }
             }, 80);
           }}
         />
       )}
 
       {showCompleteProfile && user && (
-        <CompleteProfileModal
-          token={token}
-          user={user}
+        <CompleteProfileModal token={token} user={user}
           onComplete={(updatedUser) => { setUser(updatedUser); setShowCompleteProfile(false); setShowModal(true); }}
         />
       )}
@@ -161,9 +177,7 @@ function AppContent() {
       {showModal && user && (
         <AcordModal
           onClose={() => { setShowModal(false); setResumeSessionId(null); }}
-          user={user}
-          token={token}
-          onUserUpdate={setUser}
+          user={user} token={token} onUserUpdate={setUser}
           onShowUpgrade={() => setShowUpgradeModal(true)}
           resumeSessionId={resumeSessionId}
           savedSignature={savedSignature}
@@ -174,23 +188,16 @@ function AppContent() {
       )}
 
       {showUpgradeModal && (
-        <UpgradeModal
-          token={token}
-          user={user}
+        <UpgradeModal token={token} user={user}
           onClose={() => setShowUpgradeModal(false)}
           onError={(msg) => { setShowUpgradeModal(false); setHeaderError(msg); }}
         />
       )}
 
       {showSignatureModal && (
-        <SignatureModal
-          token={token}
-          existingSignature={savedSignature}
+        <SignatureModal token={token} existingSignature={savedSignature}
           onClose={() => setShowSignatureModal(false)}
-          onSaved={(sig) => {
-            updateSignature(sig);
-            setShowSignatureModal(false);
-          }}
+          onSaved={(sig) => { updateSignature(sig); setShowSignatureModal(false); }}
         />
       )}
     </div>

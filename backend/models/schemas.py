@@ -53,9 +53,9 @@ class ApplyOverageRequest(BaseModel):
     qty: int
 
 
+from typing import Optional
 class SaveSignatureRequest(BaseModel):
-    session_id: Optional[str] = None
-    signature_data: str
+    signature_data: Optional[str] = None
 
 
 class CompleteProfileRequest(BaseModel):

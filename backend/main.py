@@ -10,6 +10,7 @@ from routes.download_routes import router as download_router
 from routes.stripe_routes import router as stripe_router
 from routes.signature_routes import router as signature_router
 from routes.dev_routes import router as dev_router
+from routes.arq_routes import router as arq_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ try:
 except Exception as e:
     logger.error(f"DB init error: {e}")
 
-app = FastAPI(title="Acordly API", version="12.3.1")
+app = FastAPI(title="API", version="12.4.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +36,7 @@ app.include_router(download_router)
 app.include_router(stripe_router)
 app.include_router(signature_router)
 app.include_router(dev_router)
+app.include_router(arq_router)
 
 
 @app.on_event("startup")
@@ -49,7 +51,7 @@ async def shutdown():
 
 @app.get("/")
 def home():
-    return {"message": "Acordly API v12.3.1", "status": "operational"}
+    return {"message": "API v12.4.0", "status": "operational"}
 
 
 @app.get("/api/health")

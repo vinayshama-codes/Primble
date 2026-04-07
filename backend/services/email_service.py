@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from config.settings import STRIPE_BILLING_PORTAL_URL
+from config.settings import STRIPE_BILLING_PORTAL_URL, FRONTEND_URL
 
 logger = logging.getLogger(__name__)
 
@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 def send_verification_email(email: str, code: str) -> bool:
     provider  = os.getenv("EMAIL_PROVIDER", "").lower()
     from_addr = os.getenv("EMAIL_FROM", "noreply@acordly.ai")
-    subject   = "Your Acordly Verification Code"
-    body_txt  = f"Your Acordly verification code is: {code}\n\nExpires in 10 minutes."
+    subject   = "Your Verification Code"
+    body_txt  = f"Your verification code is: {code}\n\nExpires in 10 minutes."
     body_html = f"""
     <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
-      <h2 style="color:#1e293b;">Verify your Acordly account</h2>
+      <h2 style="color:#1e293b;">Verify your account</h2>
       <p style="color:#475569;">Enter the code below to complete sign-up.</p>
       <div style="background:#f1f5f9;border-radius:8px;padding:24px;text-align:center;margin-bottom:24px;">
         <span style="font-size:36px;font-weight:700;letter-spacing:8px;color:#0f172a;">{code}</span>
@@ -22,6 +22,192 @@ def send_verification_email(email: str, code: str) -> bool:
     </div>
     """
     return _send_generic_email(email, subject, body_txt, body_html, provider, from_addr)
+
+
+def send_arq_email(
+    to_email: str,
+    client_name: str,
+    producer_full_name: str,
+    producer_first_name: str,
+    arq_link: str,
+) -> bool:
+    """Send ARQ questionnaire invitation email to client."""
+    subject   = f"Insurance Information Request from {producer_first_name}"
+    greeting  = f"Hi {client_name}," if client_name and client_name.strip() else "Hello,"
+    body_txt  = (
+        f"{greeting}\n\n"
+        f"{producer_full_name} needs your help with a few details to complete your commercial insurance application.\n\n"
+        f"Please click the link below to answer some simple questions. This will only take a couple of minutes.\n\n"
+        f"{arq_link}\n\n"
+        f"This link will expire in 7 days.\n\n"
+        f"Thank you,\nThe Insurance Team"
+    )
+    body_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+    <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;">
+      <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);padding:28px 32px;">
+          <p style="color:#e6007a;font-size:22px;font-weight:700;margin:0;letter-spacing:-0.5px;">acordly</p>
+          <p style="color:#94a3b8;font-size:12px;margin:4px 0 0 0;">Commercial Insurance Platform</p>
+        </div>
+        <div style="padding:32px;">
+          <p style="font-size:16px;color:#1e293b;font-weight:600;margin:0 0 12px 0;">{greeting}</p>
+          <p style="font-size:15px;color:#475569;line-height:1.6;margin:0 0 24px 0;">
+            <strong style="color:#1e293b;">{producer_full_name}</strong> needs your help with a few details to complete your commercial insurance application.
+            Please click the button below to answer some simple questions. This will only take a couple of minutes.
+          </p>
+          <div style="text-align:center;margin:32px 0;">
+            <a href="{arq_link}"
+               style="background:#e6007a;color:#fff;text-decoration:none;padding:14px 36px;border-radius:8px;font-size:16px;font-weight:600;display:inline-block;letter-spacing:0.3px;">
+              Answer Questions
+            </a>
+          </div>
+          <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0 0 8px 0;">
+            Or copy this link: <a href="{arq_link}" style="color:#e6007a;">{arq_link}</a>
+          </p>
+          <p style="font-size:11px;color:#cbd5e1;text-align:center;margin:0;">This link expires in 7 days.</p>
+        </div>
+        <div style="background:#f8fafc;padding:16px 32px;border-top:1px solid #e2e8f0;text-align:center;">
+          <p style="font-size:11px;color:#94a3b8;margin:0;">
+            Powered by <a href="{FRONTEND_URL}" style="color:#e6007a;font-weight:600;text-decoration:none;">acordly.ai</a>
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    return _send_generic_email(to_email, subject, body_txt, body_html)
+
+
+def send_arq_reminder_email(
+    to_email: str,
+    client_name: str,
+    producer_full_name: str,
+    producer_first_name: str,
+    arq_link: str,
+) -> bool:
+    """Send ARQ reminder email to client."""
+    subject   = f"Reminder: Insurance Information Request from {producer_first_name}"
+    greeting  = f"Hi {client_name}," if client_name and client_name.strip() else "Hello,"
+    body_txt  = (
+        f"{greeting}\n\n"
+        f"This is a friendly reminder that {producer_full_name} is still waiting for your response "
+        f"to complete your commercial insurance application.\n\n"
+        f"Please click the link below to answer a few simple questions.\n\n"
+        f"{arq_link}\n\n"
+        f"Thank you,\nThe Insurance Team"
+    )
+    body_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+    <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;">
+      <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);padding:28px 32px;">
+          <p style="color:#e6007a;font-size:22px;font-weight:700;margin:0;">acordly</p>
+          <p style="color:#94a3b8;font-size:12px;margin:4px 0 0 0;">Commercial Insurance Platform</p>
+        </div>
+        <div style="padding:32px;">
+          <div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:12px 16px;margin-bottom:20px;">
+            <p style="font-size:13px;color:#854d0e;margin:0;font-weight:600;">⏰ Friendly Reminder</p>
+          </div>
+          <p style="font-size:16px;color:#1e293b;font-weight:600;margin:0 0 12px 0;">{greeting}</p>
+          <p style="font-size:15px;color:#475569;line-height:1.6;margin:0 0 24px 0;">
+            <strong style="color:#1e293b;">{producer_full_name}</strong> is still waiting for your response
+            to complete your commercial insurance application. It only takes a couple of minutes.
+          </p>
+          <div style="text-align:center;margin:32px 0;">
+            <a href="{arq_link}"
+               style="background:#e6007a;color:#fff;text-decoration:none;padding:14px 36px;border-radius:8px;font-size:16px;font-weight:600;display:inline-block;">
+              Complete Questionnaire
+            </a>
+          </div>
+          <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0;">
+            <a href="{arq_link}" style="color:#e6007a;">{arq_link}</a>
+          </p>
+        </div>
+        <div style="background:#f8fafc;padding:16px 32px;border-top:1px solid #e2e8f0;text-align:center;">
+          <p style="font-size:11px;color:#94a3b8;margin:0;">
+            Powered by <a href="{FRONTEND_URL}" style="color:#e6007a;font-weight:600;text-decoration:none;">acordly.ai</a>
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    return _send_generic_email(to_email, subject, body_txt, body_html)
+
+
+# PATCH for backend/services/email_service.py
+# Replace send_arq_submitted_notification with this version that includes a session link
+
+def send_arq_submitted_notification(
+    producer_email: str,
+    producer_name: str,
+    client_name: str,
+    client_email: str,
+    fields_filled: int,
+    session_id: str = "",          # ADD THIS PARAM
+    frontend_url: str = "",        # ADD THIS PARAM
+) -> bool:
+    """Notify producer that client has submitted the ARQ — includes link back to session."""
+    import os
+    if not frontend_url:
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    # Deep link: frontend reads ?resume_session=<id> on load to reopen editor
+    session_link = f"{frontend_url}?resume_session={session_id}" if session_id else frontend_url
+
+    subject   = f"Client Submitted Insurance Questionnaire — {client_name or client_email}"
+    body_txt  = (
+        f"Hi {producer_name or 'there'},\n\n"
+        f"{client_name or client_email} has submitted answers to your insurance questionnaire.\n\n"
+        f"{fields_filled} field(s) have been updated in your ACORD forms.\n\n"
+        f"Click the link below to review and continue editing:\n{session_link}\n\n"
+        f"The Acordly Team"
+    )
+    body_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;">
+      <div style="max-width:520px;margin:40px auto;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);padding:24px 28px;">
+          <p style="color:#e6007a;font-size:20px;font-weight:700;margin:0;">acordly</p>
+        </div>
+        <div style="padding:28px;">
+          <div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:14px 16px;margin-bottom:20px;">
+            <p style="font-size:14px;color:#166534;margin:0;font-weight:600;">✅ Client Response Received</p>
+          </div>
+          <p style="font-size:15px;color:#475569;line-height:1.6;margin:0 0 16px 0;">
+            Hi <strong>{producer_name or "there"}</strong>,
+          </p>
+          <p style="font-size:15px;color:#475569;line-height:1.6;margin:0 0 16px 0;">
+            <strong style="color:#1e293b;">{client_name or client_email}</strong> has submitted answers to your insurance questionnaire.
+            <strong>{fields_filled}</strong> field(s) have been automatically updated in your ACORD forms.
+          </p>
+          <div style="text-align:center;margin:24px 0;">
+            <a href="{session_link}"
+               style="background:#e6007a;color:#fff;text-decoration:none;padding:12px 32px;border-radius:8px;font-size:15px;font-weight:600;display:inline-block;">
+              Open Session &amp; Review Changes
+            </a>
+          </div>
+          <p style="font-size:12px;color:#94a3b8;text-align:center;margin:0;">
+            Or copy this link: <a href="{session_link}" style="color:#e6007a;">{session_link}</a>
+          </p>
+        </div>
+        <div style="background:#f8fafc;padding:14px 28px;border-top:1px solid #e2e8f0;text-align:center;">
+          <p style="font-size:11px;color:#94a3b8;margin:0;">
+            Powered by <a href="{frontend_url}" style="color:#e6007a;font-weight:600;text-decoration:none;">acordly.ai</a>
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    return _send_generic_email(producer_email, subject, body_txt, body_html)
 
 
 def _send_generic_email(
@@ -110,23 +296,23 @@ def _send_generic_email(
             return False
 
     else:
-        logger.warning(f"EMAIL_PROVIDER not set — code for {to_email} not sent")
+        logger.warning(f"EMAIL_PROVIDER not set — email for {to_email} not sent")
         return True
 
 
 def _send_payment_failed_email(email: str, name: str, day: int) -> bool:
     portal = STRIPE_BILLING_PORTAL_URL
     if day == 1:
-        subject  = "Action required: Payment failed for your Acordly subscription"
+        subject  = "Action required: Payment failed for your subscription"
         body_txt = (f"Hi {name or 'there'},\n\nWe could not process your payment. "
-                    f"Update here: {portal}\n\nThe Acordly Team")
+                    f"Update here: {portal}\n\nThe Team")
         body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
           <h2 style="color:#1e293b;">Payment failed</h2>
-          <p>Hi {name or 'there'},</p><p>We could not process your Acordly payment.</p>
+          <p>Hi {name or 'there'},</p><p>We could not process your payment.</p>
           <p><a href="{portal}" style="background:#e6007a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;">Update Billing</a></p>
         </div>"""
     elif day == 7:
-        subject  = "Important: Your Acordly payment is still overdue"
+        subject  = "Important: Your payment is still overdue"
         body_txt = f"Hi {name or 'there'},\nPayment still outstanding. Update: {portal}"
         body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
           <h2 style="color:#dc2626;">Payment still overdue</h2>
@@ -143,7 +329,7 @@ def _send_payment_failed_email(email: str, name: str, day: int) -> bool:
           <p><a href="{portal}" style="background:#e6007a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;">Update Billing</a></p>
         </div>"""
     elif day == 21:
-        subject  = "Account suspended: Acordly access restricted"
+        subject  = "Account suspended: access restricted"
         body_txt = f"Hi {name or 'there'},\nAccount suspended. Update: {portal}"
         body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
           <h2 style="color:#dc2626;">Account suspended</h2>

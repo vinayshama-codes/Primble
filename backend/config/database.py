@@ -140,6 +140,52 @@ def init_db():
         )
     """)
 
+    # ARQ tables
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS arq_sessions (
+            id               TEXT PRIMARY KEY,
+            session_id       TEXT NOT NULL,
+            user_id          TEXT NOT NULL,
+            token            TEXT UNIQUE NOT NULL,
+            email            TEXT NOT NULL,
+            client_name      TEXT DEFAULT '',
+            status           TEXT DEFAULT 'pending',
+            questions        JSONB NOT NULL,
+            answers          JSONB DEFAULT '{}',
+            expires_at       TEXT NOT NULL,
+            created_at       TEXT NOT NULL,
+            submitted_at     TEXT,
+            viewed_at        TEXT,
+            reminder_sent    INTEGER DEFAULT 0,
+            reminder_count   INTEGER DEFAULT 0,
+            last_reminder_at TEXT
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS arq_notifications (
+            id          TEXT PRIMARY KEY,
+            arq_id      TEXT NOT NULL,
+            user_id     TEXT NOT NULL,
+            type        TEXT NOT NULL,
+            read_status INTEGER DEFAULT 0,
+            created_at  TEXT NOT NULL
+        )
+    """)
+
+    # Add missing columns to arq_sessions if upgrading
+    for col, definition in [
+        ("client_name",      "TEXT DEFAULT ''"),
+        ("reminder_sent",    "INTEGER DEFAULT 0"),
+        ("reminder_count",   "INTEGER DEFAULT 0"),
+        ("last_reminder_at", "TEXT"),
+    ]:
+        try:
+            cur.execute(f"ALTER TABLE arq_sessions ADD COLUMN {col} {definition}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
     conn.commit()
     cur.close()
     conn.close()

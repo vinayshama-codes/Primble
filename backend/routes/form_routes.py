@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import Optional
+from fastapi import Request
 
 from fastapi import APIRouter, Depends, File, Header, Query, UploadFile, HTTPException, File, Response
 from fastapi.responses import JSONResponse, Response
@@ -198,11 +199,47 @@ async def get_form_fields(
     fields      = extract_form_fields_with_positions(tpl)
     page_dims   = get_page_dims_pikepdf(tpl)
     field_state = r.get("field_state") or r.get("mapped", {})
+    confidence  = r.get("confidence", {})
+    client_filled = set(r.get("client_filled_fields", []))
     for f in fields:
-        if f["name"] in field_state:
-            sv = field_state[f["name"]]
+        name = f["name"]
+        if name in field_state:
+            sv = field_state[name]
             f["value"] = str(sv) if sv is not None and str(sv) not in ("null", "None") else ""
+        else:
+            f["value"] = ""
+        f["confidence_label"] = confidence.get(name, "")
+        f["client_filled"]    = name in client_filled
     return JSONResponse({"success": True, "fields": fields, "page_dims": page_dims})
+
+
+@router.post("/api/mark-client-filled/{session_id}/{form_id}")
+async def mark_client_filled(
+    session_id: str, form_id: str,
+    request: Request,
+    token: Optional[str] = Query(default=None),
+    authorization: str   = Header(default=None),
+):
+    """After client fills ARQ, mark those fields as 'filled' confidence and store client_filled list."""
+    from fastapi import HTTPException
+    if not validate_token_from_request(token, authorization):
+        raise HTTPException(401, "Not authenticated")
+    body       = await request.json()
+    field_names = body.get("field_names", [])
+    proc_session = get_processing_session(session_id)
+    generated    = proc_session.get("generated_forms", {})
+    if form_id not in generated:
+        raise HTTPException(404, f"Form '{form_id}' not found")
+    r = generated[form_id]
+    # Update confidence to "filled" for client-filled fields
+    confidence = r.get("confidence", {})
+    for fn in field_names:
+        confidence[fn] = "filled"
+    r["confidence"]          = confidence
+    r["client_filled_fields"] = list(set(r.get("client_filled_fields", []) + field_names))
+    generated[form_id] = r
+    upd_processing_session(session_id, {"generated_forms": generated})
+    return JSONResponse({"success": True})
 
 
 @router.get("/api/get-pdf/{session_id}/{form_id}")
