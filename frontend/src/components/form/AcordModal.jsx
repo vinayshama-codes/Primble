@@ -707,6 +707,7 @@ export default function AcordModal({
                   onSignApplied={fid => setSignedForms(prev => new Set([...prev, fid]))}
                   onOpenSignatureModal={onOpenSignatureModal}
                   clientFilledFields={clientFilledFields}
+                  onRefreshFields={refreshArqData}
                 />
               </div>
             </div>

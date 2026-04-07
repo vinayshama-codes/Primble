@@ -130,12 +130,17 @@ def generate_arq_questions(
             elif conf_val == "low_confidence" and is_empty:
                 pass  # empty low_confidence → include
             elif conf_val == "low_confidence" and not is_empty:
-                continue  # AI filled with value → skip
+                continue
             elif conf_val == "filled":
-                continue  # deterministic fill → skip
+                continue
             else:
                 continue
 
+            if field_name not in missing_fields:
+                missing_fields[field_name] = set()
+                field_current_values[field_name] = current_val
+            missing_fields[field_name].add(form_id)
+        
     # Also include hard-stop fields that map to known fact keys
     tier1_fact_keys = ["applicant_name", "producer_name", "mailing_address", "effective_date",
                        "contact_name", "contact_phone", "contact_email", "lines_of_business"]

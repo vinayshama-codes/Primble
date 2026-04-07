@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import "./App.css";
 import "./styles/injected.js";
@@ -22,7 +23,7 @@ import ClientQuestionnaire    from "./components/arq/ClientQuestionnaire";
 export default function App() {
   // Route /questionnaire/:token without react-router-dom
   const path                = window.location.pathname;
-  const questionnaireMatch  = path.match(/^\/questionnaire\/([^/]+)$/);
+  const questionnaireMatch  = path.match(/^\/client-questionnaire\/([^/]+)$/);
   if (questionnaireMatch) {
     return <ClientQuestionnaire token={questionnaireMatch[1]} />;
   }

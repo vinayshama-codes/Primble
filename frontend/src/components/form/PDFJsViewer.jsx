@@ -199,7 +199,7 @@ export default function PDFJsViewer({
       if (clientFilled.includes(name)) { green++; return; }
       if (YELLOW_REQUIRED.has(name) && (!val || val === "null" || val === "None")) { yellow++; return; }
       const conf = confLabels[name];
-      if (conf === "low_confidence" || conf === "missing_required") pink++;
+      if (conf === "low_confidence" && val && val !== "null" && val !== "None") pink++;
     });
     setHighlightCounts({ pink, yellow, green });
   };
