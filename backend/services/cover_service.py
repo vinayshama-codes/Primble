@@ -110,7 +110,6 @@ def build_cover_page_pdf(
 ) -> bytes:
     generated_at = datetime.now(timezone.utc).strftime("%B %d, %Y at %H:%M UTC")
 
-    # Ensure we have real data, not empty dicts
     if not narrative or not narrative.strip():
         narrative = (
             f"This ACORD submission package was prepared by {org_name} for applicant "
@@ -149,6 +148,7 @@ def build_cover_page_pdf(
         TEXT_MUTE  = colors.HexColor("#64748b")
         TEXT_HINT  = colors.HexColor("#94a3b8")
         SLATE      = colors.HexColor("#64748b")
+        LOGO_BG    = colors.HexColor("#0f172a")
 
         def sqs_color(score):
             if score is None:
@@ -173,32 +173,40 @@ def build_cover_page_pdf(
         reasoning_s  = S("Rsn",  fontSize=9,  textColor=TEXT_MAIN,  fontName="Helvetica-Oblique", leading=14, spaceAfter=3)
         disclaimer_s = S("Disc", fontSize=7,  textColor=TEXT_MUTE,  fontName="Helvetica-BoldOblique", leading=10)
         hidden_style = S("Hid",  fontSize=0.001, textColor=colors.white, fontName="Courier", leading=0.001, backColor=colors.white)
+        logo_style   = S("Logo", fontSize=26, textColor=PINK, fontName="Helvetica-Bold", leading=32)
+        powered_style = S("Pwr", fontSize=9,  textColor=PINK, fontName="Helvetica-Bold", alignment=TA_RIGHT)
+        powered_date_style = S("PwrDt", fontSize=7, textColor=TEXT_HINT, fontName="Helvetica", alignment=TA_RIGHT)
 
         story = []
 
-        # ── HEADER ──
-        logo_cell    = Paragraph(
+        # ── HEADER ──────────────────────────────────────────────────────────
+        # Left: agency logo placeholder + agency name
+        # Right: "Powered by acordly.ai" (small, pink) + date
+       # Acordly logo (matches homepage: lowercase "acordly" in pink, bold, large)
+        acordly_logo = Paragraph(
             '<font color="#e6007a"><b>acordly</b></font>',
-            S("Logo", fontSize=26, textColor=PINK, fontName="Helvetica-Bold", leading=32),
+            S("AcordlyLogo", fontSize=28, fontName="Helvetica-Bold", leading=34),
         )
+
         powered_cell = Paragraph(
             f'<font color="#e6007a"><b>Powered by acordly.ai</b></font><br/>'
             f'<font color="#94a3b8" size="7">{generated_at}</font>',
-            S("Pwr", fontSize=9, fontName="Helvetica", alignment=TA_RIGHT),
+            S("Pwr2", fontSize=9, fontName="Helvetica", alignment=TA_RIGHT),
         )
-        header_tbl = Table([[logo_cell, powered_cell]], colWidths=[3.5*inch, 3.5*inch])
+
+        header_tbl = Table([[acordly_logo, powered_cell]], colWidths=[3.5*inch, 3.5*inch])
         header_tbl.setStyle(TableStyle([
-            ("BACKGROUND", (0,0), (-1,-1), NAVY),
-            ("VALIGN",     (0,0), (-1,-1), "MIDDLE"),
-            ("LEFTPADDING",(0,0), (-1,-1), 14),
-            ("RIGHTPADDING",(0,0),(-1,-1), 14),
-            ("TOPPADDING", (0,0), (-1,-1), 16),
-            ("BOTTOMPADDING",(0,0),(-1,-1),16),
+            ("BACKGROUND",    (0,0), (-1,-1), NAVY),
+            ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+            ("LEFTPADDING",   (0,0), (-1,-1), 14),
+            ("RIGHTPADDING",  (0,0), (-1,-1), 14),
+            ("TOPPADDING",    (0,0), (-1,-1), 16),
+            ("BOTTOMPADDING", (0,0), (-1,-1), 16),
         ]))
         story.append(header_tbl)
         story.append(Spacer(1, 0.14*inch))
 
-        # ── SUBMISSION INFO TABLE ──
+        # ── SUBMISSION INFO TABLE ────────────────────────────────────────────
         agent_name = (user.get("full_name", "") if user else "") or "—"
         eff_date   = facts.get("effective_date", "—") or "—"
         exp_date   = facts.get("expiration_date", "—") or "—"
@@ -212,7 +220,7 @@ def build_cover_page_pdf(
 
         info_rows = [
             [Paragraph("AGENT / USER",      label_s), Paragraph(agent_name,              val_s),
-             Paragraph("POLICY PERIOD",     label_s), Paragraph(f"{eff_date} – {exp_date}", val_s)],
+             Paragraph("POLICY PERIOD",     label_s), Paragraph(f"{eff_date} - {exp_date}", val_s)],
             [Paragraph("AGENCY",            label_s), Paragraph(org_name or "—",          val_s),
              Paragraph("ENTITY TYPE",       label_s), Paragraph(_v("entity_type"),        val_s)],
             [Paragraph("APPLICANT",         label_s), Paragraph(_v("applicant_name"),     val_s),
@@ -236,16 +244,17 @@ def build_cover_page_pdf(
         story.append(info_tbl)
         story.append(Spacer(1, 0.14*inch))
 
-        # ── SQS TABLE ──
+        # ── SQS TABLE ────────────────────────────────────────────────────────
         story.append(Paragraph("Submission Quality Scores (SQS)", h2_style))
         story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
         story.append(Spacer(1, 0.06*inch))
 
+        # No emoji — plain text routing labels only
         routing_labels = {
-            "auto_quote":  "✅ Auto-Quote",
-            "review":      "🔍 Light Review",
-            "full_review": "📋 Full Review",
-            "hold":        "🚫 Hold",
+            "auto_quote":  "Auto-Quote",
+            "review":      "Light Review",
+            "full_review": "Full Review",
+            "hold":        "Hold",
         }
         sqs_header = [
             Paragraph(f"<b>{h}</b>", S("TH", fontSize=8, textColor=WHITE, fontName="Helvetica-Bold"))
@@ -292,7 +301,7 @@ def build_cover_page_pdf(
         story.append(sqs_tbl)
         story.append(Spacer(1, 0.10*inch))
 
-        # ── SQS REASONING ──
+        # ── SQS REASONING ────────────────────────────────────────────────────
         if sqs_reasoning and sqs_reasoning.strip():
             story.append(Paragraph("SQS Score Explanation", h2_style))
             story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
@@ -300,7 +309,7 @@ def build_cover_page_pdf(
             story.append(Paragraph(sqs_reasoning.strip(), reasoning_s))
             story.append(Spacer(1, 0.10*inch))
 
-        # ── NARRATIVE ──
+        # ── NARRATIVE ────────────────────────────────────────────────────────
         story.append(Paragraph("Package Summary", h2_style))
         story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
         story.append(Spacer(1, 0.05*inch))
@@ -311,16 +320,22 @@ def build_cover_page_pdf(
                 story.append(Spacer(1, 0.04*inch))
         story.append(Spacer(1, 0.10*inch))
 
-        # ── A2A DISCLAIMER ──
+        # ── A2A DISCLAIMER ───────────────────────────────────────────────────
+        # Plain text only — no emoji, safe for all ReportLab font encodings
         disclaimer_text = (
-            "IMPORTANT — This page contains carrier-grade AI-to-AI (A2A) data "
-            "for next-generation carrier AI ingestion engines."
+            "IMPORTANT - Hidden within this page is carrier-grade AI-to-AI (A2A) data "
+            "that is invisible to human readers but interpretable by next-generation carrier "
+            "AI ingestion engines. Please include this page in your underwriting submission "
+            "package for a faster and more robust submission experience."
         )
-        disclaimer_data = [[
-            Paragraph("🤖", S("DIcon", fontSize=14, fontName="Helvetica")),
-            Paragraph(disclaimer_text, disclaimer_s),
-        ]]
-        disclaimer_tbl = Table(disclaimer_data, colWidths=[0.3*inch, 6.7*inch])
+        disclaimer_label = Paragraph(
+            "<b>[A2A]</b>",
+            S("DLbl", fontSize=8, textColor=PINK, fontName="Helvetica-Bold"),
+        )
+        disclaimer_body = Paragraph(disclaimer_text, disclaimer_s)
+
+        disclaimer_data = [[disclaimer_label, disclaimer_body]]
+        disclaimer_tbl = Table(disclaimer_data, colWidths=[0.45*inch, 6.55*inch])
         disclaimer_tbl.setStyle(TableStyle([
             ("BACKGROUND",    (0,0), (-1,-1), PINK_LIGHT),
             ("LEFTPADDING",   (0,0), (-1,-1), 8),
@@ -334,7 +349,7 @@ def build_cover_page_pdf(
         story.append(disclaimer_tbl)
         story.append(Spacer(1, 0.10*inch))
 
-        # ── HIDDEN A2A JSON BLOCK ──
+        # ── HIDDEN A2A JSON BLOCK ─────────────────────────────────────────────
         if ai_block:
             ai_json_str   = json.dumps(ai_block, indent=2, default=str)
             wrapped_lines = []
@@ -351,14 +366,14 @@ def build_cover_page_pdf(
             story.append(Paragraph(hidden_text, hidden_style))
             story.append(Spacer(1, 0.06*inch))
 
-        # ── FOOTER ──
+        # ── FOOTER ───────────────────────────────────────────────────────────
         footer_data = [[
             Paragraph(
-                'Generated by <font color="#e6007a"><b>acordly.ai</b></font> · AI-powered ACORD form automation',
+                'Generated by <font color="#e6007a"><b>acordly.ai</b></font> - AI-powered ACORD form automation',
                 S("Ft", fontSize=7, textColor=TEXT_HINT, fontName="Helvetica"),
             ),
             Paragraph(
-                f"Confidential · {generated_at}",
+                f"Confidential - {generated_at}",
                 S("FtR", fontSize=7, textColor=TEXT_HINT, fontName="Helvetica", alignment=TA_RIGHT),
             ),
         ]]
@@ -393,8 +408,8 @@ def _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative
             f"Prepared by: {org_name}",
             f"Applicant: {facts.get('applicant_name', 'Unknown')}",
             f"Agency: {org_name}",
-            f"Effective Date: {facts.get('effective_date', '—')}",
-            f"Lines of Business: {', '.join(facts.get('lines_of_business', [])) or '—'}",
+            f"Effective Date: {facts.get('effective_date', '---')}",
+            f"Lines of Business: {', '.join(facts.get('lines_of_business', [])) or '---'}",
             f"Forms: {', '.join(form_ids)}",
             "",
             "SQS SCORES:",
@@ -405,7 +420,6 @@ def _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative
             lines.append(f"  {fid}: {score}/100 ({grade})")
         lines += ["", "SUMMARY:", (narrative or "No narrative available.")[:800]]
 
-        # Build a minimal but valid PDF using raw PDF syntax
         page_content = "BT /F1 10 Tf 40 750 Td 14 TL\n"
         for line in lines[:60]:
             safe = line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")

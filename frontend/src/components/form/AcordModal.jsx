@@ -332,7 +332,10 @@ export default function AcordModal({
     finally { setEpicLoading(false); }
   };
 
-  const gatedDownload = (action) => { setAcordLicenseChecked(false); setAcordModalAction(() => action); setShowAcordModal(true); };
+  const gatedDownload = (action) => {
+    if (user?.acord_license_confirmed) { action(); return; }
+    setAcordLicenseChecked(false); setAcordModalAction(() => action); setShowAcordModal(true);
+  };
 
   const handleAcordConfirm = async () => {
     if (!acordLicenseChecked) return;
@@ -357,7 +360,7 @@ export default function AcordModal({
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       await refreshUser();
       if (pkgStatus) { setPkgStatusMsg(pkgMsg); setPkgStatusType(pkgStatus); setTimeout(() => setPkgStatusMsg(""), 12000); }
-      // Stay on editor after download
+      setStep("success");
     } catch (err) { setError("Download failed: " + err.message); }
     finally { setLoading(false); setShowDownloadOverlay(false); }
   };
@@ -374,7 +377,7 @@ export default function AcordModal({
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       await refreshUser();
       if (pkgStatus) { setPkgStatusMsg(pkgMsg); setPkgStatusType(pkgStatus); setTimeout(() => setPkgStatusMsg(""), 12000); }
-      // Stay on editor after download
+      setStep("success");
     } catch (err) { setError("Download failed: " + err.message); }
     finally { setLoading(false); setShowDownloadOverlay(false); }
   };
@@ -713,15 +716,23 @@ export default function AcordModal({
             </div>
           )}
 
-          {step === "success" && (
-            <div className="modal-step" style={{ textAlign: "center" }}>
+        {step === "success" && (
+            <div className="modal-step" style={{ textAlign: "center", padding: "48px 24px" }}>
               <div className="success-animation"><div className="success-icon">✓</div></div>
-              <h2 className="success-title">Download Complete!</h2>
-              <p className="success-message">Your filled ACORD forms have been downloaded.</p>
-              {user && user.subscription_tier === "free" && <div className="success-remaining"><p>You have <strong>{Math.max(0, user.downloads_remaining)}</strong> free download{user.downloads_remaining !== 1 ? "s" : ""} remaining</p></div>}
-              <div className="success-actions">
-                <button className="btn btn-modal-secondary" onClick={() => setStep("editor")}>← Go Back</button>
-                <button className="btn btn-modal-primary" onClick={reset}>Upload Another Document</button>
+              <h2 className="success-title">Your Download is Complete!</h2>
+              <p className="success-message">Your filled ACORD forms have been downloaded successfully.</p>
+              {user && user.subscription_tier === "free" && (
+                <div className="success-remaining">
+                  <p>You have <strong>{Math.max(0, user.downloads_remaining)}</strong> free download{user.downloads_remaining !== 1 ? "s" : ""} remaining</p>
+                </div>
+              )}
+              <div className="success-actions" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center", marginTop: 24 }}>
+                <button className="btn btn-modal-primary" style={{ minWidth: 240 }} onClick={() => setStep("editor")}>
+                  ← Back to Form — Download Again or Make Changes
+                </button>
+                <button className="btn btn-modal-secondary" style={{ minWidth: 240 }} onClick={reset}>
+                  Upload Another Document
+                </button>
               </div>
             </div>
           )}

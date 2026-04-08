@@ -7,7 +7,6 @@ import NoSignaturePrompt from "../signature/NoSignaturePrompt";
 const PDFJS_CDN    = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
-// Yellow only for these two fields on ACORD 126 when empty
 const YELLOW_REQUIRED = new Set(["NamedInsured_Signature_A", "NamedInsured_SignatureDate_A"]);
 
 export default function PDFJsViewer({
@@ -21,7 +20,7 @@ export default function PDFJsViewer({
   const renderTask             = useRef(null);
   const overlayRef             = useRef(null);
   const fieldValuesRef         = useRef({});
-  const fieldConfLabelRef      = useRef({}); // stores "filled"|"low_confidence"|"missing_required"
+  const fieldConfLabelRef      = useRef({});
   const clearedSigFieldsRef    = useRef(new Set());
   const originalFieldValuesRef = useRef({});
   const pdfUrlRef              = useRef("");
@@ -30,6 +29,7 @@ export default function PDFJsViewer({
   const manuallyRenderedRef    = useRef({ doc: null, pageNum: -1 });
   const editModeRef            = useRef(false);
   const clientFilledRef        = useRef([]);
+  const renderScaleRef         = useRef(1);
 
   const [pdfjsReady,    setPdfjsReady]    = useState(!!window.pdfjsLib);
   const [pdfDoc,        setPdfDoc]        = useState(null);
@@ -48,7 +48,6 @@ export default function PDFJsViewer({
   const [applyingSign,  setApplyingSign]  = useState(false);
   const [applySigStage, setApplySigStage] = useState("idle");
   const [loadingStage,  setLoadingStage]  = useState("idle");
-  const [refreshing,    setRefreshing]    = useState(false);
   const [pdfRefreshKey, setPdfRefreshKey] = useState(0);
   const [highlightCounts, setHighlightCounts] = useState({ pink: 0, yellow: 0, green: 0 });
 
@@ -78,6 +77,7 @@ export default function PDFJsViewer({
     setApplySigStage("idle"); setLoadingStage("idle");
     clearedSigFieldsRef.current = new Set();
     manuallyRenderedRef.current = { doc: null, pageNum: -1 };
+    renderScaleRef.current = 1;
     setHighlightCounts({ pink: 0, yellow: 0, green: 0 });
   }, [formId]);
 
@@ -114,6 +114,7 @@ export default function PDFJsViewer({
         const scale  = Math.min(2.2, Math.max(1.0, avail / page.getViewport({ scale: 1 }).width));
         const vp     = page.getViewport({ scale });
         canvas.width = vp.width; canvas.height = vp.height;
+        renderScaleRef.current = scale;
         const ctx    = canvas.getContext("2d");
         ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
         const t = page.render({ canvasContext: ctx, viewport: vp, renderInteractiveForms: false });
@@ -121,9 +122,12 @@ export default function PDFJsViewer({
         await t.promise;
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-              buildOverlay(scale, vp.width, vp.height, fieldValuesRef.current);
-        });
+            const pd = pageDimsRef.current[pageNum - 1];
+            const resolvedScale = pd ? vp.width / pd.width : scale;
+            renderScaleRef.current = resolvedScale;
+            buildOverlay(resolvedScale, vp.width, vp.height, fieldValuesRef.current);
           });
+        });
       } catch (e) {
         if (e?.name !== "RenderingCancelledException") setLoadError(true);
       } finally { setRendering(false); setLoadingStage("idle"); }
@@ -131,18 +135,15 @@ export default function PDFJsViewer({
     doRender();
   }, [pdfDoc, pageNum]); // eslint-disable-line
 
-  // Rebuild overlay when anything changes
+  // Rebuild overlay when state changes — always use renderScaleRef so scale matches canvas
   useEffect(() => {
     if (!canvasRef.current || !overlayRef.current || !fieldsLoaded) return;
     const canvas = canvasRef.current;
-    const pd     = pageDimsRef.current[pageNum - 1];
-    if (!pd || canvas.width === 0) return;
-    const avail = containerRef.current ? containerRef.current.clientWidth - 48 : 720;
-    const scale = Math.min(2.2, Math.max(1.0, avail / pd.width));
-    buildOverlay(scale, canvas.width, canvas.height, fieldValuesRef.current);
+    if (canvas.width === 0) return;
+    buildOverlay(renderScaleRef.current, canvas.width, canvas.height, fieldValuesRef.current);
   }, [pageNum, editMode, isSignedLocal, fields, fieldsLoaded, pageDims, clientFilledFields]); // eslint-disable-line
 
-  // Fetch fields from backend
+  // ── fetchFields (used by handleRefresh) ────────────────────────────────
   const fetchFields = () =>
     fetch(`${API_BASE}/api/fields/${sessionId}/${formId}?token=${token}`)
       .then(r => r.ok ? r.json() : null)
@@ -152,7 +153,6 @@ export default function PDFJsViewer({
         (data.fields || []).forEach(f => {
           vals[f.name]       = f.value            || "";
           confLabels[f.name] = f.confidence_label || "";
-          // f.client_filled comes from backend (patched above)
           if (f.client_filled) {
             clientFilledRef.current = [...new Set([...clientFilledRef.current, f.name])];
           }
@@ -165,10 +165,20 @@ export default function PDFJsViewer({
         setFieldValues(vals);
         fieldValuesRef.current         = vals;
         originalFieldValuesRef.current = { ...vals };
+        // ── INSTANCE 1: fetchFields ────────────────────────────────────
         setFieldsLoaded(true);
         updateHighlightCounts(data.fields || [], confLabels, clientFilledRef.current, vals);
+        requestAnimationFrame(() => {
+          const canvas = canvasRef.current;
+          if (!canvas || canvas.width === 0) return;
+          const pd = (data.page_dims || [])[pageNum - 1];
+          const sc = pd ? canvas.width / pd.width : renderScaleRef.current;
+          renderScaleRef.current = sc;
+          buildOverlay(sc, canvas.width, canvas.height, vals);
+        });
       });
 
+  // ── Initial fields fetch on mount ──────────────────────────────────────
   useEffect(() => {
     if (!sessionId || !formId || !token) return;
     const controller = new AbortController();
@@ -189,8 +199,17 @@ export default function PDFJsViewer({
         setFieldValues(vals);
         fieldValuesRef.current         = vals;
         originalFieldValuesRef.current = { ...vals };
+        // ── INSTANCE 2: initial fetch ──────────────────────────────────
         setFieldsLoaded(true);
         updateHighlightCounts(data.fields || [], confLabels, clientFilledRef.current, vals);
+        requestAnimationFrame(() => {
+          const canvas = canvasRef.current;
+          if (!canvas || canvas.width === 0) return;
+          const pd = (data.page_dims || [])[0]; // pageNum is always 1 on initial load
+          const sc = pd ? canvas.width / pd.width : renderScaleRef.current;
+          renderScaleRef.current = sc;
+          buildOverlay(sc, canvas.width, canvas.height, vals);
+        });
       })
       .catch(err => { if (err?.name !== "AbortError") console.error("Fields fetch error:", err); });
     return () => controller.abort();
@@ -209,24 +228,19 @@ export default function PDFJsViewer({
     setHighlightCounts({ pink, yellow, green });
   };
 
-  // Issue 2 & 4: Refresh — re-fetches fields AND clientFilledFields, then redraws overlay
-  // REPLACE handleRefresh:
-const handleRefresh = async () => {
-  if (!sessionId || !formId || !token) return;
-  setRefreshing(true);
-  try {
-    if (onRefreshFields) {
-      const freshClientFilled = await onRefreshFields();
-      if (Array.isArray(freshClientFilled)) {
-        clientFilledRef.current = freshClientFilled;
+  const handleRefresh = async () => {
+    if (!sessionId || !formId || !token) return;
+    setLoadingStage("loading");
+    try {
+      if (onRefreshFields) {
+        const freshClientFilled = await onRefreshFields();
+        if (Array.isArray(freshClientFilled)) clientFilledRef.current = freshClientFilled;
       }
-    }
-    await fetchFields();
-    // Force PDF.js to reload PDF from server (backend updated pdf_bytes after client submit)
-    manuallyRenderedRef.current = { doc: null, pageNum: -1 };
-    setPdfRefreshKey(k => k + 1);
-  } finally { setRefreshing(false); }
-};
+      await fetchFields();
+      manuallyRenderedRef.current = { doc: null, pageNum: -1 };
+      setPdfRefreshKey(k => k + 1);
+    } finally { setLoadingStage("idle"); }
+  };
 
   const _isSigField = (name) => {
     const fn = (name || "").toLowerCase().replace(/[\s\-.]/g, "_");
@@ -236,24 +250,17 @@ const handleRefresh = async () => {
            .some(p => fn.includes(p));
   };
 
-  // Issue 1: Correct highlight logic
-  // GREEN  = clientFilled (highest priority)
-  // YELLOW = NamedInsured_Signature_A / NamedInsured_SignatureDate_A when empty
-  // PINK   = confidence_label is "low_confidence" or "missing_required" (anything not "filled")
-  // REPLACE _getHighlight entirely:
   const _getHighlight = (fieldName, val) => {
-  // GREEN: client filled (highest priority)
-  if (clientFilledRef.current.includes(fieldName)) return "green";
-  const v    = (val || "").toString().trim();
-  const conf = fieldConfLabelRef.current[fieldName];
-
-  if (YELLOW_REQUIRED.has(fieldName)) {
-    if (!v || v === "null" || v === "None") return "yellow";
-    return null; // Issue 4: filled signature → no yellow
-  }
-  if (conf === "low_confidence" && v && v !== "null" && v !== "None") return "pink";
-  return null;
-};
+    if (clientFilledRef.current.includes(fieldName)) return "green";
+    const v    = (val || "").toString().trim();
+    const conf = fieldConfLabelRef.current[fieldName];
+    if (YELLOW_REQUIRED.has(fieldName)) {
+      if (!v || v === "null" || v === "None") return "yellow";
+      return null;
+    }
+    if (conf === "low_confidence" && v && v !== "null" && v !== "None") return "pink";
+    return null;
+  };
 
   const buildOverlay = (scale, canvasW, canvasH, liveValues) => {
     const overlay = overlayRef.current;
@@ -351,7 +358,14 @@ const handleRefresh = async () => {
         setPdfDoc(newDoc); setTotalPages(newDoc.numPages);
         setIsSignedLocal(true); clearedSigFieldsRef.current = new Set();
         onSignApplied(formId);
-        if (canvas) { const pd2 = pageDimsRef.current[pageNum - 1]; if (pd2) { const s2 = Math.min(2.2, Math.max(1.0, (containerRef.current ? containerRef.current.clientWidth - 48 : 720) / pd2.width)); buildOverlay(s2, canvas.width, canvas.height, fieldValuesRef.current); } }
+        if (canvas) {
+          const pd2 = pageDimsRef.current[pageNum - 1];
+          if (pd2) {
+            const s2 = canvas.width / pd2.width;
+            renderScaleRef.current = s2;
+            buildOverlay(s2, canvas.width, canvas.height, fieldValuesRef.current);
+          }
+        }
       } else { const d = await res.json().catch(() => ({})); console.error("Sig apply failed:", d.detail); }
     } catch (e) { console.error("Sig apply failed:", e); }
     finally { setApplyingSign(false); setApplySigStage("idle"); }
@@ -401,7 +415,11 @@ const handleRefresh = async () => {
           manuallyRenderedRef.current = { doc: newDoc, pageNum };
           setPdfDoc(newDoc); setTotalPages(newDoc.numPages);
           const pd = pageDimsRef.current[pageNum - 1];
-          if (pd) { const s2 = Math.min(2.2, Math.max(1.0, (containerRef.current ? containerRef.current.clientWidth - 48 : 720) / pd.width)); buildOverlay(s2, off.width, off.height, currentValues); }
+          if (pd) {
+            const s2 = off.width / pd.width;
+            renderScaleRef.current = s2;
+            buildOverlay(s2, off.width, off.height, currentValues);
+          }
           setSaveStatus("saved"); setTimeout(() => setSaveStatus("idle"), 2000);
         } catch { setPdfDoc(newDoc); setTotalPages(newDoc.numPages); setSaveStatus("saved"); setTimeout(() => setSaveStatus("idle"), 2000); }
       })
@@ -455,13 +473,10 @@ const handleRefresh = async () => {
           {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>✓ Saved</span>}
           {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>⚠ Failed</span>}
 
-          {/* Issue 2: Refresh button */}
-          <button onClick={handleRefresh} disabled={refreshing}
+          <button onClick={handleRefresh} disabled={loadingStage !== "idle"}
             title="Refresh — picks up client-submitted answers and shows green highlights"
-            style={{ display: "flex", alignItems: "center", gap: 3, padding: "4px 9px", borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: refreshing ? "#4f7cff" : "#8b93b0", fontSize: 11, fontWeight: 600, cursor: refreshing ? "wait" : "pointer", fontFamily: "inherit" }}>
-            {refreshing
-              ? <><span style={{ width: 10, height: 10, border: "2px solid #4f7cff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Refreshing…</>
-              : "🔄 Refresh"}
+            style={{ display: "flex", alignItems: "center", gap: 3, padding: "4px 9px", borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#8b93b0", fontSize: 11, fontWeight: 600, cursor: loadingStage !== "idle" ? "wait" : "pointer", fontFamily: "inherit" }}>
+            🔄 Refresh
           </button>
 
           <button onClick={handleToggleEditMode} disabled={saveStatus === "saving" || saveStatus === "generating"}
@@ -499,7 +514,6 @@ const handleRefresh = async () => {
         </div>
       )}
 
-      {/* Issue 3: overflow:"auto" so pages are scrollable not jumbled */}
       <div ref={containerRef} style={{ flex: 1, overflow: "auto", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 24, background: "#252a3d", minHeight: 0 }}>
         {loadError ? (
           <div style={{ color: "#6b7899", textAlign: "center", marginTop: 60 }}>⚠️ Could not load PDF preview.</div>
@@ -509,7 +523,7 @@ const handleRefresh = async () => {
           </div>
         ) : (
           <div style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2 }}>
-            <canvas ref={canvasRef} style={{ display: "block", maxWidth: "100%" }} />
+            <canvas ref={canvasRef} style={{ display: "block" }} />
             <div ref={overlayRef} style={{ position: "absolute", top: 0, left: 0, pointerEvents: editMode ? "all" : "none" }} />
             {saveStatus === "saving" && (
               <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.65)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, borderRadius: 2, backdropFilter: "blur(2px)", zIndex: 100 }}>

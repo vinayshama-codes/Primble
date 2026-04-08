@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
-
-const API_BASE = 'http://localhost:8000';
+import { API_BASE } from '../../config/constants';
 
 export default function ClientQuestionnaire({ token }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [questions, setQuestions] = useState([]);
-  const [answers, setAnswers] = useState({});
+  const [answers, setAnswers] = useState(() => ({}));
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [expiresAt, setExpiresAt] = useState(null);
@@ -19,7 +18,9 @@ export default function ClientQuestionnaire({ token }) {
       return;
     }
 
-    fetch(`${API_BASE}/api/arq/client-view/${token}`)
+    const controller = new AbortController();
+
+    fetch(`${API_BASE}/api/arq/client-view/${token}`, { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => {
         if (data.success) {
@@ -31,7 +32,6 @@ export default function ClientQuestionnaire({ token }) {
           (data.questions || []).forEach((q) => {
             init[q.field_name] = q.current_value || '';
           });
-
           setAnswers(init);
         } else if (data.error === 'expired') {
           setError(
@@ -43,8 +43,18 @@ export default function ClientQuestionnaire({ token }) {
           setError(data.message || 'Failed to load questionnaire');
         }
       })
-      .catch(() => setError('Network error. Please try again.'))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (err.name !== 'AbortError') {
+          setError('Network error. Please try again.');
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
   }, [token]);
 
   const answeredCount = questions.filter(
