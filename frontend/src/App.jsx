@@ -44,7 +44,9 @@ function AppContent() {
     return p.get("resume_session") || null;
   };
 
+  const _hasResume = !!new URLSearchParams(window.location.search).get("resume_session");
   const [showModal,           setShowModal]           = useState(false);
+  const [resumeLoading,       setResumeLoading]       = useState(_hasResume);
   const [showAuthModal,       setShowAuthModal]       = useState(false);
   const [showCompleteProfile, setShowCompleteProfile] = useState(false);
   const [showUpgradeModal,    setShowUpgradeModal]    = useState(false);
@@ -59,23 +61,22 @@ function AppContent() {
   useUpgradePolling(token, setUser, setUpgradeChecking, setUpgradeFailed);
   useBillingReturnPolling(token, setUser, setUpgradeChecking);
 
-  // Step 1: on mount, capture resume_session param and clear URL
-    useEffect(() => {
-      const sid = _resumeFromUrl();
-      if (!sid) return;
-      window.history.replaceState({}, "", "/");
-      sessionStorage.setItem("acordly_resume_after_login", sid);
-    }, []); // eslint-disable-line
+  useEffect(() => {
+    const sid = _resumeFromUrl();
+    if (!sid) return;
+    window.history.replaceState({}, "", "/");
+    sessionStorage.setItem("acordly_resume_after_login", sid);
+  }, []); // eslint-disable-line
 
-    // Step 2: once auth is ready, consume the stored resume session
-    useEffect(() => {
-      if (!token || !user) return;
-      const sid = sessionStorage.getItem("acordly_resume_after_login");
-      if (!sid) return;
-      sessionStorage.removeItem("acordly_resume_after_login");
-      setResumeSessionId(sid);
-      setShowModal(true);
-    }, [token, user]); // fires when auth resolves
+  useEffect(() => {
+    if (!token || !user) return;
+    const sid = sessionStorage.getItem("acordly_resume_after_login");
+    if (!sid) { setResumeLoading(false); return; }
+    sessionStorage.removeItem("acordly_resume_after_login");
+    setResumeSessionId(sid);
+    setResumeLoading(false);
+    setShowModal(true);
+  }, [token, user]);
     
   useEffect(() => {
     const params          = new URLSearchParams(window.location.search);
@@ -125,6 +126,12 @@ function AppContent() {
         </div>
       )}
       {upgradeChecking && <UpgradeStageOverlay />}
+      {resumeLoading && (
+        <div style={{ position: "fixed", inset: 0, background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+          <div className="loading-spinner" style={{ width: 40, height: 40, marginBottom: 16 }} />
+          <p style={{ color: "#64748b", fontSize: 15, fontWeight: 500 }}>Restoring your session...</p>
+        </div>
+      )}
       {signingIn && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(255,255,255,0.97)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
           <div className="loading-spinner" style={{ width: 40, height: 40, marginBottom: 16 }} />

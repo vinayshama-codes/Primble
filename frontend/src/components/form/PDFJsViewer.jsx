@@ -119,7 +119,11 @@ export default function PDFJsViewer({
         const t = page.render({ canvasContext: ctx, viewport: vp, renderInteractiveForms: false });
         renderTask.current = t;
         await t.promise;
-        buildOverlay(scale, vp.width, vp.height, fieldValuesRef.current);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+              buildOverlay(scale, vp.width, vp.height, fieldValuesRef.current);
+        });
+          });
       } catch (e) {
         if (e?.name !== "RenderingCancelledException") setLoadError(true);
       } finally { setRendering(false); setLoadingStage("idle"); }
