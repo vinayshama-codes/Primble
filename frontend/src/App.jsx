@@ -22,7 +22,6 @@ import ClientQuestionnaire    from "./components/arq/ClientQuestionnaire";
 export default function App() {
   const path = window.location.pathname;
 
-  // Match BOTH /questionnaire/ and /client-questionnaire/ to handle both formats
   const qMatch = path.match(/^\/(?:client-)?questionnaire\/([^/]+)$/);
   if (qMatch) {
     return <ClientQuestionnaire token={qMatch[1]} />;
@@ -77,7 +76,7 @@ function AppContent() {
     setResumeLoading(false);
     setShowModal(true);
   }, [token, user]);
-    
+
   useEffect(() => {
     const params          = new URLSearchParams(window.location.search);
     if (params.get("overage_paid") !== "true") return;
@@ -125,31 +124,55 @@ function AppContent() {
           {overageToast}
         </div>
       )}
+
       {upgradeChecking && <UpgradeStageOverlay />}
+
       {resumeLoading && (
         <div style={{ position: "fixed", inset: 0, background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
           <div className="loading-spinner" style={{ width: 40, height: 40, marginBottom: 16 }} />
           <p style={{ color: "#64748b", fontSize: 15, fontWeight: 500 }}>Restoring your session...</p>
         </div>
       )}
+
       {signingIn && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(255,255,255,0.97)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
           <div className="loading-spinner" style={{ width: 40, height: 40, marginBottom: 16 }} />
           <p style={{ color: "#64748b", fontSize: "15px", fontWeight: 500 }}>Signing you in...</p>
         </div>
       )}
-      <Header
-        user={user} token={token} savedSignature={savedSignature}
-        onSignatureClick={() => setShowSignatureModal(true)}
-        onUpgradeClick={() => setShowUpgradeModal(true)}
-        onLogout={logout} openBillingPortal={openBillingPortal}
-        upgradeChecking={upgradeChecking} upgradeFailed={upgradeFailed}
-        setUpgradeFailed={setUpgradeFailed} setUpgradeChecking={setUpgradeChecking} setUser={setUser}
-      />
-      {headerError && (
-        <div className="header-error-bar">⚠️ {headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
+
+      {/* Full-page app — rendered above everything, replaces landing */}
+      {showModal && user && (
+        <AcordModal
+          onClose={() => { setShowModal(false); setResumeSessionId(null); }}
+          user={user} token={token} onUserUpdate={setUser}
+          onShowUpgrade={() => setShowUpgradeModal(true)}
+          resumeSessionId={resumeSessionId}
+          savedSignature={savedSignature}
+          onOpenSignatureModal={() => setShowSignatureModal(true)}
+          onOpenBillingPortal={openBillingPortal}
+          billingPortalLoading={false}
+          fullPage={true}
+        />
       )}
-      <LandingPage user={user} onGetStarted={handleGetStarted} />
+
+      {/* Landing — hidden when app is open */}
+      {!showModal && (
+        <>
+          <Header
+            user={user} token={token} savedSignature={savedSignature}
+            onSignatureClick={() => setShowSignatureModal(true)}
+            onUpgradeClick={() => setShowUpgradeModal(true)}
+            onLogout={logout} openBillingPortal={openBillingPortal}
+            upgradeChecking={upgradeChecking} upgradeFailed={upgradeFailed}
+            setUpgradeFailed={setUpgradeFailed} setUpgradeChecking={setUpgradeChecking} setUser={setUser}
+          />
+          {headerError && (
+            <div className="header-error-bar">⚠️ {headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
+          )}
+          <LandingPage user={user} onGetStarted={handleGetStarted} />
+        </>
+      )}
 
       {showAuthModal && (
         <AuthModal
@@ -169,29 +192,20 @@ function AppContent() {
           }}
         />
       )}
+
       {showCompleteProfile && user && (
         <CompleteProfileModal token={token} user={user}
           onComplete={(u) => { setUser(u); setShowCompleteProfile(false); setShowModal(true); }}
         />
       )}
-      {showModal && user && (
-        <AcordModal
-          onClose={() => { setShowModal(false); setResumeSessionId(null); }}
-          user={user} token={token} onUserUpdate={setUser}
-          onShowUpgrade={() => setShowUpgradeModal(true)}
-          resumeSessionId={resumeSessionId}
-          savedSignature={savedSignature}
-          onOpenSignatureModal={() => setShowSignatureModal(true)}
-          onOpenBillingPortal={openBillingPortal}
-          billingPortalLoading={false}
-        />
-      )}
+
       {showUpgradeModal && (
         <UpgradeModal token={token} user={user}
           onClose={() => setShowUpgradeModal(false)}
           onError={(msg) => { setShowUpgradeModal(false); setHeaderError(msg); }}
         />
       )}
+
       {showSignatureModal && (
         <SignatureModal token={token} existingSignature={savedSignature}
           onClose={() => setShowSignatureModal(false)}

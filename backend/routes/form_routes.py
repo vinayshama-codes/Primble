@@ -351,6 +351,23 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
     return JSONResponse({"session_id": session_id, "generated_forms": summary,
                          "cross_issues": proc_session.get("cross_issues_last", [])})
 
+@router.get("/api/sessions")
+async def list_sessions(current_user: dict = Depends(get_current_user)):
+    from repositories.session_repository import list_sessions_for_user
+    sessions = list_sessions_for_user(str(current_user["id"]))
+    return JSONResponse({"success": True, "sessions": sessions})
+
+
+@router.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str, current_user: dict = Depends(get_current_user)):
+    conn = get_db(); cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM processing_sessions WHERE id = %s AND user_id = %s",
+        (session_id, str(current_user["id"])),
+    )
+    cur.execute("DELETE FROM session_pdf_bytes WHERE session_id = %s", (session_id,))
+    conn.commit(); cur.close(); conn.close()
+    return JSONResponse({"success": True})
 
 @router.get("/api/send-to-epic/{session_id}/{form_id}")
 async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depends(get_current_user)):

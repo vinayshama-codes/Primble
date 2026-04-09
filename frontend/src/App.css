@@ -708,19 +708,31 @@ body {
 /* ==================== EDITOR LAYOUT ==================== */
 .editor-layout {
   display: grid;
-  grid-template-columns: 350px 1fr;
-  gap: 24px;
+  grid-template-columns: 320px 1fr;
+  gap: 0;
   height: 75vh;
+  overflow: hidden;
 }
 .editor-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 12px;
   overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px 12px 14px 14px;
+  background: #f8fafc;
+  border-right: 1px solid #e2e8f0;
+  scrollbar-width: thin;
+  scrollbar-color: #e2e8f0 transparent;
 }
+.editor-sidebar::-webkit-scrollbar { width: 4px; }
+.editor-sidebar::-webkit-scrollbar-track { background: transparent; }
+.editor-sidebar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 4px; }
 .editor-main {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
 }
 
 /* ==================== SQS DISPLAY ==================== */
@@ -1631,4 +1643,73 @@ body {
 }
 .btn-signature-header:hover {
   background: rgba(230,0,122,0.15);
+}
+
+
+
+/* ── Full-page editor layout ── */
+.editor-layout-fullpage {
+  height: calc(100vh - 52px);
+  overflow: hidden;
+}
+
+/* ── SQS compact overrides inside sidebar ── */
+.editor-sidebar .sqs-display {
+  padding: 14px;
+  border-radius: 8px;
+}
+.editor-sidebar .sqs-score-large {
+  font-size: 40px;
+  margin-bottom: 10px;
+}
+.editor-sidebar .sqs-score-row {
+  margin-bottom: 12px;
+}
+.editor-sidebar .sqs-breakdown {
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.editor-sidebar .form-navigator {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 0;
+}
+.editor-sidebar .form-nav-list {
+  max-height: 140px;
+}
+.editor-sidebar .download-actions {
+  margin-top: 4px;
+  gap: 6px;
+}
+.editor-sidebar .download-actions .btn {
+  padding: 9px 16px;
+  font-size: 13px;
+}
+
+/* ── Dashboard session delete button ── */
+.session-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  opacity: 0;
+}
+.session-card:hover .session-delete-btn {
+  opacity: 1;
+}
+.session-delete-btn:hover {
+  background: #dc2626;
+  color: #fff;
+  border-color: #dc2626;
 }

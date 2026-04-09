@@ -111,3 +111,30 @@ def upd_processing_session(sid: str, updates: dict):
     conn.commit()
     cur.close()
     conn.close()
+
+def list_sessions_for_user(user_id: str) -> list:
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute(
+        "SELECT id, data, created_at, updated_at FROM processing_sessions WHERE user_id = %s ORDER BY updated_at DESC LIMIT 50",
+        (user_id,),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    result = []
+    for row in rows:
+        data = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
+        generated = data.get("generated_forms", {})
+        facts     = data.get("facts", {})
+        sqs_scores = {fid: fd.get("sqs", {}) for fid, fd in generated.items()}
+        result.append({
+            "session_id":   row["id"],
+            "created_at":   row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
+            "updated_at":   row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
+            "applicant":    facts.get("applicant_name") or "Unknown Applicant",
+            "lines":        facts.get("lines_of_business") or [],
+            "form_ids":     list(generated.keys()),
+            "sqs":          sqs_scores,
+        })
+    return result    
