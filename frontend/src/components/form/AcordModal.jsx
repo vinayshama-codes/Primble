@@ -18,14 +18,31 @@ const SQS_WEIGHTS = {
   umbrella_limit_adequacy: 10, narrative_quality: 10,
 };
 
-// ── Inline ARQ Modal ───────────────────────────────────────────────────────
+// ── Delete Confirm Modal ───────────────────────────────────────────────────
+function DeleteConfirmModal({ onConfirm, onCancel }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.7)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: "32px 28px", maxWidth: 400, width: "100%", boxShadow: "0 24px 60px rgba(0,0,0,0.25)", animation: "slideUp 0.2s ease-out" }}>
+        <div style={{ width: 52, height: 52, borderRadius: "50%", background: "#fef2f2", border: "2px solid #fecaca", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, margin: "0 auto 18px" }}>🗑️</div>
+        <h3 style={{ textAlign: "center", fontSize: 18, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>Delete Session?</h3>
+        <p style={{ textAlign: "center", fontSize: 14, color: "#64748b", lineHeight: 1.6, marginBottom: 24 }}>This submission package will be permanently deleted and cannot be recovered.</p>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onCancel} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+          <button onClick={onConfirm} style={{ flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: "#dc2626", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>Delete</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ARQ Modal ─────────────────────────────────────────────────────────────
 function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
-  const [clientEmail,       setClientEmail]       = useState("");
-  const [clientName,        setClientName]        = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [clientName, setClientName] = useState("");
   const [selectedQuestions, setSelectedQuestions] = useState({});
-  const [sending,           setSending]           = useState(false);
-  const [error,             setError]             = useState("");
-  const [selectAll,         setSelectAll]         = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+  const [selectAll, setSelectAll] = useState(true);
 
   useEffect(() => {
     const init = {};
@@ -33,86 +50,95 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
     setSelectedQuestions(init);
   }, [questions]);
 
-  const handleToggle = (fn) => setSelectedQuestions(prev => ({ ...prev, [fn]: !prev[fn] }));
-
+  const handleToggle = fn => setSelectedQuestions(prev => ({ ...prev, [fn]: !prev[fn] }));
   const handleSelectAll = () => {
     const next = !selectAll; setSelectAll(next);
-    const updated = {};
-    questions.forEach(q => { updated[q.field_name] = next; });
+    const updated = {}; questions.forEach(q => { updated[q.field_name] = next; });
     setSelectedQuestions(updated);
   };
 
   const selectedCount = Object.values(selectedQuestions).filter(Boolean).length;
-  const isEmailValid  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail);
-  const canSend       = isEmailValid && selectedCount > 0;
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail);
+  const canSend = isEmailValid && selectedCount > 0;
 
   const handleSend = async () => {
     if (!canSend) return;
     setSending(true); setError("");
     const selectedList = questions.filter(q => selectedQuestions[q.field_name]);
     try {
-      const res  = await fetch(`${API_BASE}/api/arq/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: sessionId, client_email: clientEmail, client_name: clientName, questions: selectedList }),
-      });
+      const res = await fetch(`${API_BASE}/api/arq/send`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, client_email: clientEmail, client_name: clientName, questions: selectedList }) });
       const data = await res.json();
-      if (res.ok && data.success) { onSuccess(data); }
-      else { setError(data.detail || data.message || "Failed to send questionnaire."); }
+      if (res.ok && data.success) onSuccess(data);
+      else setError(data.detail || data.message || "Failed to send questionnaire.");
     } catch (e) { setError("Network error: " + e.message); }
     finally { setSending(false); }
   };
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-content arq-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 640 }}>
-        <button className="modal-close" onClick={onClose}>✕</button>
-        <div className="modal-inner">
-          <div style={{ fontSize: 36, textAlign: "center", marginBottom: 8 }}>📧</div>
-          <h2 className="step-title" style={{ textAlign: "center" }}>Send Questionnaire to Client</h2>
-          <p className="step-subtitle" style={{ textAlign: "center" }}>Select questions — client answers will auto-populate your forms.</p>
-          {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>⚠️ {error}</div>}
-          <div className="form-group" style={{ marginBottom: 16 }}>
-            <label>Client Email <span className="field-required">*</span></label>
-            <input type="email" value={clientEmail} onChange={e => setClientEmail(e.target.value)} placeholder="client@company.com" className="form-input" />
-          </div>
-          <div className="form-group" style={{ marginBottom: 20 }}>
-            <label>Client First Name <span style={{ color: "#94a3b8", fontWeight: 400 }}>(optional)</span></label>
-            <input type="text" value={clientName} onChange={e => setClientName(e.target.value)} placeholder="e.g. John" className="form-input" />
-          </div>
-          <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <span style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>Questions ({selectedCount}/{questions.length} selected)</span>
-              <button onClick={handleSelectAll} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer", color: "#4f7cff", fontWeight: 500 }}>
-                {selectAll ? "Deselect All" : "Select All"}
-              </button>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(8px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 620, maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 32px 80px rgba(0,0,0,0.2)" }}>
+        <div style={{ padding: "24px 28px 0", flexShrink: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", marginBottom: 4, letterSpacing: "0.05em", textTransform: "uppercase" }}>Client Questionnaire</div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: "#0f172a", margin: 0 }}>Send to Client</h2>
+              <p style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Client answers will auto-populate your ACORD forms.</p>
             </div>
-            <div style={{ maxHeight: 320, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
-              {questions.map((q, idx) => (
-                <div key={idx} onClick={() => handleToggle(q.field_name)}
-                  style={{ border: `1px solid ${selectedQuestions[q.field_name] ? "#e6007a" : "#e2e8f0"}`, borderRadius: 8, padding: "10px 14px", cursor: "pointer", background: selectedQuestions[q.field_name] ? "rgba(230,0,122,0.04)" : "#fff", display: "flex", alignItems: "flex-start", gap: 10, opacity: selectedQuestions[q.field_name] ? 1 : 0.5, transition: "all 0.15s" }}>
-                  <input type="checkbox" checked={!!selectedQuestions[q.field_name]} onChange={() => handleToggle(q.field_name)} onClick={e => e.stopPropagation()} style={{ marginTop: 3, width: 16, height: 16, cursor: "pointer", accentColor: "#e6007a", flexShrink: 0 }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: "#e6007a", background: "#fdf2f8", padding: "1px 8px", borderRadius: 20, display: "inline-block", marginBottom: 4 }}>ACORD: {q.forms}</span>
-                    <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#0f172a", lineHeight: 1.4 }}>{q.question}</p>
-                    {q.current_value && <p style={{ margin: "4px 0 0", fontSize: 11, color: "#94a3b8" }}>Current: {q.current_value}</p>}
-                  </div>
+            <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid #e6007a", background: "rgba(230,0,122,0.08)", color: "#e6007a", fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.2s" }}
+              onMouseEnter={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.color = "#fff"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "rgba(230,0,122,0.08)"; e.currentTarget.style.color = "#e6007a"; }}>✕</button>
+          </div>
+          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 16, color: "#dc2626", fontSize: 13 }}>⚠️ {error}</div>}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Client Email <span style={{ color: "#e6007a" }}>*</span></label>
+              <input type="email" value={clientEmail} onChange={e => setClientEmail(e.target.value)} placeholder="client@company.com"
+                style={{ width: "100%", padding: "9px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                onFocus={e => e.target.style.borderColor = "#e6007a"} onBlur={e => e.target.style.borderColor = "#e2e8f0"} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>First Name <span style={{ color: "#94a3b8", fontWeight: 400 }}>(optional)</span></label>
+              <input type="text" value={clientName} onChange={e => setClientName(e.target.value)} placeholder="e.g. John"
+                style={{ width: "100%", padding: "9px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box" }}
+                onFocus={e => e.target.style.borderColor = "#e6007a"} onBlur={e => e.target.style.borderColor = "#e2e8f0"} />
+            </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid #f1f5f9" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>Questions <span style={{ color: "#64748b", fontWeight: 400 }}>({selectedCount}/{questions.length} selected)</span></span>
+            <button onClick={handleSelectAll} style={{ fontSize: 12, fontWeight: 600, color: "#4f7cff", background: "rgba(79,124,255,0.06)", border: "1px solid rgba(79,124,255,0.2)", borderRadius: 6, padding: "3px 10px", cursor: "pointer" }}>
+              {selectAll ? "Deselect All" : "Select All"}
+            </button>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 28px 4px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {questions.map((q, idx) => (
+              <div key={idx} onClick={() => handleToggle(q.field_name)}
+                style={{ border: `1.5px solid ${selectedQuestions[q.field_name] ? "#e6007a" : "#e2e8f0"}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", background: selectedQuestions[q.field_name] ? "rgba(230,0,122,0.03)" : "#fafafa", display: "flex", alignItems: "flex-start", gap: 10, opacity: selectedQuestions[q.field_name] ? 1 : 0.5, transition: "all 0.15s" }}>
+                <input type="checkbox" checked={!!selectedQuestions[q.field_name]} onChange={() => handleToggle(q.field_name)} onClick={e => e.stopPropagation()} style={{ marginTop: 3, width: 15, height: 15, cursor: "pointer", accentColor: "#e6007a", flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#e6007a", background: "#fdf2f8", padding: "1px 7px", borderRadius: 20, display: "inline-block", marginBottom: 4 }}>ACORD {q.forms}</span>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#0f172a", lineHeight: 1.45 }}>{q.question}</p>
+                  {q.current_value && <p style={{ margin: "3px 0 0", fontSize: 11, color: "#94a3b8" }}>Current: {q.current_value}</p>}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </div>
-          <button className="btn btn-modal-primary btn-block" onClick={handleSend} disabled={!canSend || sending} style={{ marginTop: 20, opacity: (!canSend || sending) ? 0.6 : 1, cursor: (!canSend || sending) ? "not-allowed" : "pointer" }}>
-            {sending ? <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><span style={{ width: 14, height: 14, border: "2px solid white", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Sending…</span> : `📧 Send ${selectedCount} Question${selectedCount !== 1 ? "s" : ""} to Client`}
+        </div>
+        <div style={{ padding: "16px 28px 24px", flexShrink: 0, borderTop: "1px solid #f1f5f9", marginTop: 8 }}>
+          <button onClick={handleSend} disabled={!canSend || sending}
+            style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: canSend && !sending ? "#e6007a" : "#e2e8f0", color: canSend && !sending ? "#fff" : "#94a3b8", fontSize: 14, fontWeight: 700, cursor: canSend && !sending ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            {sending ? <><span style={{ width: 14, height: 14, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Sending…</> : `Send ${selectedCount} Question${selectedCount !== 1 ? "s" : ""} to Client`}
           </button>
           {!isEmailValid && clientEmail && <p style={{ fontSize: 11, color: "#ef4444", textAlign: "center", marginTop: 8 }}>Please enter a valid email address.</p>}
-          <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", marginTop: 14 }}>Client receives a secure link. Answers auto-populate your forms.</p>
+          <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", marginTop: 10 }}>Client receives a secure link valid for 72 hours.</p>
         </div>
       </div>
     </div>
   );
 }
 
-// ── ARQ Status Panel ────────────────────────────────────────────────────────
+// ── ARQ Status Panel ───────────────────────────────────────────────────────
 function ARQStatusPanel({ arqSessions, token, onRefresh }) {
   const [reminding, setReminding] = useState(null);
   const handleRemind = async (arq_id) => {
@@ -123,27 +149,26 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
   const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
   if (!arqSessions || arqSessions.length === 0) return null;
   return (
-    <div style={{ marginTop: 10 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: "#64748b", marginBottom: 6 }}>📧 Sent Questionnaires</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", marginBottom: 5, textTransform: "uppercase" }}>Sent Questionnaires</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {arqSessions.map(arq => {
           const isExpired = new Date() > new Date(arq.expires_at) && arq.status !== "submitted";
-          const status    = isExpired ? "expired" : arq.status;
-          const sc = { submitted: { bg: "#dcfce7", color: "#166534", border: "#86efac" }, expired: { bg: "#f1f5f9", color: "#64748b", border: "#cbd5e1" }, pending: { bg: "#fef9c3", color: "#854d0e", border: "#fde047" } }[status] || {};
+          const status = isExpired ? "expired" : arq.status;
+          const sc = { submitted: { bg: "#dcfce7", color: "#166534", border: "#86efac", label: "✓ Done" }, expired: { bg: "#f1f5f9", color: "#64748b", border: "#cbd5e1", label: "Expired" }, pending: { bg: "#fef9c3", color: "#854d0e", border: "#fde047", label: "Pending" } }[status] || {};
           return (
-            <div key={arq.id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 10px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+            <div key={arq.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{arq.client_name ? `${arq.client_name} (${arq.email})` : arq.email}</div>
-                  <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2 }}>Sent {fmtDate(arq.created_at)}</div>
+                  <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 1 }}>{fmtDate(arq.created_at)}</div>
                 </div>
-                <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 10, border: `1px solid ${sc.border}`, background: sc.bg, color: sc.color, flexShrink: 0 }}>
-                  {status === "submitted" ? "✓ Done" : status === "expired" ? "Expired" : "⏳ Pending"}
-                </span>
+                <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, border: `1px solid ${sc.border}`, background: sc.bg, color: sc.color, flexShrink: 0 }}>{sc.label}</span>
               </div>
               {arq.status === "pending" && !isExpired && (
-                <button onClick={() => handleRemind(arq.id)} disabled={reminding === arq.id} style={{ marginTop: 6, fontSize: 10, fontWeight: 600, color: "#4f7cff", background: "none", border: "1px solid #4f7cff", borderRadius: 5, padding: "2px 8px", cursor: reminding === arq.id ? "wait" : "pointer", opacity: reminding === arq.id ? 0.6 : 1 }}>
-                  {reminding === arq.id ? "Sending…" : "🔔 Remind"}{arq.reminder_count > 0 && ` (${arq.reminder_count})`}
+                <button onClick={() => handleRemind(arq.id)} disabled={reminding === arq.id}
+                  style={{ marginTop: 5, fontSize: 10, fontWeight: 600, color: "#4f7cff", background: "rgba(79,124,255,0.06)", border: "1px solid rgba(79,124,255,0.2)", borderRadius: 5, padding: "2px 8px", cursor: reminding === arq.id ? "wait" : "pointer", opacity: reminding === arq.id ? 0.6 : 1 }}>
+                  {reminding === arq.id ? "Sending…" : "Remind"}{arq.reminder_count > 0 && ` (${arq.reminder_count})`}
                 </button>
               )}
             </div>
@@ -154,10 +179,11 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
   );
 }
 
-// ── Dashboard Step ──────────────────────────────────────────────────────────
+// ── Dashboard Step ─────────────────────────────────────────────────────────
 function DashboardStep({ token, onResume, onNewPackage }) {
-  const [sessions,  setSessions]  = useState([]);
-  const [loading,   setLoading]   = useState(true);
+  const [sessions, setSessions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/sessions`, { headers: { Authorization: `Bearer ${token}` } })
@@ -166,79 +192,69 @@ function DashboardStep({ token, onResume, onNewPackage }) {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [token]);
-  
-  const handleDelete = async (sid) => {
-    if (!window.confirm("Delete this session? This cannot be undone.")) return;
+
+  const handleDelete = async sid => {
     setSessions(prev => prev.filter(s => s.session_id !== sid));
-    try {
-      await fetch(`${API_BASE}/api/sessions/${sid}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
-    } catch (_) {}
+    setDeleteTarget(null);
+    try { await fetch(`${API_BASE}/api/sessions/${sid}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); } catch (_) {}
   };
 
-  const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
-
-  const avgSqs = (sqsMap) => {
-    const scores = Object.values(sqsMap || {}).map(s => s?.sqs_score).filter(n => n != null);
-    if (!scores.length) return null;
-    return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
-  };
+  const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+  const avgSqs = sqsMap => { const scores = Object.values(sqsMap || {}).map(s => s?.sqs_score).filter(n => n != null); return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null; };
+  const sqsColor = v => v >= 75 ? "#10b981" : v >= 50 ? "#f59e0b" : "#ef4444";
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 0 40px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
+    <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 0 48px" }}>
+      {deleteTarget && <DeleteConfirmModal onConfirm={() => handleDelete(deleteTarget)} onCancel={() => setDeleteTarget(null)} />}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 28 }}>
         <div>
-          <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>📋 Package Dashboard</h2>
-          <p style={{ fontSize: 14, color: "#64748b" }}>Resume any in-progress submission or start a new one.</p>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", letterSpacing: "0.06em", marginBottom: 6, textTransform: "uppercase" }}>Submissions</div>
+          <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: 0, lineHeight: 1.2 }}>Package Dashboard</h2>
+          <p style={{ fontSize: 14, color: "#64748b", marginTop: 5 }}>Resume any in-progress submission or start a new one.</p>
         </div>
-        <button className="btn btn-modal-primary" onClick={onNewPackage} style={{ whiteSpace: "nowrap" }}>
-          + New Package
+        <button onClick={onNewPackage}
+          style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 20px", background: "#e6007a", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(230,0,122,0.3)", whiteSpace: "nowrap" }}
+          onMouseEnter={e => { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.transform = "none"; }}>
+          <span style={{ fontSize: 16 }}>+</span> New Package
         </button>
       </div>
-
       {loading ? (
-        <div style={{ textAlign: "center", padding: "60px 0", color: "#94a3b8" }}>
-          <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />Loading packages…
+        <div style={{ textAlign: "center", padding: "80px 0" }}>
+          <div style={{ width: 36, height: 36, border: "3px solid #f1f5f9", borderTopColor: "#e6007a", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 14px" }} />
+          <p style={{ color: "#94a3b8", fontSize: 14 }}>Loading packages…</p>
         </div>
       ) : sessions.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "80px 0", color: "#94a3b8" }}>
-          <div style={{ fontSize: 48, marginBottom: 16 }}>📂</div>
-          <p style={{ fontSize: 16, fontWeight: 600, color: "#64748b", marginBottom: 8 }}>No packages yet</p>
-          <p style={{ fontSize: 14, marginBottom: 24 }}>Upload documents to create your first ACORD submission package.</p>
-          <button className="btn btn-modal-primary" onClick={onNewPackage}>+ Start First Package</button>
+        <div style={{ textAlign: "center", padding: "80px 24px", background: "#fafafa", borderRadius: 16, border: "2px dashed #e2e8f0" }}>
+          <div style={{ width: 64, height: 64, borderRadius: 16, background: "rgba(230,0,122,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 16px" }}>📂</div>
+          <p style={{ fontSize: 16, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>No packages yet</p>
+          <p style={{ fontSize: 14, color: "#64748b", marginBottom: 24 }}>Upload your first submission documents to get started.</p>
+          <button onClick={onNewPackage} style={{ padding: "10px 24px", background: "#e6007a", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>+ Start First Package</button>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {sessions.map(s => {
             const avg = avgSqs(s.sqs);
             return (
-              <div key={s.session_id}
-                className="session-card"
+              <div key={s.session_id} className="session-card"
                 onClick={() => onResume(s.session_id)}
-                style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "18px 20px", cursor: "pointer", display: "flex", alignItems: "center", gap: 16, transition: "all 0.15s", position: "relative" }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = "#e6007a"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.1)"; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "#e2e8f0"; e.currentTarget.style.boxShadow = "none"; }}
-              >
-                <div style={{ width: 44, height: 44, borderRadius: 10, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>📄</div>
+                style={{ background: "#fff", border: "1px solid #e8edf5", borderRadius: 12, padding: "16px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 14, transition: "all 0.18s", position: "relative", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = "#e6007a"; e.currentTarget.style.boxShadow = "0 4px 20px rgba(230,0,122,0.1)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "#e8edf5"; e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.04)"; e.currentTarget.style.transform = "none"; }}>
+                <div style={{ width: 42, height: 42, borderRadius: 10, background: "linear-gradient(135deg, rgba(230,0,122,0.1), rgba(230,0,122,0.05))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📄</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.applicant}</div>
-                  <div style={{ fontSize: 12, color: "#64748b", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    {s.form_ids.length > 0 && <span>Forms: {s.form_ids.join(", ")}</span>}
-                    {s.lines?.length > 0 && <span>· {s.lines.slice(0, 2).join(", ")}{s.lines.length > 2 ? ` +${s.lines.length - 2}` : ""}</span>}
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.applicant}</div>
+                  <div style={{ fontSize: 12, color: "#64748b", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    {s.form_ids.length > 0 && <span style={{ background: "#f1f5f9", borderRadius: 4, padding: "1px 6px" }}>{s.form_ids.join(", ")}</span>}
+                    {s.lines?.length > 0 && <span>{s.lines.slice(0, 2).join(", ")}{s.lines.length > 2 ? ` +${s.lines.length - 2}` : ""}</span>}
                   </div>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  {avg != null && (
-                    <div style={{ fontSize: 18, fontWeight: 800, color: avg >= 75 ? "#10b981" : avg >= 50 ? "#f59e0b" : "#ef4444", marginBottom: 2 }}>
-                      {avg}<span style={{ fontSize: 11, fontWeight: 400, color: "#94a3b8" }}>/100</span>
-                    </div>
-                  )}
+                  {avg != null && <div style={{ fontSize: 17, fontWeight: 800, color: sqsColor(avg), marginBottom: 1, lineHeight: 1 }}>{avg}<span style={{ fontSize: 10, fontWeight: 500, color: "#94a3b8" }}>/100</span></div>}
                   <div style={{ fontSize: 11, color: "#94a3b8" }}>{fmtDate(s.updated_at)}</div>
                 </div>
-                 <div style={{ color: "#e6007a", fontSize: 18, flexShrink: 0 }}>→</div>
-                <button
-                  className="session-delete-btn"
-                  onClick={e => { e.stopPropagation(); handleDelete(s.session_id); }}
-                  title="Delete session">✕</button>
+                <div style={{ color: "#cbd5e1", fontSize: 16, flexShrink: 0 }}>→</div>
+                <button className="session-delete-btn" onClick={e => { e.stopPropagation(); setDeleteTarget(s.session_id); }} title="Delete session">✕</button>
               </div>
             );
           })}
@@ -256,53 +272,47 @@ export default function AcordModal({
   fullPage = false,
 }) {
   const dropRef = useRef(null);
-
-  const [files, setFiles]                         = useState([]);
-  const [dragging, setDragging]                   = useState(false);
-  const [loading, setLoading]                     = useState(false);
-  const [processingStage, setProcessingStage]     = useState("");
-  const [step, setStep]                           = useState(resumeSessionId ? "resuming" : "dashboard");
-  const [error, setError]                         = useState(null);
-  const [sessionId, setSessionId]                 = useState(resumeSessionId || null);
-  const [docSummary, setDocSummary]               = useState([]);
-  const [flags, setFlags]                         = useState({});
-  const [hardStops, setHardStops]                 = useState([]);
-  const [softStops, setSoftStops]                 = useState([]);
-  const [tier2Score, setTier2Score]               = useState(null);
-  const [tier2Missing, setTier2Missing]           = useState([]);
-  const [recommendations, setRecommendations]     = useState([]);
+  const [files, setFiles] = useState([]);
+  const [dragging, setDragging] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [processingStage, setProcessingStage] = useState("");
+  const [step, setStep] = useState(resumeSessionId ? "resuming" : "dashboard");
+  const [error, setError] = useState(null);
+  const [sessionId, setSessionId] = useState(resumeSessionId || null);
+  const [docSummary, setDocSummary] = useState([]);
+  const [flags, setFlags] = useState({});
+  const [hardStops, setHardStops] = useState([]);
+  const [softStops, setSoftStops] = useState([]);
+  const [tier2Score, setTier2Score] = useState(null);
+  const [tier2Missing, setTier2Missing] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
   const [allAvailableForms, setAllAvailableForms] = useState([]);
-  const [checkedFormIds, setCheckedFormIds]       = useState(new Set());
-  const [showAddForms, setShowAddForms]           = useState(false);
-  const [generatedForms, setGeneratedForms]       = useState({});
-  const [activeFormId, setActiveFormId]           = useState(null);
-  const [crossIssues, setCrossIssues]             = useState([]);
-  const [pdfLoading, setPdfLoading]               = useState({});
-  const [pkgStatusMsg, setPkgStatusMsg]           = useState("");
-  const [pkgStatusType, setPkgStatusType]         = useState("");
-  const [signedForms, setSignedForms]             = useState(new Set());
-  const [showUploadOverlay, setShowUploadOverlay]     = useState(false);
+  const [checkedFormIds, setCheckedFormIds] = useState(new Set());
+  const [showAddForms, setShowAddForms] = useState(false);
+  const [generatedForms, setGeneratedForms] = useState({});
+  const [activeFormId, setActiveFormId] = useState(null);
+  const [crossIssues, setCrossIssues] = useState([]);
+  const [pdfLoading, setPdfLoading] = useState({});
+  const [pkgStatusMsg, setPkgStatusMsg] = useState("");
+  const [pkgStatusType, setPkgStatusType] = useState("");
+  const [signedForms, setSignedForms] = useState(new Set());
+  const [showUploadOverlay, setShowUploadOverlay] = useState(false);
   const [showGenerateOverlay, setShowGenerateOverlay] = useState(false);
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
-  const [showAcordModal, setShowAcordModal]           = useState(false);
-  const [acordModalAction, setAcordModalAction]       = useState(null);
+  const [showAcordModal, setShowAcordModal] = useState(false);
+  const [acordModalAction, setAcordModalAction] = useState(null);
   const [acordLicenseChecked, setAcordLicenseChecked] = useState(false);
-  const [acordModalLoading, setAcordModalLoading]     = useState(false);
-  const [epicLoading, setEpicLoading]                 = useState(false);
-  const [epicSuccess, setEpicSuccess]                 = useState(false);
-
-  const [showARQModal,       setShowARQModal]       = useState(false);
-  const [arqQuestions,       setArqQuestions]       = useState([]);
-  const [arqLoadingQ,        setArqLoadingQ]        = useState(false);
-  const [arqSessions,        setArqSessions]        = useState([]);
-  const [arqNotifCount,      setArqNotifCount]      = useState(0);
+  const [acordModalLoading, setAcordModalLoading] = useState(false);
+  const [epicLoading, setEpicLoading] = useState(false);
+  const [epicSuccess, setEpicSuccess] = useState(false);
+  const [showARQModal, setShowARQModal] = useState(false);
+  const [arqQuestions, setArqQuestions] = useState([]);
+  const [arqLoadingQ, setArqLoadingQ] = useState(false);
+  const [arqSessions, setArqSessions] = useState([]);
+  const [arqNotifCount, setArqNotifCount] = useState(0);
   const [clientFilledFields, setClientFilledFields] = useState([]);
 
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = prev; };
-  }, []);
+
 
   useEffect(() => {
     if (!resumeSessionId) return;
@@ -323,9 +333,9 @@ export default function AcordModal({
 
   useEffect(() => {
     const el = dropRef.current; if (!el) return;
-    const over  = e => { e.preventDefault(); setDragging(true); };
+    const over = e => { e.preventDefault(); setDragging(true); };
     const leave = () => setDragging(false);
-    const drop  = e => {
+    const drop = e => {
       e.preventDefault(); setDragging(false);
       const uploaded = Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".zip") || f.type.startsWith("image/"));
       setFiles(prev => [...prev, ...uploaded]);
@@ -342,19 +352,14 @@ export default function AcordModal({
   const refreshArqData = async () => {
     if (!sessionId || !token) return [];
     fetch(`${API_BASE}/api/arq/list/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.success) setArqSessions(d.arq_sessions || []); })
-      .catch(() => {});
+      .then(r => r.ok ? r.json() : null).then(d => { if (d?.success) setArqSessions(d.arq_sessions || []); }).catch(() => {});
     fetch(`${API_BASE}/api/arq/notifications`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.notifications) setArqNotifCount(d.notifications.filter(n => !n.read_status).length); })
-      .catch(() => {});
+      .then(r => r.ok ? r.json() : null).then(d => { if (d?.notifications) setArqNotifCount(d.notifications.filter(n => !n.read_status).length); }).catch(() => {});
     try {
-      const r      = await fetch(`${API_BASE}/api/arq/client-filled/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
-      const d      = r.ok ? await r.json() : null;
+      const r = await fetch(`${API_BASE}/api/arq/client-filled/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const d = r.ok ? await r.json() : null;
       const fields = d?.client_filled_fields || [];
-      setClientFilledFields(fields);
-      return fields;
+      setClientFilledFields(fields); return fields;
     } catch { return []; }
   };
 
@@ -362,10 +367,10 @@ export default function AcordModal({
     if (!sessionId) return;
     setArqLoadingQ(true);
     try {
-      const res  = await fetch(`${API_BASE}/api/arq/generate/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/arq/generate/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (res.ok && data.success) { setArqQuestions(data.questions || []); setShowARQModal(true); }
-      else { setError(data.detail || "Failed to generate questions."); }
+      else setError(data.detail || "Failed to generate questions.");
     } catch (e) { setError("Network error: " + e.message); }
     finally { setArqLoadingQ(false); }
   };
@@ -392,9 +397,8 @@ export default function AcordModal({
     setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0);
   };
 
-  const handleResumeSession = (sid) => {
-    setLoading(true); setProcessingStage("Restoring session…");
-    setSessionId(sid);
+  const handleResumeSession = sid => {
+    setLoading(true); setProcessingStage("Restoring session…"); setSessionId(sid);
     fetch(`${API_BASE}/api/session/${sid}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -409,19 +413,19 @@ export default function AcordModal({
       .finally(() => { setLoading(false); setProcessingStage(""); });
   };
 
-  const handleSendToEpic = async (formId) => {
+  const handleSendToEpic = async formId => {
     if (!formId || !sessionId) return;
     setEpicLoading(true); setEpicSuccess(false);
     try {
-      const res  = await fetch(`${API_BASE}/api/send-to-epic/${sessionId}/${formId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/send-to-epic/${sessionId}/${formId}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (res.ok && data.success) { setEpicSuccess(true); setTimeout(() => setEpicSuccess(false), 3500); }
-      else { setError(data.detail || "Failed to send to EPIC."); }
+      else setError(data.detail || "Failed to send to EPIC.");
     } catch (e) { setError("EPIC send failed: " + e.message); }
     finally { setEpicLoading(false); }
   };
 
-  const gatedDownload = (action) => {
+  const gatedDownload = action => {
     if (user?.acord_license_confirmed) { action(); return; }
     setAcordLicenseChecked(false); setAcordModalAction(() => action); setShowAcordModal(true);
   };
@@ -432,12 +436,12 @@ export default function AcordModal({
     try {
       const res = await fetch(`${API_BASE}/api/acord/confirm-license`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) { onUserUpdate({ ...user, acord_license_confirmed: true }); setShowAcordModal(false); if (acordModalAction) acordModalAction(); }
-      else { setError("License confirmation failed. Please try again."); }
+      else setError("License confirmation failed. Please try again.");
     } catch { setError("Network error during license confirmation."); }
     finally { setAcordModalLoading(false); }
   };
 
-  const _doDownloadOne = async (formId) => {
+  const _doDownloadOne = async formId => {
     setLoading(true); setShowDownloadOverlay(true);
     try {
       const res = await fetch(`${API_BASE}/api/download-pdf/${sessionId}/${formId}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -479,13 +483,12 @@ export default function AcordModal({
   const handleUpload = async () => {
     if (!files.length) { setError("Select at least one file"); return; }
     setLoading(true); setError(null); setShowUploadOverlay(true);
-    const fd = new FormData();
-    files.forEach(f => fd.append("files", f));
+    const fd = new FormData(); files.forEach(f => fd.append("files", f));
     try {
-      const res  = await fetch(`${API_BASE}/api/upload-declaration`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+      const res = await fetch(`${API_BASE}/api/upload-declaration`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
       const data = await res.json();
       if (res.status === 401) { setError("Session expired. Please sign in again."); setTimeout(() => { localStorage.removeItem("acordly_token"); window.location.reload(); }, 2000); return; }
-      if (res.status === 403) { const msg = data.detail || data.message || "Access blocked."; if (msg.includes("suspended")) setError("🚫 Your account is suspended."); else if (msg.includes("archived")) setError("🗄️ Account archived. Contact support."); else if (msg.includes("soft_locked") || msg.includes("locked")) setError("🔒 Account Disabled — please update billing."); else setError(msg); return; }
+      if (res.status === 403) { const msg = data.detail || data.message || "Access blocked."; if (msg.includes("suspended")) setError("Your account is suspended."); else if (msg.includes("archived")) setError("Account archived. Contact support."); else if (msg.includes("soft_locked") || msg.includes("locked")) setError("Account Disabled — please update billing."); else setError(msg); return; }
       if (!data.success) { if (data.gate === "tier1_fail") { setHardStops(data.missing_fields || []); setStep("stopped"); } else setError(data.message || "Upload failed"); return; }
       setSessionId(data.session_id); setDocSummary(data.doc_summary || []); setFlags(data.flags || {});
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []);
@@ -502,9 +505,9 @@ export default function AcordModal({
     if (!ids.length) { setError("Select at least one form"); return; }
     setLoading(true); setError(null); setShowGenerateOverlay(true);
     try {
-      const res  = await fetch(`${API_BASE}/api/select-forms-bulk`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, form_ids: ids }) });
+      const res = await fetch(`${API_BASE}/api/select-forms-bulk`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, form_ids: ids }) });
       const data = await res.json();
-      if (res.status === 403) { setError("🔒 " + (data.detail || "Access blocked.") + " Please update your billing."); return; }
+      if (res.status === 403) { setError("Access blocked. Please update your billing."); return; }
       if (!data.success) { setError("Form generation failed"); return; }
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");
@@ -514,92 +517,42 @@ export default function AcordModal({
   };
 
   const formIdList = Object.keys(generatedForms);
-  const activeIdx  = formIdList.indexOf(activeFormId);
-  const goNext     = () => { if (activeIdx < formIdList.length - 1) setActiveFormId(formIdList[activeIdx + 1]); };
-  const goPrev     = () => { if (activeIdx > 0) setActiveFormId(formIdList[activeIdx - 1]); };
-  const toggleForm = (formId) => { setCheckedFormIds(prev => { const next = new Set(prev); if (next.has(formId)) next.delete(formId); else next.add(formId); return next; }); };
+  const activeIdx = formIdList.indexOf(activeFormId);
+  const goNext = () => { if (activeIdx < formIdList.length - 1) setActiveFormId(formIdList[activeIdx + 1]); };
+  const goPrev = () => { if (activeIdx > 0) setActiveFormId(formIdList[activeIdx - 1]); };
+  const toggleForm = formId => { setCheckedFormIds(prev => { const next = new Set(prev); if (next.has(formId)) next.delete(formId); else next.add(formId); return next; }); };
 
   const recommendedIds = new Set(recommendations.map(r => r.form_id));
-  const extraForms     = allAvailableForms.filter(f => !recommendedIds.has(f.form_id));
-  const activeSqs      = activeFormId && generatedForms[activeFormId]?.sqs;
-  const pkgsUsed       = user?.packages_used  || 0;
-  const pkgsLimit      = user?.packages_limit || 0;
-  const softBuffer     = user?.packages_soft_buffer || 0;
-  const inOverage      = user?.subscription_tier !== "free" && pkgsLimit > 0 && pkgsUsed >= pkgsLimit + softBuffer;
+  const extraForms = allAvailableForms.filter(f => !recommendedIds.has(f.form_id));
+  const activeSqs = activeFormId && generatedForms[activeFormId]?.sqs;
+  const pkgsUsed = user?.packages_used || 0;
+  const pkgsLimit = user?.packages_limit || 0;
+  const softBuffer = user?.packages_soft_buffer || 0;
+  const inOverage = user?.subscription_tier !== "free" && pkgsLimit > 0 && pkgsUsed >= pkgsLimit + softBuffer;
+
+  const freeExhausted = user?.subscription_tier === "free" && user?.downloads_remaining === 0;
+
+  const handleNewPackage = () => {
+    if (freeExhausted) { onShowUpgrade(); return; }
+    resetToUpload();
+  };
 
   const BillingBtnSpinner = () => (
     <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite", marginRight: 4 }} />
   );
 
-  const handleDownloadOne = (formId) => gatedDownload(() => _doDownloadOne(formId));
+  const handleDownloadOne = formId => gatedDownload(() => _doDownloadOne(formId));
   const handleDownloadAll = () => gatedDownload(() => _doDownloadAll());
 
-  // ── Full-page app shell vs modal shell ───────────────────────────────────
-  const outerStyle = fullPage
-    ? { position: "fixed", inset: 0, background: "#f8fafc", zIndex: 9000, display: "flex", flexDirection: "column", overflow: "hidden" }
-    : undefined;
+ 
 
-  const innerWrapStyle = fullPage
-    ? { flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }
-    : undefined;
-
-  // Top bar for full-page mode
-  const TopBar = () => (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px", height: 52, background: "#0f172a", borderBottom: "1px solid #1e2a3a", flexShrink: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color: "#e6007a", letterSpacing: "-0.5px" }}>acordly</span>
-        {step !== "dashboard" && (
-          <button onClick={goToDashboard} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: 13, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", borderRadius: 6, transition: "color 0.15s" }}
-            onMouseEnter={e => e.currentTarget.style.color = "#e2e8f0"}
-            onMouseLeave={e => e.currentTarget.style.color = "#94a3b8"}>
-            ← Dashboard
-          </button>
-        )}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <span style={{ fontSize: 13, color: "#64748b" }}>{user?.email}</span>
-        <button onClick={onClose} style={{ background: "rgba(230,0,122,0.1)", border: "1px solid #e6007a", color: "#e6007a", borderRadius: "50%", width: 32, height: 32, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
-      </div>
-    </div>
-  );
-
-  const contentStyle = fullPage
-    ? { flex: 1, overflow: "auto", padding: step === "editor" ? "0" : "32px 40px" }
-    : undefined;
-
-  if (fullPage) {
-    return (
-      <div style={outerStyle}>
-        <TopBar />
-        <div style={innerWrapStyle}>
-          <div style={{ ...contentStyle, padding: step === "editor" ? 0 : "32px 40px" }}>
-            {renderContent()}
-          </div>
-        </div>
-        {showAcordModal && renderAcordLicenseModal()}
-        {showARQModal && (
-          <ARQModal sessionId={sessionId} token={token} questions={arqQuestions}
-            onClose={() => setShowARQModal(false)}
-            onSuccess={() => { setShowARQModal(false); refreshArqData(); }} />
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="modal-overlay">
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>✕</button>
-        <div className="modal-inner">
-          {renderContent()}
-        </div>
+return (
+    <div style={{ background: "#f8fafc", minHeight: "calc(100vh - 81px)", width: "100%" }}>
+      <div style={{ padding: step === "editor" ? 0 : "32px 40px" }}>
+        {renderContent()}
       </div>
       {showAcordModal && renderAcordLicenseModal()}
-      {showARQModal && (
-        <ARQModal sessionId={sessionId} token={token} questions={arqQuestions}
-          onClose={() => setShowARQModal(false)}
-          onSuccess={() => { setShowARQModal(false); refreshArqData(); }} />
-      )}
+      {showARQModal && <ARQModal sessionId={sessionId} token={token} questions={arqQuestions} onClose={() => setShowARQModal(false)} onSuccess={() => { setShowARQModal(false); refreshArqData(); }} />}
     </div>
   );
 
@@ -624,9 +577,9 @@ export default function AcordModal({
             </button>
             <div className="acord-stub-actions">
               <span className="acord-stub-label">Coming soon:</span>
-              <button className="btn-stub" disabled title="Email — coming soon">✉ Email</button>
-              <button className="btn-stub" disabled title="Share — coming soon">🔗 Share</button>
-              <button className="btn-stub" disabled title="Fax — coming soon">📠 Fax</button>
+              <button className="btn-stub" disabled>✉ Email</button>
+              <button className="btn-stub" disabled>🔗 Share</button>
+              <button className="btn-stub" disabled>📠 Fax</button>
             </div>
             <button className="btn btn-modal-secondary btn-block" onClick={() => { setShowAcordModal(false); setAcordLicenseChecked(false); }}>Cancel</button>
           </div>
@@ -638,7 +591,7 @@ export default function AcordModal({
   function renderContent() {
     return (
       <>
-        {showUploadOverlay   && <ProcessStageOverlay stages={["Reading your documents…", "Extracting facts with AI…"]} advanceAfter={3500} />}
+        {showUploadOverlay && <ProcessStageOverlay stages={["Reading your documents…", "Extracting facts with AI…"]} advanceAfter={3500} />}
         {showGenerateOverlay && <ProcessStageOverlay stages={[`Selecting ${checkedFormIds.size} form${checkedFormIds.size !== 1 ? "s" : ""}…`, "Generating with AI…"]} advanceAfter={3000} />}
         {showDownloadOverlay && <ProcessStageOverlay stages={["Preparing your form…", "Packaging for download…"]} advanceAfter={2000} />}
 
@@ -662,10 +615,10 @@ export default function AcordModal({
 
         {user && user.subscription_tier !== "free" && (() => {
           const ps = user.payment_status;
-          if (ps === "archived")    return <div className="payment-status-banner payment-status-archived">🗄️ Account archived — <a href="mailto:support@acordly.ai">Contact support</a> to restore.</div>;
-          if (ps === "suspended")   return <div className="payment-status-banner payment-status-suspended">🚫 Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
+          if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived — <a href="mailto:support@acordly.ai">Contact support</a> to restore.</div>;
+          if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">🚫 Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
           if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">🔒 Account Disabled —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button>{" "}to restore.</div>;
-          if (ps === "failed")      return <div className="payment-status-banner payment-status-failed">⚠️ Payment overdue —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
+          if (ps === "failed") return <div className="payment-status-banner payment-status-failed">⚠️ Payment overdue —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
           return null;
         })()}
 
@@ -683,52 +636,70 @@ export default function AcordModal({
           </div>
         )}
 
-        {/* DASHBOARD */}
-        {step === "dashboard" && (
-          <DashboardStep token={token} onResume={handleResumeSession} onNewPackage={resetToUpload} />
-        )}
+        {step === "dashboard" && <DashboardStep token={token} onResume={handleResumeSession} onNewPackage={handleNewPackage} />}
 
-        {/* UPLOAD */}
         {step === "upload" && (() => {
+          if (freeExhausted) {
+            return (
+              <div style={{ maxWidth: 560, margin: "0 auto", textAlign: "center", padding: "60px 24px" }}>
+                <div style={{ width: 72, height: 72, borderRadius: 20, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, margin: "0 auto 20px" }}>🚀</div>
+                <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Free Limit Reached</h2>
+                <p style={{ fontSize: 15, color: "#64748b", marginBottom: 28, lineHeight: 1.6 }}>You've used all your free downloads. Upgrade to keep generating ACORD packages.</p>
+                <button onClick={onShowUpgrade}
+                  style={{ padding: "13px 36px", background: "#e6007a", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(230,0,122,0.3)" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.transform = "none"; }}>
+                  Upgrade Now
+                </button>
+                <div style={{ marginTop: 16 }}>
+                  <button onClick={goToDashboard} style={{ background: "none", border: "none", color: "#94a3b8", fontSize: 13, cursor: "pointer", textDecoration: "underline" }}>Back to Dashboard</button>
+                </div>
+              </div>
+            );
+          }
           const ps = user?.payment_status;
           const uploadBlocked = ps === "soft_locked" || ps === "suspended" || ps === "archived";
-          const blockMsg = ps === "archived" ? "🗄️ Account archived — contact support to restore." : ps === "suspended" ? "🚫 Account suspended — restore billing to continue." : ps === "soft_locked" ? "🔒 Account Disabled — please update your billing." : null;
+          const blockMsg = ps === "archived" ? "Account archived — contact support to restore." : ps === "suspended" ? "Account suspended — restore billing to continue." : ps === "soft_locked" ? "Account Disabled — please update your billing." : null;
           return (
-            <div className="modal-step">
-              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-                <button onClick={goToDashboard} style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", color: "#64748b", fontFamily: "inherit" }}>← Dashboard</button>
+            <div style={{ maxWidth: 560, margin: "0 auto" }}>
+
+              <div style={{ textAlign: "center", marginBottom: 32 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>New Submission</div>
+                <h2 style={{ fontSize: 28, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>Upload Documents</h2>
+                <p style={{ fontSize: 14, color: "#64748b" }}>Dec pages, loss runs, schedules, quotes — PDFs, images, or ZIP archives</p>
               </div>
-              <div className="step-header">
-                <h2 className="step-title">Upload Documents</h2>
-                <p className="step-subtitle">Dec pages, loss runs, schedules, quotes — upload PDFs, images (JPG/PNG), or ZIP archives</p>
-              </div>
-              {uploadBlocked && <div className="upload-blocked-msg">{blockMsg}</div>}
-              <div ref={dropRef} className={`upload-area ${dragging ? "dragging" : ""} ${uploadBlocked ? "upload-area-blocked" : ""}`}>
-                <div className="upload-icon">📁</div>
-                <input type="file" id="file-upload" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,application/pdf,application/zip,image/*" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} className="file-input" />
-                <label htmlFor="file-upload" className="upload-label">Drag &amp; drop or <span className="upload-link">browse files</span></label>
-                <p className="upload-hint">PDFs, Images (JPG, PNG, BMP, TIFF) and ZIP archives supported</p>
+              {uploadBlocked && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px", marginBottom: 20, fontSize: 13, color: "#dc2626", textAlign: "center" }}>{blockMsg}</div>}
+              <div ref={dropRef}
+                style={{ textAlign: "center", padding: dragging ? "52px 20px" : "48px 20px", border: `2px dashed ${dragging ? "#e6007a" : "#d1d5db"}`, borderRadius: 16, background: dragging ? "rgba(230,0,122,0.04)" : "#fafafa", transition: "all 0.2s", transform: dragging ? "scale(1.01)" : "none" }}>
+                <div style={{ fontSize: 40, marginBottom: 14, opacity: 0.7 }}>📁</div>
+                <input type="file" id="file-upload" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,application/pdf,application/zip,image/*" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ display: "none" }} />
+                <label htmlFor="file-upload" style={{ display: "block", fontSize: 15, color: "#475569", cursor: uploadBlocked ? "not-allowed" : "pointer" }}>
+                  Drag & drop or <span style={{ color: "#e6007a", textDecoration: "underline", fontWeight: 600 }}>browse files</span>
+                </label>
+                <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 6 }}>PDFs, Images (JPG, PNG, BMP, TIFF) and ZIP archives</p>
               </div>
               {files.length > 0 && (
-                <div className="file-list">
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "16px 0", maxHeight: 180, overflowY: "auto" }}>
                   {files.map((f, i) => (
-                    <div key={i} className="file-chip">
-                      <span className="file-icon">{f.name.endsWith(".zip") ? "📦" : f.type?.startsWith("image/") ? "🖼️" : "📄"}</span>
-                      <span className="file-name">{f.name}</span>
-                      <button className="file-remove" onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}>✕</button>
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", background: "rgba(230,0,122,0.04)", border: "1px solid rgba(230,0,122,0.15)", borderRadius: 8, fontSize: 13 }}>
+                      <span style={{ fontSize: 15, flexShrink: 0 }}>{f.name.endsWith(".zip") ? "📦" : f.type?.startsWith("image/") ? "🖼️" : "📄"}</span>
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#1e293b" }}>{f.name}</span>
+                      <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 15, padding: "0 2px" }}
+                        onMouseEnter={e => e.currentTarget.style.color = "#e6007a"}
+                        onMouseLeave={e => e.currentTarget.style.color = "#94a3b8"}>✕</button>
                     </div>
                   ))}
                 </div>
               )}
-              <button className="btn btn-modal-primary btn-block" onClick={handleUpload} disabled={!files.length || loading || uploadBlocked}>
-                <span className="btn-icon">🚀</span>
+              <button onClick={handleUpload} disabled={!files.length || loading || uploadBlocked}
+                style={{ width: "100%", marginTop: 16, padding: "13px 0", borderRadius: 10, border: "none", background: files.length && !loading && !uploadBlocked ? "#e6007a" : "#e2e8f0", color: files.length && !loading && !uploadBlocked ? "#fff" : "#94a3b8", fontSize: 15, fontWeight: 700, cursor: files.length && !loading && !uploadBlocked ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: files.length && !loading && !uploadBlocked ? "0 4px 14px rgba(230,0,122,0.3)" : "none" }}>
+                <span style={{ fontSize: 16 }}>🚀</span>
                 {loading ? "Analyzing..." : `Analyze ${files.length > 1 ? files.length + " Files" : "File"}`}
               </button>
             </div>
           );
         })()}
 
-        {/* STOPPED */}
         {step === "stopped" && (
           <div className="modal-step">
             <div className="stop-banner stop-hard">
@@ -742,7 +713,6 @@ export default function AcordModal({
           </div>
         )}
 
-        {/* RECOMMENDATIONS */}
         {step === "recommendations" && (
           <div className="modal-step modal-step-wide">
             <div className="step-header">
@@ -807,92 +777,156 @@ export default function AcordModal({
             <button className="btn btn-modal-primary btn-block btn-large" onClick={handleGenerateAll} disabled={loading || checkedFormIds.size === 0}>
               <span className="btn-icon">⚡</span>{loading ? "Generating..." : `Generate ${checkedFormIds.size} Form${checkedFormIds.size !== 1 ? "s" : ""} Now`}
             </button>
-            <button className="btn btn-modal-secondary" onClick={goToDashboard} style={{ marginBottom: "12px" }}>← Dashboard</button>
           </div>
         )}
 
-        {/* EDITOR */}
         {step === "editor" && (
-          <div className={fullPage ? "editor-layout editor-layout-fullpage" : "editor-layout"}>
-            <div className="editor-sidebar">
-              <div className="form-navigator">
-                <div className="form-nav-header"><span className="form-nav-title">Generated Forms</span><span className="form-nav-count">{formIdList.length} form{formIdList.length !== 1 ? "s" : ""}</span></div>
-                <div className="form-nav-list">
+          <div className="editor-layout editor-layout-fullpage">
+          
+          <div className="editor-sidebar" style={{ background: "#fff", borderRight: "1px solid #e2e8f0", padding: 0, gap: 0 }}>
+
+              {/* Form Navigator */}
+              <div style={{ padding: "14px 14px 12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Generated Forms</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", background: "rgba(230,0,122,0.08)", padding: "1px 7px", borderRadius: 20 }}>{formIdList.length}</span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 130, overflowY: "auto" }}>
                   {formIdList.map(fid => {
                     const fd = generatedForms[fid]; const sq = fd?.sqs;
+                    const isActive = activeFormId === fid;
                     return (
-                      <div key={fid} className={`form-nav-item ${activeFormId === fid ? "form-nav-active" : ""}`} onClick={() => setActiveFormId(fid)}>
-                        <div className="form-nav-name">{fd?.form_name || fid}{signedForms.has(fid) && <span style={{ color: "#10b981", fontSize: 11 }}> ✍</span>}{pdfLoading[fid] ? <span className="form-nav-loading"> ⏳</span> : <span className="form-nav-ready"> ✓</span>}</div>
-                        {sq && <div className="form-nav-meta"><span className="form-nav-score" style={{ color: gradeColor(sq.grade) }}>{sq.sqs_score} {sq.grade}</span><span className={`form-nav-tier tier-${sq.tier_color}`}>{sq.tier}</span></div>}
+                      <div key={fid} onClick={() => setActiveFormId(fid)}
+                        style={{ padding: "7px 9px", borderRadius: 7, cursor: "pointer", border: `1px solid ${isActive ? "#e6007a" : "transparent"}`, background: isActive ? "rgba(230,0,122,0.05)" : "transparent", transition: "all 0.15s" }}
+                        onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "#f8fafc"; }}
+                        onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? "#e6007a" : "#1e293b" }}>
+                          {fd?.form_name || fid}
+                          {signedForms.has(fid) && <span style={{ color: "#10b981" }}> ✍</span>}
+                          {pdfLoading[fid] ? <span style={{ color: "#f59e0b" }}> ⏳</span> : <span style={{ color: "#10b981" }}> ✓</span>}
+                        </div>
+                        {sq && <div style={{ display: "flex", gap: 6, marginTop: 2 }}><span style={{ fontSize: 10, fontWeight: 700, color: gradeColor(sq.grade) }}>{sq.sqs_score} {sq.grade}</span><span style={{ fontSize: 10, color: "#94a3b8" }}>{sq.tier}</span></div>}
                       </div>
                     );
                   })}
                 </div>
-                <div className="form-nav-arrows">
-                  <button className="btn btn-modal-secondary btn-small" onClick={goPrev} disabled={activeIdx <= 0}>← Prev</button>
-                  <span className="form-nav-pos">{activeIdx + 1} / {formIdList.length}</span>
-                  <button className="btn btn-modal-secondary btn-small" onClick={goNext} disabled={activeIdx >= formIdList.length - 1}>Next →</button>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, paddingTop: 8, borderTop: "1px solid #f1f5f9" }}>
+                  <button onClick={goPrev} disabled={activeIdx <= 0} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 12, fontWeight: 600, color: activeIdx <= 0 ? "#cbd5e1" : "#475569", cursor: activeIdx <= 0 ? "not-allowed" : "pointer" }}>← Prev</button>
+                  <span style={{ fontSize: 11, color: "#94a3b8" }}>{activeIdx + 1} / {formIdList.length}</span>
+                  <button onClick={goNext} disabled={activeIdx >= formIdList.length - 1} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 12, fontWeight: 600, color: activeIdx >= formIdList.length - 1 ? "#cbd5e1" : "#475569", cursor: activeIdx >= formIdList.length - 1 ? "not-allowed" : "pointer" }}>Next →</button>
                 </div>
               </div>
 
+              {/* SQS — unified hero block */}
               {activeSqs && (
-                <div className="sqs-display">
-                  <div className="sqs-header"><span className="sqs-label">SQS — {generatedForms[activeFormId]?.form_name}</span><div className="sqs-grade" style={{ background: gradeColor(activeSqs.grade) }}>{activeSqs.grade}</div></div>
-                  <div className="sqs-score-row"><span className="sqs-score-large" style={{ color: gradeColor(activeSqs.grade) }}>{activeSqs.sqs_score}</span><span className={`sqs-tier-badge tier-${activeSqs.tier_color}`}>{activeSqs.tier}</span></div>
-                  {activeSqs.routing_decision && (
-                    <div style={{ margin: "8px 0 12px 0", padding: "8px 12px", borderRadius: "6px", fontSize: "12px", fontWeight: "600", textAlign: "center", background: { auto_quote: "#dcfce7", review: "#fef9c3", full_review: "#ffedd5", hold: "#fee2e2" }[activeSqs.routing_decision] || "#f1f5f9", color: { auto_quote: "#166534", review: "#854d0e", full_review: "#9a3412", hold: "#991b1b" }[activeSqs.routing_decision] || "#374151", border: `1px solid ${{ auto_quote: "#86efac", review: "#fde047", full_review: "#fdba74", hold: "#fca5a5" }[activeSqs.routing_decision] || "#e2e8f0"}` }}>
-                      {{ auto_quote: "✅ Auto-Route to Quoting", review: "🔍 Light Review", full_review: "📋 Full Underwriter Review", hold: "🚫 Hold — Remediation Required" }[activeSqs.routing_decision] || activeSqs.routing_decision}
-                    </div>
-                  )}
-                  <div className="sqs-breakdown">
-                    {Object.entries(activeSqs.breakdown || {}).map(([key, val]) => (
-                      <div key={key} className="sqs-metric">
-                        <div className="metric-header"><span className="metric-name">{SQS_LABELS[key] || key}<span className="metric-weight"> ({SQS_WEIGHTS[key] || 0}%)</span></span><span className="metric-value">{val}%</span></div>
-                        <div className="metric-bar"><div className="metric-fill" style={{ width: `${val}%`, background: barColor(val) }} /></div>
+                <>
+                  <div style={{ height: 1, background: "#f1f5f9", margin: "0 14px" }} />
+                  <div style={{ padding: "14px 14px 12px" }}>
+                    {/* Hero row: score + grade + tier + routing all in one block */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: "50%", background: gradeColor(activeSqs.grade), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{activeSqs.grade}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+                          <span style={{ fontSize: 28, fontWeight: 800, lineHeight: 1, color: gradeColor(activeSqs.grade) }}>{activeSqs.sqs_score}</span>
+                          <span style={{ fontSize: 11, color: "#94a3b8" }}>/100</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, color: "#fff", marginLeft: 4, background: { green: "#10b981", yellow: "#f59e0b", orange: "#f97316", red: "#ef4444" }[activeSqs.tier_color] || "#94a3b8" }}>{activeSqs.tier}</span>
+                        </div>
+                        <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 1, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>SQS Score</div>
                       </div>
-                    ))}
+                    </div>
+                    {activeSqs.routing_decision && (
+                      <div style={{ padding: "5px 9px", borderRadius: 7, fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, background: { auto_quote: "#dcfce7", review: "#fef9c3", full_review: "#ffedd5", hold: "#fee2e2" }[activeSqs.routing_decision] || "#f1f5f9", color: { auto_quote: "#166534", review: "#854d0e", full_review: "#9a3412", hold: "#991b1b" }[activeSqs.routing_decision] || "#374151", border: `1px solid ${{ auto_quote: "#86efac", review: "#fde047", full_review: "#fdba74", hold: "#fca5a5" }[activeSqs.routing_decision] || "#e2e8f0"}` }}>
+                        {{ auto_quote: "✅ Auto-Route to Quoting", review: "🔍 Light Review", full_review: "📋 Full Underwriter Review", hold: "🚫 Hold — Remediation Required" }[activeSqs.routing_decision]}
+                      </div>
+                    )}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: activeSqs.risk_drivers?.length || activeSqs.issues?.length || activeSqs.recommendations?.length ? 10 : 0 }}>
+                      {Object.entries(activeSqs.breakdown || {}).map(([key, val]) => (
+                        <div key={key}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+                            <span style={{ color: "#64748b" }}>{SQS_LABELS[key] || key} <span style={{ color: "#e2e8f0" }}>({SQS_WEIGHTS[key] || 0}%)</span></span>
+                            <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>
+                          </div>
+                          <div style={{ height: 5, background: "#f1f5f9", borderRadius: 3, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 3, transition: "width 0.6s ease" }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {activeSqs.risk_drivers?.length > 0 && (
+                      <div style={{ background: "#fafafa", borderRadius: 7, padding: "8px 10px", marginBottom: 8, border: "1px solid #f1f5f9" }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Top Risk Drivers</div>
+                        {activeSqs.risk_drivers.map((d, i) => (
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: i < activeSqs.risk_drivers.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#e6007a", width: 16 }}>#{i + 1}</span>
+                            <span style={{ flex: 1, fontSize: 11, color: "#374151" }}>{d.component}</span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: barColor(d.score) }}>{d.score}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {activeSqs.issues?.length > 0 && <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "7px 10px", marginBottom: 6 }}><div style={{ fontSize: 10, fontWeight: 700, color: "#b45309", marginBottom: 3 }}>⚠️ Issues</div>{activeSqs.issues.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#64748b", padding: "1px 0" }}>• {s}</div>)}</div>}
+                    {activeSqs.recommendations?.length > 0 && <div style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 7, padding: "7px 10px" }}><div style={{ fontSize: 10, fontWeight: 700, color: "#059669", marginBottom: 3 }}>💡 Remediation</div>{activeSqs.recommendations.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#64748b", padding: "1px 0" }}>• {s}</div>)}</div>}
                   </div>
-                  {activeSqs.risk_drivers?.length > 0 && <div className="sqs-drivers"><div className="drivers-title">⚡ Top Risk Drivers</div>{activeSqs.risk_drivers.map((d, i) => <div key={i} className="driver-item"><span className="driver-rank">#{i + 1}</span><span className="driver-name">{d.component}</span><span className="driver-score" style={{ color: barColor(d.score) }}>{d.score}%</span></div>)}</div>}
-                  {activeSqs.issues?.length > 0 && <div className="sqs-alerts"><div className="alerts-title">⚠️ Issues</div><ul className="alerts-list">{activeSqs.issues.map((s, i) => <li key={i}>{s}</li>)}</ul></div>}
-                  {activeSqs.recommendations?.length > 0 && <div className="sqs-tips"><div className="tips-title">💡 Remediation Steps</div><ul className="tips-list">{activeSqs.recommendations.map((s, i) => <li key={i}>{s}</li>)}</ul></div>}
-                </div>
+                </>
               )}
 
+              {/* Cross issues */}
               {crossIssues.length > 0 && (
-                <div className="cross-issues">
-                  <div className="cross-title">🔗 Cross-Form Validation</div>
-                  {crossIssues.map((iss, i) => <div key={i} className={`cross-item cross-${iss.type}`}>{iss.type === "hard_stop" ? "🚫" : "⚠️"} {iss.message}</div>)}
-                </div>
+                <>
+                  <div style={{ height: 1, background: "#f1f5f9", margin: "0 14px" }} />
+                  <div style={{ padding: "12px 14px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>Cross-Form Validation</div>
+                    {crossIssues.map((iss, i) => <div key={i} style={{ fontSize: 12, padding: "3px 0", color: iss.type === "hard_stop" ? "#dc2626" : "#b45309" }}>{iss.type === "hard_stop" ? "🚫" : "⚠️"} {iss.message}</div>)}
+                  </div>
+                </>
               )}
 
-              <div style={{ padding: "12px 0 4px" }}>
+              {/* Actions */}
+              <div style={{ height: 1, background: "#f1f5f9", margin: "0 14px" }} />
+              <div style={{ padding: "12px 14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
                 <button onClick={handleOpenARQ} disabled={arqLoadingQ}
-                  style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #4f7cff", background: "rgba(79,124,255,0.08)", color: "#4f7cff", fontSize: 13, fontWeight: 600, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: arqLoadingQ ? 0.7 : 1, marginBottom: 4 }}>
-                  {arqLoadingQ ? <><span style={{ width: 12, height: 12, border: "2px solid #4f7cff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading questions…</> : <>📧 Send to Client {arqNotifCount > 0 && <span style={{ background: "#e6007a", color: "#fff", borderRadius: 10, fontSize: 10, padding: "1px 6px", fontWeight: 700 }}>{arqNotifCount}</span>}</>}
+                  style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: arqLoadingQ ? 0.7 : 1 }}
+                  onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.border = "1px solid #c00066"; } }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.border = "1px solid #e6007a"; }}>
+                  {arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #4f7cff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : <>📧 Send to Client {arqNotifCount > 0 && <span style={{ background: "#fff", color: "#e6007a", borderRadius: 10, fontSize: 10, padding: "1px 6px", fontWeight: 700 }}>{arqNotifCount}</span>}</>}
                 </button>
                 <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
-              </div>
-
-              <div className="download-actions">
                 <button onClick={() => handleSendToEpic(activeFormId)} disabled={!activeFormId || epicLoading}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", padding: "8px 14px", borderRadius: 9, marginBottom: 6, border: epicSuccess ? "1px solid #22c55e" : "1px solid #2a3047", background: epicSuccess ? "rgba(34,197,94,0.08)" : "#0f172a", color: epicSuccess ? "#22c55e" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: epicLoading ? "wait" : "pointer", fontFamily: "inherit", transition: "all 0.18s", opacity: (!activeFormId || epicLoading) ? 0.55 : 1 }}>
-                  {epicSuccess ? "✅ Sent to EPIC" : epicLoading ? <><span style={{ width: 12, height: 12, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Sending...</> : "🔗 Send to EPIC"}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", padding: "9px 14px", borderRadius: 8, border: epicSuccess ? "1px solid #22c55e" : "1px solid #e6007a", background: epicSuccess ? "rgba(34,197,94,0.08)" : "#e6007a", color: epicSuccess ? "#22c55e" : "#fff", fontSize: 13, fontWeight: 700, cursor: epicLoading ? "wait" : "pointer", fontFamily: "inherit", transition: "all 0.18s", opacity: (!activeFormId || epicLoading) ? 0.55 : 1 }}
+                  onMouseEnter={e => { if (activeFormId && !epicLoading && !epicSuccess) { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.border = "1px solid #c00066"; } }}
+                  onMouseLeave={e => { if (!epicSuccess) { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.border = "1px solid #e6007a"; } }}>
+                  {epicSuccess ? "✅ Sent to EPIC" : epicLoading ? <><span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Sending…</> : "🔗 Send to EPIC"}
                 </button>
-                <button className="btn btn-modal-primary btn-block" onClick={() => handleDownloadOne(activeFormId)} disabled={!activeFormId}>⬇ Download This Form</button>
-                {formIdList.length > 1 && <button className="btn btn-modal-secondary btn-block" onClick={handleDownloadAll}>📦 Download All Forms ({formIdList.length} forms)</button>}
-                <button className="btn btn-modal-secondary btn-block" onClick={goToDashboard} style={{ marginBottom: 2 }}>← Dashboard</button>
+                <button onClick={() => handleDownloadOne(activeFormId)} disabled={!activeFormId}
+                  style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: activeFormId ? "pointer" : "not-allowed", opacity: activeFormId ? 1 : 0.5, boxShadow: "0 3px 10px rgba(230,0,122,0.25)", fontFamily: "inherit" }}
+                  onMouseEnter={e => { if (activeFormId) e.currentTarget.style.background = "#c00066"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; }}>
+                  ⬇ Download This Form
+                </button>
+                {formIdList.length > 1 && (
+                  <button onClick={handleDownloadAll}
+                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid rgba(230,0,122,0.3)", background: "rgba(230,0,122,0.04)", color: "#e6007a", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+                    onMouseEnter={e => e.currentTarget.style.background = "rgba(230,0,122,0.1)"}
+                    onMouseLeave={e => e.currentTarget.style.background = "rgba(230,0,122,0.04)"}>
+                    📦 Download All ({formIdList.length} forms)
+                  </button>
+                )}
+                <button onClick={goToDashboard}
+                  style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.border = "1px solid #c00066"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.border = "1px solid #e6007a"; }}>
+                  ← Home
+                </button>
               </div>
             </div>
-
+            
             <div className="editor-main">
               <PDFJsViewer
                 key={activeFormId}
                 pdfUrl={`${API_BASE}/api/get-pdf/${sessionId}/${activeFormId}?token=${token}`}
                 formName={activeFormId ? (generatedForms[activeFormId]?.form_name || activeFormId) : ""}
                 onFormNav={{ goPrev, goNext, activeIdx, total: formIdList.length }}
-                sessionId={sessionId}
-                formId={activeFormId}
-                token={token}
+                sessionId={sessionId} formId={activeFormId} token={token}
                 savedSignature={savedSignature}
                 isSigned={signedForms.has(activeFormId)}
                 onSignApplied={fid => setSignedForms(prev => new Set([...prev, fid]))}
@@ -905,20 +939,26 @@ export default function AcordModal({
         )}
 
         {step === "success" && (
-          <div className="modal-step" style={{ textAlign: "center", padding: "48px 24px" }}>
-            <div className="success-animation"><div className="success-icon">✓</div></div>
-            <h2 className="success-title">Your Download is Complete!</h2>
-            <p className="success-message">Your filled ACORD forms have been downloaded successfully.</p>
+          <div style={{ maxWidth: 480, margin: "0 auto", textAlign: "center", padding: "56px 24px" }}>
+            <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg, #e6007a, #c00066)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36, color: "#fff", margin: "0 auto 24px", boxShadow: "0 8px 28px rgba(230,0,122,0.3)", animation: "successPop 0.5s ease-out" }}>✓</div>
+            <h2 style={{ fontSize: 26, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>Download Complete!</h2>
+            <p style={{ fontSize: 15, color: "#64748b", marginBottom: 28, lineHeight: 1.6 }}>Your filled ACORD forms have been downloaded successfully.</p>
             {user && user.subscription_tier === "free" && (
-              <div className="success-remaining">
-                <p>You have <strong>{Math.max(0, user.downloads_remaining)}</strong> free download{user.downloads_remaining !== 1 ? "s" : ""} remaining</p>
+              <div style={{ background: "rgba(230,0,122,0.05)", border: "1px solid rgba(230,0,122,0.15)", borderRadius: 10, padding: "12px 16px", marginBottom: 24, fontSize: 14, color: "#1e293b" }}>
+                You have <strong style={{ color: "#e6007a" }}>{Math.max(0, user.downloads_remaining)}</strong> free download{user.downloads_remaining !== 1 ? "s" : ""} remaining
               </div>
             )}
-            <div className="success-actions" style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center", marginTop: 24 }}>
-              <button className="btn btn-modal-primary" style={{ minWidth: 240 }} onClick={() => setStep("editor")}>
-                ← Back to Form — Download Again or Make Changes
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
+              <button onClick={() => setStep("editor")}
+                style={{ minWidth: 260, padding: "12px 0", borderRadius: 10, border: "none", background: "#e6007a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(230,0,122,0.3)" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#c00066"}
+                onMouseLeave={e => e.currentTarget.style.background = "#e6007a"}>
+                ← Back to Form
               </button>
-              <button className="btn btn-modal-secondary" style={{ minWidth: 240 }} onClick={goToDashboard}>
+              <button onClick={goToDashboard}
+                style={{ minWidth: 260, padding: "11px 0", borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#f1f5f9"}
+                onMouseLeave={e => e.currentTarget.style.background = "#f8fafc"}>
                 ← Dashboard
               </button>
             </div>

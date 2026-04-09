@@ -708,7 +708,7 @@ body {
 /* ==================== EDITOR LAYOUT ==================== */
 .editor-layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 380px 1fr;
   gap: 0;
   height: 75vh;
   overflow: hidden;
@@ -716,11 +716,11 @@ body {
 .editor-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 14px 12px 14px 14px;
-  background: #f8fafc;
+  padding: 0;
+  background: #fff;
   border-right: 1px solid #e2e8f0;
   scrollbar-width: thin;
   scrollbar-color: #e2e8f0 transparent;
@@ -1649,10 +1649,17 @@ body {
 
 /* ── Full-page editor layout ── */
 .editor-layout-fullpage {
-  height: calc(100vh - 52px);
+  height: calc(100vh - 81px);
   overflow: hidden;
+  width: 100%;
 }
 
+.editor-main {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
 /* ── SQS compact overrides inside sidebar ── */
 .editor-sidebar .sqs-display {
   padding: 14px;
@@ -1713,3 +1720,41 @@ body {
   color: #fff;
   border-color: #dc2626;
 }
+
+
+/* ── Modernized sidebar card base ── */
+.editor-sidebar > div {
+  transition: box-shadow 0.15s;
+}
+
+/* ── Remove old form-navigator bg override (now handled inline) ── */
+.editor-sidebar .form-navigator {
+  background: #fff;
+  border: 1px solid #e8edf5;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 0;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+/* ── Remove old sqs-display override (now handled inline) ── */
+.editor-sidebar .sqs-display {
+  background: #fff;
+  border: 1px solid #e8edf5;
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+
+/* ── Top bar breadcrumb ── */
+.topbar-breadcrumb-btn {
+  background: none;
+  border: none;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s;
+}
+.topbar-breadcrumb-btn:hover { color: #94a3b8; }

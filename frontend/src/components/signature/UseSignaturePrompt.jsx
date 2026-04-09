@@ -17,9 +17,7 @@ export default function UseSignaturePrompt({ signature, onApply, onManage, onClo
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <button className="btn btn-modal-primary btn-block" onClick={onApply}>✅ Yes, Apply Signature</button>
             <button className="btn btn-modal-secondary btn-block" onClick={onClose}>No, Skip</button>
-            <button onClick={onManage} style={{ fontSize: 12, color: "#94a3b8", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", marginTop: 4 }}>
-              Manage / Update Signature
-            </button>
+            
           </div>
         </div>
       </div>

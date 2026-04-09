@@ -3,8 +3,8 @@ import { GoogleLogin } from "@react-oauth/google";
 import { API_BASE } from "../../config/constants";
 import { isPersonalEmail } from "../../utils/formatters";
 
-export default function AuthModal({ onClose, onSuccess }) {
-  const [mode, setMode]                           = useState("signin");
+export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }) {
+  const [mode, setMode]                           = useState(initialMode);
   const [email, setEmail]                         = useState("");
   const [password, setPassword]                   = useState("");
   const [fullName, setFullName]                   = useState("");
@@ -201,7 +201,7 @@ export default function AuthModal({ onClose, onSuccess }) {
           <div className="auth-google">
             <GoogleLogin onSuccess={handleGoogleSuccess} onError={() => setError("Google sign-in failed")} useOneTap size="large" text={mode === "signin" ? "signin_with" : "signup_with"} shape="pill" logo_alignment="left" />
           </div>
-          <div className="auth-divider"><span>or continue with email</span></div>
+          <div style={{ textAlign: "center", margin: "12px 0", color: "#64748b", fontSize: "13px" }}><b>or continue with email </b></div>
           <form onSubmit={handleEmailAuth} className="auth-form">
             {mode === "signup" && (
               <>

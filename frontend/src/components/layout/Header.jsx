@@ -1,8 +1,27 @@
 import { API_BASE } from "../../config/constants";
+import { useState } from "react";
+
+function LogoutButton({ onLogout }) {
+  const [loggingOut, setLoggingOut] = useState(false);
+  const handleClick = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    await new Promise(r => setTimeout(r, 60));
+    onLogout();
+  };
+  return loggingOut ? (
+    <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 18px", borderRadius: 999, background: "#0b0b0b", color: "#fff", fontSize: 14, fontWeight: 600, minWidth: 110, justifyContent: "center" }}>
+      <span style={{ width: 13, height: 13, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+      Logging out…
+    </div>
+  ) : (
+    <button className="btn-dark" onClick={handleClick}>Sign Out</button>
+  );
+}
 
 export default function Header({
   user, savedSignature, token,
-  onSignatureClick, onUpgradeClick, onLogout,
+  onSignatureClick, onUpgradeClick, onLogout, onHome, onSignUp, onLogIn,
   openBillingPortal, upgradeChecking, upgradeFailed,
   setUpgradeFailed, setUpgradeChecking, setUser,
 }) {
@@ -15,7 +34,7 @@ export default function Header({
   return (
     <header className="landing-header">
       <div className="header-left">
-        <div className="logo">acordly</div>
+        <div className="logo" onClick={() => onHome ? onHome() : (window.location.href = "/")} style={{ cursor: "pointer" }}>acordly</div>
         <nav className="nav">
           <a href="#about">About</a>
           <a href="#platform">Platform</a>
@@ -96,9 +115,14 @@ export default function Header({
                  : "Pro"}
             </span>
           )}
-          <button className="btn-dark" onClick={onLogout}>Sign Out</button>
+          <LogoutButton onLogout={onLogout} />
         </div>
-      ) : null}
+      ) : (
+        <div className="user-menu" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button onClick={onSignUp} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "#0f172a", padding: "10px 18px" }}>Sign up</button>
+          <button onClick={onLogIn} style={{ background: "#e6007a", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "#fff", padding: "10px 26px", borderRadius: 999 }}>Log in</button>
+        </div>
+      )}
     </header>
   );
 }

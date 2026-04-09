@@ -47,6 +47,7 @@ function AppContent() {
   const [showModal,           setShowModal]           = useState(false);
   const [resumeLoading,       setResumeLoading]       = useState(_hasResume);
   const [showAuthModal,       setShowAuthModal]       = useState(false);
+  const [authModalMode,       setAuthModalMode]       = useState("signin");
   const [showCompleteProfile, setShowCompleteProfile] = useState(false);
   const [showUpgradeModal,    setShowUpgradeModal]    = useState(false);
   const [showSignatureModal,  setShowSignatureModal]  = useState(false);
@@ -115,9 +116,24 @@ function AppContent() {
     } catch { setUpgradeChecking(false); setHeaderError("Network error. Please try again."); }
   };
 
-  const handleGetStarted = () => (user ? setShowModal(true) : setShowAuthModal(true));
+  const handleGetStarted = () => {
+    if (user) {
+      setShowModal(true);
+      window.history.pushState({ acordly: true }, "");
+    } else {
+      setShowAuthModal(true);
+    }
+  };
 
-  return (
+  useEffect(() => {
+    const handlePop = () => {
+      if (showModal) { setShowModal(false); setResumeSessionId(null); }
+    };
+    window.addEventListener("popstate", handlePop);
+    return () => window.removeEventListener("popstate", handlePop);
+  }, [showModal]);
+
+ return (
     <div className="landing-container">
       {overageToast && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#10b981", color: "#fff", padding: "12px 24px", borderRadius: 10, fontWeight: 600, fontSize: 14, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.18)" }}>
@@ -141,8 +157,23 @@ function AppContent() {
         </div>
       )}
 
-      {/* Full-page app — rendered above everything, replaces landing */}
-      {showModal && user && (
+      {/* Persistent header — always visible */}
+      <Header
+        user={user} token={token} savedSignature={savedSignature}
+        onSignatureClick={() => setShowSignatureModal(true)}
+        onUpgradeClick={() => setShowUpgradeModal(true)}
+        onLogout={logout} openBillingPortal={openBillingPortal}
+        upgradeChecking={upgradeChecking} upgradeFailed={upgradeFailed}
+        setUpgradeFailed={setUpgradeFailed} setUpgradeChecking={setUpgradeChecking} setUser={setUser}
+        onSignUp={() => { setAuthModalMode("signup"); setShowAuthModal(true); }}
+        onLogIn={() => { setAuthModalMode("signin"); setShowAuthModal(true); }}
+      />
+      {headerError && (
+        <div className="header-error-bar">⚠️ {headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
+      )}
+
+      {/* Page content — switches between landing and app */}
+      {showModal && user ? (
         <AcordModal
           onClose={() => { setShowModal(false); setResumeSessionId(null); }}
           user={user} token={token} onUserUpdate={setUser}
@@ -152,30 +183,15 @@ function AppContent() {
           onOpenSignatureModal={() => setShowSignatureModal(true)}
           onOpenBillingPortal={openBillingPortal}
           billingPortalLoading={false}
-          fullPage={true}
+          fullPage={false}
         />
-      )}
-
-      {/* Landing — hidden when app is open */}
-      {!showModal && (
-        <>
-          <Header
-            user={user} token={token} savedSignature={savedSignature}
-            onSignatureClick={() => setShowSignatureModal(true)}
-            onUpgradeClick={() => setShowUpgradeModal(true)}
-            onLogout={logout} openBillingPortal={openBillingPortal}
-            upgradeChecking={upgradeChecking} upgradeFailed={upgradeFailed}
-            setUpgradeFailed={setUpgradeFailed} setUpgradeChecking={setUpgradeChecking} setUser={setUser}
-          />
-          {headerError && (
-            <div className="header-error-bar">⚠️ {headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
-          )}
-          <LandingPage user={user} onGetStarted={handleGetStarted} />
-        </>
+      ) : (
+        <LandingPage user={user} onGetStarted={handleGetStarted} />
       )}
 
       {showAuthModal && (
         <AuthModal
+          initialMode={authModalMode}
           onClose={() => setShowAuthModal(false)}
           onSuccess={(tok, usr, profileIncomplete) => {
             login(tok, usr);
