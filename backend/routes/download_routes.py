@@ -1,7 +1,7 @@
 import io
 import logging
 import zipfile
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from config.database import get_db
@@ -11,6 +11,7 @@ from services.auth_service import get_current_user
 from services.cover_service import generate_ai_cover_narrative, build_cover_page_pdf
 from services.pdf_service import regenerate_pdf_for_form
 from services.stripe_service import evaluate_package_limit, create_overage_invoice_item
+from services.sqs_service import calculate_sqs
 
 router = APIRouter(tags=["downloads"])
 logger = logging.getLogger(__name__)
@@ -39,8 +40,8 @@ async def download_pdf(
 
     if fresh.get("payment_status") == "suspended":
         return JSONResponse({"success": False, "payment_locked": True, "message": "Account suspended."}, status_code=403)
-    if fresh.get("payment_status") == "soft_locked":
-        return JSONResponse({"success": False, "payment_locked": True, "message": "Account disabled — please update billing."}, status_code=403)
+    if sub == "lite":
+        return JSONResponse({"success": False, "message": "ACORD form downloads are not included in the Lite plan."}, status_code=403)
     if sub == "free" and used >= 3:
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
 
@@ -106,8 +107,8 @@ async def download_all(
 
     if fresh.get("payment_status") == "suspended":
         return JSONResponse({"success": False, "payment_locked": True, "message": "Account suspended."}, status_code=403)
-    if fresh.get("payment_status") == "soft_locked":
-        return JSONResponse({"success": False, "payment_locked": True, "message": "Account disabled."}, status_code=403)
+    if sub == "lite":
+        return JSONResponse({"success": False, "message": "ACORD form downloads are not included in the Lite plan."}, status_code=403)
     if sub == "free" and used >= 3:
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
 
@@ -167,3 +168,69 @@ async def download_all(
 
     return Response(content=zip_buf.getvalue(), media_type="application/zip",
                     headers={"Content-Disposition": "attachment; filename=ACORD_Package_Acordly.zip", **extra_headers})
+
+
+@router.get("/api/lite/analyze/{session_id}")
+async def lite_analyze(session_id: str, current_user: dict = Depends(get_current_user)):
+    if current_user.get("subscription_tier") != "lite":
+        raise HTTPException(403, "This endpoint is for Lite plan users only.")
+    proc_session = get_processing_session(session_id)
+    facts      = proc_session.get("facts", {})
+    flags      = proc_session.get("flags", {})
+    hard_stops = proc_session.get("hard_stops", [])
+    soft_stops = proc_session.get("soft_stops", [])
+    tier2_score = proc_session.get("tier2_score", 50)
+    sqs = calculate_sqs(
+        facts=facts, flags=flags,
+        mapped_data={}, form_schema={},
+        selected_form_ids=[],
+        hard_stops=hard_stops, soft_stops=soft_stops,
+        tier2_score=tier2_score,
+    )
+    return JSONResponse({"success": True, "sqs": sqs, "hard_stops": hard_stops, "soft_stops": soft_stops, "flags": flags})
+
+
+@router.get("/api/lite/cover-sheet/{session_id}")
+async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_current_user)):
+    if current_user.get("subscription_tier") != "lite":
+        raise HTTPException(403, "This endpoint is for Lite plan users only.")
+    proc_session = get_processing_session(session_id)
+    facts       = proc_session.get("facts", {})
+    flags       = proc_session.get("flags", {})
+    hard_stops  = proc_session.get("hard_stops", [])
+    soft_stops  = proc_session.get("soft_stops", [])
+    tier2_score = proc_session.get("tier2_score", 50)
+    org_name    = current_user.get("organization_name") or current_user.get("full_name") or "Acordly User"
+
+    # Use real post-generation SQS if forms were internally generated, else fall back to pre-gen
+    generated_forms = proc_session.get("generated_forms", {})
+    if generated_forms:
+        sqs_list = [r["sqs"] for r in generated_forms.values() if r.get("sqs")]
+        avg_score = int(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
+        sqs = {**(sqs_list[0] if sqs_list else {}), "sqs_score": avg_score}
+    else:
+        sqs = calculate_sqs(
+            facts=facts, flags=flags,
+            mapped_data={}, form_schema={},
+            selected_form_ids=[],
+            hard_stops=hard_stops, soft_stops=soft_stops,
+            tier2_score=tier2_score,
+        )
+    sqs_results = {"Pre-Submission Analysis": sqs}
+
+    from services.cover_service import generate_lite_cover_narrative
+    ai_content = generate_lite_cover_narrative(
+        facts=facts, flags=flags, sqs=sqs,
+        hard_stops=hard_stops, soft_stops=soft_stops,
+        org_name=org_name, user=current_user,
+    )
+    cover_pdf = build_cover_page_pdf(
+        facts=facts, flags=flags, sqs_results=sqs_results, form_ids=[],
+        org_name=org_name, narrative=ai_content["narrative"],
+        ai_block=ai_content["ai_block"],
+        sqs_reasoning=ai_content.get("sqs_reasoning", ""),
+        user=current_user,
+        hard_stops=hard_stops, soft_stops=soft_stops,
+    )
+    return Response(content=cover_pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": "attachment; filename=Acordly_SQS_Cover_Sheet.pdf"})

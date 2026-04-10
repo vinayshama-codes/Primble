@@ -3,6 +3,11 @@ import { API_BASE } from "../../config/constants";
 
 const PLANS = [
   {
+    id: "lite", name: "Lite", monthly: 49, annual: 39,
+    packages: null, overage: null, highlight: false, cta: "Get Lite",
+    features: ["SQS analysis","Client questionnaire","Summary cover sheet"],
+  },
+  {
     id: "essentials", name: "Essentials", monthly: 129, annual: 99,
     packages: 100, overage: "$1.50/package", highlight: false, cta: "Get Essentials",
     features: ["All core ACORD forms","SQS scoring & routing","Cross-form validation","Email support"],
@@ -83,8 +88,8 @@ export default function UpgradeModal({ token, user, onClose, onError }) {
                   ) : billing === "annual" ? (
                     <div className="plan-billed-note">(billed annually)</div>
                   ) : null}
-                  <div className="plan-packages">{plan.packages} packages/mo</div>
-                  <div className="plan-overage">Overage: {plan.overage}</div>
+                  {plan.packages !== null && <div className="plan-packages">{plan.packages} packages/mo</div>}
+                  {plan.overage !== null && <div className="plan-overage">Overage: {plan.overage}</div>}
                   <ul className="plan-features">
                     {plan.features.map((f, i) => <li key={i}>✓ {f}</li>)}
                   </ul>

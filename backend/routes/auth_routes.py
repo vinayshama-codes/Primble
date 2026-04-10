@@ -320,11 +320,29 @@ async def complete_profile(req: CompleteProfileRequest, current_user: dict = Dep
 
 @router.get("/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
+    import stripe as stripe_lib
     sub  = current_user.get("subscription_tier", "free") or "free"
     used = int(current_user.get("downloads_used", 0) or 0)
     pkgs_used   = int(current_user.get("packages_used", 0) or 0)
     pkgs_limit  = int(current_user.get("packages_limit", 0) or 0)
     soft_buffer = int(pkgs_limit * 0.05) if pkgs_limit > 0 else 0
+
+    # Auto-sync stripe_subscription_id from Stripe if missing or potentially stale
+    customer_id = current_user.get("stripe_customer_id")
+    stored_sub_id = current_user.get("stripe_subscription_id")
+    if customer_id and sub not in ("free", None):
+        try:
+            active_subs = stripe_lib.Subscription.list(customer=customer_id, status="active", limit=1)
+            real_sub = active_subs.data[0] if active_subs.data else None
+            real_sub_id = getattr(real_sub, "id", None) if real_sub else None
+            if real_sub_id and real_sub_id != stored_sub_id:
+                conn = get_db(); cur = conn.cursor()
+                cur.execute("UPDATE users SET stripe_subscription_id=%s WHERE id=%s", (real_sub_id, current_user["id"]))
+                conn.commit(); cur.close(); conn.close()
+                stored_sub_id = real_sub_id
+        except Exception:
+            pass  # Never break /me due to Stripe issues
+
     return {
         "id": current_user["id"], "email": current_user["email"],
         "full_name": current_user.get("full_name",""), "organization_name": current_user.get("organization_name",""),

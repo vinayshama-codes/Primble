@@ -97,6 +97,95 @@ Return ONLY the JSON object."""
     }
 
 
+def generate_lite_cover_narrative(
+    facts: dict,
+    flags: dict,
+    sqs: dict,
+    hard_stops: list,
+    soft_stops: list,
+    org_name: str,
+    user: dict = None,
+) -> dict:
+    score   = sqs.get("sqs_score", 0)
+    grade   = sqs.get("grade", "—")
+    routing = sqs.get("routing_decision", "—")
+    prompt  = f"""You are an expert commercial insurance underwriting analyst.
+Generate a professional pre-submission SQS summary for a producer who has uploaded their package for analysis.
+This is NOT a full ACORD package — no forms have been generated. The purpose is to flag issues before the producer
+proceeds with their platform of choice.
+
+SUBMISSION DATA:
+Agent/User: {user.get('full_name', '') if user else ''}
+Agency/Org: {org_name}
+Applicant: {facts.get('applicant_name', 'Unknown')}
+Lines of Business: {facts.get('lines_of_business', [])}
+Effective Date: {facts.get('effective_date', 'Not specified')}
+Operations: {facts.get('operations_description', 'Not provided')}
+Revenue: {facts.get('total_revenue', 'Not provided')}
+SQS Score: {score}/100 (Grade: {grade}, Routing: {routing})
+Hard Stops (critical blockers): {hard_stops}
+Soft Stops (warnings): {soft_stops}
+Risk Flags: {flags}
+
+Respond with ONLY a valid JSON object with exactly three keys:
+"narrative": 2-3 paragraphs focused on what the producer should watch out for, what information is missing,
+  and how to strengthen this submission before proceeding. Plain text, no markdown.
+"sqs_reasoning": One paragraph explaining the SQS score in context of the hard/soft stops found.
+"ai_block": A machine-readable structured JSON object with: submission_id, generated_at,
+  agent_name, applicant_name, org_name, lines_of_business, effective_date,
+  total_revenue, entity_type, sqs_score, sqs_grade, sqs_routing, hard_stops, soft_stops, risk_flags,
+  acordly_version: "12.4.0", a2a_schema_version: "1.0", report_type: "lite_pre_submission"
+
+Return ONLY the JSON object."""
+    try:
+        r   = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+        )
+        raw = (r.choices[0].message.content or "").strip()
+        if raw.startswith("```"):
+            raw = raw.replace("```json", "").replace("```", "").strip()
+        s, e = raw.find("{"), raw.rfind("}")
+        if s != -1 and e != -1:
+            result = json.loads(raw[s : e + 1])
+            return {
+                "narrative":     result.get("narrative", ""),
+                "sqs_reasoning": result.get("sqs_reasoning", ""),
+                "ai_block":      result.get("ai_block", {}),
+            }
+    except Exception as ex:
+        logger.error(f"Lite cover narrative generation failed: {ex}")
+
+    applicant = facts.get('applicant_name', 'Unknown')
+    lobs      = ", ".join(facts.get("lines_of_business", [])) if facts.get("lines_of_business") else "commercial insurance"
+    return {
+        "narrative": (
+            f"This pre-submission SQS analysis was prepared by {org_name} for {applicant} covering {lobs}. "
+            f"The submission received an SQS score of {score}/100 (Grade {grade}). "
+            f"{'The following critical issues must be resolved before submission: ' + '; '.join(hard_stops) + '. ' if hard_stops else ''}"
+            f"{'The following warnings may impact the submission quality: ' + '; '.join(soft_stops) + '.' if soft_stops else ''}"
+        ),
+        "sqs_reasoning": (
+            f"The SQS score of {score}/100 reflects the quality of the submission based on the uploaded documents. "
+            f"{'Hard stops were identified that will block this submission. ' if hard_stops else ''}"
+            f"Scores below 75 indicate fields or conditions requiring attention before proceeding."
+        ),
+        "ai_block": {
+            "agent_name": (user.get("full_name", "") if user else ""),
+            "org_name": org_name,
+            "applicant_name": applicant,
+            "sqs_score": score,
+            "sqs_grade": grade,
+            "hard_stops": hard_stops,
+            "soft_stops": soft_stops,
+            "report_type": "lite_pre_submission",
+            "acordly_version": "12.4.0",
+            "a2a_schema_version": "1.0",
+        },
+    }
+
+
 def build_cover_page_pdf(
     facts: dict,
     flags: dict,
@@ -107,6 +196,8 @@ def build_cover_page_pdf(
     ai_block: dict,
     sqs_reasoning: str = "",
     user: dict = None,
+    hard_stops: list = None,
+    soft_stops: list = None,
 ) -> bytes:
     generated_at = datetime.now(timezone.utc).strftime("%B %d, %Y at %H:%M UTC")
 
@@ -212,7 +303,7 @@ def build_cover_page_pdf(
         exp_date   = facts.get("expiration_date", "—") or "—"
         lobs_raw   = facts.get("lines_of_business", [])
         lobs       = ", ".join(lobs_raw) if lobs_raw else "—"
-        forms_list = ", ".join(form_ids) if form_ids else "—"
+        forms_list = ", ".join(form_ids) if form_ids else "Pre-Submission SQS Analysis (Lite)"
 
         def _v(key, default="—"):
             v = facts.get(key, default)
@@ -300,6 +391,50 @@ def build_cover_page_pdf(
         ]))
         story.append(sqs_tbl)
         story.append(Spacer(1, 0.10*inch))
+
+        # ── RED FLAGS (Lite only — when hard/soft stops are provided) ─────────
+        if hard_stops or soft_stops:
+            story.append(Paragraph("Red Flags & Warnings", h2_style))
+            story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
+            story.append(Spacer(1, 0.06*inch))
+            if hard_stops:
+                flag_rows = [[
+                    Paragraph("<b>CRITICAL — Hard Stops</b>",
+                              S("FlagHdr", fontSize=8, textColor=WHITE, fontName="Helvetica-Bold")),
+                ]]
+                for stop in hard_stops:
+                    flag_rows.append([Paragraph(f"• {stop}", S("FlagRow", fontSize=8, textColor=colors.HexColor("#7f1d1d"), fontName="Helvetica"))])
+                flag_tbl = Table(flag_rows, colWidths=[7.0*inch])
+                flag_tbl.setStyle(TableStyle([
+                    ("BACKGROUND",    (0,0), (-1,0),  colors.HexColor("#ef4444")),
+                    ("ROWBACKGROUNDS",(0,1), (-1,-1), [colors.HexColor("#fef2f2"), WHITE]),
+                    ("LEFTPADDING",   (0,0), (-1,-1), 8),
+                    ("RIGHTPADDING",  (0,0), (-1,-1), 8),
+                    ("TOPPADDING",    (0,0), (-1,-1), 5),
+                    ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+                    ("GRID",          (0,0), (-1,-1), 0.25, BORDER),
+                ]))
+                story.append(flag_tbl)
+                story.append(Spacer(1, 0.07*inch))
+            if soft_stops:
+                warn_rows = [[
+                    Paragraph("<b>WARNINGS — Soft Stops</b>",
+                              S("WarnHdr", fontSize=8, textColor=WHITE, fontName="Helvetica-Bold")),
+                ]]
+                for stop in soft_stops:
+                    warn_rows.append([Paragraph(f"• {stop}", S("WarnRow", fontSize=8, textColor=colors.HexColor("#78350f"), fontName="Helvetica"))])
+                warn_tbl = Table(warn_rows, colWidths=[7.0*inch])
+                warn_tbl.setStyle(TableStyle([
+                    ("BACKGROUND",    (0,0), (-1,0),  colors.HexColor("#f59e0b")),
+                    ("ROWBACKGROUNDS",(0,1), (-1,-1), [colors.HexColor("#fffbeb"), WHITE]),
+                    ("LEFTPADDING",   (0,0), (-1,-1), 8),
+                    ("RIGHTPADDING",  (0,0), (-1,-1), 8),
+                    ("TOPPADDING",    (0,0), (-1,-1), 5),
+                    ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+                    ("GRID",          (0,0), (-1,-1), 0.25, BORDER),
+                ]))
+                story.append(warn_tbl)
+                story.append(Spacer(1, 0.10*inch))
 
         # ── SQS REASONING ────────────────────────────────────────────────────
         if sqs_reasoning and sqs_reasoning.strip():

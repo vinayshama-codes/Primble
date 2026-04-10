@@ -1,5 +1,6 @@
 import { API_BASE } from "../../config/constants";
-import { useState } from "react";
+import { useState, useRef } from "react";
+import PlanModal from "../billing/PlanModal";
 
 function LogoutButton({ onLogout }) {
   const [loggingOut, setLoggingOut] = useState(false);
@@ -25,6 +26,9 @@ export default function Header({
   openBillingPortal, upgradeChecking, upgradeFailed,
   setUpgradeFailed, setUpgradeChecking, setUser,
 }) {
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const planBtnRef = useRef(null);
+
   const BillingSpinner = () => (
     <span style={{ width: 12, height: 12, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite", marginRight: 4 }} />
   );
@@ -93,27 +97,49 @@ export default function Header({
             </span>
           ) : user.payment_status === "soft_locked" ? (
             <span style={{ display: "flex", alignItems: "center", gap: 6, background: "#78350f", color: "#fcd34d", fontSize: 13, fontWeight: 600, padding: "4px 10px", borderRadius: 6, border: "1px solid #92400e" }}>
-              🔒 Account Disabled —&nbsp;
+              🔒 Account Disabled — Please&nbsp;
               <button onClick={openBillingPortal} disabled={billingPortalLoading} style={{ color: "#fcd34d", fontWeight: 700, background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, textDecoration: "underline", display: "flex", alignItems: "center", gap: 4 }}>
-                {billingPortalLoading && <BillingSpinner />}Update Billing
+                {billingPortalLoading && <BillingSpinner />}update your billing
               </button>
+              &nbsp;to restore access.
             </span>
           ) : user.payment_status === "failed" ? (
-            <span style={{ display: "flex", alignItems: "center", gap: 6, background: "#fef2f2", color: "#991b1b", fontSize: 13, fontWeight: 600, padding: "4px 10px", borderRadius: 6, border: "1px solid #fca5a5" }}>
-              ⚠️ Payment overdue —&nbsp;
-              <button onClick={openBillingPortal} disabled={billingPortalLoading} style={{ color: "#991b1b", fontWeight: 700, background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, textDecoration: "underline", display: "flex", alignItems: "center", gap: 4 }}>
-                {billingPortalLoading && <BillingSpinner />}Update billing
-              </button>
-            </span>
+            user.payment_failed_at && Math.floor((Date.now() - new Date(user.payment_failed_at).getTime()) / 86400000) >= 7 ? (
+              <span style={{ display: "flex", alignItems: "center", gap: 5, background: "#7f1d1d", color: "#fca5a5", fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 6, border: "1px solid #991b1b", whiteSpace: "nowrap" }}>
+                🚨 Payment still overdue — account will be restricted soon.&nbsp;
+                <button onClick={openBillingPortal} disabled={billingPortalLoading} style={{ color: "#fca5a5", fontWeight: 700, background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, textDecoration: "underline", display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+                  {billingPortalLoading && <BillingSpinner />}Update billing now
+                </button>
+              </span>
+            ) : (
+              <span style={{ display: "flex", alignItems: "center", gap: 6, background: "#fef2f2", color: "#991b1b", fontSize: 13, fontWeight: 600, padding: "4px 10px", borderRadius: 6, border: "1px solid #fca5a5" }}>
+                ⚠️ Payment overdue —&nbsp;
+                <button onClick={openBillingPortal} disabled={billingPortalLoading} style={{ color: "#991b1b", fontWeight: 700, background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, textDecoration: "underline", display: "flex", alignItems: "center", gap: 4 }}>
+                  {billingPortalLoading && <BillingSpinner />}Update billing
+                </button>
+              </span>
+            )
           ) : user.subscription_tier === "free" ? (
             <button className="btn-upgrade-header" onClick={onUpgradeClick}>⭐ Upgrade</button>
           ) : (
-            <span className="pro-badge">
-              ✅ {user.subscription_tier === "essentials" ? "Essentials"
-                 : user.subscription_tier === "professional" ? "Professional"
-                 : user.subscription_tier === "enterprise" ? "Enterprise"
-                 : "Pro"}
-            </span>
+            <div style={{ position: "relative" }}>
+              <button
+                ref={planBtnRef}
+                onClick={() => setShowPlanModal(p => !p)}
+                style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", fontSize: 13, fontWeight: 700, color: "#0f172a", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+              >
+                ✅ My Plan
+              </button>
+              {showPlanModal && (
+                <PlanModal
+                  user={user}
+                  token={token}
+                  onClose={() => setShowPlanModal(false)}
+                  onChangePlan={onUpgradeClick}
+                  anchorRef={planBtnRef}
+                />
+              )}
+            </div>
           )}
           <LogoutButton onLogout={onLogout} />
         </div>

@@ -311,8 +311,16 @@ export default function AcordModal({
   const [arqSessions, setArqSessions] = useState([]);
   const [arqNotifCount, setArqNotifCount] = useState(0);
   const [clientFilledFields, setClientFilledFields] = useState([]);
+  const [liteSqsData, setLiteSqsData] = useState(null);
+  const [liteCoverLoading, setLiteCoverLoading] = useState(false);
 
-
+  useEffect(() => {
+    if (step !== "lite" || !sessionId || !token) return;
+    fetch(`${API_BASE}/api/lite/generate-internal/${sessionId}`, { method: "POST", headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.success) setLiteSqsData(d); })
+      .catch(() => {});
+  }, [step, sessionId]); // eslint-disable-line
 
   useEffect(() => {
     if (!resumeSessionId) return;
@@ -345,7 +353,7 @@ export default function AcordModal({
   }, []);
 
   useEffect(() => {
-    if (step !== "editor" || !sessionId || !token) return;
+    if ((step !== "editor" && step !== "lite") || !sessionId || !token) return;
     refreshArqData();
   }, [step, sessionId]); // eslint-disable-line
 
@@ -507,7 +515,11 @@ export default function AcordModal({
     try {
       const res = await fetch(`${API_BASE}/api/select-forms-bulk`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, form_ids: ids }) });
       const data = await res.json();
-      if (res.status === 403) { setError("Access blocked. Please update your billing."); return; }
+      if (res.status === 403) {
+        const msg = data.detail || data.message || "";
+        if (msg.toLowerCase().includes("lite")) { setStep("lite"); return; }
+        setError(msg || "Access blocked. Please update your billing."); return;
+      }
       if (!data.success) { setError("Form generation failed"); return; }
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");
@@ -543,6 +555,19 @@ export default function AcordModal({
 
   const handleDownloadOne = formId => gatedDownload(() => _doDownloadOne(formId));
   const handleDownloadAll = () => gatedDownload(() => _doDownloadAll());
+
+  const handleLiteCoverSheet = async () => {
+    setLiteCoverLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/lite/cover-sheet/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) { setError("Failed to generate cover sheet."); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "Acordly_SQS_Cover_Sheet.pdf";
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch { setError("Download failed. Please try again."); }
+    finally { setLiteCoverLoading(false); }
+  };
 
  
 
@@ -617,8 +642,12 @@ return (
           const ps = user.payment_status;
           if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived — <a href="mailto:support@acordly.ai">Contact support</a> to restore.</div>;
           if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">🚫 Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
-          if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">🔒 Account Disabled —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button>{" "}to restore.</div>;
-          if (ps === "failed") return <div className="payment-status-banner payment-status-failed">⚠️ Payment overdue —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
+          if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">🔒 Account Disabled — Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
+          if (ps === "failed") {
+            const daysFailed = user.payment_failed_at ? Math.floor((Date.now() - new Date(user.payment_failed_at).getTime()) / 86400000) : 0;
+            if (daysFailed >= 7) return <div className="payment-status-banner payment-status-failed" style={{ background: "#fef2f2", borderColor: "#fca5a5", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap" }}>🚨 Payment still overdue — account will be restricted soon.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Update billing now</button></div>;
+            return <div className="payment-status-banner payment-status-failed">⚠️ Payment overdue —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
+          }
           return null;
         })()}
 
@@ -637,6 +666,87 @@ return (
         )}
 
         {step === "dashboard" && <DashboardStep token={token} onResume={handleResumeSession} onNewPackage={handleNewPackage} />}
+
+        {step === "lite" && (() => {
+          const sqs = liteSqsData?.sqs;
+          const gradeColor = g => ({ A: "#10b981", B: "#22c55e", C: "#f59e0b", D: "#f97316", F: "#ef4444" }[g] || "#94a3b8");
+          return (
+            <div style={{ maxWidth: 720, margin: "0 auto" }}>
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", marginBottom: 4 }}>Your Lite Analysis</div>
+                <div style={{ fontSize: 13, color: "#64748b" }}>Form generation is not included in the Lite plan. Use the tools below to complete your workflow.</div>
+              </div>
+
+              {/* SQS Card */}
+              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "20px 24px", marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>SQS Analysis</div>
+                {!sqs ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#94a3b8", fontSize: 13 }}>
+                    <span style={{ width: 14, height: 14, border: "2px solid #cbd5e1", borderTopColor: "#4f7cff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+                    Analyzing submission…
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
+                    <div style={{ width: 64, height: 64, borderRadius: "50%", background: gradeColor(sqs.grade), display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <span style={{ fontSize: 22, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{sqs.sqs_score ?? "—"}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>{sqs.grade}</span>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 2 }}>{sqs.tier} — {({ auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Underwriter Review", hold: "Hold — Remediation Required" })[sqs.routing_decision] || sqs.routing_decision}</div>
+                      {liteSqsData.soft_stops?.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309", marginBottom: 4 }}>⚠️ Warnings</div>
+                          {liteSqsData.soft_stops.map((s, i) => <div key={i} style={{ fontSize: 12, color: "#64748b", padding: "1px 0" }}>• {s}</div>)}
+                        </div>
+                      )}
+                      {liteSqsData.hard_stops?.length > 0 && (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 4 }}>🚫 Hard Stops</div>
+                          {liteSqsData.hard_stops.map((s, i) => <div key={i} style={{ fontSize: 12, color: "#64748b", padding: "1px 0" }}>• {s}</div>)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Cards */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "20px 20px" }}>
+                  <div style={{ fontSize: 18, marginBottom: 8 }}>📧</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>Client Questionnaire</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>Generate and send a tailored questionnaire to your client to fill in missing information.</div>
+                  <button onClick={handleOpenARQ} disabled={arqLoadingQ}
+                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: arqLoadingQ ? 0.7 : 1 }}>
+                    {arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client"}
+                  </button>
+                  <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
+                </div>
+
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "20px 20px" }}>
+                  <div style={{ fontSize: 18, marginBottom: 8 }}>📄</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>Summary Cover Sheet</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>Download your AI-generated SQS summary cover page for use with any platform.</div>
+                  <button onClick={handleLiteCoverSheet} disabled={liteCoverLoading}
+                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #0f172a", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: liteCoverLoading ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: liteCoverLoading ? 0.7 : 1 }}>
+                    {liteCoverLoading ? <><span style={{ width: 11, height: 11, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Generating…</> : "Download Cover Sheet"}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ textAlign: "center" }}>
+                <button onClick={() => { setStep("upload"); setSessionId(null); setFiles([]); setLiteSqsData(null); }}
+                  style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 20px", fontSize: 13, color: "#64748b", cursor: "pointer", fontFamily: "inherit" }}>
+                  ← Upload a new package
+                </button>
+                <div style={{ marginTop: 10, fontSize: 12, color: "#94a3b8" }}>
+                  Want full form generation?{" "}
+                  <button onClick={onShowUpgrade} style={{ background: "none", border: "none", color: "#e6007a", fontWeight: 700, cursor: "pointer", padding: 0, fontSize: 12, fontFamily: "inherit" }}>Upgrade your plan →</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {step === "upload" && (() => {
           if (freeExhausted) {

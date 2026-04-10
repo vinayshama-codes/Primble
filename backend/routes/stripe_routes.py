@@ -29,25 +29,43 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
     if cycle not in ("monthly", "annual"):
         raise HTTPException(400, "billing_cycle must be 'monthly' or 'annual'")
 
-    plan_cfg = PLANS[plan][cycle]
+    plan_cfg   = PLANS[plan][cycle]
     plan_label = f"Acordly {plan.title()} — {'Annual' if cycle == 'annual' else 'Monthly'}"
+
+    # Cancel any existing active subscriptions before creating a new one
+    customer_id = current_user.get("stripe_customer_id")
+    if customer_id:
+        try:
+            existing = stripe.Subscription.list(customer=customer_id, status="active", limit=5)
+            for sub in existing.auto_paging_iter():
+                stripe.Subscription.cancel(getattr(sub, "id"))
+                logger.info(f"Cancelled old subscription {getattr(sub, 'id')} before plan change for customer {customer_id}")
+        except Exception as e:
+            logger.warning(f"Could not cancel old subscriptions: {e}")
+
     try:
-        session = stripe.checkout.Session.create(
-        payment_method_types=["card"],
-        line_items=[{"price_data": {"currency": "usd",
-            "product_data": {"name": plan_label},
-            "unit_amount": plan_cfg["amount"],
-            "recurring": {"interval": plan_cfg["interval"]}}, "quantity": 1}],
-        mode="subscription",
-        success_url=f"{FRONTEND_URL}?upgraded=true",
-        cancel_url=f"{FRONTEND_URL}?upgraded=false",
-        client_reference_id=str(current_user["id"]),
-        customer_email=current_user["email"],
-        metadata={"plan": plan, "billing_cycle": cycle, "user_id": str(current_user["id"])},
-        subscription_data={
-            "metadata": {"plan": plan, "billing_cycle": cycle, "user_id": str(current_user["id"])}
-        },
-    )
+        checkout_kwargs = dict(
+            payment_method_types=["card"],
+            line_items=[{"price_data": {"currency": "usd",
+                "product_data": {"name": plan_label},
+                "unit_amount": plan_cfg["amount"],
+                "recurring": {"interval": plan_cfg["interval"]}}, "quantity": 1}],
+            mode="subscription",
+            success_url=f"{FRONTEND_URL}?upgraded=true",
+            cancel_url=f"{FRONTEND_URL}?upgraded=false",
+            client_reference_id=str(current_user["id"]),
+            metadata={"plan": plan, "billing_cycle": cycle, "user_id": str(current_user["id"])},
+            subscription_data={
+                "metadata": {"plan": plan, "billing_cycle": cycle, "user_id": str(current_user["id"])}
+            },
+        )
+        # Attach to existing Stripe customer if available so card is pre-filled
+        if customer_id:
+            checkout_kwargs["customer"] = customer_id
+        else:
+            checkout_kwargs["customer_email"] = current_user["email"]
+
+        session = stripe.checkout.Session.create(**checkout_kwargs)
         return {"checkout_url": session.url}
     except Exception as e:
         logger.error(f"Stripe checkout error: {e}")
@@ -107,54 +125,77 @@ async def stripe_webhook(request: Request):
                 cur.close(); conn.close()
             return {"received": True}
 
-        sub_id = obj.get("subscription")
-        if not sub_id and obj.get("customer"):
-            _subs = stripe.Subscription.list(customer=obj["customer"], status="active", limit=1)
-            if _subs.data:
-                sub_id = _subs.data[0].id
-        plan = metadata.get("plan", "essentials")
-        cycle = metadata.get("billing_cycle", "monthly")
-        if user_id and plan in PLANS and cycle in PLANS[plan]:
-            cfg = PLANS[plan][cycle]
-            now = datetime.now(timezone.utc).isoformat()
-            conn = get_db(); cur = conn.cursor()
-            stripe_customer = obj.get("customer")
-            if stripe_customer:
-                cur.execute("UPDATE users SET stripe_customer_id = %s WHERE id = %s", (stripe_customer, user_id))
-            cur.execute("""UPDATE users SET subscription_tier=%s, stripe_subscription_id=%s,
-                packages_limit=%s, packages_used=0, billing_cycle=%s, billing_period_start=%s,
-                overage_rate=%s, payment_status='ok', payment_failed_at=NULL,
-                overage_packages_pending=0, overage_packages_invoiced=0 WHERE id=%s""",
-                (plan, sub_id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id))
-            conn.commit(); cur.close(); conn.close()
+        # Setup-mode sessions are payment method updates only — skip subscription DB update
+        # but still fall through to the auto-retry block below so the new card is used immediately
+        if obj.get("mode") != "setup":
+            sub_id = obj.get("subscription")
+            if not sub_id and obj.get("customer"):
+                _subs = stripe.Subscription.list(customer=obj["customer"], status="active", limit=1)
+                if _subs.data:
+                    sub_id = _subs.data[0].id
+            plan = metadata.get("plan", "essentials")
+            cycle = metadata.get("billing_cycle", "monthly")
+            if user_id and plan in PLANS and cycle in PLANS[plan] and sub_id:
+                cfg = PLANS[plan][cycle]
+                now = datetime.now(timezone.utc).isoformat()
+                conn = get_db(); cur = conn.cursor()
+                stripe_customer = obj.get("customer")
+                if stripe_customer:
+                    cur.execute("UPDATE users SET stripe_customer_id = %s WHERE id = %s", (stripe_customer, user_id))
+                cur.execute("""UPDATE users SET subscription_tier=%s, stripe_subscription_id=%s,
+                    packages_limit=%s, packages_used=0, billing_cycle=%s, billing_period_start=%s,
+                    overage_rate=%s, payment_status='ok', payment_failed_at=NULL,
+                    overage_packages_pending=0, overage_packages_invoiced=0 WHERE id=%s""",
+                    (plan, sub_id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id))
+                conn.commit(); cur.close(); conn.close()
 
-        # Auto-retry any open/failed invoices after new card added
+        # Auto-retry any open invoices after new card added
         customer_id = obj.get("customer")
         if customer_id:
+            pm = None
             setup_intent_id = obj.get("setup_intent")
             if setup_intent_id:
                 try:
                     si = stripe.SetupIntent.retrieve(setup_intent_id)
-                    pm = si.get("payment_method")
+                    pm = getattr(si, "payment_method", None)
                     if pm:
                         stripe.Customer.modify(customer_id,
                             invoice_settings={"default_payment_method": pm}
                         )
                         logger.info(f"Set default payment method {pm} for {customer_id}")
+                        # Also update the subscription's own payment method so future
+                        # invoices don't revert to the old card
+                        try:
+                            subs = stripe.Subscription.list(customer=customer_id, limit=10)
+                            for sub in subs.auto_paging_iter():
+                                sub_status = getattr(sub, "status", "")
+                                if sub_status not in ("canceled", "incomplete_expired"):
+                                    stripe.Subscription.modify(
+                                        getattr(sub, "id"),
+                                        default_payment_method=pm
+                                    )
+                                    logger.info(f"Updated subscription {getattr(sub, 'id')} PM to {pm}")
+                        except Exception as sub_e:
+                            logger.warning(f"Could not update subscription PM: {sub_e}")
                 except Exception as e:
                     logger.warning(f"Could not set default payment method: {e}")
 
             try:
-                for status in ["open", "uncollectible"]:
-                    invoices = stripe.Invoice.list(customer=customer_id, status=status, limit=5)
-                    for invoice in invoices.auto_paging_iter():
-                        try:
-                            stripe.Invoice.pay(invoice["id"])
-                            logger.info(f"Auto-retried invoice {invoice['id']} for {customer_id}")
-                        except stripe.error.CardError as e:
-                            logger.warning(f"Card declined on retry: {e}")
-                        except stripe.error.InvalidRequestError as e:
-                            logger.warning(f"Invoice retry invalid: {e}")
+                invoices = stripe.Invoice.list(customer=customer_id, status="open", limit=5)
+                for invoice in invoices.auto_paging_iter():
+                    invoice_id = getattr(invoice, "id", None) or invoice.get("id")
+                    if not invoice_id:
+                        continue
+                    try:
+                        pay_kwargs = {"payment_method": pm} if pm else {}
+                        stripe.Invoice.pay(invoice_id, **pay_kwargs)
+                        logger.info(f"Auto-retried invoice {invoice_id} for {customer_id}")
+                    except stripe.error.CardError as e:
+                        logger.warning(f"Card declined on retry {invoice_id}: {e}")
+                    except stripe.error.InvalidRequestError as e:
+                        logger.warning(f"Invoice retry invalid {invoice_id}: {e}")
+                    except Exception as e:
+                        logger.warning(f"Invoice retry failed {invoice_id}: {e}")
             except Exception as e:
                 logger.warning(f"Could not list/retry invoices: {e}")
 
@@ -184,17 +225,38 @@ async def stripe_webhook(request: Request):
             conn = get_db(); cur = conn.cursor()
             cur.execute("UPDATE users SET payment_status='failed', payment_failed_at=COALESCE(payment_failed_at,%s) WHERE stripe_subscription_id=%s", (now, sub_id))
             conn.commit()
-            cur.execute("SELECT email, full_name FROM users WHERE stripe_subscription_id = %s", (sub_id,))
+            # Only send the day-1 email on the very first failure (payment_failed_at was NULL before this update)
+            cur.execute("SELECT email, full_name, payment_failed_at FROM users WHERE stripe_subscription_id = %s", (sub_id,))
             row = cur.fetchone(); cur.close(); conn.close()
             if row:
                 row = dict(row)
-                _send_payment_failed_email(row["email"], row.get("full_name",""), day=1)
+                failed_at_str = row.get("payment_failed_at") or ""
+                # COALESCE means payment_failed_at == now only on first failure
+                is_first_failure = failed_at_str.startswith(now[:16])  # match to the minute
+                if is_first_failure:
+                    _send_payment_failed_email(row["email"], row.get("full_name",""), day=1)
 
     elif event["type"] == "customer.subscription.deleted":
         sub_id = json.loads(str(event["data"]["object"])).get("id")
         if sub_id:
             conn = get_db(); cur = conn.cursor()
-            cur.execute("UPDATE users SET subscription_tier='free', packages_limit=0, packages_used=0, payment_status='ok', payment_failed_at=NULL, overage_packages_pending=0, overage_packages_invoiced=0 WHERE stripe_subscription_id=%s", (sub_id,))
+            cur.execute("UPDATE users SET subscription_tier='free', packages_limit=0, packages_used=0, payment_status='ok', payment_failed_at=NULL, stripe_subscription_id=NULL, overage_packages_pending=0, overage_packages_invoiced=0 WHERE stripe_subscription_id=%s", (sub_id,))
+            conn.commit(); cur.close(); conn.close()
+            logger.info(f"Subscription deleted: user downgraded to free for sub {sub_id}")
+
+    elif event["type"] == "customer.subscription.updated":
+        obj = json.loads(str(event["data"]["object"]))
+        sub_id = obj.get("id")
+        cancel_at_period_end = obj.get("cancel_at_period_end", False)
+        status = obj.get("status", "")
+        if sub_id:
+            conn = get_db(); cur = conn.cursor()
+            if cancel_at_period_end:
+                # Subscription marked for cancellation — confirm status in DB
+                cur.execute("UPDATE users SET payment_status='canceling' WHERE stripe_subscription_id=%s AND payment_status NOT IN ('failed','soft_locked','suspended','archived')", (sub_id,))
+            elif status == "active" and not cancel_at_period_end:
+                # Subscription renewed or reactivated — clear canceling state
+                cur.execute("UPDATE users SET payment_status='ok', payment_failed_at=NULL WHERE stripe_subscription_id=%s AND payment_status='canceling'", (sub_id,))
             conn.commit(); cur.close(); conn.close()
 
     return {"received": True}
@@ -205,7 +267,7 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
     from fastapi import HTTPException
     user_email = current_user.get("email")
     user_id = current_user.get("id")
-    if current_user.get("subscription_tier") not in ("free", None):
+    if current_user.get("subscription_tier") not in ("free", None, "lite"):
         return {"subscription_tier": current_user["subscription_tier"], "upgraded": False, "reason": "already_subscribed"}
     try:
         customers = stripe.Customer.list(email=user_email, limit=5)
@@ -215,8 +277,9 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
             subs = stripe.Subscription.list(customer=customer.id, status="active", limit=5)
             if subs.data:
                 sub = subs.data[0]; sub_id = sub.id
-                meta = dict(sub.get("metadata") or {})
-                plan = meta.get("plan", "essentials"); cycle = meta.get("billing_cycle","monthly")
+                raw_meta = getattr(sub, "metadata", None) or {}
+                plan = getattr(raw_meta, "plan", None) or "essentials"
+                cycle = getattr(raw_meta, "billing_cycle", None) or "monthly"
                 cfg = PLANS.get(plan, {}).get(cycle, PLANS["essentials"]["monthly"])
                 now = datetime.now(timezone.utc).isoformat()
                 conn = get_db(); cur = conn.cursor()
@@ -379,6 +442,48 @@ async def apply_overage(
     }
 
 
+@router.post("/cancel-subscription")
+async def cancel_subscription(current_user: dict = Depends(get_current_user)):
+    from fastapi import HTTPException
+
+    customer_id = current_user.get("stripe_customer_id")
+    if not customer_id:
+        raise HTTPException(400, "No Stripe customer found for this account.")
+
+    try:
+        # Always resolve the real active subscription from Stripe — never trust DB alone
+        active_subs = stripe.Subscription.list(customer=customer_id, status="active", limit=5)
+        subs = list(active_subs.auto_paging_iter())
+        if not subs:
+            raise HTTPException(400, "No active subscription found in Stripe.")
+
+        cancelled_ids = []
+        for sub in subs:
+            real_sub_id = getattr(sub, "id", None)
+            if not real_sub_id:
+                continue
+            stripe.Subscription.modify(real_sub_id, cancel_at_period_end=True)
+            cancelled_ids.append(real_sub_id)
+            logger.info(f"Set cancel_at_period_end=True for sub {real_sub_id} (customer {customer_id})")
+
+        # Sync the correct subscription ID back to DB and mark as canceling
+        conn = get_db(); cur = conn.cursor()
+        cur.execute(
+            "UPDATE users SET payment_status='canceling', stripe_subscription_id=%s WHERE id=%s",
+            (cancelled_ids[0], current_user["id"])
+        )
+        conn.commit(); cur.close(); conn.close()
+
+        return {"success": True, "message": "Subscription will cancel at the end of the current billing period."}
+    except stripe.error.InvalidRequestError as e:
+        raise HTTPException(400, f"Could not cancel subscription: {e}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Cancel subscription error: {e}")
+        raise HTTPException(500, "Failed to cancel subscription.")
+
+
 @router.post("/create-portal-session")
 async def create_portal_session(user: dict = Depends(get_current_user)):
     from fastapi import HTTPException
@@ -395,11 +500,17 @@ async def create_portal_session(user: dict = Depends(get_current_user)):
 
             plan_data = PLANS[plan][billing_cycle]
 
-            customer = stripe.Customer.create(
-                email=user["email"],
-                name=user.get("full_name", ""),
-                metadata={"user_id": user["id"]},
-            )
+            # Check if a Stripe customer already exists for this email before creating a new one
+            existing_customers = stripe.Customer.list(email=user["email"], limit=1)
+            if existing_customers.data:
+                customer = existing_customers.data[0]
+                logger.info(f"Reusing existing Stripe customer {customer.id} for {user['email']}")
+            else:
+                customer = stripe.Customer.create(
+                    email=user["email"],
+                    name=user.get("full_name", ""),
+                    metadata={"user_id": user["id"]},
+                )
 
             conn = get_db()
             cur = conn.cursor()
@@ -410,6 +521,34 @@ async def create_portal_session(user: dict = Depends(get_current_user)):
             conn.commit()
             cur.close()
             conn.close()
+
+            # If this customer already has an active subscription, return a setup session instead
+            active_subs = stripe.Subscription.list(customer=customer.id, status="active", limit=1)
+            if active_subs.data:
+                existing_sub = active_subs.data[0]
+                sub_meta = getattr(existing_sub, "metadata", None) or {}
+                existing_plan = getattr(sub_meta, "plan", None) or plan
+                existing_cycle = getattr(sub_meta, "billing_cycle", None) or billing_cycle
+                existing_cfg = PLANS.get(existing_plan, {}).get(existing_cycle, PLANS["essentials"]["monthly"])
+                now = datetime.now(timezone.utc).isoformat()
+                conn2 = get_db(); cur2 = conn2.cursor()
+                cur2.execute(
+                    """UPDATE users SET stripe_subscription_id=%s, subscription_tier=%s,
+                       billing_cycle=%s, packages_limit=%s, overage_rate=%s,
+                       payment_status='ok', payment_failed_at=NULL WHERE id=%s""",
+                    (existing_sub.id, existing_plan, existing_cycle,
+                     existing_cfg["packages"], existing_cfg["overage_rate"], user["id"])
+                )
+                conn2.commit(); cur2.close(); conn2.close()
+                logger.info(f"Restored subscription {existing_sub.id} for user {user['id']} from Stripe")
+                setup_session = stripe.checkout.Session.create(
+                    customer=customer.id,
+                    payment_method_types=["card"],
+                    mode="setup",
+                    success_url=f"{FRONTEND_URL}?billing_updated=true",
+                    cancel_url=FRONTEND_URL,
+                )
+                return {"url": setup_session.url}
 
             checkout = stripe.checkout.Session.create(
                 customer=customer.id,

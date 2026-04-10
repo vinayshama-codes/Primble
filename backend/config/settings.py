@@ -20,6 +20,10 @@ STRIPE_CURRENCY    = "usd"
 STRIPE_YEARLY_AMOUNT = 30000
 
 PLANS = {
+    "lite": {
+        "monthly": {"amount": 4900,  "interval": "month", "packages": 0, "overage_rate": 0},
+        "annual":  {"amount": 39900, "interval": "year",  "packages": 0, "overage_rate": 0},
+    },
     "essentials": {
         "monthly": {"amount": 12900,  "interval": "month", "packages": 100,  "overage_rate": 150},
         "annual":  {"amount": 118800, "interval": "year",  "packages": 1200, "overage_rate": 150},

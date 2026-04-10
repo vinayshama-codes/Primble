@@ -322,10 +322,10 @@ def _send_payment_failed_email(email: str, name: str, day: int) -> bool:
         </div>"""
     elif day == 10:
         subject  = "Account Disabled: Update Billing"
-        body_txt = f"Hi {name or 'there'},\nAccount disabled. Update: {portal}"
+        body_txt = f"Hi {name or 'there'},\nYour account has been disabled. Please update your billing to restore access: {portal}"
         body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
           <h2 style="color:#b45309;">Account Disabled</h2>
-          <p>Hi {name or 'there'},</p><p>Your account is disabled — 10 days overdue.</p>
+          <p>Hi {name or 'there'},</p><p>Your account has been disabled. Please update your billing to restore access.</p>
           <p><a href="{portal}" style="background:#e6007a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;">Update Billing</a></p>
         </div>"""
     elif day == 21:

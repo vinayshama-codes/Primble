@@ -122,6 +122,9 @@ async def upload_declaration(
 @router.post("/api/select-forms-bulk")
 async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = Depends(get_current_user)):
     from fastapi import HTTPException
+    if current_user.get("subscription_tier") == "lite":
+        raise HTTPException(403, "Form generation is not included in the Lite plan.")
+
     conn = get_db(); cur = conn.cursor()
     cur.execute("SELECT payment_status FROM users WHERE id = %s", (current_user["id"],))
     row = cur.fetchone(); cur.close(); conn.close()
@@ -177,6 +180,64 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
 @router.post("/api/select-form")
 async def select_form(req: FormSelectionRequest, current_user: dict = Depends(get_current_user)):
     return await select_forms_bulk(BulkFormSelectionRequest(session_id=req.session_id, form_ids=[req.selected_form_id]), current_user)
+
+
+@router.post("/api/lite/generate-internal/{session_id}")
+async def lite_generate_internal(session_id: str, current_user: dict = Depends(get_current_user)):
+    """Silently generate forms for Lite users to power ARQ and SQS — forms are never exposed or downloadable."""
+    from fastapi import HTTPException
+    if current_user.get("subscription_tier") != "lite":
+        raise HTTPException(403, "This endpoint is for Lite plan users only.")
+
+    session = get_processing_session(session_id)
+    recommendations = session.get("recommendations", [])
+    form_ids = [r["form_id"] for r in recommendations]
+
+    if not form_ids:
+        raise HTTPException(400, "No recommended forms found in session.")
+
+    results = {}
+    for form_id in form_ids:
+        form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
+        if not form_meta:
+            continue
+        tpl = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
+        if not os.path.exists(tpl):
+            continue
+        try:
+            result = process_single_form(form_meta, session)
+            results[form_id] = result
+        except Exception as ex:
+            logger.error(f"Lite internal generation error for {form_id}: {ex}")
+
+    if not results:
+        raise HTTPException(400, "No forms could be generated internally.")
+
+    cross_issues_raw = cross_validate(session["facts"], session["flags"], form_ids)
+    seen_msgs, cross_issues_deduped = set(), []
+    for issue in cross_issues_raw:
+        msg = issue.get("message", "")
+        if msg not in seen_msgs:
+            seen_msgs.add(msg); cross_issues_deduped.append(issue)
+
+    upd_processing_session(session_id, {
+        "selected_form_ids": form_ids,
+        "generated_forms": results,
+        "active_form_id": form_ids[0] if form_ids else None,
+        "cross_issues_last": cross_issues_deduped,
+    })
+
+    # Return SQS summary across all generated forms — no form content exposed
+    sqs_list = [r["sqs"] for r in results.values() if r.get("sqs")]
+    avg_score = int(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
+    first_sqs = sqs_list[0] if sqs_list else {}
+    return JSONResponse({
+        "success": True,
+        "sqs": {**first_sqs, "sqs_score": avg_score},
+        "hard_stops": session.get("hard_stops", []),
+        "soft_stops": session.get("soft_stops", []),
+        "flags": session.get("flags", {}),
+    })
 
 
 @router.get("/api/fields/{session_id}/{form_id}")
