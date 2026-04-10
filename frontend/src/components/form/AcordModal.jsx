@@ -572,7 +572,7 @@ export default function AcordModal({
  
 
 return (
-    <div style={{ background: "#f8fafc", minHeight: "calc(100vh - 81px)", width: "100%" }}>
+    <div style={{ background: "#f8fafc", minHeight: "calc(100vh - 81px)", width: "100%", overflow: step === "editor" ? "hidden" : "visible" }}>
       <div style={{ padding: step === "editor" ? 0 : "32px 40px" }}>
         {renderContent()}
       </div>
@@ -1015,9 +1015,9 @@ return (
                 </button>
                 {formIdList.length > 1 && (
                   <button onClick={handleDownloadAll}
-                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid rgba(230,0,122,0.3)", background: "rgba(230,0,122,0.04)", color: "#e6007a", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
-                    onMouseEnter={e => e.currentTarget.style.background = "rgba(230,0,122,0.1)"}
-                    onMouseLeave={e => e.currentTarget.style.background = "rgba(230,0,122,0.04)"}>
+                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 3px 10px rgba(230,0,122,0.25)", fontFamily: "inherit" }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.border = "1px solid #c00066"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.border = "1px solid #e6007a"; }}>
                     📦 Download All ({formIdList.length} forms)
                   </button>
                 )}
@@ -1025,7 +1025,7 @@ return (
                   style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}
                   onMouseEnter={e => { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.border = "1px solid #c00066"; }}
                   onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.border = "1px solid #e6007a"; }}>
-                  ← Home
+                  ← Dashboard
                 </button>
               </div>
             </div>

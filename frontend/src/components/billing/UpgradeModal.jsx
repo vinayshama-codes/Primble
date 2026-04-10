@@ -57,7 +57,7 @@ export default function UpgradeModal({ token, user, onClose, onError }) {
         <div className="modal-inner">
           <div className="upgrade-icon">🚀</div>
           <h2 className="upgrade-title">Choose Your Plan</h2>
-          {user?.downloads_remaining <= 0 && (
+          {user?.subscription_tier === "free" && user?.downloads_remaining <= 0 && (
             <p className="upgrade-message">You've used all 3 free downloads. Upgrade to continue.</p>
           )}
           <div className="billing-toggle">
