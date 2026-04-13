@@ -54,6 +54,7 @@ async def run_daily_payment_lifecycle():
 
                 if days_since >= 60 and current_status != "archived":
                     new_status = "archived"
+                    email_day  = 60
                 elif days_since >= 21 and current_status not in ("suspended", "archived"):
                     new_status = "suspended"
                     email_day  = 21

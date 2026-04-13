@@ -317,13 +317,6 @@ async def get_pdf(
     if form_id not in generated:
         raise HTTPException(404, f"Form {form_id} not generated")
     r = generated[form_id]
-    if r.get("signature_applied") and r.get("pdf_bytes"):
-        pdf_bytes = r["pdf_bytes"]
-        if not isinstance(pdf_bytes, bytes):
-            pdf_bytes = bytes(pdf_bytes)
-        return Response(content=pdf_bytes, media_type="application/pdf",
-                        headers={"Content-Disposition": f"inline; filename={form_id}_preview.pdf",
-                                 "Cache-Control": "no-store, no-cache, must-revalidate"})
     pdf_bytes = regenerate_pdf_for_form(proc_session, form_id)
     return Response(content=pdf_bytes, media_type="application/pdf",
                     headers={"Content-Disposition": f"inline; filename={form_id}_preview.pdf",

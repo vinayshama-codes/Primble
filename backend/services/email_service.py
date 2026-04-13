@@ -336,6 +336,17 @@ def _send_payment_failed_email(email: str, name: str, day: int) -> bool:
           <p>Hi {name or 'there'},</p><p>Suspended — 21 days of non-payment.</p>
           <p><a href="{portal}" style="background:#e6007a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;">Update Billing</a></p>
         </div>"""
+    elif day == 60:
+        subject  = "Account archived: subscription ended"
+        body_txt = (f"Hi {name or 'there'},\nYour account has been archived after 60 days of non-payment. "
+                    f"To reactivate, please contact support or update your billing: {portal}")
+        body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
+          <h2 style="color:#64748b;">Account Archived</h2>
+          <p>Hi {name or 'there'},</p>
+          <p>Your account has been archived after 60 days of non-payment. All your data is preserved.</p>
+          <p>To reactivate your account, please update your billing details.</p>
+          <p><a href="{portal}" style="background:#e6007a;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;">Reactivate Account</a></p>
+        </div>"""
     else:
         return False
     return _send_generic_email(email, subject, body_txt, body_html)

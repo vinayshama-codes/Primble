@@ -403,10 +403,13 @@ def apply_arq_answers_to_session(
                 form_data["field_state"] = field_state
                 if "confidence" in form_data:
                     form_data["confidence"][field_name] = "filled"
-                # Invalidate pdf cache so it regenerates
-                form_data.pop("_pdf_cache_hash", None)
-                form_data.pop("pdf_bytes", None)
-                form_data.pop("signature_applied", None)
+                # Invalidate pdf cache so it regenerates.
+                # Use assignment (not pop) so dict.update() in upd_processing_session
+                # actually overwrites these keys in the stored session.
+                # signature_applied is intentionally left unchanged — if the form was
+                # signed, regeneration will re-apply the signature via signature_b64.
+                form_data["_pdf_cache_hash"] = ""
+                form_data["pdf_bytes"] = None
         if field_name not in updated:
             updated.append(field_name)
 

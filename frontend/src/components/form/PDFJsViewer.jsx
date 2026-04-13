@@ -190,6 +190,9 @@ export default function PDFJsViewer({
         (data.fields || []).forEach(f => {
           vals[f.name]       = f.value            || "";
           confLabels[f.name] = f.confidence_label || "";
+          if (f.client_filled) {
+            clientFilledRef.current = [...new Set([...clientFilledRef.current, f.name])];
+          }
         });
         fieldsRef.current         = data.fields    || [];
         pageDimsRef.current       = data.page_dims || [];
@@ -330,6 +333,11 @@ export default function PDFJsViewer({
         inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:rgba(255,255,255,0.95);border:none;outline:none;border-radius:2px;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#111;padding:1px 3px;cursor:text;overflow:hidden;white-space:nowrap;`;
         inp.addEventListener("input", e => triggerSave(field.name, e.target.value));
         wrap.appendChild(inp);
+      } else if (clientFilledRef.current.includes(field.name) && val && val !== "null" && val !== "None") {
+        const txt = document.createElement("div");
+        txt.style.cssText = `width:100%;height:100%;box-sizing:border-box;overflow:hidden;white-space:nowrap;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#111;padding:1px 3px;display:flex;align-items:center;background:rgba(255,255,255,0.9);`;
+        txt.textContent = val;
+        wrap.appendChild(txt);
       }
       overlay.appendChild(wrap);
     });
@@ -514,7 +522,7 @@ export default function PDFJsViewer({
         </div>
       )}
 
-      <div ref={containerRef} style={{ flex: 1, overflow: "auto", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 24, background: "#252a3d", minHeight: 0 }}>
+      <div ref={containerRef} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 24, background: "#252a3d", minHeight: 0 }}>
         {loadError ? (
           <div style={{ color: "#6b7899", textAlign: "center", marginTop: 60 }}>⚠️ Could not load PDF preview.</div>
         ) : !pdfDoc ? (

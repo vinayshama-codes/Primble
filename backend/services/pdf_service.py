@@ -315,7 +315,12 @@ def get_page_dims_pikepdf(path: str) -> List[dict]:
     return dims
 
 
-def regenerate_pdf_for_form(proc_session: dict, form_id: str, force: bool = False) -> bytes:
+def regenerate_pdf_for_form(
+    proc_session: dict,
+    form_id: str,
+    force: bool = False,
+    user_signature: str = None,
+) -> bytes:
     generated = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form {form_id} not generated")
@@ -324,11 +329,12 @@ def regenerate_pdf_for_form(proc_session: dict, form_id: str, force: bool = Fals
     field_data = r.get("field_state") or r.get("mapped", {})
     confidence = r.get("confidence", {})
 
-    if r.get("signature_applied") and r.get("pdf_bytes"):
-        cached = r["pdf_bytes"]
-        return cached if isinstance(cached, bytes) else bytes(cached)
-
     if not force:
+        # Only serve the cached signed PDF when the cache is still valid (non-empty hash).
+        # An empty _pdf_cache_hash means client answers were applied after signing — must regen.
+        if r.get("signature_applied") and r.get("pdf_bytes") and r.get("_pdf_cache_hash"):
+            cached = r["pdf_bytes"]
+            return cached if isinstance(cached, bytes) else bytes(cached)
         import hashlib
         state_hash  = hashlib.md5(json.dumps(field_data, sort_keys=True).encode()).hexdigest()
         cached_hash = r.get("_pdf_cache_hash")
@@ -336,7 +342,18 @@ def regenerate_pdf_for_form(proc_session: dict, form_id: str, force: bool = Fals
         if cached_bytes and cached_hash == state_hash:
             return cached_bytes if isinstance(cached_bytes, bytes) else bytes(cached_bytes)
 
-    pdf_bytes = fill_pdf(tpl, field_data, confidence)
+    # Resolve which signature to use: prefer stored signature_b64, then fall back to
+    # the caller-supplied user_signature (covers legacy sessions missing signature_b64).
+    sig_b64 = None
+    if r.get("signature_applied"):
+        sig_b64 = r.get("signature_b64") or user_signature
+
+    if sig_b64:
+        # Regenerate with latest field values and re-stamp signature
+        pdf_bytes = inject_signature_into_pdf(tpl, field_data, confidence, sig_b64)
+    else:
+        pdf_bytes = fill_pdf(tpl, field_data, confidence)
+
     import hashlib
     state_hash = hashlib.md5(json.dumps(field_data, sort_keys=True).encode()).hexdigest()
     generated[form_id]["pdf_bytes"]       = pdf_bytes

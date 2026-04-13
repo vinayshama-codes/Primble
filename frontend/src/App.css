@@ -46,7 +46,7 @@ body {
   padding: 20px 56px; border-bottom: 1px solid var(--light-gray);
 }
 .header-left { display: flex; align-items: center; gap: 36px; }
-.logo { font-weight: 700; font-size: 40px; color: var(--primary); cursor: pointer; }
+.logo { font-weight: 700; font-size: 40px; color: var(--primary); cursor: pointer; line-height: 1; }
 .nav { display: flex; gap: 40px; font-size: 18px; }
 .nav a {
   color: var(--dark-medium); text-decoration: none;
@@ -1649,7 +1649,8 @@ body {
 
 /* ── Full-page editor layout ── */
 .editor-layout-fullpage {
-  height: calc(100vh - 81px);
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
   width: 100%;
 }

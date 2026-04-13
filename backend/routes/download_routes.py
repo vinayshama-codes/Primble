@@ -49,10 +49,11 @@ async def download_pdf(
     if sub in ("essentials", "professional"):
         pkg_eval = evaluate_package_limit(fresh)
 
-    proc_session = get_processing_session(session_id)
-    generated    = proc_session.get("generated_forms", {})
-    form_name    = generated.get(form_id, {}).get("form_name", form_id)
-    pdf_bytes    = regenerate_pdf_for_form(proc_session, form_id, force=True)
+    proc_session   = get_processing_session(session_id)
+    generated      = proc_session.get("generated_forms", {})
+    form_name      = generated.get(form_id, {}).get("form_name", form_id)
+    user_signature = fresh.get("signature_data") or None
+    pdf_bytes      = regenerate_pdf_for_form(proc_session, form_id, force=True, user_signature=user_signature)
     facts        = proc_session.get("facts", {})
     flags        = proc_session.get("flags", {})
     org_name     = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
@@ -116,16 +117,17 @@ async def download_all(
     if sub in ("essentials", "professional"):
         pkg_eval = evaluate_package_limit(fresh)
 
-    proc_session = get_processing_session(session_id)
-    generated    = proc_session.get("generated_forms", {})
+    proc_session   = get_processing_session(session_id)
+    generated      = proc_session.get("generated_forms", {})
     if not generated:
         from fastapi import HTTPException
         raise HTTPException(400, "No forms generated yet")
 
+    user_signature = fresh.get("signature_data") or None
     acord_pdfs = {}
     for fid in generated.keys():
         try:
-            acord_pdfs[fid] = regenerate_pdf_for_form(proc_session, fid, force=True)
+            acord_pdfs[fid] = regenerate_pdf_for_form(proc_session, fid, force=True, user_signature=user_signature)
         except Exception as ex:
             logger.error(f"Skipping {fid}: {ex}")
 

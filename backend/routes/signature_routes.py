@@ -115,6 +115,7 @@ async def apply_signature(
     generated[form_id]["pdf_bytes"]         = signed_pdf
     generated[form_id]["_pdf_cache_hash"]   = state_hash
     generated[form_id]["signature_applied"] = True
+    generated[form_id]["signature_b64"]     = sig
 
     upd_processing_session(session_id, {"generated_forms": generated})
 

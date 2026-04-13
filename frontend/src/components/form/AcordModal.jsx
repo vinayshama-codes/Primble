@@ -277,6 +277,17 @@ export default function AcordModal({
   const [loading, setLoading] = useState(false);
   const [processingStage, setProcessingStage] = useState("");
   const [step, setStep] = useState(resumeSessionId ? "resuming" : "dashboard");
+
+  useEffect(() => {
+    if (step === "editor") {
+      document.body.style.overflow = "hidden";
+      window.scrollTo(0, 0);
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [step]);
+
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(resumeSessionId || null);
   const [docSummary, setDocSummary] = useState([]);
@@ -572,8 +583,16 @@ export default function AcordModal({
  
 
 return (
-    <div style={{ background: "#f8fafc", minHeight: "calc(100vh - 81px)", width: "100%", overflow: step === "editor" ? "hidden" : "visible" }}>
-      <div style={{ padding: step === "editor" ? 0 : "32px 40px" }}>
+    <div style={{
+      background: "#f8fafc", width: "100%",
+      ...(step === "editor"
+        ? { height: "calc(100vh - 81px)", display: "flex", flexDirection: "column", overflow: "hidden" }
+        : { minHeight: "calc(100vh - 81px)" })
+    }}>
+      <div style={{
+        padding: step === "editor" ? 0 : "32px 40px",
+        ...(step === "editor" && { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 })
+      }}>
         {renderContent()}
       </div>
       {showAcordModal && renderAcordLicenseModal()}
