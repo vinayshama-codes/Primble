@@ -1,5 +1,4 @@
-# Acordly API v12.3.1 - Python Backend Requirements
-# Generated from main.py imports
+# Acordly API v12.4.0 - Python Backend Requirements
 
 # Web Framework
 fastapi>=0.104.0
@@ -32,27 +31,22 @@ Pillow>=10.1.0
 # AI/LLM
 groq>=0.4.2
 
-# Email (Optional providers - install as needed)
-resend>=0.3.0
-
 # Scheduling
 APScheduler>=3.10.4
 
 # Data Validation
-pydantic>=2.5.0
 pydantic[email]>=2.5.0
 email-validator>=2.1.0
 
 # Environment Variables
 python-dotenv>=1.0.0
 
-# OCR (Optional - install based on OCR_PROVIDER)
-# easyocr>=1.7.0  # Uncomment if using EasyOCR
-# google-cloud-vision>=3.4.0  # Uncomment if using Google Vision
- boto3>=1.29.0  
+# Cloud / AWS (Textract OCR, S3, SQS)
+boto3>=1.29.0
 
-# Logging & Monitoring (Optional)
-# sentry-sdk>=1.38.0
+# OCR — default provider; install all three to support runtime switching via OCR_PROVIDER env var
+easyocr>=1.7.0
+google-cloud-vision>=3.4.0
 
 # Development (Optional)
 pytest>=7.4.3
