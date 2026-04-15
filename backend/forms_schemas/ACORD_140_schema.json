@@ -1,0 +1,1782 @@
+{
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer ",
+    "required": false
+  },
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the da",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer / agency. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submi",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and condi",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy o",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Asso",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarat",
+    "required": false
+  },
+  "CommercialProperty_Summary_BlanketNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket. ",
+    "required": false
+  },
+  "CommercialProperty_Summary_BlanketLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for the blanket. ",
+    "required": false
+  },
+  "CommercialCoverage_Summary_BlanketTypeDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The subject(s) of insurance covered by this blanket.  Examples inclu",
+    "required": false
+  },
+  "CommercialProperty_Summary_BlanketNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket. ",
+    "required": false
+  },
+  "CommercialProperty_Summary_BlanketLimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for the blanket. ",
+    "required": false
+  },
+  "CommercialCoverage_Summary_BlanketTypeDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The subject(s) of insurance covered by this blanket.  Examples inclu",
+    "required": false
+  },
+  "CommercialProperty_Summary_BlanketNumberIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket. ",
+    "required": false
+  },
+  "CommercialProperty_Summary_BlanketLimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for the blanket. ",
+    "required": false
+  },
+  "CommercialCoverage_Summary_BlanketTypeDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The subject(s) of insurance covered by this blanket.  Examples inclu",
+    "required": false
+  },
+  "CommercialProperty_Summary_BlanketNumberIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket. ",
+    "required": false
+  },
+  "CommercialProperty_Summary_BlanketLimitAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for the blanket. ",
+    "required": false
+  },
+  "CommercialCoverage_Summary_BlanketTypeDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The subject(s) of insurance covered by this blanket.  Examples inclu",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_Building_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The building number for the premises.  Used when more than one bui",
+    "required": false
+  },
+  "CommercialStructure_Building_SublocationDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: This describes the particular sublocation in a manner sufficient to ",
+    "required": false
+  },
+  "CommercialProperty_Premises_SubjectOfInsuranceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code designating all unit at risk / coverages that are to be ins",
+    "required": false
+  },
+  "CommercialProperty_Premises_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for this subject of insuran",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total valu",
+    "required": false
+  },
+  "CommercialProperty_Premises_ValuationCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicate the method which will be used to determine the amount paid ",
+    "required": false
+  },
+  "CommercialProperty_Premises_CauseOfLossCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The causes of loss the subject of insurance is to be covered for.  E",
+    "required": false
+  },
+  "CommercialProperty_Premises_InflationGuardPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The inflation guard percentage gives an automatic increase in ",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount that is to apply to this subject of insu",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleTypeCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code indicating the type of deductible that is to apply to this ",
+    "required": false
+  },
+  "CommercialProperty_Premises_BlanketNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket under which this subject of",
+    "required": false
+  },
+  "CommercialProperty_Premises_FormsAndConditions_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The form numbers and special conditions that apply to this subject o",
+    "required": false
+  },
+  "CommercialProperty_Premises_SubjectOfInsuranceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code designating all unit at risk / coverages that are to be ins",
+    "required": false
+  },
+  "CommercialProperty_Premises_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for this subject of insuran",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_B": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total valu",
+    "required": false
+  },
+  "CommercialProperty_Premises_ValuationCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicate the method which will be used to determine the amount paid ",
+    "required": false
+  },
+  "CommercialProperty_Premises_CauseOfLossCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The causes of loss the subject of insurance is to be covered for.  E",
+    "required": false
+  },
+  "CommercialProperty_Premises_InflationGuardPercent_B": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The inflation guard percentage gives an automatic increase in ",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount that is to apply to this subject of insu",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleTypeCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code indicating the type of deductible that is to apply to this ",
+    "required": false
+  },
+  "CommercialProperty_Premises_BlanketNumber_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket under which this subject of",
+    "required": false
+  },
+  "CommercialProperty_Premises_FormsAndConditions_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The form numbers and special conditions that apply to this subject o",
+    "required": false
+  },
+  "CommercialProperty_Premises_SubjectOfInsuranceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code designating all unit at risk / coverages that are to be ins",
+    "required": false
+  },
+  "CommercialProperty_Premises_LimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for this subject of insuran",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_C": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total valu",
+    "required": false
+  },
+  "CommercialProperty_Premises_ValuationCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicate the method which will be used to determine the amount paid ",
+    "required": false
+  },
+  "CommercialProperty_Premises_CauseOfLossCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The causes of loss the subject of insurance is to be covered for.  E",
+    "required": false
+  },
+  "CommercialProperty_Premises_InflationGuardPercent_C": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The inflation guard percentage gives an automatic increase in ",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount that is to apply to this subject of insu",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleTypeCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code indicating the type of deductible that is to apply to this ",
+    "required": false
+  },
+  "CommercialProperty_Premises_BlanketNumber_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket under which this subject of",
+    "required": false
+  },
+  "CommercialProperty_Premises_FormsAndConditions_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The form numbers and special conditions that apply to this subject o",
+    "required": false
+  },
+  "CommercialProperty_Premises_SubjectOfInsuranceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code designating all unit at risk / coverages that are to be ins",
+    "required": false
+  },
+  "CommercialProperty_Premises_LimitAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for this subject of insuran",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_D": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total valu",
+    "required": false
+  },
+  "CommercialProperty_Premises_ValuationCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicate the method which will be used to determine the amount paid ",
+    "required": false
+  },
+  "CommercialProperty_Premises_CauseOfLossCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The causes of loss the subject of insurance is to be covered for.  E",
+    "required": false
+  },
+  "CommercialProperty_Premises_InflationGuardPercent_D": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The inflation guard percentage gives an automatic increase in ",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount that is to apply to this subject of insu",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleTypeCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code indicating the type of deductible that is to apply to this ",
+    "required": false
+  },
+  "CommercialProperty_Premises_BlanketNumber_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket under which this subject of",
+    "required": false
+  },
+  "CommercialProperty_Premises_FormsAndConditions_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The form numbers and special conditions that apply to this subject o",
+    "required": false
+  },
+  "CommercialProperty_Premises_SubjectOfInsuranceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code designating all unit at risk / coverages that are to be ins",
+    "required": false
+  },
+  "CommercialProperty_Premises_LimitAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for this subject of insuran",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_E": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total valu",
+    "required": false
+  },
+  "CommercialProperty_Premises_ValuationCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicate the method which will be used to determine the amount paid ",
+    "required": false
+  },
+  "CommercialProperty_Premises_CauseOfLossCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The causes of loss the subject of insurance is to be covered for.  E",
+    "required": false
+  },
+  "CommercialProperty_Premises_InflationGuardPercent_E": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The inflation guard percentage gives an automatic increase in ",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount that is to apply to this subject of insu",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleTypeCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code indicating the type of deductible that is to apply to this ",
+    "required": false
+  },
+  "CommercialProperty_Premises_BlanketNumber_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket under which this subject of",
+    "required": false
+  },
+  "CommercialProperty_Premises_FormsAndConditions_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The form numbers and special conditions that apply to this subject o",
+    "required": false
+  },
+  "CommercialProperty_Attachment_BusinessIncomeExtraExpenseIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates ACORD 810, Business Income / Extra Expe",
+    "required": false
+  },
+  "CommercialProperty_Attachment_ValueReportingIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates ACORD 811, Value Reporting Information,",
+    "required": false
+  },
+  "CommercialProperty_Spoilage_YesNoCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if spoilage c",
+    "required": false
+  },
+  "CommercialProperty_Spoilage_PropertyDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of property to be covered for spoilage. ",
+    "required": false
+  },
+  "CommercialProperty_Spoilage_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to the spoilage coverage. ",
+    "required": false
+  },
+  "CommercialProperty_Spoilage_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to the spoilage coverage. ",
+    "required": false
+  },
+  "CommercialProperty_Spoilage_RefrigeratorMaintenanceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if there is a",
+    "required": false
+  },
+  "CommercialProperty_Premises_BreakdownOrContaminationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that breakdown or contamination coverag",
+    "required": false
+  },
+  "CommercialProperty_Premises_PowerOutageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates power outage coverage exists. ",
+    "required": false
+  },
+  "CommercialProperty_Premises_SellingPriceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates selling price coverage exists on refrig",
+    "required": false
+  },
+  "CommercialProperty_Premises_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates other refrigerant equipment coverage ex",
+    "required": false
+  },
+  "CommercialProperty_Premises_OptionsDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of optional coverages that apply. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_SinkHoleCollapse_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that sink hole coverage is accepted. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_SinkHoleCollapse_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that sink hole coverage is rejected. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_SinkHoleCollapse_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to the sink hole coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_MineSubsidence_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that mine subsidence coverage is accept",
+    "required": false
+  },
+  "CommercialPropertyCoverage_MineSubsidenceOption_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that mine subsidence coverage is reject",
+    "required": false
+  },
+  "CommercialPropertyCoverage_MineSubsidence_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The total limit amount for mine subsidence coverage. ",
+    "required": false
+  },
+  "BuildingFeatures_HistoricalPropertyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the property has been designated an his",
+    "required": false
+  },
+  "Construction_OpenSidesCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of open sides on a structure. ",
+    "required": false
+  },
+  "CommercialProperty_Premises_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with a specific location or sublocation. ",
+    "required": false
+  },
+  "Construction_ConstructionCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The primary construction type of the premises. Common construction c",
+    "required": false
+  },
+  "BuildingFireProtection_HydrantDistanceFeetCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance in feet from the nearest hydrant that supports the pr",
+    "required": false
+  },
+  "BuildingFireProtection_FireStationDistanceMileCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance in miles from the nearest fire station that supports ",
+    "required": false
+  },
+  "BuildingFireProtection_FireDistrictName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The property's fire district name. ",
+    "required": false
+  },
+  "BuildingFireProtection_FireDistrictCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The property's fire district code number which can be found in the i",
+    "required": false
+  },
+  "BuildingFireProtection_ProtectionClassCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The fire rating protection class for this location.  Note: some stru",
+    "required": false
+  },
+  "Construction_StoreyCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of stories or floors for this building not including an",
+    "required": false
+  },
+  "Construction_BasementCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of basements for this building. ",
+    "required": false
+  },
+  "CommercialStructure_BuiltYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the building at each location was originally constructed. S",
+    "required": false
+  },
+  "Construction_BuildingArea_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of square feet of the building at this location for whi",
+    "required": false
+  },
+  "BuildingImprovement_WiringIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if any wiring improvements have been ma",
+    "required": false
+  },
+  "BuildingImprovement_WiringYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the wiring improvements took place. ",
+    "required": false
+  },
+  "BuildingImprovement_RoofingIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if any roofing improvements have been m",
+    "required": false
+  },
+  "BuildingImprovement_RoofingYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the roofing improvements took place. ",
+    "required": false
+  },
+  "BuildingImprovement_PlumbingIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if any plumbing improvements have been ",
+    "required": false
+  },
+  "BuildingImprovement_PlumbingYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the plumbing improvements took place. ",
+    "required": false
+  },
+  "BuildingImprovement_HeatingIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if any heating improvements have been m",
+    "required": false
+  },
+  "BuildingImprovement_HeatingYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the heating improvements took place. ",
+    "required": false
+  },
+  "BuildingImprovement_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if any other improvements have been mad",
+    "required": false
+  },
+  "BuildingImprovement_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other improvements that have been made to the str",
+    "required": false
+  },
+  "BuildingImprovement_OtherYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the other improvements took place. ",
+    "required": false
+  },
+  "Construction_BuildingCodeEffectivenessGradeCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The industry code used to collect the building code effectiveness gr",
+    "required": false
+  },
+  "CommercialStructure_TaxCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The city, county or state tax code, if applicable. ",
+    "required": false
+  },
+  "Construction_RoofMaterialCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The material used to construct the roof.  Examples include:\n  * Comp",
+    "required": false
+  },
+  "BuildingOccupancy_OtherOccupanciesDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of any other occupancies located in the building not",
+    "required": false
+  },
+  "CommercialStructure_WindClass_ResistiveIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the wind class is resistive. ",
+    "required": false
+  },
+  "CommercialStructure_WindClass_SemiResistiveIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the wind class is semi-resistive. ",
+    "required": false
+  },
+  "CommercialStructure_WindClass_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the wind class is other than those list",
+    "required": false
+  },
+  "CommercialStructure_WindClass_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other wind class. ",
+    "required": false
+  },
+  "BuildingFeatures_SolidFuelHeaterIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the presence of a solid fuel heater suc",
+    "required": false
+  },
+  "BuildingFeatures_SolidFuelHeaterInstallationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The installation date of the solid fuel heater. ",
+    "required": false
+  },
+  "BuildingFeatures_SolidFuelHeaterManufacturerName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The manufacturer of the solid fuel heater. ",
+    "required": false
+  },
+  "CommercialStructure_PrimaryHeat_BoilerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if a boiler is the primary heating on t",
+    "required": false
+  },
+  "CommercialStructure_HeatingBoilerInsuredElsewhereCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the heatin",
+    "required": false
+  },
+  "CommercialStructure_PrimaryHeat_SolidFuelIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if solid fuel is the primary heating on",
+    "required": false
+  },
+  "CommercialStructure_PrimaryHeat_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates primary heating source is other than th",
+    "required": false
+  },
+  "CommercialStructure_PrimaryHeat_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: If applicable, describe the other primary heat source. ",
+    "required": false
+  },
+  "CommercialStructure_SecondaryHeat_BoilerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if a boiler is the secondary heating on",
+    "required": false
+  },
+  "CommercialStructure_HeatingBoilerInsuredElsewhereCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the heatin",
+    "required": false
+  },
+  "CommercialStructure_SecondaryHeat_SolidFuelIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if solid fuel is the secondary heating ",
+    "required": false
+  },
+  "CommercialStructure_SecondaryHeat_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates secondary heating source is other than ",
+    "required": false
+  },
+  "CommercialStructure_SecondaryHeat_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: If applicable, describe the other secondary heat source. ",
+    "required": false
+  },
+  "BuildingExposure_RightDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the buildings, structures, activities conducted, ",
+    "required": false
+  },
+  "BuildingExposure_RightDistance_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance to the adjacent exposure on the right of the insured ",
+    "required": false
+  },
+  "BuildingExposure_LeftDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the buildings, structures, activities conducted, ",
+    "required": false
+  },
+  "BuildingExposure_LeftDistance_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance to the adjacent exposure on the left of the insured p",
+    "required": false
+  },
+  "BuildingExposure_FrontDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the buildings, structures, activities conducted, ",
+    "required": false
+  },
+  "BuildingExposure_FrontDistance_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance to the adjacent exposure in the front of the insured ",
+    "required": false
+  },
+  "BuildingExposure_RearDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the buildings, structures, activities conducted, ",
+    "required": false
+  },
+  "BuildingExposure_RearDistance_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance to the adjacent exposure in the rear of the insured p",
+    "required": false
+  },
+  "Alarm_Burglar_AlarmDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of any burglar alarm protecting the building or cont",
+    "required": false
+  },
+  "Alarm_Burglar_CertificateIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The Underwriters Laboratories or other testing organization Ce",
+    "required": false
+  },
+  "Alarm_Burglar_CertificateExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the certificate.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Alarm_Burglar_CentralStationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the burglar alarm rings at an alarm com",
+    "required": false
+  },
+  "Alarm_Burglar_WithKeysIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the alarm company, located off the insu",
+    "required": false
+  },
+  "Burglar_LocalGongIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the burglar alarm rings on audible gong",
+    "required": false
+  },
+  "Alarm_Burglar_InstalledAndServicedByName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the alarm company that installed and services the alarm.",
+    "required": false
+  },
+  "Alarm_Burglar_ProtectionExtentCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The designated extent of protection as described in the Underwriters",
+    "required": false
+  },
+  "Alarm_Burglar_GradeCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The alarm system grade as described in the Underwriters Laboratories",
+    "required": false
+  },
+  "BuildingSecurity_GuardWatchmenCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of guards and or watchmen employed or contracted for by",
+    "required": false
+  },
+  "BuildingSecurity_GuardWatchmenClockHourlyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the guard / watchman is required to mak",
+    "required": false
+  },
+  "BuildingSecurity_GuardWatchmenOtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the guard / watchman is required to mak",
+    "required": false
+  },
+  "BuildingSecurity_GuardWatchmenOtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the rounds the guards / watchmen are required to ",
+    "required": false
+  },
+  "BuildingFireProtection_Alarm_ProtectionDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of fire protection for the premises (e.g",
+    "required": false
+  },
+  "BuildingFireProtection_Alarm_SprinklerPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of the structure area covered by the sprinkler ",
+    "required": false
+  },
+  "BuildingFireProtection_Alarm_ManufacturerName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the manufacturer of the alarm, and if it is UL listed. ",
+    "required": false
+  },
+  "BuildingFireProtection_Alarm_CentralStationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the fire alarm rings at an alarm compan",
+    "required": false
+  },
+  "BuildingFireProtection_Alarm_LocalGongIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the fire alarm rings on an audible gong",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Attachment_AdditionalInterestIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that further additional interests appea",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LendersLossPayableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lende",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LossPayeeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a loss ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_MortgageeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a mortg",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest is other than t",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_InterestRank_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The ranking of 'this' additional interest when multiple additional",
+    "required": false
+  },
+  "AdditionalInterest_CertificateRequiredIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the additional interest requires a C",
+    "required": false
+  },
+  "AdditionalInterest_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line one. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line two. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address city name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address state or province code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address postal code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CountryCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's country code. ",
+    "required": false
+  },
+  "AdditionalInterest_AccountNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The loan number, account number or other controlling number th",
+    "required": false
+  },
+  "AdditionalInterest_Item_LocationProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location which has an addition",
+    "required": false
+  },
+  "AdditionalInterest_Item_BuildingProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the building which has an addition",
+    "required": false
+  },
+  "AdditionalInterest_Item_OtherItemDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the item which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_ScheduledItemProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the scheduled item which has an ad",
+    "required": false
+  },
+  "AdditionalInterest_ItemDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the item of interest if needed to further clarify",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_Building_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The building number for the premises.  Used when more than one bui",
+    "required": false
+  },
+  "CommercialStructure_Building_SublocationDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: This describes the particular sublocation in a manner sufficient to ",
+    "required": false
+  },
+  "CommercialProperty_Premises_SubjectOfInsuranceCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code designating all unit at risk / coverages that are to be ins",
+    "required": false
+  },
+  "CommercialProperty_Premises_LimitAmount_G": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for this subject of insuran",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_G": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total valu",
+    "required": false
+  },
+  "CommercialProperty_Premises_ValuationCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicate the method which will be used to determine the amount paid ",
+    "required": false
+  },
+  "CommercialProperty_Premises_CauseOfLossCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The causes of loss the subject of insurance is to be covered for.  E",
+    "required": false
+  },
+  "CommercialProperty_Premises_InflationGuardPercent_G": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The inflation guard percentage gives an automatic increase in ",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleAmount_G": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount that is to apply to this subject of insu",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleTypeCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code indicating the type of deductible that is to apply to this ",
+    "required": false
+  },
+  "CommercialProperty_Premises_BlanketNumber_G": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket under which this subject of",
+    "required": false
+  },
+  "CommercialProperty_Premises_FormsAndConditions_G": {
+    "ft": "/Tx",
+    "tu": "Enter text: The form numbers and special conditions that apply to this subject o",
+    "required": false
+  },
+  "CommercialProperty_Premises_SubjectOfInsuranceCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code designating all unit at risk / coverages that are to be ins",
+    "required": false
+  },
+  "CommercialProperty_Premises_LimitAmount_H": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for this subject of insuran",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_H": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total valu",
+    "required": false
+  },
+  "CommercialProperty_Premises_ValuationCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicate the method which will be used to determine the amount paid ",
+    "required": false
+  },
+  "CommercialProperty_Premises_CauseOfLossCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The causes of loss the subject of insurance is to be covered for.  E",
+    "required": false
+  },
+  "CommercialProperty_Premises_InflationGuardPercent_H": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The inflation guard percentage gives an automatic increase in ",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleAmount_H": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount that is to apply to this subject of insu",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleTypeCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code indicating the type of deductible that is to apply to this ",
+    "required": false
+  },
+  "CommercialProperty_Premises_BlanketNumber_H": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket under which this subject of",
+    "required": false
+  },
+  "CommercialProperty_Premises_FormsAndConditions_H": {
+    "ft": "/Tx",
+    "tu": "Enter text: The form numbers and special conditions that apply to this subject o",
+    "required": false
+  },
+  "CommercialProperty_Premises_SubjectOfInsuranceCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code designating all unit at risk / coverages that are to be ins",
+    "required": false
+  },
+  "CommercialProperty_Premises_LimitAmount_I": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for this subject of insuran",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_I": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total valu",
+    "required": false
+  },
+  "CommercialProperty_Premises_ValuationCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicate the method which will be used to determine the amount paid ",
+    "required": false
+  },
+  "CommercialProperty_Premises_CauseOfLossCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The causes of loss the subject of insurance is to be covered for.  E",
+    "required": false
+  },
+  "CommercialProperty_Premises_InflationGuardPercent_I": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The inflation guard percentage gives an automatic increase in ",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleAmount_I": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount that is to apply to this subject of insu",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleTypeCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code indicating the type of deductible that is to apply to this ",
+    "required": false
+  },
+  "CommercialProperty_Premises_BlanketNumber_I": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket under which this subject of",
+    "required": false
+  },
+  "CommercialProperty_Premises_FormsAndConditions_I": {
+    "ft": "/Tx",
+    "tu": "Enter text: The form numbers and special conditions that apply to this subject o",
+    "required": false
+  },
+  "CommercialProperty_Premises_SubjectOfInsuranceCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code designating all unit at risk / coverages that are to be ins",
+    "required": false
+  },
+  "CommercialProperty_Premises_LimitAmount_J": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for this subject of insuran",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_J": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total valu",
+    "required": false
+  },
+  "CommercialProperty_Premises_ValuationCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicate the method which will be used to determine the amount paid ",
+    "required": false
+  },
+  "CommercialProperty_Premises_CauseOfLossCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The causes of loss the subject of insurance is to be covered for.  E",
+    "required": false
+  },
+  "CommercialProperty_Premises_InflationGuardPercent_J": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The inflation guard percentage gives an automatic increase in ",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleAmount_J": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount that is to apply to this subject of insu",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleTypeCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code indicating the type of deductible that is to apply to this ",
+    "required": false
+  },
+  "CommercialProperty_Premises_BlanketNumber_J": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket under which this subject of",
+    "required": false
+  },
+  "CommercialProperty_Premises_FormsAndConditions_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: The form numbers and special conditions that apply to this subject o",
+    "required": false
+  },
+  "CommercialProperty_Premises_SubjectOfInsuranceCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code designating all unit at risk / coverages that are to be ins",
+    "required": false
+  },
+  "CommercialProperty_Premises_LimitAmount_K": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The maximum amount of coverage provided for this subject of insuran",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_K": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total valu",
+    "required": false
+  },
+  "CommercialProperty_Premises_ValuationCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicate the method which will be used to determine the amount paid ",
+    "required": false
+  },
+  "CommercialProperty_Premises_CauseOfLossCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The causes of loss the subject of insurance is to be covered for.  E",
+    "required": false
+  },
+  "CommercialProperty_Premises_InflationGuardPercent_K": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The inflation guard percentage gives an automatic increase in ",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleAmount_K": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount that is to apply to this subject of insu",
+    "required": false
+  },
+  "CommercialProperty_Premises_DeductibleTypeCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code indicating the type of deductible that is to apply to this ",
+    "required": false
+  },
+  "CommercialProperty_Premises_BlanketNumber_K": {
+    "ft": "/Tx",
+    "tu": "Enter number: The identifying number for the blanket under which this subject of",
+    "required": false
+  },
+  "CommercialProperty_Premises_FormsAndConditions_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: The form numbers and special conditions that apply to this subject o",
+    "required": false
+  },
+  "CommercialProperty_Attachment_BusinessIncomeExtraExpenseIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates ACORD 810, Business Income / Extra Expe",
+    "required": false
+  },
+  "CommercialProperty_Attachment_ValueReportingIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates ACORD 811, Value Reporting Information,",
+    "required": false
+  },
+  "CommercialProperty_Spoilage_YesNoCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if spoilage c",
+    "required": false
+  },
+  "CommercialProperty_Spoilage_PropertyDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of property to be covered for spoilage. ",
+    "required": false
+  },
+  "CommercialProperty_Spoilage_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to the spoilage coverage. ",
+    "required": false
+  },
+  "CommercialProperty_Spoilage_DeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to the spoilage coverage. ",
+    "required": false
+  },
+  "CommercialProperty_Spoilage_RefrigeratorMaintenanceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if there is a",
+    "required": false
+  },
+  "CommercialProperty_Premises_BreakdownOrContaminationIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that breakdown or contamination coverag",
+    "required": false
+  },
+  "CommercialProperty_Premises_PowerOutageIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates power outage coverage exists. ",
+    "required": false
+  },
+  "CommercialProperty_Premises_SellingPriceIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates selling price coverage exists on refrig",
+    "required": false
+  },
+  "CommercialProperty_Premises_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates other refrigerant equipment coverage ex",
+    "required": false
+  },
+  "CommercialProperty_Premises_OptionsDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of optional coverages that apply. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_SinkHoleCollapse_YesIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that sink hole coverage is accepted. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_SinkHoleCollapse_NoIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that sink hole coverage is rejected. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_SinkHoleCollapse_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to the sink hole coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_MineSubsidence_YesIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that mine subsidence coverage is accept",
+    "required": false
+  },
+  "CommercialPropertyCoverage_MineSubsidenceOption_NoIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that mine subsidence coverage is reject",
+    "required": false
+  },
+  "CommercialPropertyCoverage_MineSubsidence_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The total limit amount for mine subsidence coverage. ",
+    "required": false
+  },
+  "BuildingFeatures_HistoricalPropertyIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the property has been designated an his",
+    "required": false
+  },
+  "Construction_OpenSidesCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of open sides on a structure. ",
+    "required": false
+  },
+  "CommercialProperty_Premises_RemarkText_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with a specific location or sublocation. ",
+    "required": false
+  },
+  "Construction_ConstructionCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The primary construction type of the premises. Common construction c",
+    "required": false
+  },
+  "BuildingFireProtection_HydrantDistanceFeetCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance in feet from the nearest hydrant that supports the pr",
+    "required": false
+  },
+  "BuildingFireProtection_FireStationDistanceMileCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance in miles from the nearest fire station that supports ",
+    "required": false
+  },
+  "BuildingFireProtection_FireDistrictName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The property's fire district name. ",
+    "required": false
+  },
+  "BuildingFireProtection_FireDistrictCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The property's fire district code number which can be found in the i",
+    "required": false
+  },
+  "BuildingFireProtection_ProtectionClassCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The fire rating protection class for this location.  Note: some stru",
+    "required": false
+  },
+  "Construction_StoreyCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of stories or floors for this building not including an",
+    "required": false
+  },
+  "Construction_BasementCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of basements for this building. ",
+    "required": false
+  },
+  "CommercialStructure_BuiltYear_B": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the building at each location was originally constructed. S",
+    "required": false
+  },
+  "Construction_BuildingArea_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of square feet of the building at this location for whi",
+    "required": false
+  },
+  "BuildingImprovement_WiringIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if any wiring improvements have been ma",
+    "required": false
+  },
+  "BuildingImprovement_WiringYear_B": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the wiring improvements took place. ",
+    "required": false
+  },
+  "BuildingImprovement_RoofingIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if any roofing improvements have been m",
+    "required": false
+  },
+  "BuildingImprovement_RoofingYear_B": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the roofing improvements took place. ",
+    "required": false
+  },
+  "BuildingImprovement_PlumbingIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if any plumbing improvements have been ",
+    "required": false
+  },
+  "BuildingImprovement_PlumbingYear_B": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the plumbing improvements took place. ",
+    "required": false
+  },
+  "BuildingImprovement_HeatingIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if any heating improvements have been m",
+    "required": false
+  },
+  "BuildingImprovement_HeatingYear_B": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the heating improvements took place. ",
+    "required": false
+  },
+  "BuildingImprovement_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if any other improvements have been mad",
+    "required": false
+  },
+  "BuildingImprovement_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other improvements that have been made to the str",
+    "required": false
+  },
+  "BuildingImprovement_OtherYear_B": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the other improvements took place. ",
+    "required": false
+  },
+  "Construction_BuildingCodeEffectivenessGradeCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The industry code used to collect the building code effectiveness gr",
+    "required": false
+  },
+  "CommercialStructure_TaxCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The city, county or state tax code, if applicable. ",
+    "required": false
+  },
+  "Construction_RoofMaterialCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The material used to construct the roof.  Examples include:\n  * Comp",
+    "required": false
+  },
+  "BuildingOccupancy_OtherOccupanciesDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of any other occupancies located in the building not",
+    "required": false
+  },
+  "CommercialStructure_WindClass_ResistiveIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the wind class is resistive. ",
+    "required": false
+  },
+  "CommercialStructure_WindClass_SemiResistiveIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the wind class is semi-resistive. ",
+    "required": false
+  },
+  "CommercialStructure_WindClass_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the wind class is other than those list",
+    "required": false
+  },
+  "CommercialStructure_WindClass_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other wind class. ",
+    "required": false
+  },
+  "BuildingFeatures_SolidFuelHeaterIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the presence of a solid fuel heater suc",
+    "required": false
+  },
+  "BuildingFeatures_SolidFuelHeaterInstallationDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The installation date of the solid fuel heater. ",
+    "required": false
+  },
+  "BuildingFeatures_SolidFuelHeaterManufacturerName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The manufacturer of the solid fuel heater. ",
+    "required": false
+  },
+  "CommercialStructure_PrimaryHeat_BoilerIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if a boiler is the primary heating on t",
+    "required": false
+  },
+  "CommercialStructure_HeatingBoilerInsuredElsewhereCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the heatin",
+    "required": false
+  },
+  "CommercialStructure_PrimaryHeat_SolidFuelIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if solid fuel is the primary heating on",
+    "required": false
+  },
+  "CommercialStructure_PrimaryHeat_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates primary heating source is other than th",
+    "required": false
+  },
+  "CommercialStructure_PrimaryHeat_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: If applicable, describe the other primary heat source. ",
+    "required": false
+  },
+  "CommercialStructure_SecondaryHeat_BoilerIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if a boiler is the secondary heating on",
+    "required": false
+  },
+  "CommercialStructure_HeatingBoilerInsuredElsewhereCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the heatin",
+    "required": false
+  },
+  "CommercialStructure_SecondaryHeat_SolidFuelIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if solid fuel is the secondary heating ",
+    "required": false
+  },
+  "CommercialStructure_SecondaryHeat_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates secondary heating source is other than ",
+    "required": false
+  },
+  "CommercialStructure_SecondaryHeat_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: If applicable, describe the other secondary heat source. ",
+    "required": false
+  },
+  "BuildingExposure_RightDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the buildings, structures, activities conducted, ",
+    "required": false
+  },
+  "BuildingExposure_RightDistance_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance to the adjacent exposure on the right of the insured ",
+    "required": false
+  },
+  "BuildingExposure_LeftDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the buildings, structures, activities conducted, ",
+    "required": false
+  },
+  "BuildingExposure_LeftDistance_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance to the adjacent exposure on the left of the insured p",
+    "required": false
+  },
+  "BuildingExposure_FrontDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the buildings, structures, activities conducted, ",
+    "required": false
+  },
+  "BuildingExposure_FrontDistance_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance to the adjacent exposure in the front of the insured ",
+    "required": false
+  },
+  "BuildingExposure_RearDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the buildings, structures, activities conducted, ",
+    "required": false
+  },
+  "BuildingExposure_RearDistance_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The distance to the adjacent exposure in the rear of the insured p",
+    "required": false
+  },
+  "Alarm_Burglar_AlarmDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of any burglar alarm protecting the building or cont",
+    "required": false
+  },
+  "Alarm_Burglar_CertificateIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The Underwriters Laboratories or other testing organization Ce",
+    "required": false
+  },
+  "Alarm_Burglar_CertificateExpirationDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the certificate.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Alarm_Burglar_CentralStationIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the burglar alarm rings at an alarm com",
+    "required": false
+  },
+  "Alarm_Burglar_WithKeysIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the alarm company, located off the insu",
+    "required": false
+  },
+  "Burglar_LocalGongIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the burglar alarm rings on audible gong",
+    "required": false
+  },
+  "Alarm_Burglar_InstalledAndServicedByName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the alarm company that installed and services the alarm.",
+    "required": false
+  },
+  "Alarm_Burglar_ProtectionExtentCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The designated extent of protection as described in the Underwriters",
+    "required": false
+  },
+  "Alarm_Burglar_GradeCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The alarm system grade as described in the Underwriters Laboratories",
+    "required": false
+  },
+  "BuildingSecurity_GuardWatchmenCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of guards and or watchmen employed or contracted for by",
+    "required": false
+  },
+  "BuildingSecurity_GuardWatchmenClockHourlyIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the guard / watchman is required to mak",
+    "required": false
+  },
+  "BuildingSecurity_GuardWatchmenOtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the guard / watchman is required to mak",
+    "required": false
+  },
+  "BuildingSecurity_GuardWatchmenOtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the rounds the guards / watchmen are required to ",
+    "required": false
+  },
+  "BuildingFireProtection_Alarm_ProtectionDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of fire protection for the premises (e.g",
+    "required": false
+  },
+  "BuildingFireProtection_Alarm_SprinklerPercent_B": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of the structure area covered by the sprinkler ",
+    "required": false
+  },
+  "BuildingFireProtection_Alarm_ManufacturerName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the manufacturer of the alarm, and if it is UL listed. ",
+    "required": false
+  },
+  "BuildingFireProtection_Alarm_CentralStationIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the fire alarm rings at an alarm compan",
+    "required": false
+  },
+  "BuildingFireProtection_Alarm_LocalGongIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the fire alarm rings on an audible gong",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Attachment_AdditionalInterestIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that further additional interests appea",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LendersLossPayableIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lende",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LossPayeeIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a loss ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_MortgageeIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a mortg",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest is other than t",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_InterestRank_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The ranking of 'this' additional interest when multiple additional",
+    "required": false
+  },
+  "AdditionalInterest_CertificateRequiredIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the additional interest requires a C",
+    "required": false
+  },
+  "AdditionalInterest_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. As used here, this is the compa",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineOne_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line one. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineTwo_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line two. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CityName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address city name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address state or province code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_PostalCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address postal code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CountryCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's country code. ",
+    "required": false
+  },
+  "AdditionalInterest_AccountNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The loan number, account number or other controlling number th",
+    "required": false
+  },
+  "AdditionalInterest_Item_LocationProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location which has an addition",
+    "required": false
+  },
+  "AdditionalInterest_Item_BuildingProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the building which has an addition",
+    "required": false
+  },
+  "AdditionalInterest_Item_OtherItemDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the item which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_ScheduledItemProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the scheduled item which has an ad",
+    "required": false
+  },
+  "AdditionalInterest_ItemDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the item of interest if needed to further clarify",
+    "required": false
+  },
+  "CommercialPropertyLineOfBusiness_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated the commercial property line of business. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., pr",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the authorized representative of the producer, agency an",
+    "required": false
+  },
+  "Producer_StateLicenseIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The State License Number of the producer. ",
+    "required": false
+  },
+  "NamedInsured_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM",
+    "required": false
+  },
+  "Producer_NationalIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National ",
+    "required": false
+  }
+}

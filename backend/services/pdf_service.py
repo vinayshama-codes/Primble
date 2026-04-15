@@ -8,8 +8,9 @@ import pikepdf
 from PIL import Image
 from fastapi import HTTPException
 
-from config.settings import TEMPLATE_DIR, groq_client
+from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_SCHEMAS_DIR, groq_client
 from utils.helpers import _parse_address
+from services.extraction_service import _fv
 
 logger = logging.getLogger(__name__)
 
@@ -79,17 +80,46 @@ def _collect_fields_pikepdf(arr, results: dict):
             pass
 
 
-def extract_form_schema(path: str) -> dict:
+def extract_form_schema(path: str, form_id: str = "") -> dict:
+    """Extract AcroForm field schema from a PDF template.
+
+    When *form_id* is supplied the function checks
+    ``forms_schemas/{form_id}_schema.json`` first and returns immediately on a
+    cache hit.  On a cache miss the PDF is parsed with pikepdf and the result
+    is saved to disk so subsequent calls never touch pikepdf again.
+    """
+    if form_id:
+        schema_path = os.path.join(FORMS_SCHEMAS_DIR, f"{form_id}_schema.json")
+        if os.path.exists(schema_path):
+            try:
+                with open(schema_path) as f:
+                    return json.load(f)
+            except Exception as ex:
+                logger.warning(f"extract_form_schema: failed to load cached schema for {form_id}: {ex}")
+
     if not os.path.exists(path):
         return {}
     try:
         pdf = pikepdf.open(path)
         if "/AcroForm" not in pdf.Root:
             pdf.close()
+            if form_id:
+                try:
+                    with open(os.path.join(FORMS_SCHEMAS_DIR, f"{form_id}_schema.json"), "w") as f:
+                        json.dump({}, f)
+                except Exception:
+                    pass
             return {}
         schema = {}
         _collect_fields_pikepdf(pdf.Root["/AcroForm"]["/Fields"], schema)
         pdf.close()
+        if form_id:
+            try:
+                with open(os.path.join(FORMS_SCHEMAS_DIR, f"{form_id}_schema.json"), "w") as f:
+                    json.dump(schema, f, indent=2)
+                logger.info(f"extract_form_schema: saved schema for {form_id} ({len(schema)} fields)")
+            except Exception as ex:
+                logger.warning(f"extract_form_schema: could not save schema for {form_id}: {ex}")
         return schema
     except Exception as ex:
         logger.error(f"extract_form_schema error: {ex}")
@@ -145,15 +175,41 @@ def fill_pdf(template_path: str, data: dict, confidence: Optional[dict] = None) 
             return f.read()
 
 
+def _load_fieldmap(form_id: str) -> dict:
+    """Load persisted {field_name: fact_key} map for this form template, if it exists."""
+    if not form_id:
+        return {}
+    path = os.path.join(FORMS_DB_DIR, f"ACORD_{form_id}_fieldmap.json")
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_fieldmap(form_id: str, fieldmap: dict):
+    """Persist {field_name: fact_key} map so future runs skip the LLM for known fields."""
+    if not form_id or not fieldmap:
+        return
+    path = os.path.join(FORMS_DB_DIR, f"ACORD_{form_id}_fieldmap.json")
+    try:
+        with open(path, "w") as f:
+            json.dump(fieldmap, f, indent=2)
+    except Exception as ex:
+        logger.warning(f"Could not save fieldmap for {form_id}: {ex}")
+
+
 def _resolve_special(key: str, facts: dict, prefix: str) -> str:
     if prefix == "_addr":
-        raw = facts.get("mailing_address", "")
+        raw = _fv(facts, "mailing_address", "")
     elif prefix == "_loc":
         locs = facts.get("locations", [])
-        raw  = locs[0] if isinstance(locs, list) and locs else facts.get("mailing_address", "")
+        raw  = locs[0] if isinstance(locs, list) and locs else _fv(facts, "mailing_address", "")
     else:
-        raw = facts.get("mailing_address", "")
-    parsed = _parse_address(raw)
+        raw = _fv(facts, "mailing_address", "")
+    parsed = _parse_address(raw or "")
     suffix = key.split("_")[-1]
     return parsed.get(suffix, "") or ""
 
@@ -165,29 +221,60 @@ def _deterministic_map(field_name: str, facts: dict):
                 return None
             if fact_key.startswith("_"):
                 return _resolve_special(fact_key, facts, "_" + fact_key.split("_")[1]) or None
-            val = facts.get(fact_key)
+            val = _fv(facts, fact_key)   # unwrap OCR-confidence envelope
             if isinstance(val, list):
                 return str(val[0]) if val else None
             return str(val) if val is not None else None
     return "UNMATCHED"
 
 
-def map_facts_to_form(facts: dict, schema: dict) -> Tuple[dict, dict]:
+def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dict, dict]:
     if not schema:
         return {}, {}
-    mapped    = {}
-    unmatched = {}
+
+    BATCH      = 80
+    mapped     = {}
+    unmatched  = {}
     confidence = {}
 
+    # Build a reverse index: str(plain_value) → fact_key, for post-LLM inference.
+    # Unwrap OCR-confidence envelopes so wrapped scalars are still indexed.
+    facts_by_value = {}
+    for k, v in facts.items():
+        pv = v["value"] if isinstance(v, dict) and "value" in v else v
+        if pv is not None and not isinstance(pv, (list, dict)) and str(pv).strip():
+            facts_by_value[str(pv)] = k
+
+    # Load persisted field→fact_key map built on previous runs for this form template.
+    cached_fieldmap = _load_fieldmap(form_id)
+    new_fieldmap    = dict(cached_fieldmap)
+
     for field in schema.keys():
-        result = _deterministic_map(field, facts)
-        if result == "UNMATCHED":
-            unmatched[field] = schema[field]
+        if field in cached_fieldmap:
+            fact_key = cached_fieldmap[field]
+            if fact_key is None:
+                mapped[field] = None
+            elif fact_key.startswith("_"):
+                mapped[field] = _resolve_special(fact_key, facts, "_" + fact_key.split("_")[1]) or None
+            else:
+                val = _fv(facts, fact_key)   # unwrap OCR-confidence envelope
+                if isinstance(val, list):
+                    mapped[field] = str(val[0]) if val else None
+                else:
+                    mapped[field] = str(val) if val is not None else None
         else:
-            mapped[field] = result
+            result = _deterministic_map(field, facts)
+            if result == "UNMATCHED":
+                unmatched[field] = schema[field]
+            else:
+                mapped[field] = result
+                # Persist the deterministic fact_key for future runs.
+                for pattern, fact_key in _ACORD_FIELD_RULES:
+                    if pattern in field:
+                        new_fieldmap[field] = fact_key
+                        break
 
     if unmatched:
-        BATCH          = 40
         unmatched_keys = list(unmatched.keys())
         ai_mapped: dict = {}
         for batch_start in range(0, len(unmatched_keys), BATCH):
@@ -197,9 +284,10 @@ def map_facts_to_form(facts: dict, schema: dict) -> Tuple[dict, dict]:
                 info = unmatched[k] if isinstance(unmatched[k], dict) else {}
                 tu   = info.get("tu", "")[:60] if info else ""
                 batch_hints.append(k + (f"  # {tu}" if tu else ""))
+            facts_plain = {k: _fv(facts, k) for k in facts}  # strip envelopes for LLM
             prompt = (
                 f"Map these PDF form fields to insurance facts. Return ONLY JSON. Use null if no match.\n\n"
-                f"Facts: {json.dumps(facts, indent=2)}\n\nFields: {json.dumps(batch_hints)}\n\nOutput:"
+                f"Facts: {json.dumps(facts_plain, indent=2)}\n\nFields: {json.dumps(batch_hints)}\n\nOutput:"
             )
             try:
                 r   = groq_client.chat.completions.create(
@@ -215,7 +303,24 @@ def map_facts_to_form(facts: dict, schema: dict) -> Tuple[dict, dict]:
                     ai_mapped.update(json.loads(raw[s : e + 1]))
             except Exception as ex:
                 logger.warning(f"AI batch failed: {ex}")
+
         mapped.update(ai_mapped)
+
+        # Infer fact_key from LLM-returned values via reverse lookup and persist.
+        for field, val in ai_mapped.items():
+            if val is None:
+                new_fieldmap[field] = None
+            else:
+                inferred_key = facts_by_value.get(str(val))
+                if inferred_key:
+                    new_fieldmap[field] = inferred_key
+                # If no reverse match, skip — the LLM synthesized a value we can't generalize.
+
+        _save_fieldmap(form_id, new_fieldmap)
+
+    elif new_fieldmap != cached_fieldmap:
+        # Deterministic pass added new entries — persist them even with no LLM batch.
+        _save_fieldmap(form_id, new_fieldmap)
 
     for field, meta in schema.items():
         val       = mapped.get(field)
@@ -230,7 +335,7 @@ def map_facts_to_form(facts: dict, schema: dict) -> Tuple[dict, dict]:
             confidence[field] = "low_confidence"
 
     total_filled = sum(1 for v in mapped.values() if v is not None and str(v).strip() not in ("", "null", "None"))
-    logger.info(f"Mapped {total_filled}/{len(schema)} fields")
+    logger.info(f"Mapped {total_filled}/{len(schema)} fields (form_id={form_id or 'unknown'})")
     return mapped, confidence
 
 

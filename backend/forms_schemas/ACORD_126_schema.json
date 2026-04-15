@@ -1,0 +1,1277 @@
+{
+  "GeneralLiability_CoverageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the claims made or occurrence option ap",
+    "required": false
+  },
+  "GeneralLiability_ClaimsMadeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the \"claims made\" option applies on the",
+    "required": false
+  },
+  "GeneralLiability_OccurrenceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, occurrenc",
+    "required": false
+  },
+  "GeneralLiability_OwnersAndContractorsProtectiveIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the owners and contractors protective o",
+    "required": false
+  },
+  "GeneralLiability_OtherCoverageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates other coverage not found on the form ex",
+    "required": false
+  },
+  "GeneralLiability_OtherCoverageDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the general lia",
+    "required": false
+  },
+  "GeneralLiability_PropertyDamage_DeductibleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if a property damage deductible is requ",
+    "required": false
+  },
+  "GeneralLiability_PropertyDamage_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to the Property Damage coverage. ",
+    "required": false
+  },
+  "GeneralLiability_BodilyInjury_DeductibleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if a bodily injury deductible is reques",
+    "required": false
+  },
+  "GeneralLiability_BodilyInjury_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to the Bodily Injury coverage. ",
+    "required": false
+  },
+  "GeneralLiability_OtherDeductibleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a deductible is requested on the c",
+    "required": false
+  },
+  "GeneralLiability_OtherDeductibleDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The type of deductible being requested other than property damage an",
+    "required": false
+  },
+  "GeneralLiability_OtherDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to the Other Coverage. ",
+    "required": false
+  },
+  "GeneralLiability_DeductiblePerClaimIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a per claim deductible applies to ",
+    "required": false
+  },
+  "GeneralLiability_DeductiblePerOccurrenceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a per occurrence deductible applie",
+    "required": false
+  },
+  "GeneralLiability_GeneralAggregate_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, general aggregate limit amount.  Any questio",
+    "required": false
+  },
+  "GeneralLiability_GeneralAggregate_LimitAppliesPerPolicyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, general a",
+    "required": false
+  },
+  "GeneralLiability_GeneralAggregate_LimitAppliesPerProjectIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, general a",
+    "required": false
+  },
+  "GeneralLiability_GeneralAggregate_LimitAppliesPerLocationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, general a",
+    "required": false
+  },
+  "GeneralLiability_GeneralAggregate_LimitAppliesToOtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, general a",
+    "required": false
+  },
+  "GeneralLiability_GeneralAggregate_LimitAppliesToCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other option to which the general liability p",
+    "required": false
+  },
+  "GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, products and completed operations aggregate ",
+    "required": false
+  },
+  "GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, personal and advertising injury limit amount",
+    "required": false
+  },
+  "GeneralLiability_EachOccurrence_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, each occurrence limit amount.  Any questions",
+    "required": false
+  },
+  "GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, damage to rented premises each occurrence li",
+    "required": false
+  },
+  "GeneralLiability_MedicalExpense_EachPersonLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, medical expense each person limit amount.  A",
+    "required": false
+  },
+  "GeneralLiability_EmployeeBenefits_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability employee benefits limit amount. ",
+    "required": false
+  },
+  "GeneralLiability_OtherCoverageLimitDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the general lia",
+    "required": false
+  },
+  "GeneralLiability_OtherCoverageLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, other coverage limit amount.  Any questions ",
+    "required": false
+  },
+  "GeneralLiability_PremisesOperations_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium for premises/operations coverage. ",
+    "required": false
+  },
+  "GeneralLiability_Products_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium for products coverage. ",
+    "required": false
+  },
+  "GeneralLiability_OtherCoveragePremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium for other general liability coverage. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_TotalPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total premium amount for the commercial general liability line",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the general liability line of business. ",
+    "required": false
+  },
+  "GeneralLiability_UninsuredUnderinsuredMotorists_CoverageAvailableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if uninsured/underinsured motorist cove",
+    "required": false
+  },
+  "GeneralLiability_UninsuredUnderinsuredMotorists_CoverageAvailableNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that  uninsured/underinsured motorist c",
+    "required": false
+  },
+  "GeneralLiability_MedicalPayments_CoverageAvailableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that medical payment coverage is to be ",
+    "required": false
+  },
+  "GeneralLiability_MedicalPayments_CoverageAvailableNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that medical payment coverage is not to",
+    "required": false
+  },
+  "GeneralLiability_Hazard_LocationProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned identifier for the location number of the ri",
+    "required": false
+  },
+  "GeneralLiability_Hazard_HazardProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: A unique (within location) number distinguishing this unit-at-risk",
+    "required": false
+  },
+  "GeneralLiability_Hazard_ClassCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The general liability class code that corresponds to the classificat",
+    "required": false
+  },
+  "GeneralLiability_Hazard_PremiumBasisCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: An industry code designating the rating basis of the exposure amount",
+    "required": false
+  },
+  "GeneralLiability_Hazard_Exposure_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount of the exposure used for this class code in calculating",
+    "required": false
+  },
+  "GeneralLiability_Hazard_TerritoryCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating territory code based on location from the appropriate sta",
+    "required": false
+  },
+  "GeneralLiability_Hazard_PremisesOperationsRate_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The separate Premises Operations manual rate applicable to the class",
+    "required": false
+  },
+  "GeneralLiability_Hazard_ProductsRate_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The separate Products rate applicable to the classification. ",
+    "required": false
+  },
+  "GeneralLiability_Hazard_PremisesOperationsPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium associated with the premises operations coverage. ",
+    "required": false
+  },
+  "GeneralLiability_Hazard_ProductsPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium associated with the products coverage. ",
+    "required": false
+  },
+  "GeneralLiability_Hazard_Classification_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The classification of the applicant's liability exposures by locatio",
+    "required": false
+  },
+  "GeneralLiability_Hazard_LocationProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned identifier for the location number of the ri",
+    "required": false
+  },
+  "GeneralLiability_Hazard_HazardProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: A unique (within location) number distinguishing this unit-at-risk",
+    "required": false
+  },
+  "GeneralLiability_Hazard_ClassCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The general liability class code that corresponds to the classificat",
+    "required": false
+  },
+  "GeneralLiability_Hazard_PremiumBasisCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: An industry code designating the rating basis of the exposure amount",
+    "required": false
+  },
+  "GeneralLiability_Hazard_Exposure_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount of the exposure used for this class code in calculating",
+    "required": false
+  },
+  "GeneralLiability_Hazard_TerritoryCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating territory code based on location from the appropriate sta",
+    "required": false
+  },
+  "GeneralLiability_Hazard_PremisesOperationsRate_B": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The separate Premises Operations manual rate applicable to the class",
+    "required": false
+  },
+  "GeneralLiability_Hazard_ProductsRate_B": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The separate Products rate applicable to the classification. ",
+    "required": false
+  },
+  "GeneralLiability_Hazard_PremisesOperationsPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium associated with the premises operations coverage. ",
+    "required": false
+  },
+  "GeneralLiability_Hazard_ProductsPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium associated with the products coverage. ",
+    "required": false
+  },
+  "GeneralLiability_Hazard_Classification_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The classification of the applicant's liability exposures by locatio",
+    "required": false
+  },
+  "GeneralLiability_Hazard_LocationProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned identifier for the location number of the ri",
+    "required": false
+  },
+  "GeneralLiability_Hazard_HazardProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: A unique (within location) number distinguishing this unit-at-risk",
+    "required": false
+  },
+  "GeneralLiability_Hazard_ClassCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The general liability class code that corresponds to the classificat",
+    "required": false
+  },
+  "GeneralLiability_Hazard_PremiumBasisCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: An industry code designating the rating basis of the exposure amount",
+    "required": false
+  },
+  "GeneralLiability_Hazard_Exposure_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount of the exposure used for this class code in calculating",
+    "required": false
+  },
+  "GeneralLiability_Hazard_TerritoryCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating territory code based on location from the appropriate sta",
+    "required": false
+  },
+  "GeneralLiability_Hazard_PremisesOperationsRate_C": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The separate Premises Operations manual rate applicable to the class",
+    "required": false
+  },
+  "GeneralLiability_Hazard_ProductsRate_C": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The separate Products rate applicable to the classification. ",
+    "required": false
+  },
+  "GeneralLiability_Hazard_PremisesOperationsPremiumAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium associated with the premises operations coverage. ",
+    "required": false
+  },
+  "GeneralLiability_Hazard_ProductsPremiumAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium associated with the products coverage. ",
+    "required": false
+  },
+  "GeneralLiability_Hazard_Classification_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The classification of the applicant's liability exposures by locatio",
+    "required": false
+  },
+  "GeneralLiability_ClaimsMade_ProposedRetroactiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The retroactive date you are requesting for the policy being applied",
+    "required": false
+  },
+  "GeneralLiability_ClaimsMade_UninterruptedCoverageEntryDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The retroactive date shown on the applicant's first Claims Made poli",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_AAHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_AnyProductWorkAccidentLocationExcludedUninsuredPreviousCoverageExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any work, accident or location that has been exclu",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_AAICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_TailCoveragePurchasedPreviousPolicyExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation if tail was coverage purchased under any previous pol",
+    "required": false
+  },
+  "GeneralLiability_EmployeeBenefits_PerClaimDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible per claim applicable to Employee Benefits Liabi",
+    "required": false
+  },
+  "GeneralLiability_EmployeeBenefits_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of employees. ",
+    "required": false
+  },
+  "GeneralLiability_EmployeeBenefits_EmployeeCoveredCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of employees covered by employee benefits plans. ",
+    "required": false
+  },
+  "GeneralLiability_EmployeeBenefits_RetroactiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The retroactive date that is the earliest date for which an occurren",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer ",
+    "required": false
+  },
+  "Contractors_Question_AABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_ApplicantDrawPlansForOthersExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any plans, designs or specifications drawn for oth",
+    "required": false
+  },
+  "Contractors_Question_AAICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_OperationsIncludeBlastingExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of  any operations that  include blasting or utilize ",
+    "required": false
+  },
+  "Contractors_Question_AACCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_OperationsIncludeEvacuationExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of  any operations which include evacuation, tunnelin",
+    "required": false
+  },
+  "Contractors_Question_ABBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_SubcontractorsCarryLowerLimitsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any of your subcontractors who carry coverages or ",
+    "required": false
+  },
+  "Contractors_Question_AADCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_SubcontractorsWorksWithoutCertificatesOfInsuranceExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any subcontractors allowed to work without providi",
+    "required": false
+  },
+  "Contractors_Question_AAECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_ApplicantLeaseEquipmentToOthersExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any  applicant who leases equipment to others with",
+    "required": false
+  },
+  "Contractors_SubcontractorsPaidAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total dollar amount for work that the contractor pays to subco",
+    "required": false
+  },
+  "Contractors_WorkSubcontractedPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of the work described by the applicant as subco",
+    "required": false
+  },
+  "Contractors_FullTimeEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of individuals employed full time by the applicant. ",
+    "required": false
+  },
+  "Contractors_PartTimeEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of individuals employed part time by the applicant. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_TypeOfWorkSubcontractedDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: Describe the type of work and percentage subcontracted. ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_ProductName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name used to identify the product manufactured or sold or servic",
+    "required": false
+  },
+  "ProductAndCompletedOperations_AnnualGrossSalesAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The whole dollar estimate of the annual sales receipts realized by",
+    "required": false
+  },
+  "ProductAndCompletedOperations_UnitCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of units of this product manufactured and/or sold each ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_InMarketMonthCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of months the product or service has been marketed to t",
+    "required": false
+  },
+  "ProductAndCompletedOperations_ExpectedLifeMonthCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The anticipated number of months of useful life of the product or ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_IntendedUse_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The intended use of the product. ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_PrincipalComponents_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The principal components of the product. ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_ProductName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name used to identify the product manufactured or sold or servic",
+    "required": false
+  },
+  "ProductAndCompletedOperations_AnnualGrossSalesAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The whole dollar estimate of the annual sales receipts realized by",
+    "required": false
+  },
+  "ProductAndCompletedOperations_UnitCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of units of this product manufactured and/or sold each ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_InMarketMonthCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of months the product or service has been marketed to t",
+    "required": false
+  },
+  "ProductAndCompletedOperations_ExpectedLifeMonthCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The anticipated number of months of useful life of the product or ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_IntendedUse_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The intended use of the product. ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_PrincipalComponents_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The principal components of the product. ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_ProductName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name used to identify the product manufactured or sold or servic",
+    "required": false
+  },
+  "ProductAndCompletedOperations_AnnualGrossSalesAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The whole dollar estimate of the annual sales receipts realized by",
+    "required": false
+  },
+  "ProductAndCompletedOperations_UnitCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of units of this product manufactured and/or sold each ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_InMarketMonthCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of months the product or service has been marketed to t",
+    "required": false
+  },
+  "ProductAndCompletedOperations_ExpectedLifeMonthCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The anticipated number of months of useful life of the product or ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_IntendedUse_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The intended use of the product. ",
+    "required": false
+  },
+  "ProductAndCompletedOperations_PrincipalComponents_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The principal components of the product. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_AAJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_ApplicantInstallServiceProductsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any installation, service or product demonstration",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ABACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ABBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_ResearchDevelopmentConductedNewProductsPlannedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any research and development conducted on new prod",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ABCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_GuaranteesWarrantiesHoldHarmlessExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any guarantees, warranties, hold harmless agreemen",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ABDCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_ProductsRelatedToAircraftIndustryExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation products related to aircraft/space industry. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ABECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_ProductsRecalledDiscontinuedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation products recalled, discontinued, changed. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ABFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_ProductsOfOthersSoldUnderApplicantLabelExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of products of others sold or repackaged under applic",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ABGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_ProductsUnderLabelOfOthersExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of products under label of others. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ABHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_VendorCoverageRequiredExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation any vendor's coverage required. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ABICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_NamedInsuredSellToOtherNamedInsuredExplanation_R": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any named insured who sells to any other named ins",
+    "required": false
+  },
+  "AdditionalInterest_Interest_AdditionalInsuredIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an addi",
+    "required": false
+  },
+  "AdditionalInterest_Interest_EmployeeAsLessorIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an empl",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LienholderIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lien ",
+    "required": false
+  },
+  "AdditionalInterest_Item_ScheduledItemClassCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The description of the property class of the scheduled item (i.e. Je",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ABJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_AnyMedicalFacilitiesProvidedMedicalProfessionalsEmployedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any medical facilities provided or medical profess",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ACACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_AnyExposureRadioactiveMaterialsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any exposure to radioactive/nuclear materials ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ACJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_OperationsInvolveStoringDisposingTransportingHazardousMaterialExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation any operations that involve storing, treating, discha",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ACBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_AnyListedOperationsSoldAcquiredLastFiveYearsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any listed operations sold, acquired, or discontin",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ACCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_MachineryOrEquipmentLoanedRentedOthersExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of  any machinery or equipment that is loaned or rent",
+    "required": false
+  },
+  "CommercialInlandMarineProperty_PropertySubClass_SmallToolsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the subclass / grouping of property int",
+    "required": false
+  },
+  "CommercialInlandMarineProperty_PropertySubClass_LargeEquipmentIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the subclass / grouping of property int",
+    "required": false
+  },
+  "PropertyItem_ItemDetail_InstructionGivenCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates whether instr",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_MachineryOrEquipmentLoanedRentedOthersExplanation_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of  any machinery or equipment that is loaned or rent",
+    "required": false
+  },
+  "CommercialInlandMarineProperty_PropertySubClass_SmallToolsIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the subclass / grouping of property int",
+    "required": false
+  },
+  "CommercialInlandMarineProperty_PropertySubClass_LargeEquipmentIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the subclass / grouping of property int",
+    "required": false
+  },
+  "PropertyItem_ItemDetail_InstructionGivenCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates whether instr",
+    "required": false
+  },
+  "Contractors_Question_AAHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_WatercraftDocksFloatsOwnedHiredLeasedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any watercraft, docks, floats owned, hired, or lea",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ACDCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_AnyParkingFacilitiesOwnedRentedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any parking facilities owned/ rented. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_KAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_FeeChargedForParkingExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any fee charged for parking. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ACECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_RecreationalFacilitiesProvidedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of  any recreational facilities provided. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_KAACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response ",
+    "required": false
+  },
+  "BuildingOccupancy_ApartmentCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of separate living units in structure. ",
+    "required": false
+  },
+  "BuildingOccupancy_ApartmentArea_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The area, in square feet, of the building used as apartments. ",
+    "required": false
+  },
+  "GeneralLiability_Otherlodgingoperationsdescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other lodging operations. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_KAHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "SwimmingPool_ApprovedFenceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the swimming pool is surrounded by a fe",
+    "required": false
+  },
+  "SwimmingPool_LimitedAccessIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there is limited access to the swimming",
+    "required": false
+  },
+  "SwimmingPool_DivingBoardIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the swimming pool has a diving board. ",
+    "required": false
+  },
+  "SwimmingPool_SlideIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the swimming pool has a slide. ",
+    "required": false
+  },
+  "SwimmingPool_AboveGroundIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the swimming pool is above ground. ",
+    "required": false
+  },
+  "SwimmingPool_InGroundIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the swimming pool is in the ground. ",
+    "required": false
+  },
+  "SwimmingPool_LifeGuardIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there is life guard for the swimming po",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ACFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_SportingOrSocialEventsSponsoredExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any social events sponsored. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_KABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response ",
+    "required": false
+  },
+  "AthleticTeam_SportDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of sport in which the sponsored athletic",
+    "required": false
+  },
+  "AthleticTeam_ContactSportCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the sponso",
+    "required": false
+  },
+  "AthleticTeam_AgeGroup_TwelveAndUnderIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the sport participants are 12 years old",
+    "required": false
+  },
+  "AthleticTeam_AgeGroup_ThirteenThroughEighteenIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the sport participants are 13 through 1",
+    "required": false
+  },
+  "AthleticTeam_AgeGroup_OverEighteenIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the sport participants are over 18 year",
+    "required": false
+  },
+  "AthleticTeam_SponsorshipExtentDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the extent of sponsorship the named insured provi",
+    "required": false
+  },
+  "AthleticTeam_SportDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of sport in which the sponsored athletic",
+    "required": false
+  },
+  "AthleticTeam_ContactSportCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the sponso",
+    "required": false
+  },
+  "AthleticTeam_AgeGroup_TwelveAndUnderIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the sport participants are 12 years old",
+    "required": false
+  },
+  "AthleticTeam_AgeGroup_ThirteenThroughEighteenIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the sport participants are 13 through 1",
+    "required": false
+  },
+  "AthleticTeam_AgeGroup_OverEighteenIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the sport participants are over 18 year",
+    "required": false
+  },
+  "AthleticTeam_SponsorshipExtentDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the extent of sponsorship the named insured provi",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ACGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_StructuralAlterationsContemplatedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any structural alterations contemplated. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_ACHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_DemolitionExposureContemplatedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any demolition exposure contemplated. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_AABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_ApplicantActiveJointVenturesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any joint ventures in which the applicant may be c",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_AACCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "AdditionalInterest_WorkersCompensationCarriedCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. As used here, this is the compa",
+    "required": false
+  },
+  "AdditionalInterest_WorkersCompensationCarriedCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. As used here, this is the compa",
+    "required": false
+  },
+  "AdditionalInterest_WorkersCompensationCarriedCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. As used here, this is the compa",
+    "required": false
+  },
+  "AdditionalInterest_WorkersCompensationCarriedCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_AADCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_LabourInterchangeOtherBusinessSubsidiariesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any labor interchange with any other business or s",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_AAECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_DayCareFacilitiesOperatedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any daycare facilities operated or controlled. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_AAFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_CrimesOccurredOrAttemptedLastThreeYearsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any crimes that  occurred or been attempted on you",
+    "required": false
+  },
+  "Contractors_Question_AAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_FormalSafetySecurityPolicyInEffectExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any formal, written safety and security policy in ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Question_AAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the que",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_BusinessPromotionalLiteratureSafetyRepresentationsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any business promotional literature that makes any",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_RemarkText_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the general liability line of business. ",
+    "required": false
+  },
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the da",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer / agency. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submi",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and condi",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy o",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Asso",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarat",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_Attachment_AdditionalInterestIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that further additional interests appea",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LendersLossPayableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lende",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LossPayeeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a loss ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_MortgageeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a mortg",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest is other than t",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_InterestRank_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The ranking of 'this' additional interest when multiple additional",
+    "required": false
+  },
+  "AdditionalInterest_CertificateRequiredIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the additional interest requires a C",
+    "required": false
+  },
+  "AdditionalInterest_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line one. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line two. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address city name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address state or province code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address postal code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CountryCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's country code. ",
+    "required": false
+  },
+  "AdditionalInterest_AccountNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The loan number, account number or other controlling number th",
+    "required": false
+  },
+  "AdditionalInterest_Item_LocationProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location which has an addition",
+    "required": false
+  },
+  "AdditionalInterest_Item_BuildingProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the building which has an addition",
+    "required": false
+  },
+  "AdditionalInterest_Item_ScheduledItemProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the scheduled item which has an ad",
+    "required": false
+  },
+  "AdditionalInterest_ItemDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the item of interest if needed to further clarify",
+    "required": false
+  },
+  "AdditionalInterest_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. As used here, this is the compa",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., pr",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the authorized representative of the producer, agency an",
+    "required": false
+  },
+  "Producer_StateLicenseIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The State License Number of the producer. ",
+    "required": false
+  },
+  "NamedInsured_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM",
+    "required": false
+  },
+  "Producer_NationalIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National ",
+    "required": false
+  }
+}

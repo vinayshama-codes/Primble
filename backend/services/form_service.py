@@ -4,6 +4,7 @@ import os
 from typing import List, Optional
 
 from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_INDEX, groq_client
+from services.extraction_service import _fv
 from services.pdf_service import extract_form_schema, map_facts_to_form, fill_pdf
 from services.sqs_service import cross_validate, calculate_sqs
 
@@ -99,15 +100,156 @@ def stage2_ai_match(facts: dict, flags: dict, candidates: List[dict]) -> List[di
         return [{"form_id": "ACORD_125", "form_name": "ACORD 125 - Commercial Insurance Application", "confidence": 0.99, "reason": "Default"}]
 
 
+def match_forms_deterministic(facts: dict, flags: dict) -> List[dict]:
+    """
+    Deterministic rule-based form matching based on the Acordly ACORD Form Decision Tree.
+
+    Replaces stage1_filter() + stage2_ai_match() for both Assembly and Clarity pipelines.
+    Zero LLM calls. Pure flag and keyword logic.
+
+    Return shape is identical to stage2_ai_match() so nothing downstream breaks:
+      [{"form_id": ..., "form_name": ..., "confidence": ..., "trigger_reason": ...}]
+
+    Confidence tiers:
+      1.0  — always required (ACORD 125)
+      0.95 — flag-based match
+      0.85 — keyword-based match
+
+    Note: ACORD 186, 137, 138 are included in matching output but do not yet have
+    PDF templates in /templates. Pipeline must guard against missing template_file.
+    """
+    matches: List[dict] = []
+
+    # Build a single searchable text from operations + lines of business
+    ops      = (_fv(facts, "operations_description") or "").lower()
+    lobs     = " ".join(facts.get("lines_of_business") or []).lower()
+    cert_h   = (_fv(facts, "certificate_holder") or "").lower()
+    search   = f"{ops} {lobs} {cert_h}"
+
+    # ── Always required ────────────────────────────────────────────────────────
+    matches.append({
+        "form_id":        "ACORD_125",
+        "form_name":      "ACORD 125 - Commercial Insurance Application",
+        "confidence":     1.0,
+        "trigger_reason": "Always required for any commercial submission",
+    })
+
+    # ── Flag-based (0.95) ──────────────────────────────────────────────────────
+
+    # ACORD 126 — General Liability
+    if flags.get("has_general_liability") or flags.get("is_contractor"):
+        matches.append({
+            "form_id":        "ACORD_126",
+            "form_name":      "ACORD 126 - Commercial General Liability Section",
+            "confidence":     0.95,
+            "trigger_reason": "has_general_liability or is_contractor flag detected",
+        })
+
+    # ACORD 130 — Workers Compensation
+    if flags.get("has_workers_comp"):
+        matches.append({
+            "form_id":        "ACORD_130",
+            "form_name":      "ACORD 130 - Workers Compensation Application",
+            "confidence":     0.95,
+            "trigger_reason": "has_workers_comp flag detected",
+        })
+
+    # ACORD 127 — Business Auto
+    if flags.get("has_auto_coverage"):
+        matches.append({
+            "form_id":        "ACORD_127",
+            "form_name":      "ACORD 127 - Business Auto Section",
+            "confidence":     0.95,
+            "trigger_reason": "has_auto_coverage flag detected",
+        })
+
+    # ACORD 131 — Umbrella / Excess Liability
+    if flags.get("has_umbrella"):
+        matches.append({
+            "form_id":        "ACORD_131",
+            "form_name":      "ACORD 131 - Umbrella / Excess Liability",
+            "confidence":     0.95,
+            "trigger_reason": "has_umbrella flag detected",
+        })
+
+    # ACORD 140 — Commercial Property
+    if flags.get("has_property_coverage"):
+        matches.append({
+            "form_id":        "ACORD_140",
+            "form_name":      "ACORD 140 - Commercial Property Section",
+            "confidence":     0.95,
+            "trigger_reason": "has_property_coverage flag detected",
+        })
+
+    # ACORD 141 — Property Schedule (only when multiple locations)
+    if flags.get("has_property_coverage") and flags.get("has_multiple_locations"):
+        matches.append({
+            "form_id":        "ACORD_141",
+            "form_name":      "ACORD 141 - Property Schedule",
+            "confidence":     0.95,
+            "trigger_reason": "has_property_coverage and has_multiple_locations flags detected",
+        })
+
+    # ACORD 25 — Certificate of Liability Insurance
+    if flags.get("has_certificate_request") or flags.get("is_certificate_doc"):
+        matches.append({
+            "form_id":        "ACORD_25",
+            "form_name":      "ACORD 25 - Certificate of Liability Insurance",
+            "confidence":     0.95,
+            "trigger_reason": "has_certificate_request or is_certificate_doc flag detected",
+        })
+
+    # ACORD 186 — Contractors Supplement
+    if flags.get("is_contractor"):
+        matches.append({
+            "form_id":        "ACORD_186",
+            "form_name":      "ACORD 186 - Contractors Supplement",
+            "confidence":     0.95,
+            "trigger_reason": "is_contractor flag detected",
+        })
+
+    # ── Keyword-based (0.85) ───────────────────────────────────────────────────
+
+    # ACORD 137 — Crime
+    _crime_kw = {
+        "crime", "employee dishonesty", "money and securities",
+        "forgery", "theft", "fidelity", "erisa", "employee theft",
+    }
+    if any(kw in search for kw in _crime_kw):
+        matches.append({
+            "form_id":        "ACORD_137",
+            "form_name":      "ACORD 137 - Commercial Crime Application",
+            "confidence":     0.85,
+            "trigger_reason": "crime / dishonesty keywords detected in operations or lines of business",
+        })
+
+    # ACORD 138 — Cyber / Network Security
+    _cyber_kw = {
+        "cyber", "data breach", "network security", "phi", "pci",
+        "ransomware", "privacy liability", "e-commerce", "cloud",
+        "personally identifiable", "hipaa",
+    }
+    if any(kw in search for kw in _cyber_kw):
+        matches.append({
+            "form_id":        "ACORD_138",
+            "form_name":      "ACORD 138 - Cyber / Network Security Application",
+            "confidence":     0.85,
+            "trigger_reason": "cyber / data breach keywords detected in operations or lines of business",
+        })
+
+    # ── Sort: confidence descending, ACORD_125 is always first (1.0) ──────────
+    matches.sort(key=lambda x: x["confidence"], reverse=True)
+    return matches
+
+
 def match_forms(facts: dict, flags: dict, all_forms: List[dict]) -> List[dict]:
-    candidates = stage1_filter(flags, all_forms) or all_forms
-    return stage2_ai_match(facts, flags, candidates)
+    return match_forms_deterministic(facts, flags)
 
 
 def process_single_form(form_meta: dict, session: dict) -> dict:
     tpl              = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
-    schema           = extract_form_schema(tpl)
-    mapped, confidence = map_facts_to_form(session["facts"], schema)
+    schema           = extract_form_schema(tpl, form_id=form_meta["form_id"])
+    mapped, confidence = map_facts_to_form(session["facts"], schema, form_id=form_meta["form_id"])
     selected_ids     = session.get("selected_form_ids", []) + [form_meta["form_id"]]
     cross            = cross_validate(session["facts"], session["flags"], selected_ids)
     sqs              = calculate_sqs(

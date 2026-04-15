@@ -38,12 +38,14 @@ PLANS = {
     },
 }
 
-BASE_DIR     = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UPLOAD_DIR   = os.path.join(BASE_DIR, "tmp")
-TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
-FORMS_DB_DIR = os.path.join(BASE_DIR, "forms_database")
-FORMS_INDEX  = os.path.join(FORMS_DB_DIR, "forms_index.json")
+BASE_DIR          = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+UPLOAD_DIR        = os.path.join(BASE_DIR, "tmp")
+TEMPLATE_DIR      = os.path.join(BASE_DIR, "templates")
+FORMS_DB_DIR      = os.path.join(BASE_DIR, "forms_database")
+FORMS_INDEX       = os.path.join(FORMS_DB_DIR, "forms_index.json")
+FORMS_SCHEMAS_DIR = os.path.join(BASE_DIR, "forms_schemas")
 
 SUPPORTED_IMG = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(FORMS_SCHEMAS_DIR, exist_ok=True)
