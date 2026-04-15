@@ -1,6 +1,8 @@
 import re
 from typing import Tuple, List
 
+from services.extraction_service import _fv
+
 US_STATES = {
     "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
     "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
@@ -64,16 +66,16 @@ def validate_email_format(email: str) -> Tuple[bool, str]:
 
 def run_field_validations(facts: dict) -> Tuple[List[str], List[str]]:
     hard, soft = [], []
-    for fn, fv in [
+    for fn, validator in [
         ("mailing_address", validate_address),
         ("contact_phone",   validate_phone),
         ("contact_email",   validate_email_format),
     ]:
-        ok, msg = fv(facts.get(fn, ""))
+        ok, msg = validator(_fv(facts, fn) or "")
         if not ok:
             soft.append(msg)
-    eff = facts.get("effective_date", "")
-    exp = facts.get("expiration_date", "")
+    eff = _fv(facts, "effective_date") or ""
+    exp = _fv(facts, "expiration_date") or ""
     if eff and exp:
         fmts = ["%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"]
         from datetime import datetime
