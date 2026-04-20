@@ -1,0 +1,534 @@
+Acordly.ai ACORD Form Decision Tree — Carrier-Grade Coverage Modeling
+The AI should first identify each line of coverage or requirement present on the uploaded documents (especially the declarations page) and then suggest the matching ACORD forms. 
+Overview: Upload → Form Matching (AI suggestions + preview SQS) → User Review/Confirm → Targeted Extraction & Mapping → Identity & Regulatory Checks + Cross-Form Validation → Definitive SQS → Submission Improvement Engine (loop) → Finalization.
+In practice, ACORD 125 is always the foundational form for any commercial submission, and all other forms branch off based on specific exposures or requests on the dec page. Below we outline the decision criteria for each key ACORD form, with the triggers (what to look for) and how each form differs in purpose.
+To ensure the decision tree operates at a true carrier-grade standard, the system must explicitly model the following underwriting expectations across applicable ACORD forms and validation layers:
+* Property valuation method (Replacement Cost Value vs Actual Cash Value)
+* Cause-specific deductibles (e.g., wind/hail, earthquake, flood, AOP)
+* Coinsurance and agreed value logic
+* Business Income and Extra Expense structure (limits and period of restoration)
+* Commercial auto deductibles and physical damage valuation
+* Auto liability limit structure (CSL vs split limits)
+* Auto coverage symbols and scope alignment
+* Optional auto coverages (UM/UIM, Med Pay/PIP, Hired & Non-Owned, Drive Other Car)
+* Endorsements that materially affect limits, deductibles, or valuation economics
+* State-specific regulatory and underwriting requirements
+These elements are not optional enhancements or advanced features. They represent baseline underwriting expectations that materially affect pricing, eligibility, attachment, and claim outcomes.
+Failure to model these dimensions does not merely reduce submission quality — it increases follow-up friction, misrepresents risk, and undermines underwriter confidence. Properly modeled, these inputs feed directly into cross-form validation, rejection prevention, and Submission Quality Score (SQS) accuracy.
+
+
+
+
+Master Rule
+Assumption: This a commercial insurance submission.
+1. Identify document type(s)
+   * Formats can be structured and/or unstructured including: PDF, DOC, XLS, CSV, JPEG, PNG, TIFF, RTF, ZIP
+   * Uploads can include: Dec pages (current / expired), Quotes / proposals / indications, Schedules (vehicles, equipment, locations), Loss runs, Prior apps / supplements, Endorsement requests (AI, PNC, WOS, mortgagee, loss payee)
+2. Choose the “primary truth set” for extraction (not every doc is equally authoritative)
+Base Requirement: Use ACORD 125 as the anchor. (ACORD 125 is mandatory for every commercial submission.) 
+* All other forms are selected and validated relative to the data in ACORD 125. 
+* Identify policy period(s)
+* Identify “current policy” vs “requested change” vs “historical”
+Why it matters: Prevents the AI from pulling stale limits, wrong dates, or conflicting insured names from the wrong file.
+
+
+________________
+
+
+
+
+ACORD 125 — Commercial Insurance Application. Master application / cover sheet for the submission. It must exist before other forms. 
+Full Context: The master application used for any new or renewed commercial account[1][2]. Trigger: If the uploaded documents indicate a new business submission or changes to existing coverage (any line), include ACORD 125. It captures core business info (ownership, revenues, operations, locations) and which lines of coverage are desired[1][3]. For example, if the dec page shows any insurance lines (GL, Property, Auto, WC, etc.), ACORD 125 should be present so underwriters have the full applicant profile. Difference: Unlike line-specific schedules, 125 provides a consistent overview for the entire risk[1][3]. Underwriters expect 125 as the first form; missing or inconsistent 125 data (e.g. revenue vs GL payroll mismatch) is a red flag
+Triggers: Always required when user indicates commercial submission or dec page shows any of: GL, Property, Auto, WC, Umbrella, Inland Marine, Builders Risk, Cyber, Crime, Contractors work, Certificates requested. 
+Document cues / OCR keywords: business name, NAICS/industry, owner names, locations, revenue, payroll, “lines of coverage”, policy effective dates, “certificate holder”, “mortgagee”.
+Required variables to extract: legal name, DBA, entity type, FEIN (if present), primary address, mailing address, operations description by location, total revenue, total payroll, requested lines (Y/N per line), renewal/new indicator, prior carrier & loss run flag, Policy effective and expiration dates
+Cross-form validations: All derived form values (payroll, revenue, locations, operations) become reconciliation anchors — other forms must match these values or provide an explicit explanation (ACORD 101). Validated fields include: Payroll totals, Revenue totals, Location counts, Operations descriptions, and Requested coverage lines.
+Identity & Dates Integrity Checks: Underwriters expect absolute consistency in the insured’s identity and policy term. Failures here erode trust and create E&O exposure. The AI must enforce the following Identity & Dates validations:
+* Named Insured Consistency
+   * Legal named insured must match across:
+      * ACORD 125
+      * Dec page
+      * All schedules and line-specific forms
+   * DBAs must be consistently represented or explicitly explained
+* FEIN Consistency
+   * If FEIN is present, it must match across all documents where listed
+   * Conflicting FEINs → hard stop
+* Address Mapping
+   * Physical locations must align between:
+      * ACORD 125
+      * Property schedules (140)
+      * Other location-based forms
+   * Mailing vs physical address distinctions must be explicit
+* Effective / Expiration Dates
+   * Policy periods must be consistent across:
+      * ACORD 125
+      * Dec page
+      * All attached forms
+   * Misaligned dates → hard stop unless explained
+* Location Count Reconciliation
+   * Number of locations must reconcile across:
+      * ACORD 125
+      * ACORD 140
+      * Any attached schedules
+   * Mismatches require explanation or correction
+SQS effect: ACORD 125 completeness = structural completeness portion (25%) of SQS. Missing 125 → hard stop, SQS = 0 (or cap). 
+Decision rule (pseudo):
+* IF commercial_submission_detected THEN require ACORD_125
+* IF ACORD_125 not provided THEN block submission (Implementation note:** OCR confidence threshold for key fields (business name, location) = 90%. If <90% for critical fields, surface to user for manual confirmation.
+
+
+________________
+
+
+ACORD 126 — Commercial General Liability
+Full Context: Used whenever the risk has General Liability exposure[4]. Trigger: If the dec page or support docs list general liability coverage (limits for Premises/Operations, Products/Completed Ops, Personal/Advertising Injury, etc.) or reference GL premiums, then include ACORD 126. The AI should scan for keywords like “liability,” “premises-operations,” “products,” “bodily injury,” etc. What it does: ACORD 126 gathers details about GL exposures – business operations, locations, payroll/sales by class, subcontractors used, and past loss history[4]. For example, if a declarations page shows a GL limit or describes the insured’s operations (e.g. manufacturing, construction), the AI flags ACORD 126. Difference: This form drills into liability specifics (class codes, exposures, loss run details) that are not covered on ACORD 125[4]. Always attach 126 alongside 125 if GL is present, so that underwriting has the full exposure picture.
+Purpose: Capture GL exposures, class codes, limits, operations, and claims info. 
+Triggers: Dec page shows GL limits / GL premium / wording like “General Liability”, “Products/Completed Ops”, “Premises/Operations”, “Personal & Advertising Injury”.
+Document cues / keywords: “GL”, “General Liability”, “BI”, “PD”, “Products/Completed”, class code numbers, payroll for clerical vs non-clerical, subcontractor language, Additional Insured requests.
+Required variables to extract: GL limits, deductible, claim form (occurrence/claims-made), operations description, GL class codes, payroll or revenue used as exposure base, list of additional insureds.
+Cross-form validations:
+* GL class codes must align with operations in ACORD 125. If mismatch → require ACORD 101. 
+* If business does construction work, ensure ACORD 186 is attached and % subcontracted reconciles with GL & WC fields.
+SQS effect: GL completeness and class-code alignment = Exposure Consistency (25%). Missing GL class-code match = large negative weight; counts toward top risk drivers.
+Decision rule (pseudo):
+* IF dec_page.contains(GL_terms) OR 125.requested_line(GL) THEN add ACORD_126
+* IF ACORD_126.class_codes do not align with 125.operations THEN flag for ACORD_101 and decrement SQS
+Implementation note: If OCR finds numeric class codes, attempt automatic class-code normalization (strip punctuation, map to canonical list). If class code ambiguous, surface to user with confidence score.
+Example hard/soft warnings:
+* Hard stop? No — but require ACORD 101 if class-code/operation mismatch. Rejection risk increases substantially. 
+Other: Risk transfer requirements detection (AI / PNC / WOS / endorsements) + workflow
+Risk Transfer Requirements” module
+Detect from contracts, COI requirements, lease language, and dec notes:
+* Additional Insured required?
+* Primary & Noncontributory required?
+* Waiver of Subrogation required?
+* Certificate holder / mortgagee / loss payee
+* Specific wording requirements
+Output should be:
+* Not just “generate ACORD 25,” but also a compliance checklist for the broker (endorsements / wording requirements)
+* This can feed SQS (because missing required risk-transfer language creates downstream failure)
+
+________________
+
+
+ACORD 130 — Workers’ Compensation
+Full Context: Used whenever there are payroll-based Workers’ Comp exposures[5]. Trigger: If the documents include any indication of employees or payroll (e.g. state class codes, payroll schedules, or mention of WC coverage), include ACORD 130. The AI should look for payroll figures by class, experience modification factor, or owner/officer coverage. What it does: ACORD 130 collects detailed workforce data – payroll by classification at each location, past WC carriers, loss history, and any safety programs[5][6]. For instance, if a dec page lists a payroll estimate or loss run for WC, the AI suggests ACORD 130. Difference: Unlike 125’s high-level view, 130 is specific to WC risk: it ties each jobsite to class codes and payroll used for rating[6]. It is the central intake form for any workers’ compensation submission.
+Purpose: Capture payroll by class and WC exposures (state rules apply). 
+Triggers: Document shows payroll values, mentions of WC, class codes, “workers/employees by location.
+Document cues / keywords: “Payroll”, “WC”, “workers compensation”, state references, NCCI class codes.
+Required variables to extract: Payroll totals (by class & state), WC class codes, experience modification factor (X-mod), prior WC carrier, payroll period, payroll inclusion/exclusion (owners/officers).
+Cross-form validations:
+   * WC payroll must reconcile with ACORD 125 revenue/operations and subcontracting % from ACORD 186. Flag large discrepancies. 
+   * WC class codes vs GL class codes: ensure labor-driven exposure aligns with operations. Clerical GL + heavy manual labor WC → require explanation.
+SQS effect: WC accuracy heavily impacts Exposure Consistency and Loss History Alignment (combined 40%). Missing payroll or class code → strong SQS penalty and potential declination risk.
+Decision rule (pseudo):
+   * IF dec_page.contains(payroll OR WC_terms) OR 125.requested_line(WC) THEN add ACORD_130
+   * IF payroll not reconciled with 125.operations & 186.subcontracting% THEN require ACORD_101 and lower SQS
+Implementation note: Because WC is state-regulated, use state detection on locations to choose appropriate class-code validation rules. If claims history exists but payroll mismatch, escalate with “Require underwriter review” flag.
+Other Workers’ Compensation — Jurisdiction Rules:
+Purpose: Ensure Workers’ Compensation submissions comply with state-specific regulatory requirements and underwriting rules.
+Rules:
+   * State Detection:
+Detect all U.S. states in which the insured has:
+      * Employees
+      * Payroll
+      * Physical operations
+      * Monopolistic WC States:
+If payroll or employees are located in monopolistic WC states (ND, OH, WA, WY):
+         * Flag “Monopolistic WC — separate state fund handling required”
+         * Do not assume WC can be quoted by private carriers
+         * Treat as:
+         * Soft stop if the workflow allows state-fund acknowledgment only
+         * Hard stop if private-carrier WC is being requested for those states
+         * Multi-State WC Exposure:
+If the insured has payroll in more than one state:
+            * Require payroll to be broken out:
+            * By state
+            * By WC class code
+            * Validate that:
+            * Total payroll equals ACORD 125 payroll
+            * WC class codes align with operations
+SQS Impact:
+            * Missing state-level payroll → significant SQS penalty
+            * Failure to flag monopolistic WC exposure → cap SQS and/or block submission
+            * Complete, state-accurate WC data → improves Exposure Consistency and Loss History Alignment
+
+
+________________
+
+
+ACORD 127 — Business Auto
+Full Context: Used for all Commercial Auto exposures[7]. Trigger: If the applicant has owned or leased vehicles (e.g. car/fleet limits on the dec page, or a schedule of autos), include ACORD 127. The AI should detect any list of vehicles (year/make/vin) or mention of auto liability/physical damage. What it does: ACORD 127 collects vehicle schedules, driver information, use of vehicles, and auto policy details[7]. For example, a dec page that shows a Business Auto liability limit or describes vehicles triggers the AI to add ACORD 127. Difference: This form is only for auto exposures. It standardizes vehicle data (who drives, radius of operation, Hired/Non-owned vehicles) in a structured way[7]. Without 127, key auto underwriting details would be missing.
+Purpose: Vehicle schedules, driver exposures, radius of operation, auto limits, deductibles, and physical damage structure.
+Triggers:
+            * Dec page lists owned or leased vehicles
+            * Auto liability limits present
+            * “Business Auto” referenced
+            * Vehicle schedule attached
+            * “Hired Auto” or “Non-Owned Auto” mentioned
+Document Cues / OCR Keywords: VINs, plate numbers, year/make/model, “Hired Auto”, “Non-Owned”, “Garage Operations”, driver names, driver age.
+Required Variables to Extract
+            * Vehicle schedule (VIN, year, make/model)
+            * Garaging address(es)
+            * Primary drivers
+            * Business use and radius of operation
+            * Liability limit structure (CSL vs split)
+            * Physical damage valuation (ACV vs Agreed/Stated Value)
+            * Comprehensive and collision deductibles
+Cross-Form Validations
+            * If GL includes Hired / Non-Owned exposure, ensure ACORD 127 contains corresponding auto data (do not rely on GL alone).
+            * If Umbrella coverage is requested (ACORD 131), underlying Auto limits must meet umbrella attachment requirements.
+            * Auto policy period should align with umbrella period when umbrella attaches to auto.
+Coverage Integrity Checks
+            * Liability limits:
+            * If split limits are selected, all components (BI per person, BI per accident, PD per accident) must be present.
+            * Incomplete liability structure → hard stop.
+            * Physical damage:
+            * If physical damage is present, comp and collision deductibles are required.
+            * If Agreed Value or Stated Amount is selected, vehicle schedule confirmation is required.
+            * Coverage symbols:
+            * Symbols must align with exposure (e.g., hired/non-owned symbols present when exposure exists).
+            * Physical damage symbols must align with scheduled autos.
+SQS Effect
+            * Missing vehicle schedule or driver list → moderate SQS penalty.
+            * Auto limits shown without vehicle detail → soft warning; may escalate to hard stop if umbrella minimums apply.
+            * Deductibles, limit structure, and symbols clearly defined → neutral to positive SQS impact.
+            * Symbol mismatch or incomplete limits → negative SQS impact.
+Decision Rule (Pseudo)
+            * IF dec_page.contains(vehicle_terms OR auto_limits) OR ACORD 125.requested_line(Auto) → add ACORD 127
+            * IF umbrella_requested AND auto_limits < umbrella_minimum → hard stop
+Implementation Note: For fleet submissions, require at least 80% OCR confidence on VIN and vehicle year before auto-filling schedules; otherwise prompt for a vehicle schedule upload.
+Optional Coverage Detection (Advisory)
+            * Medical Payments / PIP (state-dependent)
+            * Uninsured / Underinsured Motorist (BI / PD)
+            * Hired & Non-Owned Auto Liability
+            * Drive Other Car
+If optional coverages are listed, extract limits. If exposure exists but coverage is omitted, surface an advisory warning only (no auto-add).
+
+
+________________
+
+
+ACORD 131 — Umbrella / Excess Liability
+Full Context: Used when an umbrella or excess policy is requested[8]. Trigger: If the dec page shows an umbrella/excess limit (above the primary GL/Auto limit) or notes “excess liability,” include ACORD 131. The AI should notice any mention of an umbrella layer or excess coverage. What it does: ACORD 131 records umbrella/excess limits and attachment points, and it schedules the underlying primary policies (GL, Auto, etc.) that back the umbrella[8][9]. For instance, a dec page listing “Umbrella Liability – $2M” means 131 is needed. Difference: This form supplements ACORD 126/127: it ties together the upper layer with the underlying GL/Auto policies. It ensures the AI records how the umbrella attaches to primary limits and any self-insured retentions. In short, use 131 whenever excess limits appear on the dec page.
+Purpose: Capture umbrella/excess policies and confirm underlying coverage. 
+Triggers: Dec page lists Umbrella or “Excess Liability” or limits above primary GL/Auto.
+Document cues / keywords: “Umbrella”, “Excess”, “attachment point”, “self-insured retention”, listed underlying policy numbers.
+Required variables to extract: Umbrella limit, SIR, attachment points, list of underlying policies + limits, employers liability limits.
+**Cross-form validation verify GL/Auto limits meet umbrella minimums. If not → hard stop (umbrella cannot attach without required underlying). 
+Coverage Integrity Checks:
+Carriers expect the entire liability stack to be internally consistent, not just adequately limited. The AI must enforce the following:
+            * GL Form Consistency
+            * If GL is claims-made, require:
+            * Retro date
+            * Prior acts confirmation
+            * Flag missing retro/prior acts as a coverage integrity issue
+            * Deductible / SIR Consistency
+            * Validate deductibles and SIRs are consistent across:
+            * ACORD 126 / 127
+            * ACORD 131
+            * Dec page representations
+            * Flag unexplained discrepancies
+            * Policy Period Alignment
+            * Underlying GL, Auto, and WC policy periods must align with the umbrella policy period
+            * Misaligned periods → coverage integrity warning or block, depending on workflow
+            * WC Employers Liability Validation
+            * If umbrella attaches over WC:
+            * Confirm Employers Liability limits are present and meet minimums
+            * Flag missing EL limits as attachment failure risk
+SQS effect: Umbrella adequacy influences Umbrella & Limit Adequacy (10%). Failed attachment → hard stop or severe SQS cap. Coverage integrity issues → SQS penalties and increased underwriter follow-up risk.
+Decision rule (pseudo):
+            * IF dec_page.contains(Umbrella_terms) OR 125.requested_line(Umbrella) THEN add ACORD_131
+            * IF underlying_limits < umbrella_minimum THEN block_or_require_explanation
+Implementation note: When underlying policies are detected, attempt automatic matching by policy number, effective dates, and limits; if matching confidence is insufficient, require ACORD 101.
+
+
+
+
+
+
+________________
+
+
+ACORD 140 — Commercial Property
+Full Context: Used for commercial property coverages[10]. Trigger: If the dec page includes Property insurance (buildings, contents, equipment) – e.g. any covered locations with insured values – include ACORD 140. The AI should detect addresses, building values, business personal property (BPP) limits, or occupancy details. What it does: ACORD 140 captures each insured location in detail: addresses, construction type, occupancy, protection features, roof year, valuation basis, and itemized values[11]. For example, if a dec page lists a building value or COPE details, ACORD 140 is required. Difference: This form replaces a freeform property schedule; it standardizes property COPE data that isn’t in 125. It tells underwriters exactly what is insured at each location (e.g. steel frame, concrete block, sprinklered)[10]. Without 140, the insurer won’t have the physical structure details.
+Purpose: COPE (Construction, Occupancy, Protection, Exposure) and per-location values for fixed property. 
+Triggers: Dec page lists buildings, building values, BPP, location addresses or property premiums.
+Document cues / keywords: “Building limit”, “BPP”, address lines, construction type, sprinklered, roof year, “business income” attachment.
+Required variables to extract: Address(es), construction type, occupancy, protection class/fire protection details, year built/roof year, building value, BPP value, business income values and period of restoration details.
+Cross-form validations:
+            * If Builders Risk present (ACORD 133), values should not double-count with ACORD 140. Prevent duplication. 
+            * If inland-marine also present, ensure scheduled items aren’t counted twice under property. (140 vs 160)
+SQS effect: Property COPE completeness = Property Integrity (15%). Missing COPE fields → hard stop for many carriers (policy requires full COPE).
+Decision rule (pseudo):
+            * IF dec_page.contains(building_terms OR property_values) OR 125.requested_line(Property) THEN add ACORD_140
+            * IF COPE fields incomplete THEN block submission (Implementation note:** Property data must be location-specific; require OCR confidence and/or manual confirmation for each address. If business income requested but no values present, de-rate SQS and prompt for ACORD 810/811 attachments.
+Defining “minimum viable COPE” vs “carrier-grade COPE”:
+Minimum Viable COPE: (Required to submit without hard stop)
+This is the absolute minimum information most carriers need to accept a commercial property submission into underwriting. If any of these are missing, the submission should be blocked.
+Required Fields — Per Location:
+            * Street address (full physical location)
+            * Occupancy type (what the building is used for)
+            * Construction type (broad category)
+            * Total building value (if building coverage requested)
+            * BPP value (if contents coverage requested)
+Acceptable Granularity:
+            * Construction:
+            * “Frame” / “Joisted masonry” / “Non-combustible” / “Masonry non-combustible”
+            * Occupancy:
+            * Office / Retail / Warehouse / Manufacturing / Contractor yard
+Explicitly Not Required at this tier:
+            * Roof year
+            * Sprinkler details
+            * Fire protection class
+            * Business income details
+            * Valuation method (RC/ACV) if value present
+Rule: Minimum Viable COPE = enough information for an underwriter to identify what is insured, where it is, and its basic risk class.
+System Behavior:
+            * Missing any minimum field → HARD STOP
+            * All minimum fields present → allow submission, but cap SQS
+Carrier-Grade COPE (Required for SQS ≥ 90 and “Carrier-Ready” status)
+This is the level of detail carriers expect for fast quotes, clean binds, and no follow-ups. Missing items here do not block submission, but they meaningfully reduce SQS.
+Required Fields — Per Location: Everything in Minimum Viable COPE, plus:
+            * Year built
+            * Roof year
+            * Sprinklered (Y/N + type if available)
+            * Fire protection details
+            * Distance to fire hydrant
+            * Fire department type (volunteer / professional)
+            * Protection class (if known)
+            * Valuation method (RC vs ACV)
+            * Business income values
+            * BI limit
+            * Period of restoration
+Optional (Bonus / Differentiators)
+            * Square footage
+            * Alarm systems
+            * Flood zone (if known)
+            * Prior property losses by location
+Rule: Carrier-Grade COPE = enough information for underwriting to price the risk without follow-up.
+System Behavior:
+            * Missing carrier-grade fields → SQS penalties only
+            * No hard stops unless carrier-specific rules apply
+Adjusted SQS Mapping - Property Integrity (15% total)
+COPE Tier
+	Max Property Integrity Score
+	Missing Minimum
+	0% (hard stop)
+	Minimum Viable Only
+	~60–70%
+	Carrier-Grade
+	100%
+	Overall SQS Impact:
+            * Minimum Viable COPE caps overall SQS at ~85
+            * Carrier-Grade COPE required for 90+ Carrier-Ready
+
+
+________________
+
+
+ACORD 141 — Property Schedule (Scheduled Items)
+Full Context: Used when scheduling specific property items. Trigger: If the property being insured includes high-value or special items that need separate schedules (e.g. equipment floaters, fine arts, scheduled property), the AI should use ACORD 141 to list them. The dec page might simply say “See attached schedule” or list scheduled items (e.g. computer equipment, jewelry, contractor’s equipment). What it does: ACORD 141 allows detailed scheduling of covered items by location or category. It often supplements ACORD 140 by itemizing contents or specific property. Difference: This form is essentially an add-on to the property section. If a location has scheduled property beyond the basic building/BPP (for instance, expensive computers or a contractor’s tool schedule), the AI should attach ACORD 141. (Without 141, these values would not appear on the primary forms.)
+Purpose: Capture COPE (Construction, Occupancy, Protection, Exposure) and per-location property values, plus property-specific underwriting attributes (valuation method, deductibles, coinsurance, BI/EE) required for accurate rating, attachment checks, and carrier submission readiness.
+Triggers
+            * Dec page lists building values, BPP, property premiums, or location addresses
+            * User requests property coverage or attachments (BI, schedules)
+            * Any reference to “building limit”, “business personal property”, “property schedule”, or lender/mortgagee instructions
+Document cues / OCR keywords: “Building limit”, “BPP”, address lines, construction type, sprinklered, roof year, “business income”, “RCV”, “ACV”, “deductible”, “coinsurance”, “agreed value”, “period of restoration”, peril-specific deductibles (wind/hail, flood, earthquake).
+Required variables to extract (per location)
+Standard COPE & values:
+            * Street address (full physical location)
+            * Construction type (broad category)
+            * Occupancy type (use)
+            * Protection features (sprinkler Y/N + type if available)
+            * Protection class / distance to hydrant / fire department type
+            * Year built / roof year
+            * Building insured value (limit)
+            * Business Personal Property (BPP) value
+            * Valuation basis (RCV vs ACV) 
+            * Business income (BI) values: BI limit, period of restoration 
+            * Extra Expense limit (if applicable) 
+Property financial & coverage mechanics:
+            * Deductible structure: AOP deductible, wind/hail deductible, earthquake deductible, flood deductible, deductible basis (flat dollar or percentage), deductible application (per occurrence, per cause)
+            * Coinsurance percentage or agreed value endorsement indicator
+            * Underlying mortgagee/lender names and mortgagee clause if present
+Coverage tower & consistency items:
+            * Underlying policy overlap indicators (Builders Risk, Inland Marine references)
+            * Location-specific prior property losses (optional but valuable)
+            * Policy effective/expiration dates (for period alignment)
+Cross-form validations & coverage-integrity checks (expanded)
+            * COPE duplication prevention: If Builders Risk (ACORD 133) present, ensure construction-period values do not duplicate ACORD 140 completed-property values. If Inland Marine (ACORD 160) present, ensure scheduled mobile items are not double-counted in 140/141.
+            * Valuation consistency: RCV values must be consistent with replacement-cost intent (higher insured amounts, new-construction cost indicators). ACV selection with high insured limits or recent construction must be flagged for confirmation.
+            * Deductible consistency: Deductible structures must be sensible for geography (e.g., wind/hail expected in coastal zones). Peril-specific deductibles present on the dec page must be defined in the submission.
+            * Coinsurance / agreed value: If a coinsurance clause applies, ensure coinsurance percentage or an agreed-value endorsement is provided or triggered.
+            * Business Income alignment: BI limit and period of restoration must be present if BI coverage requested; cross-check for values in dec page and BI attachments.
+            * Location counts and mapping: Location counts and addresses must reconcile with ACORD 125 locations and any schedules (ACORD 141). Mismatches → explanation required.
+            * Policy dates alignment: Ensure effective/expiration dates for property coverage align with overall policy period and any umbrella/underlying periods where relevant.
+Decision rules (pseudo + actionable)
+            1. Base inclusion
+            * IF dec_page.contains(building_terms OR property_values) OR 125.requested_line(Property) THEN add ACORD_140.
+            2. Minimum Viable COPE enforcement
+            * IF any Minimum_Viable_COPE field missing (street address, occupancy, construction, building value when requested, BPP when requested) → HARD STOP.
+            3. Carrier-Grade COPE / SQS gating
+            * IF only Minimum_Viable_COPE present THEN allow submission but cap SQS (see SQS mapping). Prompt user to supply Carrier-Grade COPE fields.
+            4. Valuation method
+            * IF property_coverage_detected THEN attempt to extract valuation method (RCV or ACV).
+            * IF valuation method missing → SOFT BLOCK (prompt user for selection); de-rate SQS.
+            * IF RCV selected → validate that building/BPP values are consistent with replacement cost intent.
+            * IF ACV selected → allow submission but flag for depreciation exposure and SQS adjustments.
+            5. Deductible structure
+            * IF property values present THEN require deductible information by peril (AOP default plus wind/hail, earthquake, flood where applicable).
+            * IF peril-specific deductible referenced but undefined → HARD STOP.
+            * IF deductibles absent but geography expects them (e.g., wind/hail zone) → allow submission but cap SQS.
+            6. Coinsurance
+            * IF coinsurance clause applies → require coinsurance percentage or agreed value confirmation.
+            * IF coinsurance applies but value is missing → SOFT BLOCK and prompt user.
+            7. Business Income (BI)
+            * IF BI coverage requested → require BI limit and period of restoration.
+            * IF BI limit present but period missing → SOFT BLOCK.
+            8. Duplication & stack checks
+            * IF Builders Risk or Inland Marine references exist → dedupe values, require explanation or schedule mapping.
+            9. Final validation
+            * After form selection and field extraction → run cross-form validations (dates, location counts, valuation vs values, deductibles, coinsurance, BI completeness). If any hard-stop condition triggered → block submission; otherwise compute SQS and present remediation steps.
+COPE Tiering (Minimum Viable vs Carrier-Grade) — summary (keeps prior definitions)
+            * Minimum Viable COPE (HARD STOP if missing) — address, occupancy, construction, building value (if requested), BPP (if requested). Passing Minimum Viable allows submission but caps SQS.
+            * Carrier-Grade COPE (needed for SQS ≥ 90) — Minimum Viable plus year built, roof year, sprinkler and fire protection details, protection class, valuation method (RCV/ACV), BI limit & period, deductible and coinsurance details. Missing Carrier-Grade fields → SQS penalties (not hard stops unless carrier-specific).
+SQS mapping — Property Integrity (15% of SQS)
+            * Missing Minimum Viable COPE → 0% (hard stop)
+            * Minimum Viable only → ~60–70% for Property Integrity component
+            * Carrier-Grade COPE → 100% for Property Integrity component
+Additional SQS effects (examples):
+            * Valuation method missing → negative SQS delta
+            * RCV selected but values inconsistent → negative SQS delta
+            * Missing peril-specific deductible where expected → negative SQS delta
+            * Coinsurance unclear/missing → negative SQS delta
+            * BI missing period of restoration → negative SQS delta
+Overall SQS cap behavior:
+            * Minimum Viable COPE present but Carrier-Grade missing → cap overall SQS ≈ 85
+            * Carrier-Grade COPE present → SQS can reach 90+ (if other components meet thresholds)
+Implementation notes: Property data must be location-specific; require OCR confidence thresholds (e.g., ≥90% for address and values, ≥80% for construction/occupancy) and surface ambiguous fields for manual confirmation; if BI or valuation fields are missing, prompt for ACORD 810/811 attachments or a user confirmation.
+UI / UX prompts
+            * If Minimum Viable COPE missing: “We need the physical address, occupancy, construction type, and the building or contents value to submit this property to underwriting.” (Block)
+            * If Valuation method missing: “Select coverage valuation: Replacement Cost Value (RCV) or Actual Cash Value (ACV).” (Soft block / prompt)
+            * If peril deductibles referenced but undefined: “Please specify deductible amounts and basis for wind/hail, flood, and earthquake per location.” (Hard stop)
+            * If BI requested but missing period: “Please provide Period of Restoration for Business Income.” (Soft block / prompt)
+Why this is necessary: Valuation, deductibles, coinsurance, and BI materially affect pricing, limits adequacy, and claims outcome. Making these fields first-class in ACORD 140 extraction and validation reduces underwriter follow-ups, improves SQS accuracy, and prevents E&O exposure from mispriced or misrepresented property risks.
+
+________________
+
+
+ACORD 133 — Builders Risk
+Full Context: Used for builder’s risk projects. Trigger: If the submission involves property under construction (e.g. new building being erected or major renovation), include ACORD 133. The AI should check if the dec page or construction details mention “builder’s risk,” project cost, or completion date. What it does: ACORD 133 collects information specific to construction: project description, location, anticipated completion, values during construction, and how coverage is to be written (ground-up or renovation) for the structure-in-progress. Difference: This form is only relevant to construction projects. It differs from ACORD 140 (completed property) by covering the incomplete building. If a declaration has a section for builders risk (or the user tags it), the AI suggests ACORD 133 to capture those details.
+Purpose: Covers property under construction / renovation — separate underwriting logic from 140.
+Triggers: Dec page mentions “builders risk”, project name, project value, completion date, or a construction lender/mortgagee.
+Document cues / keywords: “Under construction”, “renovation”, “project value”, “completion date”.
+Required variables to extract: Project address, project cost, anticipated completion date, construction type, owner/contractor information, insured interest.
+Cross-form validations: If both 133 and 140 exist for same location, ensure period covered is disjoint (one for construction period, the other for completed property). Prevent duplicate insured values.
+SQS effect: Builders Risk missing critical project values/COPE = SQS penalty and possible hard stop.
+Decision rule (pseudo):
+            * IF dec_page.contains(construction_terms) OR 125.operations.contains(construction) THEN add ACORD_133
+            * IF project_value_missing THEN block (HARD STOP) or require ACORD_101 with explanation
+
+
+________________
+
+
+ACORD 160 — Inland Marine
+Full Context: Used for inland marine (floater) coverages. Trigger: If the insured has mobile property or transportation exposures (e.g. motor truck cargo, contractors’ equipment, equipment breakdown, accounts receivable floaters, etc.), include ACORD 160. The AI should notice any mention of “floater,” “marine,” “transit,” or classes like “equipment,” “value of construction equipment,” etc. What it does: ACORD 160 standardizes inland marine exposures: it collects descriptions and values of items that move or have special risks (including computer equipment, musical instruments, shipments, etc.). Difference: Unlike 140 (fixed property), 160 deals with movable property. If the policy includes inland marine coverage, 160 gives the underwriter a schedule of that property. For example, a dec page line “Inland Marine – Contractor’s Equipment” triggers ACORD 160 to list out the equipment details.
+Purpose: Schedule floaters/moveable property (contractor’s equipment, cargo, instruments). 
+Triggers: Dec page lists equipment in transit, contractor’s equipment, motor truck cargo, or explicitly “inland marine”.
+Document cues / keywords: “Floater”, “inland marine”, “contractor’s equipment”, “cargo”, serial numbers.
+Required variables to extract: Item descriptions, values, transit exposures, schedule durations.
+Cross-form validations: Ensure items on 160 are not double-counted on 140/141/133.
+SQS effect: Missing inland marine for obvious mobile exposures → moderate SQS deduction.
+Decision rule (pseudo):
+            * IF dec_page.contains(mobile_property_terms) THEN add ACORD_160
+            * IF item appears in 140 or 141 THEN dedupe or require ACORD_101
+
+
+________________
+
+
+ACORD 186 — Contractors Supplemental
+Full Context: Used for contracting operations. Trigger: If the insured is a contractor (especially in construction trades) and has contractor-related questions on the application or supplements (as indicated on the dec page or questionnaire), include ACORD 186. The AI should identify contractor-specific details: percent of work in renovation vs new, licensing, subcontracting practices, etc. What it does: ACORD 186 supplements the GL (126) with deep contractor info: type of contractor (GC, electrical, plumbing, etc.), work done (residential vs commercial, percent subcontracted), specialized exposures (e.g. blasting, demolition, scaffolding). Difference: This form is only used for contractors and fleshes out details that 125/126 don’t cover. If the dec page or attachments show a construction business, 186 is needed to convey their operational risks (e.g. any roofing work done, use of cranes, etc.).
+Purpose: Add contractor-specific operational detail to support GL & WC. 
+Triggers: 125.operations indicate construction trades or dec page lists contractor business.
+Document cues / keywords: “Contractor”, “subcontractor”, “licensed”, percentage subcontracted, roofing, demolition, blasting, scaffolding.
+Required variables to extract: Type of contractor, % subcontracted, residential vs commercial split, high-hazard operations, licensing details.
+Cross-form validations: Subcontracting % must feed back into WC and GL exposures. High subcontracting with low WC payroll = red flag.
+SQS effect: Missing 186 for contractor exposures → big SQS hit and higher pick of declination.
+Decision rule (pseudo):
+            * IF 125.operations.contains(contracting) THEN add ACORD_186
+            * IF %subcontracted_conflict_with_WC_payroll THEN require ACORD_101 and/or COI collection workflow
+
+
+________________
+
+
+ACORD 137 — Crime
+Full Context: Used for crime/employee dishonesty coverage. Trigger: If the dec page or supporting materials indicate a crime or fidelity policy (e.g. coverage for theft, forgery, employee dishonesty, ERISA bonds), include ACORD 137. The AI should watch for terms like “crime,” “money and securities,” “employee dishonesty,” etc. What it does: ACORD 137 captures coverages under a commercial crime policy (burglaries, robberies, employee theft, forgery, money orders, etc.), including limits and deductibles for each sub-limit. Difference: This is a highly specialized form. It supplements the core forms by detailing the various insuring agreements of a crime policy. If a declaration shows any crime coverage, the AI will suggest 137 to ensure all sections (parts A–E of crime coverage) are filled out.
+Purpose: Employee dishonesty, money & securities, ERISA bonds.
+Triggers: Dec page shows crime coverage, financial exposures, cashier/collections, or ERISA fiduciary mentions.
+Document cues / keywords: “Crime”, “employee dishonesty”, “money and securities”, “forgery”.
+Required variables: Limits by insuring agreement, deductible, locations, employee counts.
+Cross-form validations: If company has high internal cash handling but no crime coverage → flag silent exposure (soft warning).
+SQS effect: Absence of crime coverage when exposure exists → soft warning, reduced SQS.
+
+
+________________
+
+
+ACORD 138 — Cyber / Network Security
+Full Context: Used for cyber liability coverage. Trigger: If cyber insurance is requested or present (e.g. “Cyber Liability,” “Data Breach,” “Network Security”), include ACORD 138. The AI should detect any mention of first- or third-party cyber coverage in the dec page or submission. What it does: ACORD 138 collects cyber risk details: types of digital assets insured, network security measures, prior breaches, and limits. Difference: This form is specific to cyber exposures. It supplements the core application with cyber-specific questions (like triggers for breach response). In other words, if the dec page or questions indicate cyber coverage is needed, 138 is the form to record that information.
+Purpose: Cyber liability coverages: breach response, network security.
+Triggers: Dec page requests cyber coverage or business handles PHI/PCI/e-commerce.
+Document cues / keywords: “Cyber”, “Network Security”, “Data breach”, “PCI”, “PHI”, vendor/cloud use.
+Required variables: Limits, prior incidents, controls in place (MFA, backups), third-party vendor exposures.
+Cross-form validations: If business stores PHI/PCI and no cyber limits listed → soft-warning (recommend adding coverage).
+SQS effect: Missing cyber for clear cyber exposure → SQS reduction (recommendation, not block).
+
+
+________________
+
+
+ACORD 25 & ACORD 28 — Certificates / Evidence
+Full Context (25): Used when proof of liability coverage is needed (to a third party)[12]. Trigger: If the user indicates they need a certificate (e.g. to comply with a contract or lease) for GL, Auto, WC, or Umbrella coverage, include ACORD 25. The AI can spot this if the uploaded docs mention a “certificate holder” or require evidence of GL/Auto/WC insurance. What it is: ACORD 25 is a one-page Certificate of Liability Insurance that summarizes existing liability policies[12]. It lists policy numbers, limits, dates, and additional insureds in a compact format. For instance, if the dec page includes a section for “Certificate Holder,” or if a supporting letter asks “provide certificate,” the AI should generate ACORD 25. Difference: Unlike an application (125) or evidence form (28), ACORD 25 is purely informational. It does not collect new data; it reports that the insured already has liability coverage (GL, auto, umbrella, WC)[12][13]. It’s used by third parties (clients, landlords, lenders) to verify coverage exists.
+Full Context (28): Used when proof of property coverage is needed[14]. Trigger: If a lender, landlord or other party requests evidence of the property policy (e.g. on a mortgage or lease), include ACORD 28. The AI should detect requests like “evidence of insurance” or a template for mortgagee notification. What it is: ACORD 28 provides a standardized one-page Evidence of Commercial Property Insurance. It functions like a COI but for property, listing the covered locations, covered property types, and mortgagee/loss payees[14]. For example, [Insureon] notes that if you rent business property, the landlord may require an ACORD 28 form as proof of coverage[14]. Difference: ACORD 28 is exclusively for property (the dec page’s buildings and BPP). Unlike 25 (liability) or 125 (application), it doesn’t add coverage; it certifies the existing property insurance to interested parties.
+Purpose: Certificates (25) and property evidence (28) are proof-only documents for third parties (landlords, lenders). They do not replace application forms. 
+Triggers: Supporting docs ask “provide certificate” or dec page includes “certificate holder / mortgagee” fields.
+Document cues / keywords: “Certificate of Liability Insurance”, “Certificate Holder”, “Lender”, “Mortgagee”.
+Required variables: Policy numbers, effective/expiration dates, limits, names of certificate holders or mortgagees.
+SQS effect: Missing certificate when requested = user-facing failure (but not an underwriting hard stop. Prompt user to generate ACORD 25/28 post-bind.
+
+
+________________
+
+
+ACORD 101 — Additional Remarks Schedule
+Full Context: Used whenever extra explanations or narrative are needed[15]. Trigger: Any time information won’t fit in the standard fields of a form, the AI should add ACORD 101. For example, if the dec page has a handwritten note, clarification of “yes” answers, ownership details, or any supplemental story (claims explanation, project descriptions), ACORD 101 is used. What it does: ACORD 101 is simply a free-text attachment (“Additional Remarks Schedule”) that can be appended to any other form[15]. Difference: It is not a standalone application. Instead, it provides overflow space – for instance, to describe operations not captured elsewhere, clarify affiliations, or answer underwriting questions in detail[15]. Whenever the AI detects that the uploaded documents contain miscellaneous notes or require narrative answers (or if an underwriter specifically needs more space), 101 should be attached.
+Purpose: Narrative and clarifications — claims explanations, dec page inconsistencies, “yes” answers needing context. 
+Triggers: Any inconsistency: payroll vs revenue mismatch, class-code conflicts, claims/exposure misalignment, or hand-written notes.
+Document cues / keywords: “explain”, “note”, “see attached”, handwritten remarks, inconsistent numbers.
+Required variables: Free-text narrative tied to the form(s) it supplements.
+SQS effect: Good-quality narrative can repair SQS deficits (Narrative Quality = 10%). Poor or missing narratives when required increase declination risk.
+Decision rule (pseudo):*
+            * IF cross_form_conflict OR missing_explanation THEN require ACORD_101 before submission
+
+
+Submission Quality Score (SQS™) — Implementation
+Purpose: Predict quote speed, bind probability, and underwriter confidence prior to carrier submission. Use it to prioritize remediation work and to gate quality. 
+Score range & tiers:
+            * 90–100 Carrier-Ready (green)
+            * 75–89 Review-Ready (yellow/green)
+            * 60–74 At-Risk (yellow)
+            * <60 Decline-Prone (red)
+Hard-stop failures cap the score at 60. 
+Weighted components (suggested implementation):**
+               * Structural Completeness — 25% (ACORD 125 + required line forms present)
+               * Exposure Consistency — 25% (class code & payroll alignment)
+               * Property Integrity — 15% (COPE completeness)
+               * Lost History Alignment — 15% (claims vs exposures)
+               * Umbrella & Limit Adequacy — 10% (underlying limits vs umbrella)
+               * Narrative Quality — 10% (ACORD 101 clarity)
+SQS outputs to show the user: numeric SQS, top 3 risk drivers, and actionable steps (exact fields to complete or correct).
+Algorithm notes: Implement as deterministic rule scoring with negative/positive deltas for each check, not as a black-box ML model at first. You can add ML later for predictive declination scoring.

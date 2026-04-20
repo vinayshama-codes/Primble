@@ -6,6 +6,7 @@ from typing import List, Tuple
 
 import pdfplumber
 from config.settings import UPLOAD_DIR, SUPPORTED_IMG, OCR_PROVIDER
+from utils.text_cleaner import clean_text
 
 logger = logging.getLogger(__name__)
 
@@ -192,11 +193,13 @@ def extract_text(file_path: str) -> Tuple[str, List[str]]:
     """
     ext = os.path.splitext(file_path.lower())[1]
     if ext == ".pdf":
-        return extract_text_from_pdf(file_path)
+        raw_text, low_conf = extract_text_from_pdf(file_path)
     elif ext in SUPPORTED_IMG:
-        return ocr_image_file(file_path)
-    logger.warning(f"extract_text: unsupported file type '{ext}' for {file_path}")
-    return "", []
+        raw_text, low_conf = ocr_image_file(file_path)
+    else:
+        logger.warning(f"extract_text: unsupported file type '{ext}' for {file_path}")
+        return "", []
+    return clean_text(raw_text), low_conf
 
 
 # ---------------------------------------------------------------------------

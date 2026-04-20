@@ -76,7 +76,12 @@ TIER2_FIELDS = {
 
 def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
     if flags.get("is_certificate_doc") or flags.get("has_certificate_request"):
-        return True, []
+        missing = []
+        if not _fv(facts, "applicant_name"):
+            missing.append("Applicant legal name")
+        if not _fv(facts, "effective_date"):
+            missing.append("Proposed effective date")
+        return len(missing) == 0, missing
     missing = []
     is_dec_page          = flags.get("_doc_type") == "dec_page"
     skip_producer_fields = is_dec_page
@@ -97,6 +102,42 @@ def check_tier2(facts: dict) -> Tuple[int, List[str]]:
     return score, missing
 
 
+def validate_effective_date_window(facts: dict) -> tuple | None:
+    from datetime import datetime, timedelta
+    eff = _fv(facts, "effective_date")
+    if not eff:
+        return None
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y"):
+        try:
+            d = datetime.strptime(str(eff).strip(), fmt)
+            now = datetime.now()
+            if d < now - timedelta(days=730):
+                return ("soft", "effective_date is more than 2 years in the past")
+            if d > now + timedelta(days=730):
+                return ("soft", "effective_date is more than 2 years in the future")
+            return None
+        except ValueError:
+            continue
+    return ("soft", "effective_date format unrecognized")
+
+
+_VALID_NAICS_PREFIXES = {
+    "11","21","22","23","31","32","33","42","44","45",
+    "48","49","51","52","53","54","55","56","61","62",
+    "71","72","81","92"
+}
+
+def validate_naics_code(facts: dict) -> tuple | None:
+    code = str(_fv(facts, "naics_code") or "").strip()
+    if not code or code.lower() in {"null","none","n/a",""}:
+        return None
+    if not code.isdigit() or not (2 <= len(code) <= 6):
+        return ("soft", f"NAICS code '{code}' is not 2-6 digits")
+    if code[:2] not in _VALID_NAICS_PREFIXES:
+        return ("soft", f"NAICS prefix '{code[:2]}' is not a valid industry sector")
+    return None
+
+
 # ── Stop evaluation ───────────────────────────────────────────────────────────
 
 def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
@@ -109,6 +150,14 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     appended items trigger the same cap automatically.
     """
     hard, soft = run_field_validations(facts)
+
+    date_issue = validate_effective_date_window(facts)
+    if date_issue:
+        soft.append(date_issue[1])
+
+    naics_issue = validate_naics_code(facts)
+    if naics_issue:
+        soft.append(naics_issue[1])
 
     # ── GL ────────────────────────────────────────────────────────────────────
     if flags.get("gl_is_claims_made") and not _fv(facts, "retro_date"):
@@ -449,8 +498,16 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
     """
     issues: List[str] = []
 
+    # ── applicant_name mismatch: hard stop ───────────────────────────────────
+    _applicant_vals = {_fv(d["facts"], "applicant_name") for d in docs if _fv(d["facts"], "applicant_name")}
+    if len(_applicant_vals) > 1:
+        issues.append(
+            "[hard_stop] code=name_conflict "
+            f"Inconsistent applicant_name across docs: {sorted(str(v) for v in _applicant_vals)}"
+        )
+
     # ── Advisory exact-match fields ───────────────────────────────────────────
-    for key in ("applicant_name", "entity_type", "mailing_address"):
+    for key in ("entity_type", "mailing_address"):
         vals = {_fv(d["facts"], key) for d in docs if _fv(d["facts"], key)}
         if len(vals) > 1:
             issues.append(
@@ -515,6 +572,23 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
     return issues
 
 
+# ── Loss history gradient scorer ─────────────────────────────────────────────
+
+def _loss_history_score(facts, flags):
+    has_history = flags.get("has_loss_history", False)
+    has_carrier = bool(_fv(facts, "prior_carrier"))
+    n_claims = _to_int(_fv(facts, "num_claims")) or 0
+    incurred = _to_int(_fv(facts, "total_incurred")) or 0
+    base = 50
+    if has_history: base += 20
+    if has_carrier: base += 15
+    if n_claims > 0: base += 10
+    if incurred >= 0 and has_history: base += 5
+    if n_claims > 5: base -= 10
+    if incurred > 250_000: base -= 5
+    return max(40, min(100, base))
+
+
 # ── SQS calculation ───────────────────────────────────────────────────────────
 
 def calculate_sqs(
@@ -530,6 +604,17 @@ def calculate_sqs(
     schema_size=None,
     fields_mapped=None,
 ) -> dict:
+    extraction_quality = facts.get("_extraction_quality", 1.0)
+    if isinstance(extraction_quality, float) and extraction_quality < 0.60:
+        return {
+            "sqs_score": None,
+            "needs_reextraction": True,
+            "tier": "Incomplete",
+            "routing_decision": "hold",
+            "issues": [f"Only {int(extraction_quality*100)}% of document was processed. Re-upload or reprocess."],
+            "recommendations": ["Re-upload document or contact support."],
+        }
+
     breakdown:       dict = {}
     issues:          List[str] = []
     recommendations: List[str] = []
@@ -620,9 +705,10 @@ def calculate_sqs(
     else:
         struct = fill_rate
 
-    # OCR confidence penalty: -3 per tier-1 field with ocr_confident=False, cap 15.
+    # OCR confidence penalty: -6 per tier-1 field with ocr_confident=False, cap 30.
     _ocr_tier1 = list(TIER1_FIELDS.keys()) + list(TIER1_CONTACT)
-    ocr_penalty = min(15, 3 * sum(1 for k in _ocr_tier1 if not _focr(facts, k)))
+    ocr_low_count = sum(1 for k in _ocr_tier1 if not _focr(facts, k))
+    ocr_penalty = min(30, ocr_low_count * 6)
     struct = max(0, struct - ocr_penalty)
     breakdown["structural_completeness"] = struct
 
@@ -758,10 +844,8 @@ def calculate_sqs(
     breakdown["property_integrity"] = max(0, prop)
 
     # ── Loss history alignment ────────────────────────────────────────────────
-    has_loss    = flags.get("has_loss_history") or bool(_fv(facts, "num_claims"))
-    has_carrier = bool(_fv(facts, "prior_carrier"))
-    loss_score  = 90 if (has_loss and has_carrier) else 80 if has_loss else 65 if has_carrier else 50
-    if not has_loss:
+    loss_score = _loss_history_score(facts, flags)
+    if not (flags.get("has_loss_history") or bool(_fv(facts, "num_claims"))):
         recommendations.append("Attach 3–5 years of loss runs to improve SQS")
     breakdown["loss_history_alignment"] = loss_score
 

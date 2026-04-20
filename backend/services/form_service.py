@@ -104,8 +104,8 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
     ops    = (_fv(facts, "operations_description") or "").lower()
     lobs   = " ".join(facts.get("lines_of_business") or []).lower()
     cert_h = (_fv(facts, "certificate_holder") or "").lower()
-    search = f"{ops} {lobs} {cert_h}"
-    text   = text.lower()   # normalise; harmless if already lower or empty
+    text   = (text or "").lower()
+    search = f"{ops} {lobs} {cert_h} {text}"  # include raw OCR body for keyword matching
 
     def _already_matched(form_id: str) -> bool:
         return any(m["form_id"] == form_id for m in matches)

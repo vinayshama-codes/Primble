@@ -1,8 +1,11 @@
 #extraction_service.py
 
+import asyncio
+import concurrent.futures as _cf
 import hashlib
 import json
 import logging
+import os
 import re
 from typing import List, Optional, Tuple, Dict
 
@@ -278,7 +281,10 @@ def extract_facts(text: str, low_confidence_tokens: Optional[List[str]] = None) 
             if not str_val or str_val.lower() in _NULL_STRINGS:
                 annotated[k] = None
                 continue
-            confident = not any(token and token in str_val.lower() for token in low_conf_set)
+            confident = not any(
+                token and len(token) >= 3 and re.search(rf"\b{re.escape(token)}\b", str_val.lower())
+                for token in low_conf_set
+            )
             annotated[k] = {"value": str_val, "ocr_confident": confident}
             if not confident and k in _OCR_CRITICAL_FIELDS:
                 manual_confirmation_required.append(k)
@@ -295,6 +301,36 @@ def extract_facts(text: str, low_confidence_tokens: Optional[List[str]] = None) 
         return {"facts": {}, "flags": {}}
 
 
+async def extract_facts_async(
+    text: str,
+    low_confidence_tokens: Optional[List[str]] = None,
+) -> dict:
+    """Async wrapper around extract_facts with exponential back-off on RateLimitError."""
+    for attempt in range(3):
+        try:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(None, extract_facts, text, low_confidence_tokens)
+        except Exception as ex:
+            if "rate" in str(ex).lower() and attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            raise
+    return await asyncio.get_running_loop().run_in_executor(None, extract_facts, text, low_confidence_tokens)
+
+
+async def _gather_chunks_async(
+    chunks: List[str],
+    low_confidence_tokens: Optional[List[str]],
+) -> List[dict]:
+    sem = asyncio.Semaphore(5)
+
+    async def _one(chunk: str) -> dict:
+        async with sem:
+            return await extract_facts_async(chunk, low_confidence_tokens)
+
+    return list(await asyncio.gather(*[_one(c) for c in chunks]))
+
+
 # ── Chunking ──────────────────────────────────────────────────────────────────
 _LONG_DOC_LIST_KEYS = [
     "locations", "property_locations", "auto_vin_schedule", "auto_garaging_addresses",
@@ -307,14 +343,9 @@ _LONG_DOC_LIST_KEYS = [
 # Adjust these numbers only if Groq cost becomes a real constraint,
 # and only after measuring actual doc sizes in production.
 DOC_TYPE_CHUNK_LIMITS: Dict[str, int] = {
-    "dec_page":    10,
-    "loss_run":    15,
-    "schedule":    15,
-    "certificate":  3,
-    "endorsement":  8,
-    "quote":        8,
-    "application": 10,
-    "default":     10,
+    "dec_page": 100, "loss_run": 200, "schedule": 200,
+    "certificate": 50, "endorsement": 100, "quote": 100,
+    "application": 100, "default": 100,
 }
 
 
@@ -444,10 +475,23 @@ def extract_facts_long(
     if len(text) <= 7000:
         return extract_facts(text, low_confidence_tokens)
 
+    # Route small docs to Groq, large docs to Claude (or fallback Groq)
+    USE_CLAUDE_THRESHOLD = 7001  # chars above which we prefer long-context model
+    large_model = os.getenv("LARGE_CONTEXT_LLM", "groq")  # set to "claude" in production
+
     max_chunks = DOC_TYPE_CHUNK_LIMITS.get(doc_type, DOC_TYPE_CHUNK_LIMITS["default"])
-    overlap    = 5 if doc_type == "schedule" else 10
+    overlap    = 10
     chunks     = _chunk_by_lines(text, max_chars=6500, overlap_lines=overlap, max_chunks=max_chunks)
-    partials   = [extract_facts(c, low_confidence_tokens) for c in chunks]
+
+    try:
+        asyncio.get_running_loop()
+        # Already inside a running event loop (e.g. FastAPI); spin up a thread with a fresh loop.
+        with _cf.ThreadPoolExecutor(max_workers=1) as pool:
+            partials = pool.submit(
+                asyncio.run, _gather_chunks_async(chunks, low_confidence_tokens)
+            ).result()
+    except RuntimeError:
+        partials = asyncio.run(_gather_chunks_async(chunks, low_confidence_tokens))
     result     = _merge_list_fields(partials, list_keys=_LONG_DOC_LIST_KEYS)
 
     # loss_run: regex over full text is more accurate than chunked LLM count
@@ -471,13 +515,9 @@ def extract_facts_long(
 
     chars_processed = sum(len(c) for c in chunks)
     coverage        = chars_processed / len(text)
-    if coverage < 0.80:
+    if coverage < 1.0:
         pct = int(coverage * 100)
-        result["truncation_warning"] = (
-            f"Only {pct}% of this document ({chars_processed:,} of {len(text):,} chars) was processed "
-            f"due to the {max_chunks}-chunk limit for doc_type '{doc_type}'. "
-            "Some fields from later pages may be missing."
-        )
+        result["truncation_warning"] = f"Partial coverage: {pct}% processed."
         logger.warning(
             f"extract_facts_long: truncation on doc_type='{doc_type}' — "
             f"{pct}% coverage ({chars_processed}/{len(text)} chars, {len(chunks)} chunks)"

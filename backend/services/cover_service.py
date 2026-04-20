@@ -1,5 +1,6 @@
 #cover_service.py
 
+import hashlib
 import io
 import json
 import logging
@@ -8,7 +9,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from config.settings import groq_chat
-from services.extraction_service import _fv
+from services.extraction_service import _fv, _cache_get, _cache_set
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,13 @@ def generate_ai_cover_narrative(
         for fid, sqs in sqs_results.items()
     ]
     avg_sqs = int(sum(s.get("sqs_score", 0) for s in sqs_results.values()) / max(len(sqs_results), 1)) if sqs_results else 0
+    applicant = _fv(facts, 'applicant_name') or 'Unknown'
+    _cover_cache_key = "cover_ai:" + hashlib.md5(
+        f"{applicant}|{','.join(sorted(form_ids))}|{avg_sqs}|{org_name}".encode()
+    ).hexdigest()
+    _cached_cover = _cache_get(_cover_cache_key)
+    if _cached_cover:
+        return _cached_cover
     prompt  = f"""You are an expert commercial insurance underwriting analyst.
 Generate a professional cover page summary for this ACORD submission package.
 
@@ -62,11 +70,13 @@ Return ONLY the JSON object."""
         s, e = raw.find("{"), raw.rfind("}")
         if s != -1 and e != -1:
             result = json.loads(raw[s : e + 1])
-            return {
+            result = {
                 "narrative":     result.get("narrative", ""),
                 "sqs_reasoning": result.get("sqs_reasoning", ""),
                 "ai_block":      result.get("ai_block", {}),
             }
+            _cache_set(_cover_cache_key, result)
+            return result
     except Exception as ex:
         logger.error(f"Cover page AI generation failed: {ex}")
 
@@ -107,6 +117,13 @@ def generate_lite_cover_narrative(
     score   = sqs.get("sqs_score", 0)
     grade   = sqs.get("grade", "—")
     routing = sqs.get("routing_decision", "—")
+    _lite_applicant = _fv(facts, 'applicant_name') or 'Unknown'
+    _lite_cache_key = "cover_lite:" + hashlib.md5(
+        f"{_lite_applicant}|{score}|{org_name}|{','.join(sorted(str(x) for x in hard_stops))}".encode()
+    ).hexdigest()
+    _cached_lite = _cache_get(_lite_cache_key)
+    if _cached_lite:
+        return _cached_lite
     prompt  = f"""You are an expert commercial insurance underwriting analyst.
 Generate a professional pre-submission SQS summary for a producer who has uploaded their package for analysis.
 This is NOT a full ACORD package — no forms have been generated. The purpose is to flag issues before the producer
@@ -142,11 +159,13 @@ Return ONLY the JSON object."""
         s, e = raw.find("{"), raw.rfind("}")
         if s != -1 and e != -1:
             result = json.loads(raw[s : e + 1])
-            return {
+            result = {
                 "narrative":     result.get("narrative", ""),
                 "sqs_reasoning": result.get("sqs_reasoning", ""),
                 "ai_block":      result.get("ai_block", {}),
             }
+            _cache_set(_lite_cache_key, result)
+            return result
     except Exception as ex:
         logger.error(f"Lite cover narrative generation failed: {ex}")
 
