@@ -1,0 +1,13 @@
+{
+  "form_id": "ACORD_186",
+  "form_name": "ACORD 186 - Contractors Supplemental Application",
+  "form_type": "supplement",
+  "template_file": "",
+  "description": "Supplemental application for contractors providing additional underwriting detail: subcontracting percentage, project types, prior losses, and completed operations exposure.",
+  "always_include": false,
+  "matching_flags": ["is_contractor"],
+  "matching_keywords": ["contractor", "subcontract", "roofing", "demolition", "scaffolding", "blasting", "general contractor"],
+  "coverage_types": ["general_liability"],
+  "policy_types": ["commercial"],
+  "tier1_minimum_fields": []
+}

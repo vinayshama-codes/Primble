@@ -54,6 +54,29 @@ class ApplyOverageRequest(BaseModel):
 
 
 from typing import Optional
+
+
+class RiskTransferFlags(BaseModel):
+    """Mirrors the risk_transfer sub-object returned by the extraction prompt."""
+    additional_insured_required: bool = False
+    additional_insured_names: List[str] = []
+    primary_noncontributory_required: bool = False
+    waiver_of_subrogation_required: bool = False
+    certificate_holder_name: Optional[str] = None
+    loss_payee_name: Optional[str] = None
+    mortgagee_name: Optional[str] = None
+    specific_wording_requirements: Optional[str] = None
+
+
+class ComplianceCheckItem(BaseModel):
+    """One item in the compliance_checklist returned inside the SQS payload."""
+    check: str
+    label: str
+    status: str          # "required" | "advisory" | "info"
+    message: str
+    advisory: Optional[str] = None
+
+
 class SaveSignatureRequest(BaseModel):
     signature_data: Optional[str] = None
 

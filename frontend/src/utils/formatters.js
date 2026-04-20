@@ -1,3 +1,5 @@
+// formatters.js
+
 export const gradeColor = (g) =>
   ({ A: "#10b981", B: "#14b8a6", C: "#f59e0b", D: "#ef4444", F: "#dc2626" }[g] || "#6b7280");
 

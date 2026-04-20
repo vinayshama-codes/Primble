@@ -7,8 +7,20 @@ from typing import Optional
 
 from config.database import get_db
 from fastapi import HTTPException
+from services.extraction_service import _fv
 
 logger = logging.getLogger(__name__)
+
+
+def _strip_null_bytes(obj):
+    """Recursively remove \u0000 null bytes from all strings — PostgreSQL rejects them."""
+    if isinstance(obj, str):
+        return obj.replace('\x00', '')
+    if isinstance(obj, dict):
+        return {k: _strip_null_bytes(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_strip_null_bytes(i) for i in obj]
+    return obj
 
 
 def _session_to_db(data: dict) -> dict:
@@ -16,7 +28,7 @@ def _session_to_db(data: dict) -> dict:
     clean_gen  = {fid: {k: v for k, v in fd.items() if k != "pdf_bytes"} for fid, fd in generated.items()}
     clean      = {k: v for k, v in data.items() if k != "generated_forms"}
     clean["generated_forms"] = clean_gen
-    return clean
+    return _strip_null_bytes(clean)
 
 
 def _session_from_db(data: dict, sid: str) -> dict:
@@ -112,6 +124,25 @@ def upd_processing_session(sid: str, updates: dict):
     cur.close()
     conn.close()
 
+def compute_session_status(data: dict) -> str:
+    """
+    Derive the display status of a session from its stored data.
+
+    NOT_STARTED  — uploaded but no forms generated or Clarity analysis run
+    IN_PROGRESS  — forms generated / Clarity analysis done, never downloaded
+    COMPLETED    — at least one download (single or ZIP) has been recorded
+
+    This is the single source of truth for the dashboard badge.
+    Never store status directly — always compute it from these fields
+    so it cannot go stale.
+    """
+    if data.get("last_downloaded_at"):
+        return "COMPLETED"
+    if data.get("generated_forms") or data.get("clarity_result"):
+        return "IN_PROGRESS"
+    return "NOT_STARTED"
+
+
 def list_sessions_for_user(user_id: str) -> list:
     conn = get_db()
     cur  = conn.cursor()
@@ -124,17 +155,25 @@ def list_sessions_for_user(user_id: str) -> list:
     conn.close()
     result = []
     for row in rows:
-        data = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
+        data      = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
         generated = data.get("generated_forms", {})
         facts     = data.get("facts", {})
         sqs_scores = {fid: fd.get("sqs", {}) for fid, fd in generated.items()}
+
+        # Include Clarity SQS if no Assembly forms were generated
+        clarity = data.get("clarity_result", {})
+        if not sqs_scores and clarity.get("sqs_combined"):
+            sqs_scores = {"clarity": clarity["sqs_combined"]}
+
         result.append({
-            "session_id":   row["id"],
-            "created_at":   row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
-            "updated_at":   row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
-            "applicant":    facts.get("applicant_name") or "Unknown Applicant",
-            "lines":        facts.get("lines_of_business") or [],
-            "form_ids":     list(generated.keys()),
-            "sqs":          sqs_scores,
+            "session_id":          row["id"],
+            "created_at":          row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
+            "updated_at":          row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
+            "last_downloaded_at":  data.get("last_downloaded_at"),
+            "applicant":           _fv(facts, "applicant_name") or "Unknown Applicant",
+            "lines":               facts.get("lines_of_business") or [],
+            "form_ids":            list(generated.keys()),
+            "sqs":                 sqs_scores,
+            "status":              compute_session_status(data),
         })
-    return result    
+    return result

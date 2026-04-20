@@ -51,7 +51,7 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
                 "unit_amount": plan_cfg["amount"],
                 "recurring": {"interval": plan_cfg["interval"]}}, "quantity": 1}],
             mode="subscription",
-            success_url=f"{FRONTEND_URL}?upgraded=true",
+            success_url=f"{FRONTEND_URL}?upgraded=true&plan={plan}",
             cancel_url=f"{FRONTEND_URL}?upgraded=false",
             client_reference_id=str(current_user["id"]),
             metadata={"plan": plan, "billing_cycle": cycle, "user_id": str(current_user["id"])},
@@ -249,8 +249,20 @@ async def stripe_webhook(request: Request):
         sub_id = obj.get("id")
         cancel_at_period_end = obj.get("cancel_at_period_end", False)
         status = obj.get("status", "")
+        metadata = obj.get("metadata") or {}
+        new_plan = metadata.get("plan") if isinstance(metadata, dict) else getattr(metadata, "plan", None)
+        new_cycle = (metadata.get("billing_cycle") if isinstance(metadata, dict) else getattr(metadata, "billing_cycle", None)) or "monthly"
         if sub_id:
             conn = get_db(); cur = conn.cursor()
+            # Sync plan/tier if Stripe metadata carries it and the subscription is active
+            if new_plan and new_plan in PLANS and status == "active":
+                cfg = PLANS[new_plan].get(new_cycle) or PLANS[new_plan]["monthly"]
+                cur.execute("""UPDATE users SET subscription_tier=%s, billing_cycle=%s,
+                    packages_limit=%s, overage_rate=%s
+                    WHERE stripe_subscription_id=%s AND subscription_tier != %s""",
+                    (new_plan, new_cycle, cfg["packages"], cfg["overage_rate"], sub_id, new_plan))
+                if cur.rowcount:
+                    logger.info(f"subscription.updated: synced plan={new_plan} for sub {sub_id}")
             if cancel_at_period_end:
                 # Subscription marked for cancellation — confirm status in DB
                 cur.execute("UPDATE users SET payment_status='canceling' WHERE stripe_subscription_id=%s AND payment_status NOT IN ('failed','soft_locked','suspended','archived')", (sub_id,))
@@ -267,27 +279,51 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
     from fastapi import HTTPException
     user_email = current_user.get("email")
     user_id = current_user.get("id")
-    if current_user.get("subscription_tier") not in ("free", None, "lite"):
-        return {"subscription_tier": current_user["subscription_tier"], "upgraded": False, "reason": "already_subscribed"}
+    customer_id = current_user.get("stripe_customer_id")
     try:
-        customers = stripe.Customer.list(email=user_email, limit=5)
-        if not customers.data:
+        # Always verify against Stripe — never rely solely on DB state.
+        # This handles upgrades, downgrades, and cross-plan changes.
+        customers_to_check = []
+        if customer_id:
+            customers_to_check.append(type("C", (), {"id": customer_id})())
+        else:
+            listed = stripe.Customer.list(email=user_email, limit=5)
+            customers_to_check = list(listed.data)
+
+        if not customers_to_check:
             return {"subscription_tier": "free", "upgraded": False, "reason": "no_stripe_customer"}
-        for customer in customers.data:
+
+        for customer in customers_to_check:
             subs = stripe.Subscription.list(customer=customer.id, status="active", limit=5)
             if subs.data:
                 sub = subs.data[0]; sub_id = sub.id
                 raw_meta = getattr(sub, "metadata", None) or {}
-                plan = getattr(raw_meta, "plan", None) or "essentials"
-                cycle = getattr(raw_meta, "billing_cycle", None) or "monthly"
-                cfg = PLANS.get(plan, {}).get(cycle, PLANS["essentials"]["monthly"])
+                plan = (raw_meta.get("plan") if isinstance(raw_meta, dict) else getattr(raw_meta, "plan", None)) or None
+                cycle = (raw_meta.get("billing_cycle") if isinstance(raw_meta, dict) else getattr(raw_meta, "billing_cycle", None)) or "monthly"
+                # Fall back to resolving plan from price amount if metadata is missing
+                if not plan or plan not in PLANS:
+                    try:
+                        price_amount = sub.items.data[0].price.unit_amount
+                        plan = next((p for p, cfg in PLANS.items()
+                                     for c, v in cfg.items() if v["amount"] == price_amount), "essentials")
+                    except Exception:
+                        plan = "essentials"
+                cfg = PLANS.get(plan, {}).get(cycle) or PLANS["essentials"]["monthly"]
                 now = datetime.now(timezone.utc).isoformat()
                 conn = get_db(); cur = conn.cursor()
-                cur.execute("UPDATE users SET subscription_tier=%s, stripe_subscription_id=%s, stripe_customer_id=%s, packages_limit=%s, billing_cycle=%s, billing_period_start=%s, overage_rate=%s, payment_status='ok', payment_failed_at=NULL WHERE id=%s",
-                            (plan, sub_id, customer.id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id))
+                cur.execute("""UPDATE users SET subscription_tier=%s, stripe_subscription_id=%s,
+                    stripe_customer_id=%s, packages_limit=%s, billing_cycle=%s, billing_period_start=%s,
+                    overage_rate=%s, payment_status='ok', payment_failed_at=NULL WHERE id=%s""",
+                    (plan, sub_id, customer.id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id))
                 conn.commit(); cur.close(); conn.close()
+                logger.info(f"verify-upgrade synced user {user_id} to plan={plan} sub={sub_id}")
                 return {"subscription_tier": plan, "upgraded": True, "reason": "stripe_verified"}
 
+        # No active subscription in Stripe — reset to free
+        if current_user.get("subscription_tier") not in ("free", None):
+            conn = get_db(); cur = conn.cursor()
+            cur.execute("UPDATE users SET subscription_tier='free', stripe_subscription_id=NULL, packages_limit=0 WHERE id=%s", (user_id,))
+            conn.commit(); cur.close(); conn.close()
         return {"subscription_tier": "free", "upgraded": False, "reason": "no_active_subscription"}
     except stripe.error.AuthenticationError:
         raise HTTPException(500, "Stripe API key not configured")

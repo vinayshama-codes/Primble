@@ -47,23 +47,29 @@ async def generate_questions(
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
 
-    generated = proc_session.get("generated_forms", {})
-    if not generated:
-        raise HTTPException(400, "No forms generated yet — generate forms first")
-    
-    for fid, fd in generated.items():
-        conf = fd.get("confidence", {})
-        logger.info(f"DEBUG ARQ Form {fid}: confidence sample = {dict(list(conf.items())[:5])}")
-        field_state = fd.get("field_state") or fd.get("mapped", {})
-        logger.info(f"DEBUG ARQ Form {fid}: field_state sample = {dict(list(field_state.items())[:5])}")
+    generated      = proc_session.get("generated_forms", {})
+    clarity_result = proc_session.get("clarity_result", {})
 
-    questions = generate_arq_questions(
-        facts=proc_session.get("facts", {}),
-        flags=proc_session.get("flags", {}),
-        generated_forms=generated,
-        hard_stops=proc_session.get("hard_stops", []),
-        soft_stops=proc_session.get("soft_stops", []),
-    )
+    if clarity_result.get("arq_questions"):
+        # Clarity pipeline: questions were pre-computed by /api/clarity/analyze
+        questions = clarity_result["arq_questions"]
+    elif generated:
+        # Assembly pipeline: derive questions from generated form confidence data
+        for fid, fd in generated.items():
+            conf = fd.get("confidence", {})
+            logger.info(f"DEBUG ARQ Form {fid}: confidence sample = {dict(list(conf.items())[:5])}")
+            field_state = fd.get("field_state") or fd.get("mapped", {})
+            logger.info(f"DEBUG ARQ Form {fid}: field_state sample = {dict(list(field_state.items())[:5])}")
+
+        questions = generate_arq_questions(
+            facts=proc_session.get("facts", {}),
+            flags=proc_session.get("flags", {}),
+            generated_forms=generated,
+            hard_stops=proc_session.get("hard_stops", []),
+            soft_stops=proc_session.get("soft_stops", []),
+        )
+    else:
+        raise HTTPException(400, "Analysis not complete yet — please wait for processing to finish")
 
     # Auto-fill producer info for the send modal
     producer_full_name  = current_user.get("full_name", "") or current_user.get("email", "")
@@ -176,14 +182,14 @@ async def client_view(token: str):
     # Mark as viewed
     mark_arq_viewed(token)
 
-    # Return only what client needs — no internal IDs except token
+    # Return only what client needs — no internal IDs, no form attribution.
+    # Clients don't need to know which ACORD form a question maps to.
     questions_for_client = []
     for q in arq.get("questions", []):
         questions_for_client.append({
-            "field_name":  q["field_name"],
-            "question":    q["question"],
-            "forms":       q.get("forms", ""),
-            "field_type":  q.get("field_type", "text"),
+            "field_name":    q["field_name"],
+            "question":      q["question"],
+            "field_type":    q.get("field_type", "text"),
             "current_value": "",  # Never pre-fill for client
         })
 

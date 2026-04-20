@@ -1,3 +1,5 @@
+#cover_service.py
+
 import io
 import json
 import logging
@@ -5,7 +7,8 @@ import textwrap
 from datetime import datetime, timezone
 from typing import List
 
-from config.settings import groq_client
+from config.settings import groq_chat
+from services.extraction_service import _fv
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +35,11 @@ Generate a professional cover page summary for this ACORD submission package.
 SUBMISSION DATA:
 Agent/User: {user.get('full_name', '') if user else ''}
 Agency/Org: {org_name}
-Applicant: {facts.get('applicant_name', 'Unknown')}
+Applicant: {_fv(facts, 'applicant_name') or 'Unknown'}
 Lines of Business: {facts.get('lines_of_business', [])}
-Effective Date: {facts.get('effective_date', 'Not specified')}
-Operations: {facts.get('operations_description', 'Not provided')}
-Revenue: {facts.get('total_revenue', 'Not provided')}
+Effective Date: {_fv(facts, 'effective_date') or 'Not specified'}
+Operations: {_fv(facts, 'operations_description') or 'Not provided'}
+Revenue: {_fv(facts, 'total_revenue') or 'Not provided'}
 Forms Generated: {', '.join(form_ids)}
 Overall Average SQS: {avg_sqs}/100
 SQS Results: {json.dumps(sqs_summary)}
@@ -53,12 +56,7 @@ Respond with ONLY a valid JSON object with exactly three keys:
 
 Return ONLY the JSON object."""
     try:
-        r   = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-        )
-        raw = (r.choices[0].message.content or "").strip()
+        raw = groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
         if raw.startswith("```"):
             raw = raw.replace("```json", "").replace("```", "").strip()
         s, e = raw.find("{"), raw.rfind("}")
@@ -72,12 +70,12 @@ Return ONLY the JSON object."""
     except Exception as ex:
         logger.error(f"Cover page AI generation failed: {ex}")
 
-    applicant = facts.get('applicant_name', 'Unknown')
+    applicant = _fv(facts, 'applicant_name') or 'Unknown'
     lobs      = ", ".join(facts.get("lines_of_business", [])) if facts.get("lines_of_business") else "commercial insurance"
     return {
         "narrative": (
             f"This ACORD submission package was prepared by {org_name} on behalf of {applicant}. "
-            f"The package covers {lobs} with a proposed effective date of {facts.get('effective_date', 'TBD')}. "
+            f"The package covers {lobs} with a proposed effective date of {_fv(facts, 'effective_date') or 'TBD'}. "
             f"All forms have been populated using AI-extracted data from the uploaded source documents. "
             f"The submission has been reviewed for completeness and quality using the Submission Quality Score (SQS) system."
         ),
@@ -117,11 +115,11 @@ proceeds with their platform of choice.
 SUBMISSION DATA:
 Agent/User: {user.get('full_name', '') if user else ''}
 Agency/Org: {org_name}
-Applicant: {facts.get('applicant_name', 'Unknown')}
+Applicant: {_fv(facts, 'applicant_name') or 'Unknown'}
 Lines of Business: {facts.get('lines_of_business', [])}
-Effective Date: {facts.get('effective_date', 'Not specified')}
-Operations: {facts.get('operations_description', 'Not provided')}
-Revenue: {facts.get('total_revenue', 'Not provided')}
+Effective Date: {_fv(facts, 'effective_date') or 'Not specified'}
+Operations: {_fv(facts, 'operations_description') or 'Not provided'}
+Revenue: {_fv(facts, 'total_revenue') or 'Not provided'}
 SQS Score: {score}/100 (Grade: {grade}, Routing: {routing})
 Hard Stops (critical blockers): {hard_stops}
 Soft Stops (warnings): {soft_stops}
@@ -138,12 +136,7 @@ Respond with ONLY a valid JSON object with exactly three keys:
 
 Return ONLY the JSON object."""
     try:
-        r   = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-        )
-        raw = (r.choices[0].message.content or "").strip()
+        raw = groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
         if raw.startswith("```"):
             raw = raw.replace("```json", "").replace("```", "").strip()
         s, e = raw.find("{"), raw.rfind("}")
@@ -157,7 +150,7 @@ Return ONLY the JSON object."""
     except Exception as ex:
         logger.error(f"Lite cover narrative generation failed: {ex}")
 
-    applicant = facts.get('applicant_name', 'Unknown')
+    applicant = _fv(facts, 'applicant_name') or 'Unknown'
     lobs      = ", ".join(facts.get("lines_of_business", [])) if facts.get("lines_of_business") else "commercial insurance"
     return {
         "narrative": (
@@ -204,7 +197,7 @@ def build_cover_page_pdf(
     if not narrative or not narrative.strip():
         narrative = (
             f"This ACORD submission package was prepared by {org_name} for applicant "
-            f"{facts.get('applicant_name', 'Unknown')}. All forms have been populated using "
+            f"{_fv(facts, 'applicant_name') or 'Unknown'}. All forms have been populated using "
             f"AI-extracted data from the uploaded source documents."
         )
 
@@ -299,14 +292,14 @@ def build_cover_page_pdf(
 
         # ── SUBMISSION INFO TABLE ────────────────────────────────────────────
         agent_name = (user.get("full_name", "") if user else "") or "—"
-        eff_date   = facts.get("effective_date", "—") or "—"
-        exp_date   = facts.get("expiration_date", "—") or "—"
+        eff_date   = _fv(facts, "effective_date") or "—"
+        exp_date   = _fv(facts, "expiration_date") or "—"
         lobs_raw   = facts.get("lines_of_business", [])
         lobs       = ", ".join(lobs_raw) if lobs_raw else "—"
         forms_list = ", ".join(form_ids) if form_ids else "Pre-Submission SQS Analysis (Lite)"
 
         def _v(key, default="—"):
-            v = facts.get(key, default)
+            v = _fv(facts, key)
             return str(v) if v else default
 
         info_rows = [
@@ -541,9 +534,9 @@ def _build_cover_page_fallback(facts, sqs_results, form_ids, org_name, narrative
             "ACORDLY SUBMISSION PACKAGE COVER PAGE",
             f"Generated: {generated_at}",
             f"Prepared by: {org_name}",
-            f"Applicant: {facts.get('applicant_name', 'Unknown')}",
+            f"Applicant: {_fv(facts, 'applicant_name') or 'Unknown'}",
             f"Agency: {org_name}",
-            f"Effective Date: {facts.get('effective_date', '---')}",
+            f"Effective Date: {_fv(facts, 'effective_date') or '---'}",
             f"Lines of Business: {', '.join(facts.get('lines_of_business', [])) or '---'}",
             f"Forms: {', '.join(form_ids)}",
             "",

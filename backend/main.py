@@ -13,6 +13,7 @@ from routes.dev_routes import router as dev_router
 from routes.arq_routes import router as arq_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
 
 try:

@@ -5,16 +5,25 @@ export function useUpgradePolling(token, setUser, setUpgradeChecking, setUpgrade
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("upgraded") !== "true") return;
+    // Capture expected plan from URL before clearing params (handles plan changes, not just upgrades)
+    const expectedPlan = params.get("plan") || null;
     window.history.replaceState({}, "", "/");
     if (!token) return;
 
     setUpgradeChecking(true);
     setUpgradeFailed(false);
 
-    const MAX_POLL   = 8;
+    const MAX_POLL   = 12;
     const POLL_DELAY = 2000;
     let   attempts   = 0;
-    const isPaid     = (tier) => tier && tier !== "free";
+
+    // If we know the expected plan, poll until the tier matches exactly.
+    // Otherwise fall back to "any paid plan" check (legacy behavior for old sessions).
+    const isPlanReady = (tier) => {
+      if (!tier || tier === "free") return false;
+      if (expectedPlan) return tier === expectedPlan;
+      return true;
+    };
 
     const pollMe = () => {
       attempts++;
@@ -23,7 +32,7 @@ export function useUpgradePolling(token, setUser, setUpgradeChecking, setUpgrade
         .then((data) => {
           if (!data) { tryVerifyFallback(); return; }
           setUser(data);
-          if (isPaid(data.subscription_tier)) {
+          if (isPlanReady(data.subscription_tier)) {
             setUpgradeChecking(false);
           } else if (attempts < MAX_POLL) {
             setTimeout(pollMe, POLL_DELAY);
@@ -44,7 +53,7 @@ export function useUpgradePolling(token, setUser, setUpgradeChecking, setUpgrade
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (data && isPaid(data.subscription_tier)) {
+          if (data && isPlanReady(data.subscription_tier)) {
             fetch(`${API_BASE}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
               .then((r) => (r.ok ? r.json() : null))
               .then((me) => { if (me) setUser(me); });

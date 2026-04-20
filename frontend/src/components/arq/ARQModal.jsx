@@ -54,58 +54,63 @@ export default function ARQModal({ sessionId, token, questions, producerFullName
 
   return (
     <div className="modal-overlay">
-      <div className="modal-content" style={{ maxWidth: 680 }} onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content" style={{ maxWidth: 700 }} onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-inner">
-          <div style={{ fontSize: 36, marginBottom: 8, textAlign: "center" }}>📧</div>
-          <h2 className="step-title" style={{ textAlign: "center" }}>Send to Client</h2>
-          <p className="step-subtitle" style={{ textAlign: "center" }}>
-            Select questions to send. The client will receive a secure link to answer them.
+          <div style={{ fontSize: 32, marginBottom: 6, textAlign: "center" }}>📧</div>
+          <h2 className="step-title" style={{ textAlign: "center", marginBottom: 4 }}>Send to Client</h2>
+          <p className="step-subtitle" style={{ textAlign: "center", marginBottom: 16 }}>
+            Select questions to send. The client receives a secure link to answer them.
           </p>
 
           {error && (
-            <div className="alert alert-error" style={{ marginBottom: 16 }}>
+            <div className="alert alert-error" style={{ marginBottom: 14 }}>
               ⚠️ {error}
               <button className="alert-close" onClick={() => setError("")}>✕</button>
             </div>
           )}
 
-          <div className="form-group" style={{ marginBottom: 16 }}>
-            <label>Client Email <span className="field-required">*</span></label>
-            <input
-              type="email"
-              value={clientEmail}
-              onChange={(e) => setClientEmail(e.target.value)}
-              placeholder="client@theircompany.com"
-              className="form-input"
-            />
+          {/* Email + Name inline */}
+          <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+            <div className="form-group" style={{ flex: 2, marginBottom: 0 }}>
+              <label>Client Email <span className="field-required">*</span></label>
+              <input
+                type="email"
+                value={clientEmail}
+                onChange={(e) => setClientEmail(e.target.value)}
+                placeholder="client@theircompany.com"
+                className="form-input"
+              />
+            </div>
+            <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+              <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                First Name <span style={{ color: "#94a3b8", fontWeight: 400, fontSize: 11 }}>(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={clientName}
+                onChange={(e) => setClientName(e.target.value)}
+                placeholder="e.g. John"
+                className="form-input"
+              />
+            </div>
           </div>
 
-          <div className="form-group" style={{ marginBottom: 20 }}>
-            <label>Client First Name <span style={{ color: "#94a3b8", fontWeight: 400 }}>(optional)</span></label>
-            <input
-              type="text"
-              value={clientName}
-              onChange={(e) => setClientName(e.target.value)}
-              placeholder="e.g. John"
-              className="form-input"
-            />
-          </div>
-
-          <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <span style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>
+          {/* Questions list */}
+          <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 14 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <span style={{ fontWeight: 600, fontSize: 13, color: "#1e293b" }}>
                 Questions ({selectedCount}/{questions.length} selected)
               </span>
               <button
                 onClick={handleSelectAll}
-                style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer", color: "#4f7cff", fontWeight: 500 }}
+                style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 6, padding: "3px 10px", fontSize: 11, cursor: "pointer", color: "#4f7cff", fontWeight: 500 }}
               >
                 {selectAll ? "Deselect All" : "Select All"}
               </button>
             </div>
 
-            <div style={{ maxHeight: 340, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ maxHeight: 360, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
               {questions.map((q, idx) => (
                 <div
                   key={idx}
@@ -114,14 +119,14 @@ export default function ARQModal({ sessionId, token, questions, producerFullName
                     border: "1px solid",
                     borderColor: selectedQuestions[q.field_name] ? "#e6007a" : "#e2e8f0",
                     borderRadius: 8,
-                    padding: "10px 14px",
+                    padding: "9px 12px",
                     cursor: "pointer",
                     background: selectedQuestions[q.field_name] ? "rgba(230,0,122,0.04)" : "#fff",
                     display: "flex",
-                    alignItems: "flex-start",
+                    alignItems: "center",
                     gap: 10,
                     transition: "all 0.15s",
-                    opacity: selectedQuestions[q.field_name] ? 1 : 0.55,
+                    opacity: selectedQuestions[q.field_name] ? 1 : 0.5,
                   }}
                 >
                   <input
@@ -129,19 +134,25 @@ export default function ARQModal({ sessionId, token, questions, producerFullName
                     checked={!!selectedQuestions[q.field_name]}
                     onChange={() => handleToggle(q.field_name)}
                     onClick={(e) => e.stopPropagation()}
-                    style={{ marginTop: 3, width: 16, height: 16, cursor: "pointer", accentColor: "#e6007a", flexShrink: 0 }}
+                    style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#e6007a", flexShrink: 0 }}
                   />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: "#e6007a", background: "#fdf2f8", padding: "1px 8px", borderRadius: 20, display: "inline-block", marginBottom: 4 }}>
-                      ACORD: {q.forms}
-                    </span>
-                    <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#0f172a", lineHeight: 1.4 }}>
+                  {/* Form badge + question inline */}
+                  <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                    {q.forms && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "#e6007a", background: "#fdf2f8", padding: "1px 7px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
+                        {q.forms.split(",").map((f) => {
+                          const t = f.trim();
+                          return /^\d+$/.test(t) ? `ACORD ${t}` : t;
+                        }).join(", ")}
+                      </span>
+                    )}
+                    <span style={{ fontSize: 13, fontWeight: 500, color: "#0f172a", lineHeight: 1.4 }}>
                       {q.question}
-                    </p>
+                    </span>
                     {q.current_value && (
-                      <p style={{ margin: "4px 0 0", fontSize: 11, color: "#94a3b8" }}>
-                        Current: {q.current_value}
-                      </p>
+                      <span style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0 }}>
+                        · Current: {q.current_value}
+                      </span>
                     )}
                   </div>
                 </div>
@@ -153,7 +164,7 @@ export default function ARQModal({ sessionId, token, questions, producerFullName
             className="btn btn-modal-primary btn-block"
             onClick={handleSend}
             disabled={!canSend || sending}
-            style={{ marginTop: 20, opacity: (!canSend || sending) ? 0.6 : 1, cursor: (!canSend || sending) ? "not-allowed" : "pointer" }}
+            style={{ marginTop: 18, opacity: (!canSend || sending) ? 0.6 : 1, cursor: (!canSend || sending) ? "not-allowed" : "pointer" }}
           >
             {sending ? (
               <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
@@ -166,18 +177,18 @@ export default function ARQModal({ sessionId, token, questions, producerFullName
           </button>
 
           {!isEmailValid && clientEmail && (
-            <p style={{ fontSize: 11, color: "#ef4444", textAlign: "center", marginTop: 8 }}>
+            <p style={{ fontSize: 11, color: "#ef4444", textAlign: "center", marginTop: 6 }}>
               Please enter a valid email address.
             </p>
           )}
           {selectedCount === 0 && (
-            <p style={{ fontSize: 11, color: "#f59e0b", textAlign: "center", marginTop: 8 }}>
+            <p style={{ fontSize: 11, color: "#f59e0b", textAlign: "center", marginTop: 6 }}>
               ⚠️ Select at least one question to send.
             </p>
           )}
 
-          <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", marginTop: 14 }}>
-            The client will receive a secure link. Their answers will automatically populate your forms.
+          <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", marginTop: 12 }}>
+            The client will receive a secure link. Their answers automatically populate your forms.
           </p>
         </div>
       </div>

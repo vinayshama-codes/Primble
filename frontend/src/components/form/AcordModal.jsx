@@ -1,3 +1,5 @@
+// AcordModal.jsx
+
 import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../../config/constants";
 import { gradeColor, barColor } from "../../utils/formatters";
@@ -180,6 +182,12 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
 }
 
 // ── Dashboard Step ─────────────────────────────────────────────────────────
+const STATUS_CONFIG = {
+  COMPLETED:   { label: "Completed",   dot: "#10b981", bg: "#dcfce7", color: "#166534", border: "#86efac", icon: "✅" },
+  IN_PROGRESS: { label: "In Progress", dot: "#f59e0b", bg: "#fef9c3", color: "#854d0e", border: "#fde047", icon: "📝" },
+  NOT_STARTED: { label: "Not Started", dot: "#94a3b8", bg: "#f1f5f9", color: "#64748b", border: "#cbd5e1", icon: "📄" },
+};
+
 function DashboardStep({ token, onResume, onNewPackage }) {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -203,6 +211,9 @@ function DashboardStep({ token, onResume, onNewPackage }) {
   const avgSqs = sqsMap => { const scores = Object.values(sqsMap || {}).map(s => s?.sqs_score).filter(n => n != null); return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null; };
   const sqsColor = v => v >= 75 ? "#10b981" : v >= 50 ? "#f59e0b" : "#ef4444";
 
+  const completedCount  = sessions.filter(s => s.status === "COMPLETED").length;
+  const inProgressCount = sessions.filter(s => s.status === "IN_PROGRESS").length;
+
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 0 48px" }}>
       {deleteTarget && <DeleteConfirmModal onConfirm={() => handleDelete(deleteTarget)} onCancel={() => setDeleteTarget(null)} />}
@@ -210,7 +221,21 @@ function DashboardStep({ token, onResume, onNewPackage }) {
         <div>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", letterSpacing: "0.06em", marginBottom: 6, textTransform: "uppercase" }}>Submissions</div>
           <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: 0, lineHeight: 1.2 }}>Package Dashboard</h2>
-          <p style={{ fontSize: 14, color: "#64748b", marginTop: 5 }}>Resume any in-progress submission or start a new one.</p>
+          <p style={{ fontSize: 14, color: "#64748b", marginTop: 5 }}>Open any submission to edit or re-download, or start a new one.</p>
+          {sessions.length > 0 && (
+            <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+              {completedCount > 0 && (
+                <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20, background: STATUS_CONFIG.COMPLETED.bg, color: STATUS_CONFIG.COMPLETED.color, border: `1px solid ${STATUS_CONFIG.COMPLETED.border}` }}>
+                  {completedCount} Completed
+                </span>
+              )}
+              {inProgressCount > 0 && (
+                <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20, background: STATUS_CONFIG.IN_PROGRESS.bg, color: STATUS_CONFIG.IN_PROGRESS.color, border: `1px solid ${STATUS_CONFIG.IN_PROGRESS.border}` }}>
+                  {inProgressCount} In Progress
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <button onClick={onNewPackage}
           style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 20px", background: "#e6007a", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(230,0,122,0.3)", whiteSpace: "nowrap" }}
@@ -235,16 +260,21 @@ function DashboardStep({ token, onResume, onNewPackage }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {sessions.map(s => {
             const avg = avgSqs(s.sqs);
+            const sc  = STATUS_CONFIG[s.status] || STATUS_CONFIG.NOT_STARTED;
             return (
               <div key={s.session_id} className="session-card"
                 onClick={() => onResume(s.session_id)}
                 style={{ background: "#fff", border: "1px solid #e8edf5", borderRadius: 12, padding: "16px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 14, transition: "all 0.18s", position: "relative", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = "#e6007a"; e.currentTarget.style.boxShadow = "0 4px 20px rgba(230,0,122,0.1)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = "#e8edf5"; e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.04)"; e.currentTarget.style.transform = "none"; }}>
-                <div style={{ width: 42, height: 42, borderRadius: 10, background: "linear-gradient(135deg, rgba(230,0,122,0.1), rgba(230,0,122,0.05))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📄</div>
+                <div style={{ width: 42, height: 42, borderRadius: 10, background: "linear-gradient(135deg, rgba(230,0,122,0.1), rgba(230,0,122,0.05))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{sc.icon}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.applicant}</div>
                   <div style={{ fontSize: 12, color: "#64748b", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, padding: "1px 8px", borderRadius: 20, background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, flexShrink: 0 }}>
+                      <span style={{ width: 5, height: 5, borderRadius: "50%", background: sc.dot, display: "inline-block" }} />
+                      {sc.label}
+                    </span>
                     {s.form_ids.length > 0 && <span style={{ background: "#f1f5f9", borderRadius: 4, padding: "1px 6px" }}>{s.form_ids.join(", ")}</span>}
                     {s.lines?.length > 0 && <span>{s.lines.slice(0, 2).join(", ")}{s.lines.length > 2 ? ` +${s.lines.length - 2}` : ""}</span>}
                   </div>
@@ -252,6 +282,9 @@ function DashboardStep({ token, onResume, onNewPackage }) {
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
                   {avg != null && <div style={{ fontSize: 17, fontWeight: 800, color: sqsColor(avg), marginBottom: 1, lineHeight: 1 }}>{avg}<span style={{ fontSize: 10, fontWeight: 500, color: "#94a3b8" }}>/100</span></div>}
                   <div style={{ fontSize: 11, color: "#94a3b8" }}>{fmtDate(s.updated_at)}</div>
+                  {s.status === "COMPLETED" && s.last_downloaded_at && (
+                    <div style={{ fontSize: 10, color: "#10b981", fontWeight: 600, marginTop: 2 }}>Downloaded {fmtDate(s.last_downloaded_at)}</div>
+                  )}
                 </div>
                 <div style={{ color: "#cbd5e1", fontSize: 16, flexShrink: 0 }}>→</div>
                 <button className="session-delete-btn" onClick={e => { e.stopPropagation(); setDeleteTarget(s.session_id); }} title="Delete session">✕</button>
@@ -327,9 +360,19 @@ export default function AcordModal({
 
   useEffect(() => {
     if (step !== "lite" || !sessionId || !token) return;
-    fetch(`${API_BASE}/api/lite/generate-internal/${sessionId}`, { method: "POST", headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/clarity/analyze/${sessionId}`, { method: "POST", headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.success) setLiteSqsData(d); })
+      .then(d => {
+        if (d?.success) {
+          // Normalise into the shape the rest of the Lite step expects
+          setLiteSqsData({
+            sqs:          d.sqs_combined,
+            soft_stops:   d.soft_stops   || [],
+            hard_stops:   d.hard_stops   || [],
+            arq_questions: d.arq_questions || [],
+          });
+        }
+      })
       .catch(() => {});
   }, [step, sessionId]); // eslint-disable-line
 
@@ -735,8 +778,11 @@ return (
                   <div style={{ fontSize: 18, marginBottom: 8 }}>📧</div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>Client Questionnaire</div>
                   <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>Generate and send a tailored questionnaire to your client to fill in missing information.</div>
-                  <button onClick={handleOpenARQ} disabled={arqLoadingQ}
-                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: arqLoadingQ ? 0.7 : 1 }}>
+                  <button
+                    onClick={handleOpenARQ}
+                    disabled={!liteSqsData || arqLoadingQ}
+                    title={!liteSqsData ? "Waiting for analysis to complete…" : ""}
+                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: (!liteSqsData || arqLoadingQ) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: (!liteSqsData || arqLoadingQ) ? 0.45 : 1 }}>
                     {arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client"}
                   </button>
                   <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
@@ -746,15 +792,18 @@ return (
                   <div style={{ fontSize: 18, marginBottom: 8 }}>📄</div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>Summary Cover Sheet</div>
                   <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>Download your AI-generated SQS summary cover page for use with any platform.</div>
-                  <button onClick={handleLiteCoverSheet} disabled={liteCoverLoading}
-                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #0f172a", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: liteCoverLoading ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: liteCoverLoading ? 0.7 : 1 }}>
+                  <button
+                    onClick={handleLiteCoverSheet}
+                    disabled={!liteSqsData || liteCoverLoading}
+                    title={!liteSqsData ? "Waiting for analysis to complete…" : ""}
+                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #0f172a", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: (!liteSqsData || liteCoverLoading) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: (!liteSqsData || liteCoverLoading) ? 0.45 : 1 }}>
                     {liteCoverLoading ? <><span style={{ width: 11, height: 11, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Generating…</> : "Download Cover Sheet"}
                   </button>
                 </div>
               </div>
 
               <div style={{ textAlign: "center" }}>
-                <button onClick={() => { setStep("upload"); setSessionId(null); setFiles([]); setLiteSqsData(null); }}
+                <button onClick={() => { setStep("upload"); setSessionId(null); setFiles([]); setLiteSqsData(null); setArqSessions([]); setArqQuestions([]); setClientFilledFields([]); }}
                   style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 20px", fontSize: 13, color: "#64748b", cursor: "pointer", fontFamily: "inherit" }}>
                   ← Upload a new package
                 </button>
@@ -1071,7 +1120,7 @@ return (
           <div style={{ maxWidth: 480, margin: "0 auto", textAlign: "center", padding: "56px 24px" }}>
             <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg, #e6007a, #c00066)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36, color: "#fff", margin: "0 auto 24px", boxShadow: "0 8px 28px rgba(230,0,122,0.3)", animation: "successPop 0.5s ease-out" }}>✓</div>
             <h2 style={{ fontSize: 26, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>Download Complete!</h2>
-            <p style={{ fontSize: 15, color: "#64748b", marginBottom: 28, lineHeight: 1.6 }}>Your filled ACORD forms have been downloaded successfully.</p>
+            <p style={{ fontSize: 15, color: "#64748b", marginBottom: 28, lineHeight: 1.6 }}>Your filled ACORD forms have been downloaded. You can go back to the form to make edits and re-download at any time.</p>
             {user && user.subscription_tier === "free" && (
               <div style={{ background: "rgba(230,0,122,0.05)", border: "1px solid rgba(230,0,122,0.15)", borderRadius: 10, padding: "12px 16px", marginBottom: 24, fontSize: 14, color: "#1e293b" }}>
                 You have <strong style={{ color: "#e6007a" }}>{Math.max(0, user.downloads_remaining)}</strong> free download{user.downloads_remaining !== 1 ? "s" : ""} remaining

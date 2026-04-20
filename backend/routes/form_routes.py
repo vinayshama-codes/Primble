@@ -14,7 +14,7 @@ from repositories.session_repository import (
     get_processing_session, new_processing_session, upd_processing_session,
 )
 from services.auth_service import get_current_user, validate_token_from_request
-from services.extraction_service import extract_facts, identify_doc_type, merge_facts, select_primary_truth
+from services.extraction_service import extract_facts_long, identify_doc_type, merge_facts, select_primary_truth
 from services.form_service import (
     filter_available_forms, load_all_forms, match_forms, process_single_form,
 )
@@ -25,6 +25,7 @@ from services.pdf_service import (
 )
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
+    check_doc_consistency,
 )
 
 router = APIRouter(tags=["forms"])
@@ -63,15 +64,19 @@ async def upload_declaration(
             raise HTTPException(400, "No supported files found")
 
         processed_docs = []
+        all_low_conf:  list = []
         for path in all_paths:
-            text = extract_text(path)
+            text, low_conf = extract_text(path)
             if len(text) < 30:
                 continue
-            doc_type  = identify_doc_type(text)
-            extracted = extract_facts(text)
+            all_low_conf  += low_conf
+            doc_type       = identify_doc_type(text)
+            extracted      = extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
             processed_docs.append({
                 "filename": os.path.basename(path), "path": path, "doc_type": doc_type,
                 "text": text, "facts": extracted.get("facts", {}), "flags": extracted.get("flags", {}),
+                "low_confidence_tokens": low_conf,
+                "truncation_warning": extracted.get("truncation_warning"),
             })
 
         if not processed_docs:
@@ -80,6 +85,9 @@ async def upload_declaration(
 
         primary              = select_primary_truth(processed_docs)
         merged_facts, mflags = merge_facts(processed_docs, primary)
+        # Expose primary doc type in flags so check_tier1 can relax producer/contact
+        # requirements for carrier-issued declaration pages.
+        mflags["_doc_type"] = primary.get("doc_type", "unknown")
         tier1_ok, tier1_missing = check_tier1(merged_facts, mflags)
 
         if not tier1_ok:
@@ -89,9 +97,31 @@ async def upload_declaration(
 
         tier2_score, tier2_missing = check_tier2(merged_facts)
         hard_stops, soft_stops     = evaluate_stops(merged_facts, mflags)
+
+        # Cross-document consistency: flag mismatched applicant_name / FEIN / effective_date
+        consistency_issues = check_doc_consistency(processed_docs)
+        doc_conflicts = []
+        if consistency_issues:
+            logger.warning(f"Doc consistency issues: {consistency_issues}")
+            for issue in consistency_issues:
+                if issue.startswith("[hard_stop]"):
+                    rest = issue[len("[hard_stop]"):].strip()
+                    code_part, _, msg = rest.partition(" ")
+                    code = code_part.split("=", 1)[1] if "=" in code_part else "conflict"
+                    doc_conflicts.append({"code": code, "message": msg, "hard_stop": True})
+                    hard_stops = list(hard_stops) + [msg]
+                else:
+                    hard_stops = list(hard_stops) + [issue]
+
         all_forms                  = load_all_forms()
         available_forms            = filter_available_forms(all_forms)
-        recommendations            = match_forms(merged_facts, mflags, available_forms)
+        # Combine raw OCR text from all docs for keyword-based form triggers
+        # (builders risk, inland marine, certificate, evidence of property).
+        combined_ocr_text          = " ".join(d.get("text", "") for d in processed_docs)
+        recommendations            = match_forms(merged_facts, mflags, available_forms, text=combined_ocr_text)
+
+        # Deduplicate across all files, preserve insertion order
+        unique_low_conf = list(dict.fromkeys(all_low_conf))
 
         sid = new_processing_session({
             "user_id": current_user["id"], "docs": processed_docs,
@@ -100,16 +130,27 @@ async def upload_declaration(
             "hard_stops": hard_stops, "soft_stops": soft_stops,
             "all_forms": available_forms, "recommendations": recommendations,
             "selected_form_ids": [], "generated_forms": {},
+            "low_confidence_tokens": unique_low_conf,
         })
+
+        truncation_warnings = [
+            {"filename": d["filename"], "warning": d["truncation_warning"]}
+            for d in processed_docs if d.get("truncation_warning")
+        ]
 
         return JSONResponse({
             "success": True, "session_id": sid,
             "doc_summary": [{"filename": d["filename"], "doc_type": d["doc_type"],
-                              "is_primary": d["filename"] == primary["filename"]} for d in processed_docs],
+                              "is_primary": d["filename"] == primary["filename"],
+                              "low_confidence_tokens": d.get("low_confidence_tokens", []),
+                              "truncation_warning": d.get("truncation_warning")} for d in processed_docs],
             "primary_doc": primary["filename"], "flags": mflags,
             "tier2_score": tier2_score, "tier2_missing": tier2_missing,
             "hard_stops": hard_stops, "soft_stops": soft_stops,
+            "doc_conflicts": doc_conflicts,
             "recommendations": recommendations,
+            "low_confidence_tokens": unique_low_conf,
+            "truncation_warnings": truncation_warnings,
             "all_available_forms": [{"form_id": f["form_id"], "form_name": f["form_name"],
                                       "description": f.get("description","")} for f in available_forms],
         })
@@ -237,6 +278,7 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         "hard_stops": session.get("hard_stops", []),
         "soft_stops": session.get("soft_stops", []),
         "flags": session.get("flags", {}),
+        "compliance_checklist": first_sqs.get("compliance_checklist", []),
     })
 
 
@@ -457,4 +499,135 @@ async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depen
         raise HTTPException(404, f"Form '{form_id}' not found")
 
     logger.info(f"EPIC EXPORT: form={form_id} session={session_id[:8]} user={current_user.get('email')}\n{json.dumps(epic_payload, indent=2, default=str)}")
+
+    # Mark session as completed — EPIC export counts the same as a download
+    upd_processing_session(session_id, {
+        "last_downloaded_at": datetime.now(timezone.utc).isoformat()
+    })
+
     return JSONResponse({"success": True, "message": f"Exported to terminal ({form_id}). EPIC integration coming soon.", "form_id": form_id, "payload": epic_payload})
+
+
+# ---------------------------------------------------------------------------
+# Clarity pipeline — SQS + ARQ without form generation
+# ---------------------------------------------------------------------------
+
+@router.post("/api/clarity/analyze/{session_id}")
+async def clarity_analyze(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Clarity pipeline: produce SQS scoring, ARQ questions, and cross-validation
+    without generating ACORD PDF forms.
+
+    Cost: 0 batch LLM calls (form field mapping is skipped entirely).
+    Form matching (stage1 + stage2) still runs to identify which ACORD forms
+    are relevant so SQS is scored per-form correctly.
+
+    Replaces /api/lite/generate-internal + /api/lite/analyze for Lite users.
+    When the Clarity product line launches this will also serve Clarity tiers.
+    """
+    from fastapi import HTTPException
+    from services.pipeline_router import is_assembly
+    from services.sqs_service import calculate_sqs_from_facts, cross_validate
+    from services.arq_service import generate_arq_questions_from_facts
+    from services.form_service import match_forms_deterministic
+
+    tier = current_user.get("subscription_tier", "free") or "free"
+
+    # Block Assembly tier users — they should use the full form generation pipeline
+    if is_assembly(tier):
+        raise HTTPException(
+            403,
+            "This endpoint is for Clarity/Lite plan users. "
+            "Assembly plan users should use /api/select-forms-bulk.",
+        )
+
+    session     = get_processing_session(session_id)
+    facts       = session.get("facts", {})
+    flags       = session.get("flags", {})
+    hard_stops  = session.get("hard_stops", [])
+    soft_stops  = session.get("soft_stops", [])
+    tier2_score = session.get("tier2_score", 50)
+
+    if session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
+
+    # --- Form matching (deterministic — zero LLM calls) ---
+    matched = match_forms_deterministic(facts, flags)
+
+    selected_form_ids = [f["form_id"] for f in matched]
+
+    # --- SQS per form — zero LLM calls ---
+    sqs_per_form: dict = {}
+    for fid in selected_form_ids:
+        try:
+            sqs_per_form[fid] = calculate_sqs_from_facts(
+                facts=facts,
+                flags=flags,
+                selected_form_ids=selected_form_ids,
+                hard_stops=hard_stops,
+                soft_stops=soft_stops,
+                tier2_score=tier2_score,
+                form_id=fid,
+            )
+        except Exception as ex:
+            logger.error(f"Clarity SQS error for {fid}: {ex}")
+
+    # Combined SQS: average score across all forms, carry first form's metadata
+    sqs_scores = [s.get("sqs_score", 0) for s in sqs_per_form.values()]
+    avg_score   = int(sum(sqs_scores) / max(len(sqs_scores), 1)) if sqs_scores else 0
+    first_sqs   = next(iter(sqs_per_form.values()), {})
+    sqs_combined = {**first_sqs, "sqs_score": avg_score, "form_id": "combined"}
+
+    # --- ARQ questions — zero LLM calls ---
+    arq_questions = generate_arq_questions_from_facts(
+        facts=facts,
+        flags=flags,
+        selected_form_ids=selected_form_ids,
+        hard_stops=hard_stops,
+        soft_stops=soft_stops,
+    )
+
+    # --- Cross-validation — deterministic, zero LLM calls ---
+    cross_issues_raw = cross_validate(facts, flags, selected_form_ids)
+    seen_msgs, cross_issues = set(), []
+    for issue in cross_issues_raw:
+        msg = issue.get("message", "")
+        if msg not in seen_msgs:
+            seen_msgs.add(msg)
+            cross_issues.append(issue)
+
+    # Propagate hard_stop-typed cross-issues into the hard_stops list so the
+    # frontend receives a single authoritative list and can block submission.
+    cross_hard_msgs = [i["message"] for i in cross_issues if i.get("type") == "hard_stop"]
+    effective_hard_stops = list(hard_stops) + [m for m in cross_hard_msgs if m not in hard_stops]
+
+    # --- Persist results into session (no generated_forms — Clarity never produces PDFs) ---
+    upd_processing_session(session_id, {
+        "selected_form_ids": selected_form_ids,
+        "clarity_result": {
+            "sqs_per_form":   sqs_per_form,
+            "sqs_combined":   sqs_combined,
+            "arq_questions":  arq_questions,
+            "cross_issues":   cross_issues,
+            "selected_forms": [{"form_id": f["form_id"], "form_name": f.get("form_name", f["form_id"])} for f in matched],
+        },
+        "cross_issues_last": cross_issues,
+    })
+
+    return JSONResponse({
+        "success":         True,
+        "session_id":      session_id,
+        "selected_forms":  [{"form_id": f["form_id"], "form_name": f.get("form_name", f["form_id"])} for f in matched],
+        "sqs_per_form":    sqs_per_form,
+        "sqs_combined":    sqs_combined,
+        "arq_questions":      arq_questions,
+        "arq_count":          len(arq_questions),
+        "cross_issues":       cross_issues,
+        "hard_stops":         effective_hard_stops,
+        "soft_stops":         soft_stops,
+        "flags":              flags,
+        "compliance_checklist": sqs_combined.get("compliance_checklist", []),
+    })

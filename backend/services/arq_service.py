@@ -6,73 +6,263 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Tuple, Optional
 
 from config.database import get_db
-from config.settings import FRONTEND_URL, groq_client
+from config.settings import FRONTEND_URL, groq_chat
+from services.extraction_service import _fv, _focr
+from services.fact_registry import _FIELD_QUESTION_MAP, _FIELD_TO_FORMS  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Question generation
+# Prefix-pattern map for suffixed/indexed field families.
+# Each entry: (prefix, base_question, group_label)
+# group_label is used to number repeated instances: "1st insurer", "2nd location" etc.
+# ---------------------------------------------------------------------------
+_ORDINALS = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"]
+
+def _ordinal(n: int) -> str:
+    return _ORDINALS[n - 1] if 1 <= n <= len(_ORDINALS) else f"{n}th"
+
+_FIELD_PREFIX_MAP: list[tuple[str, str, str]] = [
+    # Insurer / carrier info (ACORD 25, 28 style)
+    ("insurer_fullname",         "What is the full name of your insurance company?",                        "insurer"),
+    ("insurer_name",             "What is the name of your insurance company?",                             "insurer"),
+    ("insurer_naic",             "What is your insurance company's NAIC number? (Your agent can look this up if needed)", "insurer"),
+    ("insurer_policy",           "What is the policy number for this insurance?",                           "insurer"),
+    ("insurer_phone",            "What is the phone number for your insurance company?",                    "insurer"),
+    ("insurer_address",          "What is the address of your insurance company?",                          "insurer"),
+    ("insurer_",                 "Please provide the details for your insurance company.",                  "insurer"),
+    # Additional insured / interest
+    ("additional_insured_name",  "What is the name of the additional person or company to be listed on the policy?", "additional party"),
+    ("additional_insured_addr",  "What is the address of the additional person or company to be listed on the policy?", "additional party"),
+    ("additional_insured_",      "Please provide the details for the additional party to be listed on your policy.", "additional party"),
+    ("additional_interest_name", "What is the name of the additional interested party?",                    "additional party"),
+    ("additional_interest_",     "Please provide details for the additional interested party.",              "additional party"),
+    # Location fields
+    ("location_address",         "What is the address of this business location?",                         "location"),
+    ("location_city",            "What city is this business location in?",                                 "location"),
+    ("location_state",           "What state is this business location in?",                                "location"),
+    ("location_zip",             "What is the ZIP code for this business location?",                        "location"),
+    ("location_",                "Please provide the details for this business location.",                  "location"),
+    # Vehicle fields
+    ("vehicle_vin",              "What is the VIN (Vehicle Identification Number) for this vehicle?",       "vehicle"),
+    ("vehicle_year",             "What year is this vehicle?",                                              "vehicle"),
+    ("vehicle_make",             "What is the make (brand) of this vehicle?",                               "vehicle"),
+    ("vehicle_model",            "What is the model of this vehicle?",                                      "vehicle"),
+    ("vehicle_",                 "Please provide the details for this vehicle.",                            "vehicle"),
+    # Driver fields
+    ("driver_name",              "What is the full name of this driver?",                                   "driver"),
+    ("driver_license",           "What is the driver's license number for this driver?",                    "driver"),
+    ("driver_dob",               "What is the date of birth for this driver? (MM/DD/YYYY)",                 "driver"),
+    ("driver_",                  "Please provide the details for this driver.",                             "driver"),
+    # Owner / officer fields
+    ("owner_name",               "What is the full name of this owner or officer?",                        "owner"),
+    ("owner_title",              "What is the title or role of this owner or officer?",                     "owner"),
+    ("owner_ownership",          "What percentage of the business does this person own?",                   "owner"),
+    ("owner_",                   "Please provide the details for this owner or officer.",                   "owner"),
+    # Claim / loss fields
+    ("claim_date",               "What was the date of this claim or loss? (MM/DD/YYYY)",                  "claim"),
+    ("claim_amount",             "What was the total amount paid or reserved for this claim?",              "claim"),
+    ("claim_description",        "Briefly describe what happened for this claim.",                          "claim"),
+    ("claim_",                   "Please provide the details for this claim.",                              "claim"),
+    # Schedule / item fields
+    ("schedule_item",            "Please describe this scheduled item (make, model, value, or serial number).", "item"),
+    ("schedule_value",           "What is the value of this scheduled item?",                              "item"),
+    ("schedule_",                "Please provide details for this scheduled item.",                        "item"),
+]
+
+
+# ---------------------------------------------------------------------------
+# Word splitter — converts concatenated PDF field tokens into readable words
+# e.g. "generalliability" → "general liability"
+#      "limitappliesperpolicyindicator" → "limit applies per policy indicator"
 # ---------------------------------------------------------------------------
 
-_FIELD_QUESTION_MAP = {
-    "applicant_name":           "What is the full legal name of your business?",
-    "dba_name":                 "Does your business operate under a DBA (doing business as) name? If yes, what is it?",
-    "mailing_address":          "What is your business mailing address? (Street, City, State, ZIP)",
-    "physical_address":         "What is the physical location of your business? (if different from mailing address)",
-    "contact_name":             "What is the name of the primary contact for this insurance application?",
-    "contact_phone":            "What is the best phone number to reach you?",
-    "contact_email":            "What is the best email address for insurance-related correspondence?",
-    "fein":                     "What is your Federal Employer Identification Number (FEIN / Tax ID)?",
-    "entity_type":              "What is your business entity type? (e.g., LLC, Corporation, Sole Proprietor, Partnership)",
-    "effective_date":           "What is the desired effective date for this insurance policy? (MM/DD/YYYY)",
-    "expiration_date":          "What is the desired expiration date for this insurance policy? (MM/DD/YYYY)",
-    "policy_number":            "What is the current or prior policy number, if applicable?",
-    "lines_of_business":        "What lines of business or types of coverage are you requesting?",
-    "total_revenue":            "What is your business's total annual revenue?",
-    "total_payroll":            "What is your total annual payroll?",
-    "num_employees":            "How many employees does your business have?",
-    "operations_description":   "Please describe your business operations in detail. What products or services do you provide?",
-    "prior_carrier":            "Who was your previous insurance carrier, if applicable?",
-    "naics_code":               "What is your NAICS code (industry classification code), if known?",
-    "sic_code":                 "What is your SIC code, if known?",
-    "years_in_business":        "How many years has your business been in operation?",
-    "gl_limits":                "What General Liability coverage limits are you requesting?",
-    "gl_each_occurrence":       "What per-occurrence limit are you requesting for General Liability?",
-    "gl_aggregate":             "What aggregate limit are you requesting for General Liability?",
-    "gl_deductible":            "What deductible amount are you requesting for General Liability?",
-    "gl_class_codes":           "What are the General Liability class codes for your operations?",
-    "retro_date":               "What is the retroactive date for your claims-made General Liability policy?",
-    "additional_insured":       "Are there any additional insureds that need to be listed on the policy?",
-    "property_building_value":  "What is the replacement value of the building(s) to be insured?",
-    "property_bpp_value":       "What is the value of your business personal property (equipment, inventory, etc.)?",
-    "construction_type":        "What is the construction type of your building? (Frame, Masonry, Fire-Resistive, etc.)",
-    "occupancy_type":           "How is the building primarily occupied or used?",
-    "year_built":               "What year was the building constructed?",
-    "roof_year":                "What year was the roof last replaced or updated?",
-    "sprinkler_system":         "Does the building have a fire sprinkler system? (Yes/No)",
-    "fire_protection_class":    "What is the fire protection class for the property location?",
-    "valuation_method":         "How would you like the property valued — Replacement Cost Value (RCV) or Actual Cash Value (ACV)?",
-    "coinsurance_percentage":   "What coinsurance percentage applies to the property?",
-    "business_income_limit":    "What Business Income/Business Interruption limit are you requesting?",
-    "period_of_restoration":    "What is the desired period of restoration for Business Income coverage?",
-    "property_deductible_aop":  "What is the All Other Perils (AOP) property deductible?",
-    "property_deductible_wind": "What is the wind/hail deductible for your property?",
-    "mortgagee_name":           "Is there a mortgagee or loss payee on the property? If so, what is their name and address?",
-    "auto_liability_limit":     "What Commercial Auto liability limits are you requesting?",
-    "auto_deductible_comp":     "What comprehensive deductible are you requesting for Commercial Auto?",
-    "auto_deductible_collision":"What collision deductible are you requesting for Commercial Auto?",
-    "wc_payroll":               "What is the total payroll subject to Workers Compensation coverage?",
-    "wc_class_codes":           "What Workers Compensation class codes apply to your employees?",
-    "wc_xmod":                  "What is your Experience Modification Factor (X-Mod) for Workers Compensation?",
-    "wc_officer_exclusions":    "Are any officers or owners to be excluded from Workers Compensation coverage?",
-    "umbrella_limit":           "What Umbrella / Excess Liability limit are you requesting?",
-    "umbrella_sir":             "What is the self-insured retention (SIR) for the Umbrella policy?",
-    "percent_subcontracted":    "What percentage of your work is subcontracted to others?",
-    "num_claims":               "How many insurance claims have you had in the past 3–5 years?",
-    "loss_history_years":       "How many years of loss history are you providing?",
-    "certificate_holder":       "Who is the certificate holder that needs to be listed on the certificate of insurance?",
-}
+# Ordered longest-first so greedy matching works correctly
+_INSURANCE_WORDS = sorted([
+    "certificateofinsurance", "certificate", "workerscompensation", "workers", "compensation",
+    "generalliability", "general", "liability", "automobile", "commercial",
+    "umbrella", "excess", "property", "inland", "marine",
+    "additional", "insured", "holder", "indicator", "description",
+    "aggregate", "occurrence", "limit", "limits", "applies", "applied",
+    "per", "policy", "project", "location", "other",
+    "employers", "employer", "employee", "person", "persons",
+    "excluded", "exclusion", "waiver", "subrogation",
+    "each", "any", "all", "code", "codes", "type", "types",
+    "name", "fullname", "full", "address", "phone", "email",
+    "number", "amount", "date", "year", "state", "city", "zip",
+    "effective", "expiration", "retroactive", "inception",
+    "deductible", "retention", "self", "insured",
+    "bodily", "injury", "property", "damage", "personal", "advertising",
+    "products", "completed", "operations", "fire", "legal",
+    "medical", "payments", "combined", "single",
+    "owned", "hired", "non", "scheduled", "uninsured", "motorist",
+    "statutory", "disease", "accident", "benefit",
+    "builder", "risk", "installation", "equipment",
+    "auto", "auto", "vehicle", "driver", "owner", "officer",
+    "location", "schedule", "item", "value",
+    "named", "insurer", "carrier", "company",
+    "revision", "agency", "agent", "broker", "producer",
+    "contact", "fax", "naic", "id",
+], key=len, reverse=True)
+
+_SPLIT_CACHE: dict[str, str] = {}
+
+def _split_concatenated(token: str) -> str:
+    """Split a run-together word into spaced words using greedy longest-match."""
+    token = token.strip().lower()
+    if not token:
+        return token
+    if token in _SPLIT_CACHE:
+        return _SPLIT_CACHE[token]
+
+    original = token
+    result_parts = []
+    while token:
+        matched = False
+        for word in _INSURANCE_WORDS:
+            if token.startswith(word):
+                result_parts.append(word)
+                token = token[len(word):]
+                matched = True
+                break
+        if not matched:
+            # consume one char as-is
+            result_parts.append(token[0])
+            token = token[1:]
+
+    result = " ".join(result_parts)
+    _SPLIT_CACHE[original] = result
+    return result
+
+
+def _field_name_to_readable(field_name: str) -> str:
+    """
+    Convert a raw PDF field name to a readable phrase.
+    Handles:
+      - snake_case separators
+      - camelCase
+      - concatenated insurance terms
+      - trailing _a/_b/_1/_2 suffixes (stripped)
+    """
+    # Strip trailing index suffix
+    name = re.sub(r'[_\s]+[a-z]$', '', field_name)
+    name = re.sub(r'[_\s]+\d+$', '', name)
+
+    # Split on underscores/hyphens → tokens
+    tokens = re.split(r'[_\-\s]+', name)
+
+    # camelCase split within each token
+    expanded = []
+    for tok in tokens:
+        # insert space before uppercase runs: "myField" → "my Field"
+        tok = re.sub(r'([a-z])([A-Z])', r'\1 \2', tok)
+        tok = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', tok)
+        # now split concatenated lowercase
+        for sub in tok.split():
+            expanded.append(_split_concatenated(sub))
+
+    readable = " ".join(expanded).strip()
+    # Collapse multiple spaces
+    readable = re.sub(r'\s+', ' ', readable)
+    return readable.lower()
+
+
+# ---------------------------------------------------------------------------
+# Groq batch humanizer — single LLM call for all fallback fields
+# ---------------------------------------------------------------------------
+
+_HUMANIZED_CACHE: dict[str, str] = {}  # field_name → humanized question
+
+
+def _humanize_fields_with_groq(field_names: list[str]) -> dict[str, str]:
+    """
+    Send a batch of readable field phrases to Groq and get back plain-language
+    client-facing questions. Returns {field_name: question_text}.
+    Uncached fields only; results merged into _HUMANIZED_CACHE.
+    """
+    uncached = [f for f in field_names if f not in _HUMANIZED_CACHE]
+    if not uncached:
+        return {f: _HUMANIZED_CACHE[f] for f in field_names}
+
+    # Build numbered list of readable phrases for the prompt
+    readable_map = {f: _field_name_to_readable(f) for f in uncached}
+    numbered_lines = "\n".join(
+        f"{i+1}. {readable_map[f]}" for i, f in enumerate(uncached)
+    )
+
+    prompt = f"""You are helping convert insurance form field names into clear, plain-language questions for business owners filling out an insurance application. They are not insurance professionals.
+
+Below is a numbered list of field descriptions (derived from internal form field names). For each one, write a single plain-language question a non-expert would understand. Follow these rules:
+- Write in second person ("What is your...", "Does your business...", "Please provide...")
+- No jargon, abbreviations, or technical terms
+- Keep it concise — one sentence per question
+- For yes/no fields containing words like "indicator", "included", "excluded", "applies", write a yes/no question
+- For name/address/code fields, ask for the value directly
+- Preserve the meaning exactly
+
+Return ONLY a JSON object mapping each number (as a string key) to the question. No explanation, no markdown, no extra text. Example format:
+{{"1": "Does the general aggregate limit apply per policy?", "2": "What is the full name of the certificate holder?"}}
+
+Fields:
+{numbered_lines}"""
+
+    try:
+        raw    = groq_chat("llama-3.3-70b-versatile", [{"role": "user", "content": prompt}],
+                           temperature=0.2, max_tokens=1500)
+        raw    = re.sub(r'^```[a-z]*\n?', '', raw)
+        raw    = re.sub(r'\n?```$', '', raw)
+        parsed: dict = json.loads(raw)
+
+        for i, field_name in enumerate(uncached):
+            q = parsed.get(str(i + 1), "").strip()
+            if q:
+                _HUMANIZED_CACHE[field_name] = q
+            else:
+                # Groq skipped this one — use readable fallback
+                _HUMANIZED_CACHE[field_name] = f"Please provide your {readable_map[field_name]}."
+
+    except Exception as ex:
+        logger.warning(f"ARQ: Groq humanization failed ({ex}), using readable fallback for {len(uncached)} fields")
+        for field_name in uncached:
+            _HUMANIZED_CACHE[field_name] = f"Please provide your {readable_map[field_name]}."
+
+    return {f: _HUMANIZED_CACHE[f] for f in field_names}
+
+
+def _resolve_question(field_name: str) -> tuple[str, str | None]:
+    """
+    Return (base_question_text, group_label_or_None).
+    group_label is non-None when this field belongs to a numbered family
+    (e.g. insurers, locations) so the caller can append "1st insurer" etc.
+    Falls back to Groq humanization (called in batch from generate_arq_questions).
+    """
+    # 1. Exact match — no grouping needed
+    q = _FIELD_QUESTION_MAP.get(field_name)
+    if q:
+        return q, None
+
+    # 2. Strip trailing index suffix (_a … _z, _1 … _99) and try exact map again
+    base_name = re.sub(r'[_\s]+[a-z]$', '', field_name)
+    base_name = re.sub(r'[_\s]+\d+$',   '', base_name)
+    q = _FIELD_QUESTION_MAP.get(base_name)
+    if q:
+        return q, None  # known field, suffix was noise — no numbering needed
+
+    # 3. Prefix pattern match
+    for candidate in (field_name, base_name):
+        lower = candidate.lower()
+        for prefix, question, group_label in _FIELD_PREFIX_MAP:
+            if lower.startswith(prefix):
+                return question, group_label
+
+    # 4. Groq-humanized (pre-populated by caller before _resolve_question is called)
+    if field_name in _HUMANIZED_CACHE:
+        return _HUMANIZED_CACHE[field_name], None
+
+    # 5. Readable fallback (should rarely hit — only if Groq batch was skipped)
+    readable = _field_name_to_readable(field_name)
+    return f"Please provide your {readable}.", None
 
 
 def _clean_answer(raw: str, field_name: str) -> Optional[str]:
@@ -152,21 +342,99 @@ def generate_arq_questions(
                 missing_fields[fk] = set()
                 field_current_values[fk] = ""
 
+    # Sweep _FIELD_QUESTION_MAP: any fact that is null AND relevant to at least one
+    # generated form gets a question even if the PDF confidence loop missed it.
+    active_form_ids = set(generated_forms.keys())
+    for fact_key in _FIELD_QUESTION_MAP:
+        if fact_key in missing_fields:
+            continue  # already captured above
+        relevant_forms = _FIELD_TO_FORMS.get(fact_key, set())
+        if relevant_forms and not (relevant_forms & active_form_ids):
+            continue  # not relevant to any form in this submission
+        val = facts.get(fact_key)
+        is_null = (
+            val is None
+            or (isinstance(val, str) and not val.strip())
+            or (isinstance(val, list) and not val)
+            or (isinstance(val, dict) and not val)
+        )
+        if not is_null:
+            continue
+        affected = (relevant_forms & active_form_ids) if relevant_forms else active_form_ids
+        missing_fields[fact_key] = affected
+        field_current_values[fact_key] = ""
+
+    # Low-confidence sweep: surface facts that are non-null but OCR-uncertain.
+    # These go into missing_fields so the question builder picks them up, and
+    # into _ocr_low_conf_fields so the builder can prefix "Please confirm: ".
+    _ocr_low_conf_fields: set = set()
+    for fact_key in _FIELD_QUESTION_MAP:
+        if fact_key in missing_fields:
+            continue  # already in queue (null case)
+        if _focr(facts, fact_key):
+            continue  # confident or not annotated → skip
+        relevant_forms = _FIELD_TO_FORMS.get(fact_key, set())
+        if relevant_forms and not (relevant_forms & active_form_ids):
+            continue  # not relevant to any generated form
+        affected = (relevant_forms & active_form_ids) if relevant_forms else active_form_ids
+        missing_fields[fact_key] = affected
+        field_current_values[fact_key] = str(_fv(facts, fact_key) or "")
+        _ocr_low_conf_fields.add(fact_key)
+
     questions = []
-    seen_questions = set()
+    seen_field_names = set()
+    group_counts: dict[str, int] = {}
+
+    # Pre-identify fields that will need Groq humanization (miss both maps)
+    # and batch them in a single LLM call before the loop runs.
+    groq_needed = []
+    for field_name in missing_fields:
+        if field_name in _FIELD_QUESTION_MAP:
+            continue
+        base = re.sub(r'[_\s]+[a-z]$', '', field_name)
+        base = re.sub(r'[_\s]+\d+$', '', base)
+        if base in _FIELD_QUESTION_MAP:
+            continue
+        lower = field_name.lower()
+        base_lower = base.lower()
+        if any(lower.startswith(p) or base_lower.startswith(p) for p, _, __ in _FIELD_PREFIX_MAP):
+            continue
+        if field_name not in _HUMANIZED_CACHE:
+            groq_needed.append(field_name)
+
+    if groq_needed:
+        _humanize_fields_with_groq(groq_needed)
 
     for field_name, form_ids in missing_fields.items():
-        # Get human-readable question
-        question_text = _FIELD_QUESTION_MAP.get(field_name)
-        if not question_text:
-            # Generate from field name
-            question_text = field_name.replace("_", " ").replace("-", " ").title() + "?"
-
-
-        if field_name in seen_questions:
+        if field_name in seen_field_names:
             continue
-        seen_questions.add(field_name)
-        
+        seen_field_names.add(field_name)
+
+        base_question, group_label = _resolve_question(field_name)
+
+        # If this field belongs to a numbered group (insurer, location, driver, etc.)
+        # append an ordinal so "1st insurer", "2nd insurer" etc. are distinct.
+        if group_label is not None:
+            group_counts[group_label] = group_counts.get(group_label, 0) + 1
+            count = group_counts[group_label]
+            if count == 1:
+                # First occurrence — no number yet; will be retroactively numbered
+                # when/if a second appears (via _group_label scan below).
+                question_text = base_question
+            else:
+                # Second+ occurrence: number this one
+                question_text = f"{base_question} ({_ordinal(count)} {group_label})"
+                # Retroactively number the first entry if this is the 2nd
+                if count == 2:
+                    for prev_q in questions:
+                        if prev_q.get("_group_label") == group_label:
+                            prev_q["question"] = f"{base_question} (1st {group_label})"
+                            break
+        else:
+            question_text = base_question
+
+        if field_name in _ocr_low_conf_fields:
+            question_text = "Please confirm: " + question_text
 
         # Build list of form names
         form_names_list = []
@@ -195,6 +463,70 @@ def generate_arq_questions(
             "form_ids":      list(form_ids),
             "field_type":    field_type,
             "current_value": field_current_values.get(field_name, ""),
+            "_group_label":  group_label,  # internal — stripped before return
+        })
+
+    # Strip internal key before returning
+    for q in questions:
+        q.pop("_group_label", None)
+
+    return questions
+
+
+def generate_arq_questions_from_facts(
+    facts: dict,
+    flags: dict,
+    selected_form_ids: List[str],
+    hard_stops: list,
+    soft_stops: list,
+) -> List[dict]:
+    """
+    Generate plain-language ARQ questions for the Clarity pipeline (no generated PDFs).
+    Iterates _FIELD_QUESTION_MAP and emits a question for each fact key that is
+    null/empty AND whose _FIELD_TO_FORMS entry intersects selected_form_ids.
+    Return shape matches generate_arq_questions() so callers are interchangeable.
+    """
+    selected = set(selected_form_ids)
+    questions: List[dict] = []
+    seen: set = set()
+
+    for fact_key, base_question in _FIELD_QUESTION_MAP.items():
+        if fact_key in seen:
+            continue
+        relevant_forms = _FIELD_TO_FORMS.get(fact_key, set())
+        # If the field has a known form mapping, require at least one to be selected.
+        # If there's no entry in _FIELD_TO_FORMS, include it unconditionally.
+        if relevant_forms and not (relevant_forms & selected):
+            continue
+
+        val = facts.get(fact_key)
+        is_null = (
+            val is None
+            or (isinstance(val, str) and not val.strip())
+            or (isinstance(val, list) and not val)
+            or (isinstance(val, dict) and not val)
+        )
+        is_low_conf = not _focr(facts, fact_key)
+
+        if is_null:
+            question_out  = base_question
+            current_val   = ""
+        elif is_low_conf:
+            question_out  = "Please confirm: " + base_question
+            current_val   = str(_fv(facts, fact_key) or "")
+        else:
+            continue  # filled and confident → skip
+
+        seen.add(fact_key)
+        affected_ids = sorted(relevant_forms & selected) if relevant_forms else sorted(selected)
+        form_nums    = [fid.replace("ACORD_", "") for fid in affected_ids]
+        questions.append({
+            "field_name":    fact_key,
+            "question":      question_out,
+            "forms":         ", ".join(form_nums),
+            "form_ids":      affected_ids,
+            "field_type":    "text",
+            "current_value": current_val,
         })
 
     return questions

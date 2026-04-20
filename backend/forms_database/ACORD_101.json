@@ -1,0 +1,13 @@
+{
+  "form_id": "ACORD_101",
+  "form_name": "ACORD 101 - Additional Remarks",
+  "form_type": "supplement",
+  "template_file": "",
+  "description": "Additional remarks / narrative overflow page. Recommended when the submission has unusual complexity, vague operations descriptions, high payroll/revenue ratios, or undocumented loss history.",
+  "always_include": false,
+  "matching_flags": [],
+  "matching_keywords": ["additional remarks", "supplemental", "narrative"],
+  "coverage_types": ["general_liability", "property", "auto", "workers_comp", "umbrella"],
+  "policy_types": ["commercial"],
+  "tier1_minimum_fields": []
+}

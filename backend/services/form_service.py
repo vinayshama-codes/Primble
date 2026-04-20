@@ -1,9 +1,12 @@
+#form_service.py
+
 import json
 import logging
 import os
+import re
 from typing import List, Optional
 
-from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_INDEX, groq_client
+from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_INDEX
 from services.extraction_service import _fv
 from services.pdf_service import extract_form_schema, map_facts_to_form, fill_pdf
 from services.sqs_service import cross_validate, calculate_sqs
@@ -32,7 +35,13 @@ def load_all_forms() -> List[dict]:
 
 
 def filter_available_forms(forms: List[dict]) -> List[dict]:
-    return [f for f in forms if os.path.exists(os.path.join(TEMPLATE_DIR, f.get("template_file", "")))]
+    # Exclude forms with no template_file: an empty string resolves to TEMPLATE_DIR
+    # itself (which always exists), so we must gate on truthiness first.
+    return [
+        f for f in forms
+        if f.get("template_file")
+        and os.path.exists(os.path.join(TEMPLATE_DIR, f["template_file"]))
+    ]
 
 
 def stage1_filter(flags: dict, all_forms: List[dict]) -> List[dict]:
@@ -60,71 +69,46 @@ def stage1_filter(flags: dict, all_forms: List[dict]) -> List[dict]:
     return candidates
 
 
-def stage2_ai_match(facts: dict, flags: dict, candidates: List[dict]) -> List[dict]:
-    slim   = [{"form_id": f["form_id"], "form_name": f["form_name"], "description": f.get("description", ""),
-               "matching_keywords": f.get("matching_keywords", [])} for f in candidates]
-    prompt = (
-        "You are a carrier-grade insurance submission expert.\n"
-        "Rank these candidate ACORD forms by relevance. Only use forms from the list.\n\n"
-        "Rules:\n- ACORD_125 always required first\n- ACORD_126 if GL present\n"
-        "- ACORD_140 if property present\n- ACORD_25 only if certificate holder explicitly requested\n\n"
-        f"Facts: {json.dumps(facts, indent=2)}\nFlags: {json.dumps(flags, indent=2)}\n"
-        f"Candidates: {json.dumps(slim, indent=2)}\n\n"
-        'Return ONLY a raw JSON array sorted by confidence descending.\n'
-        '[{"form_id":"ACORD_XXX","form_name":"...","confidence":0.95,"reason":"one sentence"}]'
-    )
-    try:
-        r   = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-        )
-        raw = (r.choices[0].message.content or "").strip()
-        if raw.startswith("```"):
-            raw = raw.replace("```json", "").replace("```", "").strip()
-        s, e = raw.find("["), raw.rfind("]")
-        recs = json.loads(raw[s : e + 1]) if s != -1 and e != -1 else []
-        if not isinstance(recs, list):
-            recs = []
-        valid_ids    = {f["form_id"] for f in candidates}
-        recs         = [r for r in recs if r.get("form_id") in valid_ids]
-        is_cert_only = flags.get("is_certificate_doc") and not flags.get("is_commercial_policy")
-        if not is_cert_only and not any(r.get("form_id") == "ACORD_125" for r in recs):
-            a125 = next((f for f in candidates if f["form_id"] == "ACORD_125"), None)
-            if a125:
-                recs.insert(0, {"form_id": "ACORD_125", "form_name": a125["form_name"], "confidence": 0.99, "reason": "Always required"})
-        recs.sort(key=lambda x: x.get("confidence", 0), reverse=True)
-        return recs
-    except Exception as ex:
-        logger.error(f"Stage 2 error: {ex}")
-        return [{"form_id": "ACORD_125", "form_name": "ACORD 125 - Commercial Insurance Application", "confidence": 0.99, "reason": "Default"}]
 
-
-def match_forms_deterministic(facts: dict, flags: dict) -> List[dict]:
+def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[dict]:
     """
     Deterministic rule-based form matching based on the Acordly ACORD Form Decision Tree.
 
-    Replaces stage1_filter() + stage2_ai_match() for both Assembly and Clarity pipelines.
+    Replaces the former two-stage (filter + AI) matching for both Assembly and Clarity pipelines.
     Zero LLM calls. Pure flag and keyword logic.
 
-    Return shape is identical to stage2_ai_match() so nothing downstream breaks:
+    Parameters
+    ----------
+    facts : merged fact dict (OCR-confidence envelopes intact)
+    flags : boolean flag dict from extraction
+    text  : combined lowercased raw OCR text from all uploaded docs; used for
+            keyword-based triggers that need to see the full document body
+            (builders risk, inland marine, certificate, evidence of property).
+
+    Return shape:
       [{"form_id": ..., "form_name": ..., "confidence": ..., "trigger_reason": ...}]
 
     Confidence tiers:
       1.0  — always required (ACORD 125)
       0.95 — flag-based match
-      0.85 — keyword-based match
+      0.85 — keyword / rule-based match
 
-    Note: ACORD 186, 137, 138 are included in matching output but do not yet have
-    PDF templates in /templates. Pipeline must guard against missing template_file.
+    Note: forms without PDF templates in /templates are recommended but cannot be
+    generated. They carry "template_pending": True in their match dict so the
+    pipeline can surface them as advisory recommendations only.
     """
     matches: List[dict] = []
 
-    # Build a single searchable text from operations + lines of business
-    ops      = (_fv(facts, "operations_description") or "").lower()
-    lobs     = " ".join(facts.get("lines_of_business") or []).lower()
-    cert_h   = (_fv(facts, "certificate_holder") or "").lower()
-    search   = f"{ops} {lobs} {cert_h}"
+    # Build a single searchable text from operations + lines of business + raw OCR.
+    # `text` is the full lowercased OCR body; `search` is the facts-derived subset.
+    ops    = (_fv(facts, "operations_description") or "").lower()
+    lobs   = " ".join(facts.get("lines_of_business") or []).lower()
+    cert_h = (_fv(facts, "certificate_holder") or "").lower()
+    search = f"{ops} {lobs} {cert_h}"
+    text   = text.lower()   # normalise; harmless if already lower or empty
+
+    def _already_matched(form_id: str) -> bool:
+        return any(m["form_id"] == form_id for m in matches)
 
     # ── Always required ────────────────────────────────────────────────────────
     matches.append({
@@ -190,7 +174,7 @@ def match_forms_deterministic(facts: dict, flags: dict) -> List[dict]:
             "trigger_reason": "has_property_coverage and has_multiple_locations flags detected",
         })
 
-    # ACORD 25 — Certificate of Liability Insurance
+    # ACORD 25 — Certificate of Liability Insurance (flag path)
     if flags.get("has_certificate_request") or flags.get("is_certificate_doc"):
         matches.append({
             "form_id":        "ACORD_25",
@@ -199,16 +183,16 @@ def match_forms_deterministic(facts: dict, flags: dict) -> List[dict]:
             "trigger_reason": "has_certificate_request or is_certificate_doc flag detected",
         })
 
-    # ACORD 186 — Contractors Supplement
+    # ACORD 186 — Contractors Supplement (flag path)
     if flags.get("is_contractor"):
         matches.append({
             "form_id":        "ACORD_186",
-            "form_name":      "ACORD 186 - Contractors Supplement",
+            "form_name":      "ACORD 186 - Contractors Supplemental Application",
             "confidence":     0.95,
             "trigger_reason": "is_contractor flag detected",
         })
 
-    # ── Keyword-based (0.85) ───────────────────────────────────────────────────
+    # ── Keyword / rule-based (0.85) ────────────────────────────────────────────
 
     # ACORD 137 — Crime
     _crime_kw = {
@@ -237,13 +221,117 @@ def match_forms_deterministic(facts: dict, flags: dict) -> List[dict]:
             "trigger_reason": "cyber / data breach keywords detected in operations or lines of business",
         })
 
+    # ACORD 101 — Additional Remarks
+    # Triggered when the submission has unusual complexity that needs a narrative page.
+    _101_reasons: List[str] = []
+    if _fv(facts, "gl_class_codes_by_location") and len(ops) < 30:
+        _101_reasons.append("GL class codes present but operations description is vague (<30 chars)")
+    _payroll_str = _fv(facts, "total_payroll") or _fv(facts, "wc_payroll")
+    _revenue_str = _fv(facts, "total_revenue")
+    if _payroll_str and _revenue_str:
+        try:
+            _pr = float(re.sub(r"[^\d.]", "", str(_payroll_str)))
+            _rv = float(re.sub(r"[^\d.]", "", str(_revenue_str)))
+            if _rv > 0 and _pr / _rv > 0.85:
+                _101_reasons.append("payroll/revenue ratio exceeds 85%")
+        except ValueError:
+            pass
+    _subpct_str = _fv(facts, "percent_subcontracted")
+    if _subpct_str:
+        try:
+            if float(re.sub(r"[^\d.]", "", str(_subpct_str))) > 30 and not _fv(facts, "wc_payroll"):
+                _101_reasons.append("subcontract percentage >30% with no WC payroll on file")
+        except ValueError:
+            pass
+    if flags.get("has_loss_history") and not _fv(facts, "num_claims") and not _fv(facts, "total_incurred"):
+        _101_reasons.append("loss history flagged but no claim count or incurred amount found")
+    # cross_validate with no form selection catches general submission anomalies
+    # (FEIN format errors, missing applicant name, payroll-to-revenue outliers, etc.)
+    # that need a remarks page but aren't covered by the fact-level checks above.
+    _cross_issues = cross_validate(facts, flags, [])
+    if _cross_issues:
+        _101_reasons.append(
+            f"cross-validation flagged {len(_cross_issues)} issue(s) requiring additional remarks"
+        )
+    if _101_reasons:
+        matches.append({
+            "form_id":          "ACORD_101",
+            "form_name":        "ACORD 101 - Additional Remarks",
+            "confidence":       0.85,
+            "trigger_reason":   "; ".join(_101_reasons),
+            "template_pending": True,
+        })
+
+    # ACORD 133 — Builders Risk
+    _133_kw = {
+        "builder", "builders risk", "under construction",
+        "renovation", "project value", "completion date",
+    }
+    if flags.get("has_builders_risk") or any(kw in text for kw in _133_kw):
+        matches.append({
+            "form_id":          "ACORD_133",
+            "form_name":        "ACORD 133 - Builders Risk Application",
+            "confidence":       0.85,
+            "trigger_reason":   "builders risk / construction keywords detected in document text",
+            "template_pending": True,
+        })
+
+    # ACORD 160 — Inland Marine
+    _160_kw = {
+        "floater", "inland marine", "contractor's equipment",
+        "cargo", "motor truck", "transit",
+    }
+    if flags.get("has_inland_marine") or any(kw in text for kw in _160_kw):
+        matches.append({
+            "form_id":          "ACORD_160",
+            "form_name":        "ACORD 160 - Inland Marine Application",
+            "confidence":       0.85,
+            "trigger_reason":   "inland marine / equipment / cargo keywords detected in document text",
+            "template_pending": True,
+        })
+
+    # ACORD 186 — Contractors Supplemental (keyword path, only if not already flag-matched)
+    # Catches GL submissions where the insured uses contractor language without the
+    # is_contractor flag being set (e.g., extracted from a dec page that omits it).
+    _186_kw = {"contractor", "subcontract", "roofing", "demolition", "scaffolding", "blasting"}
+    if (not _already_matched("ACORD_186")
+            and flags.get("has_general_liability")
+            and any(kw in ops for kw in _186_kw)):
+        matches.append({
+            "form_id":        "ACORD_186",
+            "form_name":      "ACORD 186 - Contractors Supplemental Application",
+            "confidence":     0.85,
+            "trigger_reason": "GL coverage with contractor-type operations keywords detected",
+        })
+
+    # ACORD 25 — Certificate of Liability Insurance (keyword path, only if not already flag-matched)
+    _25_kw = {"certificate holder", "certificate of liability", "coi"}
+    if not _already_matched("ACORD_25") and any(kw in text for kw in _25_kw):
+        matches.append({
+            "form_id":        "ACORD_25",
+            "form_name":      "ACORD 25 - Certificate of Liability Insurance",
+            "confidence":     0.85,
+            "trigger_reason": "certificate keywords detected in document text",
+        })
+
+    # ACORD 28 — Evidence of Commercial Property Insurance
+    _28_kw = {"mortgagee", "evidence of insurance", "loss payee"}
+    if flags.get("has_property_coverage") and any(kw in text for kw in _28_kw):
+        matches.append({
+            "form_id":          "ACORD_28",
+            "form_name":        "ACORD 28 - Evidence of Commercial Property Insurance",
+            "confidence":       0.85,
+            "trigger_reason":   "mortgagee / loss payee keywords detected with property coverage",
+            "template_pending": True,
+        })
+
     # ── Sort: confidence descending, ACORD_125 is always first (1.0) ──────────
     matches.sort(key=lambda x: x["confidence"], reverse=True)
     return matches
 
 
-def match_forms(facts: dict, flags: dict, all_forms: List[dict]) -> List[dict]:
-    return match_forms_deterministic(facts, flags)
+def match_forms(facts: dict, flags: dict, all_forms: List[dict], text: str = "") -> List[dict]:
+    return match_forms_deterministic(facts, flags, text=text)
 
 
 def process_single_form(form_meta: dict, session: dict) -> dict:

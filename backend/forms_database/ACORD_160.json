@@ -1,0 +1,13 @@
+{
+  "form_id": "ACORD_160",
+  "form_name": "ACORD 160 - Inland Marine Application",
+  "form_type": "application",
+  "template_file": "",
+  "description": "Application for inland marine coverage including floaters, contractor's equipment, cargo, motor truck cargo, and transit coverage.",
+  "always_include": false,
+  "matching_flags": ["has_inland_marine"],
+  "matching_keywords": ["floater", "inland marine", "contractor's equipment", "cargo", "motor truck", "transit"],
+  "coverage_types": ["inland_marine"],
+  "policy_types": ["commercial"],
+  "tier1_minimum_fields": []
+}

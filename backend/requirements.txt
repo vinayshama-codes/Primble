@@ -41,6 +41,9 @@ email-validator>=2.1.0
 # Environment Variables
 python-dotenv>=1.0.0
 
+# Cache (shared across Gunicorn workers; falls back to in-process dict if unavailable)
+redis>=4.6.0
+
 # Cloud / AWS (Textract OCR, S3, SQS)
 boto3>=1.29.0
 

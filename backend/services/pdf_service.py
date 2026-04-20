@@ -2,42 +2,315 @@ import io
 import json
 import logging
 import os
+import re
 from typing import Dict, List, Optional, Tuple
 
 import pikepdf
 from PIL import Image
 from fastapi import HTTPException
 
-from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_SCHEMAS_DIR, groq_client
+from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_SCHEMAS_DIR, groq_chat
 from utils.helpers import _parse_address
 from services.extraction_service import _fv
 
 logger = logging.getLogger(__name__)
 
 _ACORD_FIELD_RULES = [
-    ("Producer_FullName","producer_name"),("Producer_CustomerIdentifier","producer_name"),
-    ("Producer_ContactPerson_FullName","contact_name"),("Producer_ContactPerson_Phone","contact_phone"),
-    ("Producer_ContactPerson_Email","contact_email"),
-    ("Producer_MailingAddress_LineOne","_addr_line1"),("Producer_MailingAddress_LineTwo","_addr_line2"),
-    ("Producer_MailingAddress_CityName","_addr_city"),("Producer_MailingAddress_StateOrProv","_addr_state"),
-    ("Producer_MailingAddress_PostalCode","_addr_zip"),
-    ("NamedInsured_FullName","applicant_name"),
-    ("NamedInsured_MailingAddress_LineOne","_addr_line1"),("NamedInsured_MailingAddress_LineTwo","_addr_line2"),
-    ("NamedInsured_MailingAddress_CityName","_addr_city"),("NamedInsured_MailingAddress_StateOrProv","_addr_state"),
-    ("NamedInsured_MailingAddress_PostalCode","_addr_zip"),
-    ("Policy_PolicyNumberIdentifier","policy_number"),("Policy_EffectiveDate","effective_date"),
-    ("Policy_ExpirationDate","expiration_date"),("Form_CompletionDate","effective_date"),
-    ("Insurer_FullName","prior_carrier"),
-    ("GeneralLiability_EachOccurrence","gl_each_occurrence"),("GeneralLiability_GeneralAggregate","gl_aggregate"),
-    ("GeneralLiability_Aggregate","gl_aggregate"),("GeneralAggregate","gl_aggregate"),
-    ("EachOccurrence","gl_each_occurrence"),
-    ("CommercialProperty_Premises_LimitAmount","property_building_value"),
-    ("CommercialStructure_Construction_TypeCode","construction_type"),
-    ("CommercialStructure_YearBuilt","year_built"),("CommercialStructure_Roof_Year","roof_year"),
-    ("CommercialStructure_Occupancy","occupancy_type"),
-    ("CertificateHolder_FullName","certificate_holder"),
-    ("AutoLiability_CombinedSingleLimit","auto_liability_limit"),
-    ("WorkersCompensation_Payroll","wc_payroll"),("Umbrella_EachOccurrence","umbrella_limit"),
+    # ── Producer ────────────────────────────────────────────────────────────
+    ("Producer_FullName",                                  "producer_name"),
+    ("Producer_CustomerIdentifier",                        "producer_name"),
+    ("Producer_ContactPerson_FullName",                    "contact_name"),
+    ("Producer_ContactPerson_Phone",                       "contact_phone"),
+    ("Producer_ContactPerson_Email",                       "contact_email"),
+    ("Producer_MailingAddress_LineOne",                    "_addr_line1"),
+    ("Producer_MailingAddress_LineTwo",                    "_addr_line2"),
+    ("Producer_MailingAddress_CityName",                   "_addr_city"),
+    ("Producer_MailingAddress_StateOrProv",                "_addr_state"),
+    ("Producer_MailingAddress_PostalCode",                 "_addr_zip"),
+    ("Producer_FaxNumber",                                 None),
+    ("Producer_AuthorizedRepresentative",                  None),
+
+    # ── Named insured ───────────────────────────────────────────────────────
+    ("NamedInsured_FullName",                              "applicant_name"),
+    ("NamedInsured_DBAName",                               "dba_name"),
+    ("NamedInsured_TradeName",                             "dba_name"),
+    ("NamedInsured_FEIN",                                  "fein"),
+    ("NamedInsured_TaxIdentifier",                         "fein"),
+    ("NamedInsured_EntityType",                            "entity_type"),
+    ("NamedInsured_BusinessEntity",                        "entity_type"),
+    ("NamedInsured_YearsInBusiness",                       "years_in_business"),
+    ("NamedInsured_BusinessDescription",                   "operations_description"),
+    ("NamedInsured_OperationsDescription",                 "operations_description"),
+    ("NamedInsured_SICCode",                               "sic_code"),
+    ("NamedInsured_NAICSCode",                             "naics_code"),
+    ("NamedInsured_MailingAddress_LineOne",                "_addr_line1"),
+    ("NamedInsured_MailingAddress_LineTwo",                "_addr_line2"),
+    ("NamedInsured_MailingAddress_CityName",               "_addr_city"),
+    ("NamedInsured_MailingAddress_StateOrProv",            "_addr_state"),
+    ("NamedInsured_MailingAddress_PostalCode",             "_addr_zip"),
+    ("NamedInsured_PhysicalAddress_LineOne",               "_loc_line1"),
+    ("NamedInsured_PhysicalAddress_LineTwo",               "_loc_line2"),
+    ("NamedInsured_PhysicalAddress_CityName",              "_loc_city"),
+    ("NamedInsured_PhysicalAddress_StateOrProv",           "_loc_state"),
+    ("NamedInsured_PhysicalAddress_PostalCode",            "_loc_zip"),
+
+    # ── Policy / form header ─────────────────────────────────────────────────
+    ("Policy_PolicyNumberIdentifier",                      "policy_number"),
+    ("Policy_EffectiveDate",                               "effective_date"),
+    ("Policy_ExpirationDate",                              "expiration_date"),
+    ("Policy_GeneralLiability_PolicyNumberIdentifier",     "policy_number"),
+    ("Policy_GeneralLiability_EffectiveDate",              "effective_date"),
+    ("Policy_GeneralLiability_ExpirationDate",             "expiration_date"),
+    ("Policy_AutomobileLiability_PolicyNumberIdentifier",  "policy_number"),
+    ("Policy_AutomobileLiability_EffectiveDate",           "effective_date"),
+    ("Policy_AutomobileLiability_ExpirationDate",          "expiration_date"),
+    ("Policy_ExcessLiability_PolicyNumberIdentifier",      "policy_number"),
+    ("Policy_ExcessLiability_EffectiveDate",               "effective_date"),
+    ("Policy_ExcessLiability_ExpirationDate",              "expiration_date"),
+    ("Policy_WorkersCompensation",                         "policy_number"),
+    ("OtherPolicy_PolicyNumberIdentifier",                 "policy_number"),
+    ("OtherPolicy_PolicyEffectiveDate",                    "effective_date"),
+    ("OtherPolicy_PolicyExpirationDate",                   "expiration_date"),
+    ("Form_CompletionDate",                                "effective_date"),
+    ("Form_EditionIdentifier",                             None),
+    ("CertificateOfInsurance_CertificateNumberIdentifier", "policy_number"),
+    ("CertificateOfInsurance_RevisionNumber",              None),
+
+    # ── Insurer ──────────────────────────────────────────────────────────────
+    ("Insurer_FullName",                                   "prior_carrier"),
+    ("Insurer_NAICCode",                                   "naics_code"),
+    ("_InsurerLetterCode",                                 None),
+
+    # ── General liability ─────────────────────────────────────────────────────
+    ("GeneralLiability_EachOccurrence_LimitAmount",        "gl_each_occurrence"),
+    ("GeneralLiability_EachOccurrence",                    "gl_each_occurrence"),
+    ("EachOccurrence",                                     "gl_each_occurrence"),
+    ("GeneralLiability_GeneralAggregate_LimitAmount",      "gl_aggregate"),
+    ("GeneralLiability_GeneralAggregate",                  "gl_aggregate"),
+    ("GeneralLiability_Aggregate",                         "gl_aggregate"),
+    ("GeneralAggregate",                                   "gl_aggregate"),
+    ("GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount", "gl_aggregate"),
+    ("GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount", "gl_limits"),
+    ("GeneralLiability_MedicalExpense_EachPersonLimitAmount",     "gl_limits"),
+    ("GeneralLiability_OtherCoverageLimitAmount",          "gl_deductible"),
+    ("GeneralLiability_PropertyDamage_DeductibleAmount",   "gl_deductible"),
+    ("GeneralLiability_BodilyInjury_DeductibleAmount",     "gl_deductible"),
+    ("GeneralLiability_OtherDeductibleAmount",             "gl_deductible"),
+    ("GeneralLiability_ClaimsMadeIndicator",               "gl_form_type"),
+    ("GeneralLiability_OccurrenceIndicator",               "gl_form_type"),
+    ("GeneralLiability_ClaimsMade_ProposedRetroactiveDate","retro_date"),
+    ("GeneralLiability_RetroactiveDate",                   "retro_date"),
+    ("GeneralLiability_EmployeeBenefits_EmployeeCount",    "num_employees"),
+    # GL indicators / admin checkboxes → null
+    ("GeneralLiability_CoverageIndicator",                 None),
+    ("GeneralLiability_OwnersAndContractors",              None),
+    ("GeneralLiability_OtherCoverageIndicator",            None),
+    ("GeneralLiability_OtherCoverageDescription",          None),
+    ("GeneralLiability_DeductiblePerClaim",                None),
+    ("GeneralLiability_DeductiblePerOccurrence",           None),
+    ("GeneralLiability_UninsuredUnderinsured",             None),
+    ("GeneralLiability_MedicalPayments_Coverage",          None),
+    ("GeneralLiabilityLineOfBusiness_Question_",           None),
+    ("GeneralLiabilityLineOfBusiness_Attachment_",         None),
+    ("GeneralLiabilityLineOfBusiness_Total",               None),
+    ("GeneralLiabilityLineOfBusiness_RemarkText",          None),
+    ("GeneralLiabilityLineOfBusiness_TypeOfWork",          None),
+    ("GeneralLiability_Hazard_Location",                   None),
+    ("GeneralLiability_Hazard_Hazard",                     None),
+    ("GeneralLiability_Hazard_PremiumBasis",               None),
+    ("GeneralLiability_Hazard_Territory",                  None),
+    ("GeneralLiability_Hazard_PremisesOperationsRate",     None),
+    ("GeneralLiability_Hazard_ProductsRate",               None),
+    ("GeneralLiability_Hazard_PremisesOperationsPremium",  None),
+    ("GeneralLiability_Hazard_ProductsPremium",            None),
+    ("GeneralLiability_Hazard_Exposure",                   None),
+    ("GeneralLiability_Hazard_ClassCode",                  None),
+    ("GeneralLiability_Hazard_Classification",             None),
+    ("GeneralLiability_PremisesOperations_Premium",        None),
+    ("GeneralLiability_Products_Premium",                  None),
+    ("GeneralLiability_OtherCoveragePremium",              None),
+    ("GeneralLiability_PropertyDamage_DeductibleIndicator",None),
+    ("GeneralLiability_BodilyInjury_DeductibleIndicator",  None),
+    ("GeneralLiability_OtherDeductibleIndicator",          None),
+    ("GeneralLiability_GeneralAggregate_LimitApplies",     None),
+    ("GeneralLiability_UninsuredUnderinsuredMotorists",    None),
+    ("GeneralLiability_EmployeeBenefits_PerClaim",         None),
+    ("GeneralLiability_EmployeeBenefits_EmployeeCovered",  None),
+    ("GeneralLiability_EmployeeBenefits_Retroactive",      None),
+    ("GeneralLiability_EmployeeBenefits_LimitAmount",      None),
+    ("GeneralLiability_Otherlodging",                      None),
+
+    # ── Commercial property / structure ─────────────────────────────────────
+    ("CommercialProperty_Premises_LimitAmount",            "property_building_value"),
+    ("CommercialProperty_Premises_CoinsurancePercent",     "coinsurance_percentage"),
+    ("CommercialProperty_Premises_ValuationCode",          "valuation_method"),
+    ("CommercialProperty_Premises_DeductibleAmount",       "property_deductible_aop"),
+    ("CommercialProperty_Premises_DeductibleTypeCode",     None),
+    ("CommercialProperty_Premises_SubjectOfInsuranceCode", None),
+    ("CommercialProperty_Premises_CauseOfLossCode",        None),
+    ("CommercialProperty_Premises_InflationGuardPercent",  None),
+    ("CommercialProperty_Premises_BlanketNumber",          None),
+    ("CommercialProperty_Premises_FormsAndConditions",     None),
+    ("CommercialProperty_Premises_RemarkText",             None),
+    ("CommercialProperty_Premises_Breakdown",              None),
+    ("CommercialProperty_Premises_PowerOutage",            None),
+    ("CommercialProperty_Premises_SellingPrice",           None),
+    ("CommercialProperty_Premises_OtherIndicator",         None),
+    ("CommercialProperty_Premises_OptionsDescription",     None),
+    ("CommercialProperty_Summary_BlanketNumber",           None),
+    ("CommercialProperty_Summary_BlanketLimit",            None),
+    ("CommercialCoverage_Summary_BlanketType",             None),
+    ("CommercialProperty_Spoilage_",                       None),
+    ("CommercialProperty_Attachment_",                     None),
+    ("CommercialPropertyCoverage_SinkHole",                None),
+    ("CommercialPropertyCoverage_MineSubsidence",          None),
+    ("CommercialStructure_BuiltYear",                      "year_built"),
+    ("CommercialStructure_YearBuilt",                      "year_built"),
+    ("CommercialStructure_Roof_Year",                      "roof_year"),
+    ("CommercialStructure_Construction_TypeCode",          "construction_type"),
+    ("CommercialStructure_Occupancy",                      "occupancy_type"),
+    ("CommercialStructure_PhysicalAddress_LineOne",        "_loc_line1"),
+    ("CommercialStructure_PhysicalAddress_LineTwo",        "_loc_line2"),
+    ("CommercialStructure_PhysicalAddress_CityName",       "_loc_city"),
+    ("CommercialStructure_PhysicalAddress_StateOrProv",    "_loc_state"),
+    ("CommercialStructure_PhysicalAddress_PostalCode",     "_loc_zip"),
+    ("CommercialStructure_Location_ProducerIdentifier",    None),
+    ("CommercialStructure_Building_ProducerIdentifier",    None),
+    ("CommercialStructure_Building_Sublocation",           None),
+    ("CommercialStructure_TaxCode",                        None),
+    ("CommercialStructure_WindClass_",                     None),
+    ("CommercialStructure_PrimaryHeat_",                   None),
+    ("CommercialStructure_SecondaryHeat_",                 None),
+    ("CommercialStructure_HeatingBoiler",                  None),
+    ("Construction_ConstructionCode",                      "construction_type"),
+    ("Construction_OpenSidesCount",                        None),
+    ("Construction_StoreyCount",                           None),
+    ("Construction_BasementCount",                         None),
+    ("Construction_BuildingArea",                          None),
+    ("Construction_BuildingCodeEffectiveness",             None),
+    ("Construction_RoofMaterialCode",                      None),
+
+    # ── Building features / protection ──────────────────────────────────────
+    ("BuildingFireProtection_HydrantDistanceFeetCount",    "distance_to_hydrant"),
+    ("BuildingFireProtection_FireStationDistanceMile",     None),
+    ("BuildingFireProtection_FireDistrictName",            None),
+    ("BuildingFireProtection_FireDistrictCode",            None),
+    ("BuildingFireProtection_ProtectionClassCode",         "fire_protection_class"),
+    ("BuildingFireProtection_Alarm_SprinklerPercent",      "sprinkler_system"),
+    ("BuildingFireProtection_Alarm_ManufacturerName",      None),
+    ("BuildingFireProtection_Alarm_CentralStation",        None),
+    ("BuildingFireProtection_Alarm_LocalGong",             None),
+    ("BuildingFireProtection_Alarm_ProtectionDescription", None),
+    ("BuildingImprovement_WiringYear",                     None),
+    ("BuildingImprovement_WiringIndicator",                None),
+    ("BuildingImprovement_RoofingYear",                    "roof_year"),
+    ("BuildingImprovement_RoofingIndicator",               None),
+    ("BuildingImprovement_PlumbingYear",                   None),
+    ("BuildingImprovement_PlumbingIndicator",              None),
+    ("BuildingImprovement_HeatingYear",                    None),
+    ("BuildingImprovement_HeatingIndicator",               None),
+    ("BuildingImprovement_OtherYear",                      None),
+    ("BuildingImprovement_OtherIndicator",                 None),
+    ("BuildingImprovement_OtherDescription",               None),
+    ("BuildingFeatures_HistoricalProperty",                None),
+    ("BuildingFeatures_SolidFuel",                         None),
+    ("BuildingOccupancy_OtherOccupancies",                 None),
+    ("BuildingOccupancy_Apartment",                        None),
+    ("BuildingExposure_",                                  None),
+    ("BuildingSecurity_",                                  None),
+
+    # ── Additional interest / mortgagee ──────────────────────────────────────
+    ("AdditionalInterest_FullName",                        "additional_named_insureds"),
+    ("AdditionalInterest_MailingAddress_LineOne",          "_addr_line1"),
+    ("AdditionalInterest_MailingAddress_LineTwo",          "_addr_line2"),
+    ("AdditionalInterest_MailingAddress_CityName",         "_addr_city"),
+    ("AdditionalInterest_MailingAddress_StateOrProv",      "_addr_state"),
+    ("AdditionalInterest_MailingAddress_PostalCode",       "_addr_zip"),
+    ("AdditionalInterest_MailingAddress_CountryCode",      None),
+    ("AdditionalInterest_AccountNumber",                   None),
+    ("AdditionalInterest_Interest_Mortgagee",              None),
+    ("AdditionalInterest_Interest_LossPayee",              None),
+    ("AdditionalInterest_Interest_LendersLoss",            None),
+    ("AdditionalInterest_Interest_AdditionalInsured",      None),
+    ("AdditionalInterest_Interest_Lienholder",             None),
+    ("AdditionalInterest_Interest_Employee",               None),
+    ("AdditionalInterest_Interest_Other",                  None),
+    ("AdditionalInterest_InterestRank",                    None),
+    ("AdditionalInterest_CertificateRequired",             None),
+    ("AdditionalInterest_Item_",                           None),
+    ("AdditionalInterest_ItemDescription",                 None),
+    ("Mortgagee_FullName",                                 "mortgagee_name"),
+    ("Mortgagee_Name",                                     "mortgagee_name"),
+
+    # ── Certificate holder ──────────────────────────────────────────────────
+    ("CertificateHolder_FullName",                         "certificate_holder"),
+    ("CertificateHolder_MailingAddress_LineOne",           "_addr_line1"),
+    ("CertificateHolder_MailingAddress_LineTwo",           "_addr_line2"),
+    ("CertificateHolder_MailingAddress_CityName",          "_addr_city"),
+    ("CertificateHolder_MailingAddress_StateOrProv",       "_addr_state"),
+    ("CertificateHolder_MailingAddress_PostalCode",        "_addr_zip"),
+
+    # ── Auto ─────────────────────────────────────────────────────────────────
+    ("AutoLiability_CombinedSingleLimit",                  "auto_liability_limit"),
+    ("Vehicle_CombinedSingleLimit",                        "auto_liability_limit"),
+    ("Vehicle_BodilyInjury_PerPerson",                     "auto_liability_limit"),
+    ("Vehicle_BodilyInjury_PerAccident",                   "auto_liability_limit"),
+    ("Vehicle_PropertyDamage_PerAccident",                 "auto_liability_limit"),
+    ("Vehicle_OtherCoverage_CoverageDescription",          None),
+    ("Vehicle_OtherCoverage_LimitAmount",                  None),
+    ("Vehicle_OtherCoveredAutoDescription",                None),
+    ("Vehicle_InsurerLetterCode",                          None),
+
+    # ── Workers comp ─────────────────────────────────────────────────────────
+    ("WorkersCompensation_Payroll",                        "wc_payroll"),
+    ("WorkersCompensation_ExperienceModification",         "wc_xmod"),
+    ("WorkersCompensation_ExperienceMod",                  "wc_xmod"),
+    ("WorkersCompensationEmployersLiability_EmployersLiability_EachAccident", "employers_liability_limits"),
+    ("WorkersCompensationEmployersLiability_EmployersLiability_Disease",      "employers_liability_limits"),
+    ("WorkersCompensationEmployersLiability_OtherCoverage",                   None),
+    ("WorkersCompensationEmployersLiability_InsurerLetterCode",               None),
+
+    # ── Umbrella / excess ────────────────────────────────────────────────────
+    ("Umbrella_EachOccurrence",                            "umbrella_limit"),
+    ("Umbrella_Aggregate",                                 "umbrella_limit"),
+    ("Umbrella_SelfInsuredRetention",                      "umbrella_sir"),
+    ("ExcessUmbrella_Umbrella_EachOccurrenceAmount",       "umbrella_limit"),
+    ("ExcessUmbrella_Umbrella_AggregateAmount",            "umbrella_limit"),
+    ("ExcessUmbrella_Umbrella_DeductibleOrRetentionAmount","umbrella_sir"),
+    ("ExcessUmbrella_OtherCoverageDescription",            None),
+    ("ExcessUmbrella_OtherCoverageLimitAmount",            None),
+    ("ExcessUmbrella_InsurerLetterCode",                   None),
+
+    # ── Contractors ──────────────────────────────────────────────────────────
+    ("Contractors_WorkSubcontractedPercent",               "percent_subcontracted"),
+    ("Contractors_SubcontractorsPaidAmount",               "total_revenue"),
+    ("Contractors_FullTimeEmployeeCount",                  "num_employees"),
+    ("Contractors_PartTimeEmployeeCount",                  "num_employees"),
+    ("Contractors_Question_",                              None),
+    ("ProductAndCompletedOperations_AnnualGrossSalesAmount","total_revenue"),
+    ("ProductAndCompletedOperations_UnitCount",            None),
+    ("ProductAndCompletedOperations_InMarketMonth",        None),
+    ("ProductAndCompletedOperations_ExpectedLife",         None),
+    ("ProductAndCompletedOperations_IntendedUse",          None),
+    ("ProductAndCompletedOperations_PrincipalComponents",  None),
+    ("ProductAndCompletedOperations_ProductName",          None),
+
+    # ── Alarm, security, exposure, miscellaneous null fields ─────────────────
+    ("Alarm_Burglar_",                                     None),
+    ("Burglar_LocalGong",                                  None),
+    ("SwimmingPool_",                                      None),
+    ("AthleticTeam_",                                      None),
+    ("GeneralLiabilityLineOfBusiness_",                    None),
+    ("CommercialInlandMarineProperty_",                    None),
+    ("PropertyItem_ItemDetail_",                           None),
+    ("OtherPolicy_InsurerLetterCode",                      None),
+    ("OtherPolicy_OtherPolicyDescription",                 None),
+    ("OtherPolicy_SubrogationWaived",                      None),
+    ("OtherPolicy_CoverageCode",                           None),
+    ("OtherPolicy_CoverageLimitAmount",                    None),
+    ("CertificateOfLiabilityInsurance_",                   None),
+    ("_RemarkText",                                        None),
+    ("_Explanation",                                       None),
 ]
 
 _SIGNATURE_FIELD_PATTERNS = [
@@ -205,8 +478,14 @@ def _resolve_special(key: str, facts: dict, prefix: str) -> str:
     if prefix == "_addr":
         raw = _fv(facts, "mailing_address", "")
     elif prefix == "_loc":
-        locs = facts.get("locations", [])
-        raw  = locs[0] if isinstance(locs, list) and locs else _fv(facts, "mailing_address", "")
+        # Physical / premises address: prefer physical_address, fall back to
+        # first entry in locations list, then mailing_address.
+        raw = _fv(facts, "physical_address", "")
+        if not raw:
+            locs = facts.get("locations", [])
+            raw  = locs[0] if isinstance(locs, list) and locs else ""
+        if not raw:
+            raw = _fv(facts, "mailing_address", "")
     else:
         raw = _fv(facts, "mailing_address", "")
     parsed = _parse_address(raw or "")
@@ -214,7 +493,27 @@ def _resolve_special(key: str, facts: dict, prefix: str) -> str:
     return parsed.get(suffix, "") or ""
 
 
+# Valid fact key set — used to validate LLM-returned keys.
+_VALID_FACT_KEYS: set = set()  # populated lazily on first map_facts_to_form call
+_SPECIAL_PREFIXES = {"_addr", "_loc"}
+
+
 def _deterministic_map(field_name: str, facts: dict):
+    # Layer: Location\d+_SubField  →  facts["locations"][N-1] or sub-key lookup
+    loc_m = re.match(r"Location(\d+)[_]?(.*)", field_name)
+    if loc_m:
+        idx      = int(loc_m.group(1)) - 1
+        sub      = loc_m.group(2).lower()
+        locs     = facts.get("locations", []) or []
+        if idx < len(locs):
+            entry = locs[idx]
+            if isinstance(entry, dict):
+                val = entry.get(sub) or entry.get("address") or str(entry)
+            else:
+                val = str(entry)
+            return val if val else None
+        return None
+
     for pattern, fact_key in _ACORD_FIELD_RULES:
         if pattern in field_name:
             if fact_key is None:
@@ -228,6 +527,18 @@ def _deterministic_map(field_name: str, facts: dict):
     return "UNMATCHED"
 
 
+def _apply_fact_key(fact_key: str, facts: dict):
+    """Resolve a cached/LLM-returned fact_key to a scalar string value."""
+    if fact_key is None:
+        return None
+    if fact_key.startswith("_"):
+        return _resolve_special(fact_key, facts, "_" + fact_key.split("_")[1]) or None
+    val = _fv(facts, fact_key)
+    if isinstance(val, list):
+        return str(val[0]) if val else None
+    return str(val) if val is not None else None
+
+
 def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dict, dict]:
     if not schema:
         return {}, {}
@@ -237,13 +548,15 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
     unmatched  = {}
     confidence = {}
 
-    # Build a reverse index: str(plain_value) → fact_key, for post-LLM inference.
-    # Unwrap OCR-confidence envelopes so wrapped scalars are still indexed.
-    facts_by_value = {}
-    for k, v in facts.items():
-        pv = v["value"] if isinstance(v, dict) and "value" in v else v
-        if pv is not None and not isinstance(pv, (list, dict)) and str(pv).strip():
-            facts_by_value[str(pv)] = k
+    # Build valid fact-key set for LLM response validation (lazy, one-time).
+    global _VALID_FACT_KEYS
+    if not _VALID_FACT_KEYS:
+        _VALID_FACT_KEYS = set(facts.keys()) | {
+            "_addr_line1", "_addr_line2", "_addr_city", "_addr_state", "_addr_zip",
+            "_loc_line1",  "_loc_line2",  "_loc_city",  "_loc_state",  "_loc_zip",
+        }
+    else:
+        _VALID_FACT_KEYS.update(facts.keys())
 
     # Load persisted field→fact_key map built on previous runs for this form template.
     cached_fieldmap = _load_fieldmap(form_id)
@@ -251,24 +564,14 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
 
     for field in schema.keys():
         if field in cached_fieldmap:
-            fact_key = cached_fieldmap[field]
-            if fact_key is None:
-                mapped[field] = None
-            elif fact_key.startswith("_"):
-                mapped[field] = _resolve_special(fact_key, facts, "_" + fact_key.split("_")[1]) or None
-            else:
-                val = _fv(facts, fact_key)   # unwrap OCR-confidence envelope
-                if isinstance(val, list):
-                    mapped[field] = str(val[0]) if val else None
-                else:
-                    mapped[field] = str(val) if val is not None else None
+            mapped[field] = _apply_fact_key(cached_fieldmap[field], facts)
         else:
             result = _deterministic_map(field, facts)
             if result == "UNMATCHED":
                 unmatched[field] = schema[field]
             else:
                 mapped[field] = result
-                # Persist the deterministic fact_key for future runs.
+                # Persist the matched fact_key so this field is free next run.
                 for pattern, fact_key in _ACORD_FIELD_RULES:
                     if pattern in field:
                         new_fieldmap[field] = fact_key
@@ -276,7 +579,9 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
 
     if unmatched:
         unmatched_keys = list(unmatched.keys())
-        ai_mapped: dict = {}
+        ai_mapped: dict = {}  # {field: fact_key_or_null}
+        facts_plain = {k: _fv(facts, k) for k in facts}  # strip envelopes for LLM
+
         for batch_start in range(0, len(unmatched_keys), BATCH):
             batch_keys  = unmatched_keys[batch_start : batch_start + BATCH]
             batch_hints = []
@@ -284,18 +589,18 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
                 info = unmatched[k] if isinstance(unmatched[k], dict) else {}
                 tu   = info.get("tu", "")[:60] if info else ""
                 batch_hints.append(k + (f"  # {tu}" if tu else ""))
-            facts_plain = {k: _fv(facts, k) for k in facts}  # strip envelopes for LLM
             prompt = (
-                f"Map these PDF form fields to insurance facts. Return ONLY JSON. Use null if no match.\n\n"
-                f"Facts: {json.dumps(facts_plain, indent=2)}\n\nFields: {json.dumps(batch_hints)}\n\nOutput:"
+                "Map these PDF AcroForm field names to insurance fact keys.\n"
+                "Return ONLY a JSON object: {\"FieldName\": \"fact_key_or_null\"}.\n"
+                "Rules:\n"
+                "  - Use null if no fact key applies.\n"
+                "  - Use ONLY exact fact key names from the list below — do NOT invent keys.\n"
+                "  - Prefer null over a wrong key.\n\n"
+                f"Available fact keys:\n{json.dumps(list(facts_plain.keys()))}\n\n"
+                f"Fields to map:\n{json.dumps(batch_hints)}\n\nOutput:"
             )
             try:
-                r   = groq_client.chat.completions.create(
-                    model="llama-3.1-8b-instant",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0,
-                )
-                raw = (r.choices[0].message.content or "").strip()
+                raw = groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
                 if raw.startswith("```"):
                     raw = raw.replace("```json", "").replace("```", "").strip()
                 s, e = raw.find("{"), raw.rfind("}")
@@ -304,17 +609,20 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
             except Exception as ex:
                 logger.warning(f"AI batch failed: {ex}")
 
-        mapped.update(ai_mapped)
+        # Apply LLM results and always persist (even null) → 0 LLM calls on repeat runs.
+        for field, fact_key in ai_mapped.items():
+            # Validate key: reject hallucinated keys not in our known fact set.
+            if fact_key is not None and fact_key not in _VALID_FACT_KEYS:
+                logger.debug(f"LLM returned unknown fact key '{fact_key}' for {field} — treating as null")
+                fact_key = None
+            new_fieldmap[field] = fact_key   # always cache, even None
+            mapped[field]       = _apply_fact_key(fact_key, facts)
 
-        # Infer fact_key from LLM-returned values via reverse lookup and persist.
-        for field, val in ai_mapped.items():
-            if val is None:
+        # Fields in unmatched that the LLM didn't return → save as null so we skip next run.
+        for field in unmatched_keys:
+            if field not in ai_mapped:
                 new_fieldmap[field] = None
-            else:
-                inferred_key = facts_by_value.get(str(val))
-                if inferred_key:
-                    new_fieldmap[field] = inferred_key
-                # If no reverse match, skip — the LLM synthesized a value we can't generalize.
+                mapped.setdefault(field, None)
 
         _save_fieldmap(form_id, new_fieldmap)
 

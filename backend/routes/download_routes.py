@@ -1,11 +1,16 @@
+#dowmload_routes.py
+
+import hashlib
 import io
 import logging
 import zipfile
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from datetime import datetime, timezone
+
 from config.database import get_db
-from repositories.session_repository import get_processing_session
+from repositories.session_repository import get_processing_session, upd_processing_session
 from repositories.audit_repository import write_audit_log
 from services.auth_service import get_current_user
 from services.cover_service import generate_ai_cover_narrative, build_cover_page_pdf
@@ -15,6 +20,27 @@ from services.sqs_service import calculate_sqs
 
 router = APIRouter(tags=["downloads"])
 logger = logging.getLogger(__name__)
+
+# In-process cover narrative cache — avoids a redundant LLM call when the same
+# user re-downloads without changing facts, forms, SQS, or flags.
+# No TTL: the dict lives for the process lifetime and clears on restart.
+_COVER_CACHE: dict = {}
+
+
+def _cover_cache_key(facts: dict, form_ids: list, sqs_results: dict, flags: dict) -> str:
+    """md5 of applicant_name + sorted form_ids + rounded avg SQS + sorted flags."""
+    applicant = facts.get("applicant_name")
+    if isinstance(applicant, dict):          # unwrap OCR-confidence envelope if present
+        applicant = applicant.get("value", "")
+    scores    = [v.get("sqs_score", 0) for v in sqs_results.values() if isinstance(v, dict)]
+    avg_score = round(sum(scores) / len(scores)) if scores else 0
+    raw = (
+        str(applicant or "")
+        + str(sorted(form_ids))
+        + str(avg_score)
+        + str(sorted((k, str(v)) for k, v in flags.items()))
+    )
+    return hashlib.md5(raw.encode()).hexdigest()
 
 
 def _refresh_user(user_id: str) -> dict:
@@ -59,7 +85,14 @@ async def download_pdf(
     org_name     = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
     sqs_results  = {form_id: generated[form_id].get("sqs", {})} if form_id in generated else {}
 
-    ai_content = generate_ai_cover_narrative(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=[form_id], org_name=org_name, user=fresh)
+    _ck = _cover_cache_key(facts, [form_id], sqs_results, flags)
+    ai_content = _COVER_CACHE.get(_ck)
+    if ai_content is None:
+        ai_content = generate_ai_cover_narrative(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=[form_id], org_name=org_name, user=fresh)
+        _COVER_CACHE[_ck] = ai_content
+        logger.debug(f"cover narrative cached for key {_ck[:8]}")
+    else:
+        logger.debug(f"cover narrative cache hit {_ck[:8]}")
     cover_pdf  = build_cover_page_pdf(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=[form_id], org_name=org_name, narrative=ai_content["narrative"], ai_block=ai_content["ai_block"], sqs_reasoning=ai_content.get("sqs_reasoning",""), user=fresh)
 
     zip_buf = io.BytesIO()
@@ -83,6 +116,11 @@ async def download_pdf(
 
     write_audit_log(user=fresh, action="download", form_id=form_id, form_name=form_name,
                     session_id=session_id, ip_address=request.client.host if request.client else None)
+
+    # Mark session as completed (enables dashboard status badge)
+    upd_processing_session(session_id, {
+        "last_downloaded_at": datetime.now(timezone.utc).isoformat()
+    })
 
     extra_headers = {"Cache-Control": "no-cache"}
     if pkg_eval:
@@ -136,7 +174,14 @@ async def download_all(
     flags       = proc_session.get("flags", {})
     org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
 
-    ai_content = generate_ai_cover_narrative(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, user=fresh)
+    _ck = _cover_cache_key(facts, list(generated.keys()), sqs_results, flags)
+    ai_content = _COVER_CACHE.get(_ck)
+    if ai_content is None:
+        ai_content = generate_ai_cover_narrative(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, user=fresh)
+        _COVER_CACHE[_ck] = ai_content
+        logger.debug(f"cover narrative cached for key {_ck[:8]}")
+    else:
+        logger.debug(f"cover narrative cache hit {_ck[:8]}")
     cover_pdf  = build_cover_page_pdf(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, narrative=ai_content["narrative"], ai_block=ai_content["ai_block"], sqs_reasoning=ai_content.get("sqs_reasoning",""), user=fresh)
 
     zip_buf = io.BytesIO()
@@ -162,6 +207,11 @@ async def download_all(
     write_audit_log(user=fresh, action="download_zip", form_id=", ".join(generated.keys()),
                     form_name=f"ZIP Bundle ({len(generated)} forms + cover page)",
                     session_id=session_id, ip_address=request.client.host if request.client else None)
+
+    # Mark session as completed (enables dashboard status badge)
+    upd_processing_session(session_id, {
+        "last_downloaded_at": datetime.now(timezone.utc).isoformat()
+    })
 
     extra_headers = {"Cache-Control": "no-cache"}
     if pkg_eval:
@@ -204,17 +254,25 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
     tier2_score = proc_session.get("tier2_score", 50)
     org_name    = current_user.get("organization_name") or current_user.get("full_name") or "Acordly User"
 
-    # Use real post-generation SQS if forms were internally generated, else fall back to pre-gen
+    # SQS resolution order (most accurate first):
+    # 1. clarity_result.sqs_combined  — Clarity pipeline (facts-based, no form generation)
+    # 2. generated_forms SQS          — old internal form generation path
+    # 3. calculate_sqs fallback       — pre-generation estimate (least accurate)
+    clarity_result  = proc_session.get("clarity_result", {})
     generated_forms = proc_session.get("generated_forms", {})
-    if generated_forms:
-        sqs_list = [r["sqs"] for r in generated_forms.values() if r.get("sqs")]
+
+    if clarity_result.get("sqs_combined"):
+        sqs = clarity_result["sqs_combined"]
+    elif generated_forms:
+        sqs_list  = [r["sqs"] for r in generated_forms.values() if r.get("sqs")]
         avg_score = int(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
         sqs = {**(sqs_list[0] if sqs_list else {}), "sqs_score": avg_score}
     else:
-        sqs = calculate_sqs(
+        from services.sqs_service import calculate_sqs_from_facts
+        selected_ids = proc_session.get("selected_form_ids") or ["ACORD_125"]
+        sqs = calculate_sqs_from_facts(
             facts=facts, flags=flags,
-            mapped_data={}, form_schema={},
-            selected_form_ids=[],
+            selected_form_ids=selected_ids,
             hard_stops=hard_stops, soft_stops=soft_stops,
             tier2_score=tier2_score,
         )
@@ -234,5 +292,10 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
         user=current_user,
         hard_stops=hard_stops, soft_stops=soft_stops,
     )
+    # Mark session as completed — Lite cover sheet download is the export action for Lite users
+    upd_processing_session(session_id, {
+        "last_downloaded_at": datetime.now(timezone.utc).isoformat()
+    })
+
     return Response(content=cover_pdf, media_type="application/pdf",
                     headers={"Content-Disposition": "attachment; filename=Acordly_SQS_Cover_Sheet.pdf"})

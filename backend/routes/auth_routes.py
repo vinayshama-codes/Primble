@@ -327,17 +327,31 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     pkgs_limit  = int(current_user.get("packages_limit", 0) or 0)
     soft_buffer = int(pkgs_limit * 0.05) if pkgs_limit > 0 else 0
 
-    # Auto-sync stripe_subscription_id from Stripe if missing or potentially stale
+    # Auto-sync subscription data from Stripe if the active sub ID has changed
     customer_id = current_user.get("stripe_customer_id")
     stored_sub_id = current_user.get("stripe_subscription_id")
     if customer_id and sub not in ("free", None):
         try:
+            from config.settings import PLANS as _PLANS
             active_subs = stripe_lib.Subscription.list(customer=customer_id, status="active", limit=1)
             real_sub = active_subs.data[0] if active_subs.data else None
             real_sub_id = getattr(real_sub, "id", None) if real_sub else None
             if real_sub_id and real_sub_id != stored_sub_id:
+                # Subscription ID changed — also sync plan/tier from Stripe metadata
+                raw_meta = getattr(real_sub, "metadata", None) or {}
+                stripe_plan = (raw_meta.get("plan") if isinstance(raw_meta, dict) else getattr(raw_meta, "plan", None))
+                stripe_cycle = (raw_meta.get("billing_cycle") if isinstance(raw_meta, dict) else getattr(raw_meta, "billing_cycle", None)) or "monthly"
                 conn = get_db(); cur = conn.cursor()
-                cur.execute("UPDATE users SET stripe_subscription_id=%s WHERE id=%s", (real_sub_id, current_user["id"]))
+                if stripe_plan and stripe_plan in _PLANS and stripe_plan != sub:
+                    cfg = _PLANS[stripe_plan].get(stripe_cycle) or _PLANS[stripe_plan]["monthly"]
+                    cur.execute("""UPDATE users SET stripe_subscription_id=%s, subscription_tier=%s,
+                        billing_cycle=%s, packages_limit=%s, overage_rate=%s,
+                        payment_status='ok', payment_failed_at=NULL WHERE id=%s""",
+                        (real_sub_id, stripe_plan, stripe_cycle, cfg["packages"], cfg["overage_rate"], current_user["id"]))
+                    sub = stripe_plan  # Reflect updated plan in this response
+                    pkgs_limit = cfg["packages"]
+                else:
+                    cur.execute("UPDATE users SET stripe_subscription_id=%s WHERE id=%s", (real_sub_id, current_user["id"]))
                 conn.commit(); cur.close(); conn.close()
                 stored_sub_id = real_sub_id
         except Exception:
