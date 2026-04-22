@@ -6,25 +6,181 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Tuple, Optional
 
 from config.database import get_db
-from config.settings import FRONTEND_URL, groq_chat
-from services.extraction_service import _fv, _focr
-from services.fact_registry import _FIELD_QUESTION_MAP, _FIELD_TO_FORMS  # noqa: F401
+from config.settings import FRONTEND_URL, groq_client
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Answer format validators
+# ---------------------------------------------------------------------------
+
+_VAL_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+_VAL_PHONE_RE = re.compile(r"^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$")
+_VAL_DATE_RE  = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$|^\d{4}-\d{2}-\d{2}$")
+_VAL_NUM_RE   = re.compile(r"^\$?[\d,]+(\.\d+)?$")
+
+
+def _field_format_type(field_name: str) -> str:
+    """Infer expected format from field name."""
+    fn = field_name.lower()
+    if re.search(r"email", fn):
+        return "email"
+    if re.search(r"phone|fax|tel", fn):
+        return "phone"
+    if re.search(r"_date|date_|effective|expiration|retro|inception|dob", fn):
+        return "date"
+    if re.search(r"amount|limit|value|payroll|revenue|premium|deductible|aggregate|occurrence", fn):
+        return "number"
+    return "text"
+
 
 # ---------------------------------------------------------------------------
-# Prefix-pattern map for suffixed/indexed field families.
-# Each entry: (prefix, base_question, group_label)
-# group_label is used to number repeated instances: "1st insurer", "2nd location" etc.
+# Question generation
 # ---------------------------------------------------------------------------
+
+_FIELD_QUESTION_MAP = {
+    # Business basics
+    "applicant_name":           "What is the full legal name of your business?",
+    "dba_name":                 "Does your business go by a different name than its legal name? If yes, what is it?",
+    "mailing_address":          "What is your business mailing address? (Street, City, State, ZIP)",
+    "physical_address":         "Where is your business physically located? (Leave blank if same as mailing address)",
+    "contact_name":             "Who is the main person we should contact about this insurance application?",
+    "contact_phone":            "What is the best phone number to reach you?",
+    "contact_email":            "What email address should we use to contact you?",
+    "fein":                     "What is your business's federal tax ID number? (This is the 9-digit number the IRS assigned to your business, also called an EIN)",
+    "entity_type":              "How is your business legally set up? (For example: LLC, Corporation, Sole Proprietor, Partnership)",
+    "effective_date":           "What date would you like your insurance coverage to start? (MM/DD/YYYY)",
+    "expiration_date":          "What date would you like your insurance coverage to end? (MM/DD/YYYY)",
+    "policy_number":            "Do you have a current or previous insurance policy number? If yes, please share it.",
+    "lines_of_business":        "What types of insurance coverage are you looking for? (For example: General Liability, Property, Auto, Workers Comp)",
+    "total_revenue":            "What is your business's total annual income or sales?",
+    "total_payroll":            "What is the total amount you pay your employees each year (gross payroll)?",
+    "num_employees":            "How many people does your business employ?",
+    "operations_description":   "In a few sentences, what does your business do? What products or services do you offer?",
+    "prior_carrier":            "Who provided your business insurance most recently? (If none, write 'None')",
+    "naics_code":               "Do you know your business's industry classification code (NAICS code)? If yes, please share it. (If unsure, leave blank)",
+    "sic_code":                 "Do you know your business's SIC code (an older industry classification number)? If yes, please share it. (If unsure, leave blank)",
+    "years_in_business":        "How many years has your business been open?",
+    # General Liability
+    "gl_limits":                "How much liability coverage are you looking for? (For example: $1,000,000 per incident / $2,000,000 total)",
+    "gl_each_occurrence":       "What is the maximum amount you want covered for a single incident or accident?",
+    "gl_aggregate":             "What is the total maximum amount you want covered across all claims in a year?",
+    "gl_deductible":            "How much would you be willing to pay out of pocket before insurance kicks in (your deductible)?",
+    "gl_class_codes":           "Please describe your business operations in detail. What specific services or products do you provide? What percentage of your work is residential vs commercial?",
+    "retro_date":               "Has your current insurance policy been continuously active since a specific start date? If yes, what was that original start date?",
+    "additional_insured":       "Is there anyone else — such as a landlord, client, or partner — who needs to be listed on your policy? If yes, please provide their name(s).",
+    # Property
+    "property_building_value":  "If your building had to be completely rebuilt from scratch today, what would it cost? (Estimated rebuild value)",
+    "property_bpp_value":       "What is the total value of your business equipment, furniture, inventory, and other contents inside the building?",
+    "construction_type":        "What is your building mainly made of? (For example: wood frame, brick, concrete, steel)",
+    "occupancy_type":           "What is your building used for on a day-to-day basis?",
+    "year_built":               "What year was your building originally built?",
+    "roof_year":                "What year was the roof last replaced or repaired?",
+    "sprinkler_system":         "Does your building have a fire sprinkler system installed?",
+    "fire_protection_class":    "How close is your building to a fire station or fire hydrant? (Your agent may help determine this — share what you know)",
+    "valuation_method":         "If there is a loss, how would you like your property valued? Choose one: Full rebuild cost (Replacement Cost) or Current depreciated value (Actual Cash Value)",
+    "coinsurance_percentage":   "Does your insurance require you to insure your property for a minimum percentage of its value? If yes, what percentage? (Your agent can clarify if needed)",
+    "business_income_limit":    "If your business had to close temporarily due to a covered loss, how much income would you need covered per month?",
+    "period_of_restoration":    "If your business had to shut down due to damage, how many months do you estimate it would take to reopen?",
+    "property_deductible_aop":  "How much would you pay out of pocket for most property claims before insurance covers the rest?",
+    "property_deductible_wind": "How much would you pay out of pocket for wind or hail damage claims?",
+    "mortgagee_name":           "Does a bank or lender have a financial interest in your building (for example, a mortgage)? If yes, what is their name and address?",
+    # Commercial Auto
+    "auto_liability_limit":     "How much liability coverage are you looking for on your business vehicles?",
+    "auto_deductible_comp":     "How much would you pay out of pocket for non-collision vehicle damage (such as theft, weather, or vandalism)?",
+    "auto_deductible_collision": "How much would you pay out of pocket if one of your business vehicles is in a collision?",
+    # Workers Compensation
+    "wc_payroll":               "What is the total annual payroll for employees covered under Workers Compensation?",
+    "wc_class_codes":           "What types of work do your employees perform? (Describe their job duties — your agent will assign the appropriate codes)",
+    "wc_xmod":                  "Has your business received a workers compensation safety rating or modifier from your previous insurer? If yes, what is the number?",
+    "wc_officer_exclusions":    "Are there any business owners or officers who should NOT be covered under Workers Compensation? If yes, list their names.",
+    # Umbrella / Excess
+    "umbrella_limit":           "How much additional liability coverage would you like on top of your other policies? (For example: $1,000,000 or $5,000,000 extra)",
+    "umbrella_sir":             "For this extra liability coverage, how much would you be willing to cover yourself before it kicks in?",
+    # Miscellaneous
+    "percent_subcontracted":    "What percentage of your total work is done by outside contractors rather than your own employees?",
+    "num_claims":               "How many insurance claims has your business filed in the last 3 to 5 years?",
+    "loss_history_years":       "How many years of past insurance claims history are you able to provide?",
+    "certificate_holder":       "Is there a company, landlord, or individual who needs written proof of your insurance? If yes, what is their name and address?",
+}
+
+
+_FIELD_HINT_MAP = {
+    "applicant_name":           "Enter your company's full registered legal name, e.g. 'Acme Construction LLC'.",
+    "dba_name":                 "If your business operates under a trade name different from its legal name, enter it here, e.g. 'Acme Builders'.",
+    "mailing_address":          "Enter the address where your business receives mail, e.g. '123 Main St, Austin, TX 78701'.",
+    "physical_address":         "Enter the street address where your business actually operates. Leave blank if it's the same as your mailing address.",
+    "contact_name":             "Enter the full name of the person handling this insurance application, e.g. 'Jane Smith'.",
+    "contact_phone":            "Enter a direct phone number including area code, e.g. '(512) 555-1234'.",
+    "contact_email":            "Enter the email address your agent should use to reach you, e.g. 'jane@acmecorp.com'.",
+    "fein":                     "This is your 9-digit IRS Employer Identification Number — find it on any IRS letter or your prior tax return, e.g. '12-3456789'.",
+    "entity_type":              "Choose how your business is legally structured, e.g. 'LLC', 'Corporation', 'Sole Proprietor', or 'Partnership'.",
+    "effective_date":           "Enter the date you want coverage to begin in MM/DD/YYYY format, e.g. '06/01/2025'.",
+    "expiration_date":          "Enter the date you want coverage to end in MM/DD/YYYY format, e.g. '06/01/2026'.",
+    "policy_number":            "Enter just the policy number from your insurance documents, e.g. 'GL-123456'. Write 'None' if you don't have one.",
+    "lines_of_business":        "List the types of coverage you need, e.g. 'General Liability, Commercial Property'.",
+    "total_revenue":            "Enter your business's total annual sales or income, e.g. '$500,000'. Use your most recent full year.",
+    "total_payroll":            "Enter the total gross wages paid to all employees in a year, e.g. '$200,000'. Found on your W-3 or payroll summary.",
+    "num_employees":            "Enter the total number of people currently employed, including part-time workers, e.g. '12'.",
+    "operations_description":   "Describe what your business does in 2–3 sentences, e.g. 'We install residential roofing and gutters in the Austin metro area'.",
+    "prior_carrier":            "Enter the name of your current or most recent insurance company, e.g. 'Hartford' or 'Travelers'. Write 'None' if you've never had coverage.",
+    "naics_code":               "This is a 6-digit industry code — leave blank if unsure, your agent can look it up, e.g. '238160' for roofing contractors.",
+    "sic_code":                 "This is a 4-digit older industry code — leave blank if unsure, e.g. '1761' for roofing.",
+    "years_in_business":        "Enter the number of years your business has been operating, e.g. '7'.",
+    "gl_limits":                "Enter your desired coverage limits, e.g. '$1,000,000 per occurrence / $2,000,000 aggregate'. Your agent can advise if unsure.",
+    "gl_each_occurrence":       "Enter the max payout for a single incident, e.g. '$1,000,000'.",
+    "gl_aggregate":             "Enter the total max payout across all claims in a policy year, e.g. '$2,000,000'.",
+    "gl_deductible":            "Enter how much you'd pay out of pocket before insurance covers the rest, e.g. '$500' or '$0' for no deductible.",
+    "gl_class_codes":           "Describe the type of work your business performs — your agent will assign the classification code, e.g. 'residential painting contractor'.",
+    "retro_date":               "If your policy has been active without gaps since a certain date, enter that original start date, e.g. '01/01/2018'. Leave blank if unsure.",
+    "additional_insured":       "List any landlords, clients, or partners who need to be named on your policy, e.g. 'City of Austin, 123 City Hall Ave'.",
+    "property_building_value":  "Estimate the cost to completely rebuild the building from scratch today (not market value), e.g. '$800,000'.",
+    "property_bpp_value":       "Estimate the total value of all equipment, furniture, and inventory inside the building, e.g. '$150,000'.",
+    "construction_type":        "Describe the main material your building is made of, e.g. 'Wood Frame', 'Brick', 'Concrete Block', or 'Steel'.",
+    "occupancy_type":           "Describe how the building is used day-to-day, e.g. 'Office', 'Retail Store', 'Warehouse', or 'Restaurant'.",
+    "year_built":               "Enter the 4-digit year the building was originally constructed, e.g. '1998'.",
+    "roof_year":                "Enter the 4-digit year the roof was last replaced or significantly repaired, e.g. '2019'.",
+    "sprinkler_system":         "Answer Yes if the building has an active fire sprinkler system installed throughout, No if it does not.",
+    "fire_protection_class":    "Enter your building's fire protection class (1–10) if you know it — your agent can help determine this. Lower numbers mean better protection.",
+    "valuation_method":         "Choose 'Replacement Cost' to be paid the full rebuild cost, or 'Actual Cash Value' to be paid the depreciated value after a loss.",
+    "coinsurance_percentage":   "Enter the minimum insured percentage required by your policy, e.g. '80%'. Your agent can clarify — leave blank if unsure.",
+    "business_income_limit":    "Enter how much monthly income you'd need covered if your business had to temporarily close, e.g. '$20,000 per month'.",
+    "period_of_restoration":    "Estimate how many months it would take to reopen your business after a major loss, e.g. '6 months'.",
+    "property_deductible_aop":  "Enter your deductible for most property claims (All Other Perils), e.g. '$2,500'.",
+    "property_deductible_wind": "Enter your deductible specifically for wind or hail damage claims, e.g. '$5,000'.",
+    "mortgagee_name":           "If a bank holds a mortgage on the building, enter their full name and address, e.g. 'Wells Fargo Bank NA, PO Box 10335, Des Moines IA 50306'.",
+    "auto_liability_limit":     "Enter your desired liability coverage for business vehicles, e.g. '$1,000,000 combined single limit'.",
+    "auto_deductible_comp":     "Enter what you'd pay out of pocket for non-collision damage like theft or weather, e.g. '$500'.",
+    "auto_deductible_collision": "Enter what you'd pay out of pocket if a business vehicle is in a collision, e.g. '$1,000'.",
+    "wc_payroll":               "Enter the total annual wages paid to employees covered under Workers Comp, e.g. '$350,000'. Found on your payroll records.",
+    "wc_class_codes":           "Describe your employees' job duties — your agent assigns the codes, e.g. 'office staff, field installers, drivers'.",
+    "wc_xmod":                  "Enter your experience modification factor if you have one, e.g. '0.95'. Found on your current WC policy. Leave blank if unknown.",
+    "wc_officer_exclusions":    "List any owners or officers who should be excluded from WC coverage by name, e.g. 'John Smith, Jane Doe'. Leave blank if none.",
+    "umbrella_limit":           "Enter the additional liability limit you want above your other policies, e.g. '$2,000,000'.",
+    "umbrella_sir":             "Enter your self-insured retention (similar to a deductible) for this umbrella policy, e.g. '$10,000'.",
+    "percent_subcontracted":    "Enter what percentage of your work is performed by subcontractors rather than your own employees, e.g. '30%'.",
+    "num_claims":               "Enter the total number of insurance claims your business has filed in the past 3–5 years, e.g. '2'. Enter '0' if none.",
+    "loss_history_years":       "Enter how many years of claims history you can provide documentation for, e.g. '5'.",
+    "certificate_holder":       "Enter the name and address of anyone who needs a certificate of insurance, e.g. 'ABC Property Management, 456 Oak Ave, Dallas TX 75201'.",
+}
+
+_PREFIX_HINT_MAP = {
+    "insurer":          "Enter the full legal name of the insurance company, e.g. 'State Farm Fire and Casualty Company'.",
+    "additional party": "Enter the full name and address of the person or company to be listed, e.g. 'City of Austin, 301 W 2nd St, Austin TX 78701'.",
+    "location":         "Enter the complete address for this business location, e.g. '789 Commerce Dr, Houston TX 77001'.",
+    "vehicle":          "Enter ALL of the following: Year (e.g., 2021), Make (e.g., Ford), Model (e.g., F-150), VIN (17 characters), and primary use (e.g., local deliveries, long-haul, service vehicle).",
+    "driver":           "Enter driver's: Full legal name, Driver's license number and state, Date of birth (MM/DD/YYYY), and years of commercial driving experience.",
+    "owner":            "Enter this owner's full name, title, and ownership percentage, e.g. 'Jane Doe, President, 60%'.",
+    "claim":            "Enter the date, amount, and a brief description of this claim, e.g. '03/15/2022, $8,500, slip and fall at job site'.",
+    "item":             "Describe the item including make, model, serial number, and value, e.g. 'DeWalt Table Saw, Model DWE7491RS, Serial 123456, Value $600'.",
+}
+
 _ORDINALS = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"]
 
 def _ordinal(n: int) -> str:
     return _ORDINALS[n - 1] if 1 <= n <= len(_ORDINALS) else f"{n}th"
 
 _FIELD_PREFIX_MAP: list[tuple[str, str, str]] = [
-    # Insurer / carrier info (ACORD 25, 28 style)
     ("insurer_fullname",         "What is the full name of your insurance company?",                        "insurer"),
     ("insurer_name",             "What is the name of your insurance company?",                             "insurer"),
     ("insurer_naic",             "What is your insurance company's NAIC number? (Your agent can look this up if needed)", "insurer"),
@@ -32,53 +188,38 @@ _FIELD_PREFIX_MAP: list[tuple[str, str, str]] = [
     ("insurer_phone",            "What is the phone number for your insurance company?",                    "insurer"),
     ("insurer_address",          "What is the address of your insurance company?",                          "insurer"),
     ("insurer_",                 "Please provide the details for your insurance company.",                  "insurer"),
-    # Additional insured / interest
     ("additional_insured_name",  "What is the name of the additional person or company to be listed on the policy?", "additional party"),
     ("additional_insured_addr",  "What is the address of the additional person or company to be listed on the policy?", "additional party"),
     ("additional_insured_",      "Please provide the details for the additional party to be listed on your policy.", "additional party"),
     ("additional_interest_name", "What is the name of the additional interested party?",                    "additional party"),
     ("additional_interest_",     "Please provide details for the additional interested party.",              "additional party"),
-    # Location fields
     ("location_address",         "What is the address of this business location?",                         "location"),
     ("location_city",            "What city is this business location in?",                                 "location"),
     ("location_state",           "What state is this business location in?",                                "location"),
     ("location_zip",             "What is the ZIP code for this business location?",                        "location"),
-    ("location_",                "Please provide the details for this business location.",                  "location"),
-    # Vehicle fields
+    ("location_",                "Please provide the complete address for this business location including street address, city, state, and ZIP code. Also specify if this location has any unique risks or operations.", "location"),
     ("vehicle_vin",              "What is the VIN (Vehicle Identification Number) for this vehicle?",       "vehicle"),
     ("vehicle_year",             "What year is this vehicle?",                                              "vehicle"),
     ("vehicle_make",             "What is the make (brand) of this vehicle?",                               "vehicle"),
     ("vehicle_model",            "What is the model of this vehicle?",                                      "vehicle"),
-    ("vehicle_",                 "Please provide the details for this vehicle.",                            "vehicle"),
-    # Driver fields
+    ("vehicle_",                 "Please provide the following details for this vehicle: Year, Make, Model, VIN (Vehicle Identification Number), and primary use (e.g., delivery, transportation, service).", "vehicle"),
     ("driver_name",              "What is the full name of this driver?",                                   "driver"),
     ("driver_license",           "What is the driver's license number for this driver?",                    "driver"),
     ("driver_dob",               "What is the date of birth for this driver? (MM/DD/YYYY)",                 "driver"),
-    ("driver_",                  "Please provide the details for this driver.",                             "driver"),
-    # Owner / officer fields
+    ("driver_",                  "Please provide the following details for this driver: Full name, Driver's license number, Date of birth (MM/DD/YYYY), and years of driving experience.", "driver"),
     ("owner_name",               "What is the full name of this owner or officer?",                        "owner"),
     ("owner_title",              "What is the title or role of this owner or officer?",                     "owner"),
     ("owner_ownership",          "What percentage of the business does this person own?",                   "owner"),
     ("owner_",                   "Please provide the details for this owner or officer.",                   "owner"),
-    # Claim / loss fields
     ("claim_date",               "What was the date of this claim or loss? (MM/DD/YYYY)",                  "claim"),
     ("claim_amount",             "What was the total amount paid or reserved for this claim?",              "claim"),
     ("claim_description",        "Briefly describe what happened for this claim.",                          "claim"),
     ("claim_",                   "Please provide the details for this claim.",                              "claim"),
-    # Schedule / item fields
     ("schedule_item",            "Please describe this scheduled item (make, model, value, or serial number).", "item"),
     ("schedule_value",           "What is the value of this scheduled item?",                              "item"),
     ("schedule_",                "Please provide details for this scheduled item.",                        "item"),
 ]
 
-
-# ---------------------------------------------------------------------------
-# Word splitter — converts concatenated PDF field tokens into readable words
-# e.g. "generalliability" → "general liability"
-#      "limitappliesperpolicyindicator" → "limit applies per policy indicator"
-# ---------------------------------------------------------------------------
-
-# Ordered longest-first so greedy matching works correctly
 _INSURANCE_WORDS = sorted([
     "certificateofinsurance", "certificate", "workerscompensation", "workers", "compensation",
     "generalliability", "general", "liability", "automobile", "commercial",
@@ -109,83 +250,132 @@ _INSURANCE_WORDS = sorted([
 _SPLIT_CACHE: dict[str, str] = {}
 
 def _split_concatenated(token: str) -> str:
-    """Split a run-together word into spaced words using greedy longest-match."""
+    """Split concatenated insurance terms without adding artificial spaces between letters."""
     token = token.strip().lower()
     if not token:
         return token
+    
+    # If token is already a normal word (no weird concatenation), return as-is
+    if len(token) < 20 and ' ' not in token and token.isalpha():
+        return token
+    
     if token in _SPLIT_CACHE:
         return _SPLIT_CACHE[token]
-
+    
     original = token
     result_parts = []
-    while token:
+    i = 0
+    token_len = len(token)
+    
+    while i < token_len:
         matched = False
+        # Try to match longest words first
         for word in _INSURANCE_WORDS:
-            if token.startswith(word):
+            word_len = len(word)
+            if i + word_len <= token_len and token[i:i+word_len] == word:
                 result_parts.append(word)
-                token = token[len(word):]
+                i += word_len
                 matched = True
                 break
+        
         if not matched:
-            # consume one char as-is
-            result_parts.append(token[0])
-            token = token[1:]
-
+            # Take a single character but DON'T add space after single letters
+            # unless it's a real word boundary
+            result_parts.append(token[i])
+            i += 1
+    
+    # Join with spaces only between actual words, not between every letter
     result = " ".join(result_parts)
+    
+    # Clean up: Remove spaces that create single-letter breaks
+    # Fix common patterns like "p a c k a g e" -> "package"
+    import re
+    # If result has many single letters with spaces, try to recombine
+    if re.search(r'\b[a-z]\s+[a-z]\s+[a-z]', result):
+        # Remove spaces between letters that are likely part of same word
+        result = re.sub(r'([a-z])\s+(?=[a-z])', r'\1', result)
+    
     _SPLIT_CACHE[original] = result
     return result
 
 
 def _field_name_to_readable(field_name: str) -> str:
-    """
-    Convert a raw PDF field name to a readable phrase.
-    Handles:
-      - snake_case separators
-      - camelCase
-      - concatenated insurance terms
-      - trailing _a/_b/_1/_2 suffixes (stripped)
-    """
-    # Strip trailing index suffix
-    name = re.sub(r'[_\s]+[a-z]$', '', field_name)
+    """Convert field name to readable text without trailing characters."""
+    # Remove trailing single letters (like 'a' at the end)
+    name = re.sub(r'[_\s]+[a-zA-Z]$', '', field_name)
     name = re.sub(r'[_\s]+\d+$', '', name)
-
-    # Split on underscores/hyphens → tokens
+    
+    # Split by underscores, spaces, or hyphens
     tokens = re.split(r'[_\-\s]+', name)
-
-    # camelCase split within each token
+    
     expanded = []
     for tok in tokens:
-        # insert space before uppercase runs: "myField" → "my Field"
+        if not tok:
+            continue
+        # Handle camelCase
         tok = re.sub(r'([a-z])([A-Z])', r'\1 \2', tok)
         tok = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', tok)
-        # now split concatenated lowercase
+        
+        # Process each part
         for sub in tok.split():
-            expanded.append(_split_concatenated(sub))
-
+            if len(sub) == 1 and sub.lower() == 'a':
+                # Skip single 'a' characters as they're likely artifacts
+                continue
+            result = _split_concatenated(sub)
+            if result and result != 'a':
+                expanded.append(result)
+    
     readable = " ".join(expanded).strip()
-    # Collapse multiple spaces
     readable = re.sub(r'\s+', ' ', readable)
+    
+    # Remove any trailing 'a' or ' a' patterns
+    readable = re.sub(r'\s+a$', '', readable)
+    readable = re.sub(r'^a\s+', '', readable)
+    
     return readable.lower()
 
 
-# ---------------------------------------------------------------------------
-# Groq batch humanizer — single LLM call for all fallback fields
-# ---------------------------------------------------------------------------
+_HUMANIZED_CACHE: dict[str, str] = {}
 
-_HUMANIZED_CACHE: dict[str, str] = {}  # field_name → humanized question
+
+def _clean_duplicate_words(text: str) -> str:
+    """Remove duplicate consecutive words and stray characters."""
+    if not text:
+        return text
+    
+    import re
+    
+    # Remove duplicate consecutive words (case insensitive)
+    words = text.split()
+    cleaned = []
+    prev_word = None
+    
+    for word in words:
+        # Skip if same as previous word (case insensitive)
+        if prev_word and word.lower() == prev_word.lower():
+            continue
+        cleaned.append(word)
+        prev_word = word
+    
+    text = ' '.join(cleaned)
+    
+    # Remove stray 'a' at the end of sentences
+    text = re.sub(r'\s+a([\.\?\!]|$)', r'\1', text)
+    
+    # Fix "policy policy" pattern specifically
+    text = re.sub(r'\b(policy)\s+\1\b', r'\1', text, flags=re.IGNORECASE)
+    
+    # Remove spaces before punctuation
+    text = re.sub(r'\s+([\.\?\!,])', r'\1', text)
+    
+    return text
 
 
 def _humanize_fields_with_groq(field_names: list[str]) -> dict[str, str]:
-    """
-    Send a batch of readable field phrases to Groq and get back plain-language
-    client-facing questions. Returns {field_name: question_text}.
-    Uncached fields only; results merged into _HUMANIZED_CACHE.
-    """
     uncached = [f for f in field_names if f not in _HUMANIZED_CACHE]
     if not uncached:
         return {f: _HUMANIZED_CACHE[f] for f in field_names}
 
-    # Build numbered list of readable phrases for the prompt
     readable_map = {f: _field_name_to_readable(f) for f in uncached}
     numbered_lines = "\n".join(
         f"{i+1}. {readable_map[f]}" for i, f in enumerate(uncached)
@@ -208,18 +398,23 @@ Fields:
 {numbered_lines}"""
 
     try:
-        raw    = groq_chat("llama-3.3-70b-versatile", [{"role": "user", "content": prompt}],
-                           temperature=0.2, max_tokens=1500)
-        raw    = re.sub(r'^```[a-z]*\n?', '', raw)
-        raw    = re.sub(r'\n?```$', '', raw)
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=1500,
+        )
+        raw = response.choices[0].message.content.strip()
+        raw = re.sub(r'^```[a-z]*\n?', '', raw)
+        raw = re.sub(r'\n?```$', '', raw)
         parsed: dict = json.loads(raw)
 
         for i, field_name in enumerate(uncached):
             q = parsed.get(str(i + 1), "").strip()
             if q:
+                q = _clean_duplicate_words(q)
                 _HUMANIZED_CACHE[field_name] = q
             else:
-                # Groq skipped this one — use readable fallback
                 _HUMANIZED_CACHE[field_name] = f"Please provide your {readable_map[field_name]}."
 
     except Exception as ex:
@@ -231,60 +426,113 @@ Fields:
 
 
 def _resolve_question(field_name: str) -> tuple[str, str | None]:
-    """
-    Return (base_question_text, group_label_or_None).
-    group_label is non-None when this field belongs to a numbered family
-    (e.g. insurers, locations) so the caller can append "1st insurer" etc.
-    Falls back to Groq humanization (called in batch from generate_arq_questions).
-    """
-    # 1. Exact match — no grouping needed
     q = _FIELD_QUESTION_MAP.get(field_name)
     if q:
+        # Clean duplicate words
+        q = _clean_duplicate_words(q)
         return q, None
 
-    # 2. Strip trailing index suffix (_a … _z, _1 … _99) and try exact map again
     base_name = re.sub(r'[_\s]+[a-z]$', '', field_name)
     base_name = re.sub(r'[_\s]+\d+$',   '', base_name)
     q = _FIELD_QUESTION_MAP.get(base_name)
     if q:
-        return q, None  # known field, suffix was noise — no numbering needed
+        q = _clean_duplicate_words(q)
+        return q, None
 
-    # 3. Prefix pattern match
     for candidate in (field_name, base_name):
         lower = candidate.lower()
         for prefix, question, group_label in _FIELD_PREFIX_MAP:
             if lower.startswith(prefix):
+                question = _clean_duplicate_words(question)
                 return question, group_label
 
-    # 4. Groq-humanized (pre-populated by caller before _resolve_question is called)
     if field_name in _HUMANIZED_CACHE:
-        return _HUMANIZED_CACHE[field_name], None
+        question = _HUMANIZED_CACHE[field_name]
+        question = _clean_duplicate_words(question)
+        return question, None
 
-    # 5. Readable fallback (should rarely hit — only if Groq batch was skipped)
     readable = _field_name_to_readable(field_name)
-    return f"Please provide your {readable}.", None
+    question = f"Please provide your {readable}."
+    question = _clean_duplicate_words(question)
+    return question, None
 
 
 def _clean_answer(raw: str, field_name: str) -> Optional[str]:
     """
-    Sanitize and validate a client-provided answer.
-    Returns cleaned string or None if the answer is invalid/empty.
+    Sanitize, validate format by field name, and return cleaned answer.
+    Returns None if answer is empty, placeholder, or fails format validation.
     """
     if raw is None:
         return None
     val = str(raw).strip()
+
     # Empty / placeholder values
     if not val or val.lower() in ("n/a", "na", "?", "unknown", "none", "null", "-", "--", "tbd", "unsure"):
         return None
-    # For policy number fields, extract digits/alphanumeric from noisy answers
+
+    # Strip HTML tags
+    val = re.sub(r"<[^>]*>", "", val).strip()
+
+    # Policy number cleanup
     if "policy_number" in field_name.lower():
-        # Strip common prefixes like "Policy Number 123" → "123"
         val = re.sub(r"(?i)^policy\s*(number|#|no\.?|num\.?)[\s:]*", "", val).strip()
-    # Truncate excessively long answers (max 500 chars)
+        # Fix duplicate "policy" words
+        val = re.sub(r'\b(policy)\s+\1\b', r'\1', val, flags=re.IGNORECASE)
+
+    # Truncate
     if len(val) > 500:
         val = val[:500].strip()
-    return val if val else None
 
+    if not val:
+        return None
+
+    # Format validation by field name
+    fmt = _field_format_type(field_name)
+    
+    # For checkbox fields, ensure we have proper Yes/No values
+    if fmt == "checkbox" or field_name.lower().find("indicator") >= 0:
+        # Convert various yes/no representations
+        yes_values = ("yes", "true", "1", "y", "on", "checked")
+        no_values = ("no", "false", "0", "n", "off", "unchecked")
+        
+        if val.lower() in yes_values:
+            return "Yes"
+        elif val.lower() in no_values:
+            return "No"
+        else:
+            # Not a valid checkbox answer
+            logger.warning(f"ARQ answer rejected: field={field_name} expected=checkbox val={val!r}")
+            return None
+
+    if fmt == "email":
+        if not _VAL_EMAIL_RE.match(val):
+            logger.warning(f"ARQ answer rejected: field={field_name} expected=email val={val!r}")
+            return None
+
+    elif fmt == "phone":
+        # Normalize common separators before checking
+        normalized = val.replace(" ", "").replace("-", "").replace(".", "").replace("(", "").replace(")", "")
+        if not normalized.lstrip("+").isdigit() or len(normalized.lstrip("+")) < 7:
+            logger.warning(f"ARQ answer rejected: field={field_name} expected=phone/fax val={val!r}")
+            return None
+
+    elif fmt == "date":
+        if not _VAL_DATE_RE.match(val):
+            logger.warning(f"ARQ answer rejected: field={field_name} expected=date val={val!r}")
+            return None
+
+    elif fmt == "number":
+        # Soft validation — log but do not reject (user may write "$1M" or "1 million")
+        clean_num = val.replace(" ", "").replace(",", "").replace("$", "")
+        if not re.match(r"^\d+(\.\d+)?$", clean_num):
+            logger.info(f"ARQ answer number format unusual: field={field_name} val={val!r}")
+
+    return val
+
+
+# ---------------------------------------------------------------------------
+# Question generation
+# ---------------------------------------------------------------------------
 
 def generate_arq_questions(
     facts: dict,
@@ -293,12 +541,7 @@ def generate_arq_questions(
     hard_stops: list,
     soft_stops: list,
 ) -> List[dict]:
-    """
-    Generate deduplicated plain-language questions for missing/questionable fields
-    across all generated forms, grouped by field (one question per unique field).
-    """
-    # Collect missing fields across all forms
-    missing_fields: dict = {}  # field_name -> set of form_ids
+    missing_fields: dict = {}
     field_current_values: dict = {}
 
     for form_id, form_data in generated_forms.items():
@@ -316,15 +559,15 @@ def generate_arq_questions(
             is_empty    = current_val == "" or current_val in ("null", "None")
 
             if conf_val == "missing_required":
-                pass  # always include
+                pass
             elif conf_val == "low_confidence" and is_empty:
-                pass  # empty low_confidence → include
+                pass
             elif conf_val == "low_confidence" and not is_empty:
-                continue  # AI filled with value → skip
+                continue
             elif conf_val == "filled" and is_empty:
-                pass  # marked filled but actually empty → include
+                pass
             elif conf_val == "filled" and not is_empty:
-                continue  # genuinely filled → skip
+                continue
             else:
                 continue
 
@@ -332,8 +575,7 @@ def generate_arq_questions(
                 missing_fields[field_name] = set()
                 field_current_values[field_name] = current_val
             missing_fields[field_name].add(form_id)
-        
-    # Also include hard-stop fields that map to known fact keys
+
     tier1_fact_keys = ["applicant_name", "producer_name", "mailing_address", "effective_date",
                        "contact_name", "contact_phone", "contact_email", "lines_of_business"]
     for fk in tier1_fact_keys:
@@ -342,51 +584,10 @@ def generate_arq_questions(
                 missing_fields[fk] = set()
                 field_current_values[fk] = ""
 
-    # Sweep _FIELD_QUESTION_MAP: any fact that is null AND relevant to at least one
-    # generated form gets a question even if the PDF confidence loop missed it.
-    active_form_ids = set(generated_forms.keys())
-    for fact_key in _FIELD_QUESTION_MAP:
-        if fact_key in missing_fields:
-            continue  # already captured above
-        relevant_forms = _FIELD_TO_FORMS.get(fact_key, set())
-        if relevant_forms and not (relevant_forms & active_form_ids):
-            continue  # not relevant to any form in this submission
-        val = facts.get(fact_key)
-        is_null = (
-            val is None
-            or (isinstance(val, str) and not val.strip())
-            or (isinstance(val, list) and not val)
-            or (isinstance(val, dict) and not val)
-        )
-        if not is_null:
-            continue
-        affected = (relevant_forms & active_form_ids) if relevant_forms else active_form_ids
-        missing_fields[fact_key] = affected
-        field_current_values[fact_key] = ""
-
-    # Low-confidence sweep: surface facts that are non-null but OCR-uncertain.
-    # These go into missing_fields so the question builder picks them up, and
-    # into _ocr_low_conf_fields so the builder can prefix "Please confirm: ".
-    _ocr_low_conf_fields: set = set()
-    for fact_key in _FIELD_QUESTION_MAP:
-        if fact_key in missing_fields:
-            continue  # already in queue (null case)
-        if _focr(facts, fact_key):
-            continue  # confident or not annotated → skip
-        relevant_forms = _FIELD_TO_FORMS.get(fact_key, set())
-        if relevant_forms and not (relevant_forms & active_form_ids):
-            continue  # not relevant to any generated form
-        affected = (relevant_forms & active_form_ids) if relevant_forms else active_form_ids
-        missing_fields[fact_key] = affected
-        field_current_values[fact_key] = str(_fv(facts, fact_key) or "")
-        _ocr_low_conf_fields.add(fact_key)
-
     questions = []
     seen_field_names = set()
     group_counts: dict[str, int] = {}
 
-    # Pre-identify fields that will need Groq humanization (miss both maps)
-    # and batch them in a single LLM call before the loop runs.
     groq_needed = []
     for field_name in missing_fields:
         if field_name in _FIELD_QUESTION_MAP:
@@ -412,19 +613,13 @@ def generate_arq_questions(
 
         base_question, group_label = _resolve_question(field_name)
 
-        # If this field belongs to a numbered group (insurer, location, driver, etc.)
-        # append an ordinal so "1st insurer", "2nd insurer" etc. are distinct.
         if group_label is not None:
             group_counts[group_label] = group_counts.get(group_label, 0) + 1
             count = group_counts[group_label]
             if count == 1:
-                # First occurrence — no number yet; will be retroactively numbered
-                # when/if a second appears (via _group_label scan below).
                 question_text = base_question
             else:
-                # Second+ occurrence: number this one
                 question_text = f"{base_question} ({_ordinal(count)} {group_label})"
-                # Retroactively number the first entry if this is the 2nd
                 if count == 2:
                     for prev_q in questions:
                         if prev_q.get("_group_label") == group_label:
@@ -433,19 +628,11 @@ def generate_arq_questions(
         else:
             question_text = base_question
 
-        if field_name in _ocr_low_conf_fields:
-            question_text = "Please confirm: " + question_text
-
-        # Build list of form names
         form_names_list = []
         for fid in sorted(form_ids):
-            fd = generated_forms.get(fid, {})
-            fn = fd.get("form_name", fid)
-            # Extract just the ACORD number e.g. "ACORD_125" -> "125"
             num = fid.replace("ACORD_", "").replace("ACORD ", "")
             form_names_list.append(num)
 
-        # Determine field type from schema
         field_type = "text"
         for fid in form_ids:
             schema = generated_forms.get(fid, {}).get("schema", {})
@@ -456,78 +643,27 @@ def generate_arq_questions(
                     field_type = "checkbox"
                     break
 
+        hint = _FIELD_HINT_MAP.get(field_name, "")
+        if not hint:
+            base_fn = re.sub(r'[_\s]+[a-z]$', '', field_name)
+            base_fn = re.sub(r'[_\s]+\d+$', '', base_fn)
+            hint = _FIELD_HINT_MAP.get(base_fn, "")
+        if not hint and group_label:
+            hint = _PREFIX_HINT_MAP.get(group_label, "")
+
         questions.append({
             "field_name":    field_name,
             "question":      question_text,
+            "hint":          hint,
             "forms":         ", ".join(sorted(set(form_names_list))),
             "form_ids":      list(form_ids),
             "field_type":    field_type,
             "current_value": field_current_values.get(field_name, ""),
-            "_group_label":  group_label,  # internal — stripped before return
+            "_group_label":  group_label,
         })
 
-    # Strip internal key before returning
     for q in questions:
         q.pop("_group_label", None)
-
-    return questions
-
-
-def generate_arq_questions_from_facts(
-    facts: dict,
-    flags: dict,
-    selected_form_ids: List[str],
-    hard_stops: list,
-    soft_stops: list,
-) -> List[dict]:
-    """
-    Generate plain-language ARQ questions for the Clarity pipeline (no generated PDFs).
-    Iterates _FIELD_QUESTION_MAP and emits a question for each fact key that is
-    null/empty AND whose _FIELD_TO_FORMS entry intersects selected_form_ids.
-    Return shape matches generate_arq_questions() so callers are interchangeable.
-    """
-    selected = set(selected_form_ids)
-    questions: List[dict] = []
-    seen: set = set()
-
-    for fact_key, base_question in _FIELD_QUESTION_MAP.items():
-        if fact_key in seen:
-            continue
-        relevant_forms = _FIELD_TO_FORMS.get(fact_key, set())
-        # If the field has a known form mapping, require at least one to be selected.
-        # If there's no entry in _FIELD_TO_FORMS, include it unconditionally.
-        if relevant_forms and not (relevant_forms & selected):
-            continue
-
-        val = facts.get(fact_key)
-        is_null = (
-            val is None
-            or (isinstance(val, str) and not val.strip())
-            or (isinstance(val, list) and not val)
-            or (isinstance(val, dict) and not val)
-        )
-        is_low_conf = not _focr(facts, fact_key)
-
-        if is_null:
-            question_out  = base_question
-            current_val   = ""
-        elif is_low_conf:
-            question_out  = "Please confirm: " + base_question
-            current_val   = str(_fv(facts, fact_key) or "")
-        else:
-            continue  # filled and confident → skip
-
-        seen.add(fact_key)
-        affected_ids = sorted(relevant_forms & selected) if relevant_forms else sorted(selected)
-        form_nums    = [fid.replace("ACORD_", "") for fid in affected_ids]
-        questions.append({
-            "field_name":    fact_key,
-            "question":      question_out,
-            "forms":         ", ".join(form_nums),
-            "form_ids":      affected_ids,
-            "field_type":    "text",
-            "current_value": current_val,
-        })
 
     return questions
 
@@ -638,10 +774,6 @@ def submit_arq_answers(
     processing_session_id: str,
     generated_forms: dict,
 ) -> Tuple[bool, str, List[str]]:
-    """
-    Validate answers, map them back to form fields, update processing session.
-    Returns (success, message, list_of_updated_field_names).
-    """
     arq = get_arq_by_token(token)
     if not arq:
         return False, "ARQ session not found.", []
@@ -663,7 +795,6 @@ def submit_arq_answers(
     for q in questions:
         field_name = q["field_name"]
         raw_val    = raw_answers.get(field_name, "")
-        # For checkboxes, allow "Yes"/"No"
         if q.get("field_type") == "checkbox":
             cleaned_val = raw_val if raw_val in ("Yes", "No", "true", "false") else None
         else:
@@ -673,7 +804,6 @@ def submit_arq_answers(
             cleaned[field_name] = cleaned_val
             updated_fields.append(field_name)
 
-    # Persist cleaned answers to arq_sessions
     now_iso = now.isoformat()
     conn = get_db()
     cur  = conn.cursor()
@@ -692,11 +822,6 @@ def apply_arq_answers_to_session(
     arq_id: str,
     processing_session_id: str,
 ) -> Tuple[bool, List[str]]:
-    """
-    Apply submitted ARQ answers to the processing session's generated forms.
-    Called after client submits — updates field_state across all affected forms.
-    Returns (success, updated_field_names).
-    """
     from repositories.session_repository import get_processing_session, upd_processing_session
 
     arq = get_arq_by_id(arq_id)
@@ -708,7 +833,6 @@ def apply_arq_answers_to_session(
     if not answers:
         return True, []
 
-    # Build a map: field_name -> list of form_ids
     field_to_forms: dict = {}
     for q in questions:
         fn = q["field_name"]
@@ -726,7 +850,6 @@ def apply_arq_answers_to_session(
 
     for field_name, form_ids in field_to_forms.items():
         new_val = answers[field_name]
-        # Apply to all affected forms (and also propagate to all forms sharing the field)
         for fid, form_data in generated.items():
             field_state = form_data.get("field_state") or form_data.get("mapped", {})
             schema      = form_data.get("schema", {})
@@ -735,11 +858,6 @@ def apply_arq_answers_to_session(
                 form_data["field_state"] = field_state
                 if "confidence" in form_data:
                     form_data["confidence"][field_name] = "filled"
-                # Invalidate pdf cache so it regenerates.
-                # Use assignment (not pop) so dict.update() in upd_processing_session
-                # actually overwrites these keys in the stored session.
-                # signature_applied is intentionally left unchanged — if the form was
-                # signed, regeneration will re-apply the signature via signature_b64.
                 form_data["_pdf_cache_hash"] = ""
                 form_data["pdf_bytes"] = None
         if field_name not in updated:
@@ -751,7 +869,6 @@ def apply_arq_answers_to_session(
 
 
 def get_client_filled_fields(processing_session_id: str) -> List[str]:
-    """Return list of field names that were filled via ARQ for highlighting in editor."""
     conn = get_db()
     cur  = conn.cursor()
     cur.execute(
@@ -772,7 +889,6 @@ def get_client_filled_fields(processing_session_id: str) -> List[str]:
 
 
 def send_arq_reminder(arq_id: str, user: dict) -> bool:
-    """Send a manual or automatic reminder for an ARQ session."""
     from services.email_service import send_arq_reminder_email
 
     arq = get_arq_by_id(arq_id)
@@ -786,7 +902,7 @@ def send_arq_reminder(arq_id: str, user: dict) -> bool:
     if now > expires:
         return False
 
-    arq_link     = f"{FRONTEND_URL}/questionnaire/{arq['token']}"
+    arq_link      = f"{FRONTEND_URL}/questionnaire/{arq['token']}"
     producer_name = user.get("full_name", "") or user.get("email", "")
     first_name    = producer_name.split()[0] if producer_name else "Your Agent"
 

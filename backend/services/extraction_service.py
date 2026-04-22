@@ -588,7 +588,7 @@ def _safe_json_parse(raw: str, context: str = "") -> dict:
             )
             try:
                 raw = groq_chat(
-                    "llama-3.3-70b-versatile",
+                    "llama-3.1-8b-instant",
                     [{
                         "role": "user",
                         "content": (
@@ -1010,7 +1010,7 @@ def extract_facts(
         + _EXTRACT_PROMPT_SUFFIX
     )
 
-    raw = groq_chat("llama-3.3-70b-versatile", [{"role": "user", "content": prompt}])
+    raw = groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
 
     # Pipeline order: parse → validate → annotate (never reversed)
     result   = _safe_json_parse(raw, context=f"key={ck[:8]}")
