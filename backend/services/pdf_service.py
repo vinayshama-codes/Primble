@@ -311,6 +311,20 @@ _ACORD_FIELD_RULES = [
     ("CertificateOfLiabilityInsurance_",                   None),
     ("_RemarkText",                                        None),
     ("_Explanation",                                       None),
+
+    # ── ACORD 126 fields not covered above — eliminates all LLM fallback calls ─
+    # Signature / admin fields
+    ("NamedInsured_Signature",                             None),   # wet-ink signature widget
+    ("NamedInsured_SignatureDate",                         None),   # date below signature
+    ("Producer_NationalIdentifier",                        None),   # NPN — not in extraction schema
+    ("Producer_StateLicenseIdentifier",                    None),   # state license # — not extracted
+    # GL claims-made continuous coverage entry date (not same as retro_date)
+    ("GeneralLiability_ClaimsMade_UninterruptedCoverageEntryDate", "retro_date"),
+    # GL limit description and deductible description free-text boxes
+    ("GeneralLiability_OtherCoverageLimitDescription",     None),
+    ("GeneralLiability_OtherDeductibleDescription",        None),
+    # Additional interest WC certificate checkbox codes
+    ("AdditionalInterest_WorkersCompensationCarriedCode",  None),
 ]
 
 _SIGNATURE_FIELD_PATTERNS = [

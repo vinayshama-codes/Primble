@@ -22,7 +22,7 @@ SCHEMA_VERSION = "v2"
 
 # ── Model context config ──────────────────────────────────────────────────────
 _MODEL_CHUNK_CHARS: Dict[str, int] = {
-    "groq":    2_000,
+    "groq":    4_000,
     "claude": 28_000,
     "openai": 40_000,
 }
@@ -121,6 +121,7 @@ _EXTRACT_SCHEMA = (
     '  "total_paid": string or null,\n'
     '  "open_claims_count": string or null,\n'
     '  "property_locations": [],\n'
+    '  "loss_run_age_days": string or null,\n'
     '  "risk_transfer": {\n'
     '    "additional_insured_required": boolean,\n'
     '    "additional_insured_names": [string],\n'
@@ -241,9 +242,20 @@ def _fv(facts: dict, key: str, default=None):
 
 
 def _focr(facts: dict, key: str) -> bool:
+    """Returns True if field has high OCR confidence."""
     raw = facts.get(key)
-    if isinstance(raw, dict) and "ocr_confident" in raw:
-        return bool(raw["ocr_confident"])
+    if isinstance(raw, dict):
+        conf = raw.get("confidence")
+        # New 4-tier confidence system
+        if conf in ("deterministic", "filled"):
+            return True
+        if conf == "ai_high":
+            return True
+        if conf == "ai_low":
+            return False
+        # Legacy boolean fallback
+        if "ocr_confident" in raw:
+            return bool(raw["ocr_confident"])
     return True
 
 
@@ -341,28 +353,63 @@ def _cache_set(key: str, value: dict) -> None:
 
 
 # ── Document-type identification ──────────────────────────────────────────────
-DOC_TYPE_KEYWORDS = {
-    "dec_page":    ["declarations", "dec page", "policy declarations", "named insured",
-                    "policy period", "coverage summary", "insuring agreement", "policy number"],
-    "certificate": ["certificate of liability", "certificate of insurance", "acord 25",
-                    "certificate holder", "evidence of insurance", "this is to certify"],
-    "loss_run":    ["loss run", "loss history", "incurred", "reserve", "paid losses",
-                    "claimant", "date of loss"],
-    "schedule":    ["schedule of", "vehicle schedule", "equipment schedule",
-                    "location schedule", "driver schedule"],
-    "quote":       ["quote", "proposal", "indication", "estimated premium", "quoted premium"],
-    "application": ["application", "acord 125", "acord 126", "acord 130", "prior application"],
-    "endorsement": ["endorsement", "additional insured", "waiver of subrogation", "mortgagee"],
+# Each keyword tuple is (keyword, weight).
+# High-weight keywords are strong type signals (appear almost exclusively in that doc type).
+# Low-weight keywords are supporting signals (can appear in multiple types).
+# Endorsement keywords "additional insured" / "waiver of subrogation" are intentionally
+# LOW weight because they appear on applications, certs, and dec pages too.
+# The endorsement type requires its HIGH-weight keywords to win.
+DOC_TYPE_KEYWORDS: Dict[str, List[Tuple[str, float]]] = {
+    "dec_page": [
+        ("declarations page", 3.0), ("dec page", 3.0), ("policy declarations", 3.0),
+        ("declarations", 2.0), ("coverage summary", 2.0), ("insuring agreement", 2.0),
+        ("policy period", 1.5), ("named insured", 1.0), ("policy number", 0.5),
+    ],
+    "certificate": [
+        ("certificate of liability insurance", 3.0), ("certificate of insurance", 3.0),
+        ("acord 25", 3.0), ("this is to certify", 3.0),
+        ("certificate holder", 2.0), ("evidence of insurance", 2.0),
+    ],
+    "loss_run": [
+        ("loss run", 3.0), ("loss history", 3.0), ("paid losses", 2.0),
+        ("date of loss", 2.0), ("claimant", 1.5),
+        ("incurred", 1.0), ("reserve", 1.0),
+    ],
+    "schedule": [
+        ("schedule of", 2.0), ("vehicle schedule", 3.0), ("equipment schedule", 3.0),
+        ("location schedule", 3.0), ("driver schedule", 3.0),
+    ],
+    "quote": [
+        ("quoted premium", 3.0), ("estimated premium", 3.0),
+        ("quote", 2.0), ("proposal", 2.0), ("indication", 1.5),
+    ],
+    "application": [
+        ("acord 125", 3.0), ("acord 126", 3.0), ("acord 130", 3.0), ("acord 127", 3.0),
+        ("acord 131", 3.0), ("acord 140", 3.0),
+        ("application for insurance", 3.0), ("commercial insurance application", 3.0),
+        ("application", 1.5), ("prior application", 1.5),
+    ],
+    "endorsement": [
+        # Strong signals — these words appear almost exclusively on endorsement forms
+        ("endorsement number", 3.0), ("policy endorsement", 3.0),
+        ("this endorsement changes the policy", 3.0), ("endorsement effective", 2.5),
+        ("form number", 2.0), ("endorsement", 1.5),
+        # Weak signals — these appear on many doc types; alone they cannot classify as endorsement
+        ("additional insured", 0.3), ("waiver of subrogation", 0.3), ("mortgagee", 0.3),
+    ],
 }
 
 _DOC_TYPE_PRIORITY = ["dec_page", "application", "quote", "schedule",
                       "endorsement", "certificate", "loss_run", "unknown"]
-_DOC_TYPE_MIN_SCORE = 2
+_DOC_TYPE_MIN_SCORE = 3.0   # raised from 2 — requires at least one meaningful keyword hit
 
 
 def identify_doc_type(text: str) -> str:
-    tl         = text.lower()
-    scores     = {dt: sum(1 for kw in kws if kw in tl) for dt, kws in DOC_TYPE_KEYWORDS.items()}
+    tl     = text.lower()
+    scores = {
+        dt: sum(w for kw, w in kws if kw in tl)
+        for dt, kws in DOC_TYPE_KEYWORDS.items()
+    }
     best_score = max(scores.values())
     if best_score < _DOC_TYPE_MIN_SCORE:
         return "unknown"
@@ -455,10 +502,10 @@ def _validate_parsed(result: dict, context: str) -> dict:
     for field, v in result["facts"].items():
 
         # Detect pipeline ordering violation: annotated dict entered validation
-        if isinstance(v, dict) and "ocr_confident" in v:
+        if isinstance(v, dict) and "confidence" in v:
             raise RuntimeError(
                 f"_validate_parsed [{context}]: field={field!r} contains annotated dict "
-                "(has 'ocr_confident' key). _annotate_facts must NOT run before _validate_parsed."
+                "(has 'confidence' key). _annotate_facts must NOT run before _validate_parsed."
             )
 
         # None → pass through
@@ -470,7 +517,7 @@ def _validate_parsed(result: dict, context: str) -> dict:
         # List → validate + normalize for known fields
         if isinstance(v, list):
 
-    # 🔥 FIX: normalize locations (list of dict → list of string)
+            # 🔥 FIX: normalize locations (list of dict → list of string)
             if field == "locations":
                 if all(isinstance(x, dict) for x in v):
                     try:
@@ -906,17 +953,24 @@ def _verify_coverage(
     )
 
 
-# ── Fix 11: Annotation pipeline ───────────────────────────────────────────────
+# ── Fix 11: Annotation pipeline (4-tier confidence) ───────────────────────────
 
 def _annotate_facts(
     raw_facts: dict,
     low_confidence_tokens: Optional[List[str]],
+    source: str = "ai",
 ) -> Tuple[dict, List[str]]:
     """
-    Fix 11: Called AFTER _validate_parsed on RAW LLM output.
+    Called AFTER _validate_parsed on RAW LLM output.
     Receives clean str/None/list/structured-dict values — never annotated dicts.
     OCR confusion-map applied field-by-field: only safe fields get normalized.
     Free-text fields (names, addresses) use plain .lower() — no false flags.
+    
+    NEW: 4-tier confidence labels:
+    - deterministic: schema-validated rule match (not implemented in extraction, reserved for mapping)
+    - filled: producer-confirmed (source="producer")
+    - ai_high: AI-extracted, high OCR confidence
+    - ai_low: AI-extracted, low OCR confidence
     """
     low_conf_set: set = set()
     if low_confidence_tokens:
@@ -941,14 +995,25 @@ def _annotate_facts(
             annotated[k] = None
             continue
 
-        norm_val  = _normalize_for_ocr_check(str_val.lower(), field=k)
-        confident = not any(
-            token and len(token) >= 3
-            and re.search(rf"\b{re.escape(token)}\b", norm_val)
-            for token in low_conf_set
-        )
-        annotated[k] = {"value": str_val, "ocr_confident": confident}
-        if not confident and k in _OCR_CRITICAL_FIELDS:
+        # Determine confidence based on source and OCR quality
+        if source == "producer":
+            confidence = "filled"
+        else:
+            norm_val  = _normalize_for_ocr_check(str_val.lower(), field=k)
+            ocr_confident = not any(
+                token and len(token) >= 3
+                and re.search(rf"\b{re.escape(token)}\b", norm_val)
+                for token in low_conf_set
+            )
+            confidence = "ai_high" if ocr_confident else "ai_low"
+        
+        annotated[k] = {
+            "value": str_val,
+            "confidence": confidence,
+            "source": source
+        }
+        
+        if confidence == "ai_low" and k in _OCR_CRITICAL_FIELDS:
             manual_confirmation_required.append(k)
 
     return annotated, manual_confirmation_required
@@ -960,12 +1025,15 @@ def extract_facts(
     text: str,
     low_confidence_tokens: Optional[List[str]] = None,
     context_prefix: str = "",
+    source: str = "ai",
 ) -> dict:
     """
     Single-chunk extraction.
     Pipeline: LLM → _safe_json_parse → _validate_parsed → _annotate_facts (strict order).
     Cache key: model + PROMPT_VERSION + SCHEMA_VERSION + ctx_hash + lct_hash + text.
     Raises RuntimeError on any failure — never swallowed.
+    
+    NEW: source parameter for confidence labeling ("ai" or "producer")
     """
     if len(text) < 30:
         return {"facts": {}, "flags": {}}
@@ -1016,7 +1084,7 @@ def extract_facts(
     result   = _safe_json_parse(raw, context=f"key={ck[:8]}")
     # _validate_parsed already called inside _safe_json_parse on the raw LLM dict.
     # result["facts"] now contains clean str/None/list/structured-dict values.
-    annotated, manual_conf = _annotate_facts(result["facts"], low_confidence_tokens)
+    annotated, manual_conf = _annotate_facts(result["facts"], low_confidence_tokens, source=source)
     result["facts"] = annotated
     if manual_conf:
         result["manual_confirmation_required"] = manual_conf
@@ -1043,11 +1111,52 @@ def _get_field_tier(field: str) -> str:
     return "default"
 
 
+# Structured dict fields: frequency is meaningless as a quality signal because
+# the LLM produces a full object each time — identical keys with different boolean
+# values count as distinct candidates.  Score by confidence only.
+_STRUCTURED_SCORE_FIELDS = frozenset({
+    "risk_transfer", "wc_payroll_by_state", "wc_monopolistic_payroll",
+})
+
+# Currency fields where a larger non-zero magnitude is a stronger signal.
+_CURRENCY_FIELDS = frozenset({
+    "total_revenue", "total_payroll", "wc_payroll", "property_building_value",
+    "property_bpp_value", "gl_limits", "gl_aggregate", "gl_each_occurrence",
+    "auto_liability_limit", "umbrella_limit", "business_income_limit",
+    "extra_expense_limit", "umbrella_sir", "umbrella_attachment_point",
+})
+
+
+def _currency_magnitude(sval: str) -> float:
+    """Extract numeric magnitude from a currency string for tiebreaking."""
+    try:
+        return float(re.sub(r"[^\d.]", "", sval))
+    except Exception:
+        return 0.0
+
+
 def _score_value(field: str, record: Any, freq: int) -> float:
     tier_weight = _TIER_WEIGHTS[_get_field_tier(field)]
-    freq_score  = math.log1p(freq)
-    ocr_score   = 1.0 if (record.get("ocr_confident", True) if isinstance(record, dict) else True) else 0.5
-    return tier_weight * (freq_score + ocr_score)
+
+    # Extract confidence from annotated dict
+    conf = "ai_low"  # default
+    if isinstance(record, dict) and "confidence" in record:
+        conf = record["confidence"]
+
+    CONF_WEIGHTS = {
+        "deterministic": 1.0,
+        "filled":        1.0,
+        "ai_high":       0.85,
+        "ai_low":        0.50,
+    }
+    conf_score = CONF_WEIGHTS.get(conf, 0.5)
+
+    # Structured dicts: frequency is not a meaningful quality signal — skip it.
+    if field in _STRUCTURED_SCORE_FIELDS:
+        return tier_weight * conf_score
+
+    freq_score = math.log1p(freq)
+    return tier_weight * (freq_score + conf_score)
 
 
 def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
@@ -1082,6 +1191,25 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
             [(nk, _score_value(field, c["record"], c["freq"]), c) for nk, c in candidates.items()],
             key=lambda x: x[1], reverse=True,
         )
+
+        # Tiebreaker for currency fields: equal score → prefer larger non-zero magnitude.
+        # This prevents "$0" from beating "$8,750,000" when both appear once.
+        if (
+            field in _CURRENCY_FIELDS
+            and len(scored) >= 2
+            and abs(scored[0][1] - scored[1][1]) < 0.01   # effectively tied
+        ):
+            scored = sorted(
+                scored,
+                key=lambda x: _currency_magnitude(x[0]),
+                reverse=True,
+            )
+            if _currency_magnitude(scored[0][0]) > 0:
+                logger.info(
+                    f"merge field={field!r} currency tiebreak: "
+                    f"chose {scored[0][0]!r} over {scored[1][0]!r} by magnitude"
+                )
+
         winner_nk, winner_score, winner_c = scored[0]
         merged_facts[field] = winner_c["record"]
         if len(scored) > 1:
@@ -1137,7 +1265,7 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
             except ValueError:
                 pass
     if claim_vals:
-        merged_facts["num_claims"] = {"value": str(max(claim_vals)), "ocr_confident": True}
+        merged_facts["num_claims"] = {"value": str(max(claim_vals)), "confidence": "ai_high", "source": "ai"}
 
     merged_flags: dict = {}
     for partial in partials:
@@ -1198,16 +1326,92 @@ def _build_reconciliation_payload(
     return conflicts if conflicts else None
 
 
+def _name_quality_score(s: str) -> float:
+    """
+    Heuristic score for applicant_name candidates.
+    Longer, title-cased, multi-word strings score higher than short partial names.
+    Used as a deterministic tiebreaker before calling the LLM.
+    """
+    s = s.strip()
+    score = 0.0
+    score += min(len(s) / 40.0, 1.0) * 0.5          # length up to 40 chars: 0–0.5
+    words = s.split()
+    if len(words) >= 2:
+        score += 0.3                                   # multi-word bonus
+    if s == s.title() or s.isupper():
+        score += 0.2                                   # proper casing bonus
+    # Business entity suffix bonus (LLC, Inc, Corp, etc.)
+    _BIZ_SUFFIXES = {"llc", "inc", "corp", "co", "ltd", "lp", "llp", "pllc",
+                     "incorporated", "corporation", "company", "limited"}
+    if any(w.rstrip(".,").lower() in _BIZ_SUFFIXES for w in words):
+        score += 0.3
+    return score
+
+
+def _deterministic_reconcile(field: str, candidates: Dict[str, dict]) -> Optional[str]:
+    """
+    Resolve a conflict deterministically without an LLM call.
+    Returns the winning original value string, or None if no clear winner.
+
+    Rules (in priority order):
+      1. applicant_name / mailing_address: pick candidate with highest _name_quality_score.
+         If the top score is ≥0.3 more than second place, it wins outright.
+      2. effective_date / expiration_date: pick the value with the highest frequency.
+         On a tie, keep the current merged value (caller should not overwrite).
+      3. All other fields: return None → fall through to LLM.
+    """
+    if not candidates:
+        return None
+
+    # Sort by frequency descending as a baseline
+    by_freq = sorted(candidates.items(), key=lambda x: x[1]["frequency"], reverse=True)
+    top_val, top_data = by_freq[0]
+
+    if field == "applicant_name":
+        scored = sorted(
+            candidates.items(),
+            key=lambda x: _name_quality_score(x[1]["original"]),
+            reverse=True,
+        )
+        best_val,  best_data  = scored[0]
+        if len(scored) > 1:
+            second_val, _ = scored[1]
+            gap = (_name_quality_score(best_data["original"])
+                   - _name_quality_score(candidates[second_val]["original"]))
+            if gap >= 0.3:
+                logger.info(
+                    f"reconciliation deterministic: applicant_name → {best_data['original']!r} "
+                    f"(quality gap={gap:.2f})"
+                )
+                return best_data["original"]
+        # No clear quality winner — fall through to LLM
+        return None
+
+    if field in ("effective_date", "expiration_date", "fein", "policy_number"):
+        if len(by_freq) >= 2 and by_freq[0][1]["frequency"] > by_freq[1][1]["frequency"]:
+            logger.info(
+                f"reconciliation deterministic: {field} → {top_data['original']!r} "
+                f"(freq={top_data['frequency']})"
+            )
+            return top_data["original"]
+        return None  # tie → LLM
+
+    return None  # unknown field → LLM
+
+
 def _run_reconciliation(conflicts: Dict[str, dict], result: dict) -> None:
     """
-    Fix 5: separate flat JSON parser (_parse_flat_json) used — not _safe_json_parse.
-    Fix 5: value normalization (lowercase + strip + collapse whitespace) before
-           candidate set membership check.
-    Hallucinated values (not in candidates after normalization) are rejected.
+    Resolve per-field conflicts between chunk extractions.
+
+    Two-stage approach:
+      1. Deterministic tiebreakers (_deterministic_reconcile) — no LLM, no latency.
+         Handles applicant_name quality scoring and date/FEIN frequency wins.
+      2. LLM fallback — only called for fields that deterministic couldn't resolve,
+         with an enriched prompt that warns against short/partial names.
+
+    Hallucinated values (not in allowed candidate set) are always rejected.
     Non-fatal — keeps merged result on any exception.
     """
-    # Build allowed candidate set with normalization
-    # normalize: lowercase, strip, collapse internal whitespace
     def _norm(s: str) -> str:
         return re.sub(r"\s+", " ", s.strip().lower())
 
@@ -1215,16 +1419,42 @@ def _run_reconciliation(conflicts: Dict[str, dict], result: dict) -> None:
     for field, values_dict in conflicts.items():
         allowed[field] = {_norm(v) for v in values_dict.keys()}
 
-    prompt = (
-        "You are resolving conflicts in extracted insurance document facts. "
-        "For each field, use the frequency (how many document sections contained each value) "
-        "and context snippets to pick the most accurate value. "
-        "Higher frequency and more specific context are stronger signals. "
-        "Return ONLY a JSON object mapping field_name → chosen_value_string. "
-        "The chosen value MUST be one of the provided candidate values exactly as shown.\n\n"
-        "Conflicts:\n" + json.dumps(conflicts, indent=2)
-    )
+    # Stage 1: deterministic resolution
+    llm_conflicts: Dict[str, dict] = {}
+    for field, values_dict in conflicts.items():
+        winner = _deterministic_reconcile(field, values_dict)
+        if winner is not None:
+            old = result.get("facts", {}).get(field)
+            result["facts"][field] = {
+                "value": winner,
+                "confidence": "ai_high",
+                "source": "ai",
+                "reconciled": True,
+                "reconcile_method": "deterministic",
+            }
+            logger.info(f"reconciliation field={field!r} resolved={winner!r} was={old!r} (deterministic)")
+        else:
+            llm_conflicts[field] = values_dict
+
+    if not llm_conflicts:
+        return
+
+    # Stage 2: LLM for remaining unresolved fields
     try:
+        prompt = (
+            "You are resolving conflicts in extracted insurance document facts.\n"
+            "For each field, pick the most accurate value from the candidates.\n\n"
+            "IMPORTANT RULES:\n"
+            "  - applicant_name: prefer the FULL legal business name (e.g. 'TechVision Solutions Inc.')\n"
+            "    over short partial names or first-name-only values (e.g. 'raj k').\n"
+            "    A longer, properly formatted business name is almost always more accurate.\n"
+            "  - effective_date: prefer the date with higher frequency; if equal, prefer\n"
+            "    the more recent date.\n"
+            "  - For all fields: higher frequency + more specific context = stronger signal.\n"
+            "  - The chosen value MUST be one of the provided candidates exactly as shown.\n"
+            "Return ONLY a JSON object: {\"field_name\": \"chosen_value\"}.\n\n"
+            "Conflicts:\n" + json.dumps(llm_conflicts, indent=2)
+        )
         raw      = groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
         resolved = _parse_flat_json(raw, context="reconciliation")
         for k, v in resolved.items():
@@ -1240,8 +1470,14 @@ def _run_reconciliation(conflicts: Dict[str, dict], result: dict) -> None:
                 )
                 continue
             old = result.get("facts", {}).get(k)
-            result["facts"][k] = {"value": chosen_str, "ocr_confident": True, "reconciled": True}
-            logger.info(f"reconciliation field={k!r} resolved={chosen_str!r} was={old!r}")
+            result["facts"][k] = {
+                "value": chosen_str,
+                "confidence": "ai_high",
+                "source": "ai",
+                "reconciled": True,
+                "reconcile_method": "llm",
+            }
+            logger.info(f"reconciliation field={k!r} resolved={chosen_str!r} was={old!r} (llm)")
     except Exception as ex:
         logger.warning(f"_run_reconciliation: non-fatal failure — {ex}")
 
@@ -1321,6 +1557,7 @@ async def extract_facts_async(
     text: str,
     low_confidence_tokens: Optional[List[str]] = None,
     context_prefix: str = "",
+    source: str = "ai",
 ) -> dict:
     """
     Async wrapper with jittered exponential backoff for transient errors.
@@ -1334,7 +1571,7 @@ async def extract_facts_async(
         try:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
-                None, extract_facts, text, low_confidence_tokens, context_prefix
+                None, extract_facts, text, low_confidence_tokens, context_prefix, source
             )
         except RuntimeError:
             raise
@@ -1361,14 +1598,18 @@ async def _gather_chunks_async(
     sem             = _AdaptiveSemaphore()
     total_llm_calls = 0
 
+    # Inter-chunk pacing. Groq free-tier is sensitive to burst; tune via env vars.
+    _PRE_CALL_DELAY  = float(os.getenv("GROQ_PRE_CALL_DELAY",  "0.3"))
+    _POST_CALL_DELAY = float(os.getenv("GROQ_POST_CALL_DELAY", "0.2"))
+
     async def _one(idx: int, chunk_text: str, c_start: int, c_end: int, ctx: str) -> dict:
         nonlocal total_llm_calls
         async with sem:
             try:
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(_PRE_CALL_DELAY)
                 total_llm_calls += 1
-                await asyncio.sleep(0.7)
-                result = await extract_facts_async(chunk_text, low_confidence_tokens, ctx)
+                result = await extract_facts_async(chunk_text, low_confidence_tokens, ctx, source="ai")
+                await asyncio.sleep(_POST_CALL_DELAY)
                 result.update({"_chunk_idx": idx, "_char_start": c_start, "_char_end": c_end})
                 await sem.record(retried=False)
                 logger.debug(f"chunk {idx}: ok chars={c_start}–{c_end}")
@@ -1572,7 +1813,8 @@ def _run_extraction(
                 result.setdefault("facts", {})
                 result["facts"]["num_claims"] = {
                     "value": str(regex_count),
-                    "ocr_confident": True
+                    "confidence": "ai_high",
+                    "source": "ai"
                 }
 
     conflicts = _build_reconciliation_payload(partials, text)
@@ -1603,7 +1845,7 @@ def _extract_any(
     cap        = DOC_TYPE_CHUNK_LIMITS.get(doc_type, DOC_TYPE_CHUNK_LIMITS["default"])
 
     if len(text) <= chunk_size:
-        return extract_facts(text, low_confidence_tokens, context_prefix="")
+        return extract_facts(text, low_confidence_tokens, context_prefix="", source="ai")
 
     return _run_extraction(text, doc_type, low_confidence_tokens, chunk_size, cap)
 

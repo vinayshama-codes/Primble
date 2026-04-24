@@ -1,16 +1,18 @@
-
-#sqs_service.py
+# sqs_service.py
 
 import json
 import logging
 import re
-from typing import List, Tuple, Dict
+from datetime import datetime
+from typing import List, Tuple, Dict, Optional
 
 from utils.validators import run_field_validations
 from services.extraction_service import _fv, _focr
 
 logger = logging.getLogger(__name__)
 
+# ── SQS Version Control ───────────────────────────────────────────────────────
+SQS_MODEL_VERSION = "2.1.0"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -54,21 +56,16 @@ TIER1_FIELDS = {
 TIER1_CONTACT = ("contact_name", "contact_phone", "contact_email")
 
 TIER2_FIELDS = {
-    # Original 6
     "fein":                   "FEIN / Tax ID",
     "entity_type":            "Business entity type",
     "operations_description": "Operations description",
     "total_revenue":          "Annual revenue",
     "prior_carrier":          "Prior carrier name",
     "num_employees":          "Number of employees",
-    # Added 5
     "years_in_business":      "Years in business",
     "naics_code":             "NAICS / industry code",
     "num_claims":             "Number of prior claims",
     "total_payroll":          "Annual payroll",
-    # NOTE: mailing_address is intentionally excluded here — it already gates
-    # at TIER1. Including it in TIER2 would double-penalise the user for the
-    # same missing field and produce a misleading narrative quality score.
 }
 
 
@@ -143,11 +140,7 @@ def validate_naics_code(facts: dict) -> tuple | None:
 def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     """
     Evaluate hard and soft stops from facts/flags.
-
-    Cross-doc hard stops (fein_conflict, date_conflict, expiration_conflict) are
-    appended by the caller after check_doc_consistency() runs — not here.
-    calculate_sqs() caps at 60 whenever hard_stops is non-empty, so externally
-    appended items trigger the same cap automatically.
+    Cross-doc hard stops appended by caller after check_doc_consistency().
     """
     hard, soft = run_field_validations(facts)
 
@@ -228,10 +221,7 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         hard.append("Umbrella detected but no underlying GL or Auto limits found")
 
     # ── ACORD 127: Auto coverage integrity ────────────────────────────────────
-    # FIX: was flags.get("has_auto") — correct key is "has_auto_coverage"
     if flags.get("has_auto_coverage"):
-        # 1. Split limits completeness
-        # FIX: was "auto_limit_structure" — correct key matches extraction schema
         auto_limit_structure = _fv(facts, "auto_liability_structure")
         if flags.get("auto_split_limits") or auto_limit_structure == "split":
             bi_pp = _fv(facts, "bi_per_person")
@@ -243,15 +233,12 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
                     "Split liability limits incomplete — all three components required."
                 )
 
-        # 2. Physical damage deductibles
-        # FIX: was flags.get("has_physical_damage") — correct key is "auto_has_physical_damage"
         if flags.get("auto_has_physical_damage"):
             comp_ded = _fv(facts, "auto_deductible_comp")
             coll_ded = _fv(facts, "auto_deductible_collision")
             if not comp_ded or not coll_ded:
                 soft.append("Physical damage coverage present but deductibles not specified.")
 
-        # 3. Umbrella attachment check
         if flags.get("has_umbrella"):
             umb_val  = _to_int(_fv(facts, "umbrella_limit"))
             auto_val = _to_int(_fv(facts, "auto_liability_limit"))
@@ -265,12 +252,10 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
 
     # ── ACORD 131: Umbrella stack integrity ───────────────────────────────────
     if flags.get("has_umbrella"):
-        # Claims-made GL retro date
         if flags.get("gl_is_claims_made") and not _fv(facts, "retro_date"):
             if "GL policy is claims-made — retro date is required" not in soft:
                 soft.append("Claims-made GL policy requires retro date for umbrella attachment.")
 
-        # WC Employers Liability limits
         if flags.get("has_workers_comp"):
             el_limit = _fv(facts, "employers_liability_limits")
             if not el_limit:
@@ -282,7 +267,6 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
                         f"Employers Liability limit ({el_val:,}) is below the standard minimum (100,000)."
                     )
 
-        # Policy period alignment
         umb_eff = _fv(facts, "umbrella_effective_date")
         gl_eff  = _fv(facts, "effective_date")
         if umb_eff and gl_eff and umb_eff != gl_eff:
@@ -293,7 +277,6 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         if umb_exp and gl_exp and umb_exp != gl_exp:
             soft.append("Umbrella and GL expiration dates misaligned.")
 
-        # SIR vs deductible
         sir    = _to_int(_fv(facts, "umbrella_sir"))
         gl_ded = _to_int(_fv(facts, "gl_deductible"))
         if sir and gl_ded and sir < gl_ded:
@@ -307,21 +290,12 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
 # ── Risk transfer compliance checklist ───────────────────────────────────────
 
 def risk_transfer_check(facts: dict, flags: dict, selected_form_ids: List[str]) -> List[dict]:
-    """
-    Advisory-only compliance checklist for risk transfer requirements.
-    Reads from facts["risk_transfer"] (populated by the extraction prompt).
-    Never raises hard stops.
-
-    FIX: added json.loads() fallback for when the LLM returns the risk_transfer
-    block as a JSON-escaped string instead of a native dict.
-    """
+    """Advisory-only compliance checklist for risk transfer requirements."""
     checklist: List[dict] = []
 
     rt = facts.get("risk_transfer")
-    # Unwrap OCR envelope if present (should not be, but guard defensively).
     if isinstance(rt, dict) and "value" in rt:
         rt = rt["value"]
-    # FIX: LLM sometimes serialises the nested dict as a string — parse it.
     if isinstance(rt, str):
         try:
             rt = json.loads(rt)
@@ -330,7 +304,6 @@ def risk_transfer_check(facts: dict, flags: dict, selected_form_ids: List[str]) 
     if not isinstance(rt, dict):
         rt = {}
 
-    # 1. Additional insured
     if rt.get("additional_insured_required") is True or flags.get("has_additional_insured_requirement"):
         item: dict = {
             "check":   "additional_insured",
@@ -354,7 +327,6 @@ def risk_transfer_check(facts: dict, flags: dict, selected_form_ids: List[str]) 
             "message": "Additional insured(s) identified: " + ", ".join(str(n) for n in ai_names),
         })
 
-    # 2. Waiver of subrogation
     if rt.get("waiver_of_subrogation_required") is True or flags.get("has_waiver_of_subrogation"):
         checklist.append({
             "check":   "waiver_of_subrogation",
@@ -363,7 +335,6 @@ def risk_transfer_check(facts: dict, flags: dict, selected_form_ids: List[str]) 
             "message": "WOS endorsement needed — waiver of subrogation requirement detected.",
         })
 
-    # 3. Primary and non-contributory
     if rt.get("primary_noncontributory_required") is True or flags.get("has_primary_noncontributory"):
         checklist.append({
             "check":   "primary_noncontributory",
@@ -372,7 +343,6 @@ def risk_transfer_check(facts: dict, flags: dict, selected_form_ids: List[str]) 
             "message": "PNC endorsement needed — primary and non-contributory requirement detected.",
         })
 
-    # 4. Specific wording — advisory only
     wording = rt.get("specific_wording_requirements")
     if wording:
         checklist.append({
@@ -388,17 +358,9 @@ def risk_transfer_check(facts: dict, flags: dict, selected_form_ids: List[str]) 
 # ── Cross-validation ──────────────────────────────────────────────────────────
 
 def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> List[dict]:
-    """
-    Form-specific cross-validation checks.
-
-    FIX: auto flag names corrected to match extraction schema:
-      has_auto             → has_auto_coverage
-      has_hired_non_owned  → auto_has_hired_nonowned
-    FIX: total_revenue parsed via _fv() to unwrap OCR envelope before regex.
-    """
+    """Form-specific cross-validation checks."""
     issues: List[dict] = []
 
-    # ── Basic identity ────────────────────────────────────────────────────────
     if not _fv(facts, "applicant_name"):
         issues.append({"type": "hard_stop", "message": "Named insured missing — required on all forms"})
 
@@ -409,11 +371,9 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
     if not _fv(facts, "effective_date"):
         issues.append({"type": "warning", "message": "Policy effective date missing"})
 
-    # ── Property ──────────────────────────────────────────────────────────────
     if "ACORD_140" in selected_form_ids and not _fv(facts, "locations"):
         issues.append({"type": "hard_stop", "message": "ACORD 140 selected but no property locations found"})
 
-    # ── GL ────────────────────────────────────────────────────────────────────
     if flags.get("has_general_liability"):
         if "ACORD_126" not in selected_form_ids:
             issues.append({"type": "warning", "message": "GL coverage detected — ACORD 126 should be included"})
@@ -426,9 +386,6 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
             if pct and pct > 30 and not wc:
                 issues.append({"type": "warning", "message": f"High subcontracting ({pct:.0f}%) with no WC payroll"})
 
-    # ── Payroll / revenue ratios ──────────────────────────────────────────────
-    # FIX: use _fv() to unwrap OCR envelope before _to_float() to prevent
-    # garbage numbers from dict repr being passed to the regex parser.
     wc_pay  = _to_float(_fv(facts, "wc_payroll"))
     tot_pay = _to_float(_fv(facts, "total_payroll"))
     if wc_pay and tot_pay and tot_pay > 0:
@@ -442,20 +399,15 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
         if ratio > 0.85:
             issues.append({"type": "warning", "message": f"Payroll is {ratio * 100:.0f}% of revenue — unusually high"})
 
-    # ── Property form checks ──────────────────────────────────────────────────
     if "ACORD_140" in selected_form_ids:
         if flags.get("property_has_bi_coverage") and not _fv(facts, "business_income_limit"):
             issues.append({"type": "warning", "message": "Business Income coverage detected — BI limit required"})
         if not _fv(facts, "valuation_method"):
             issues.append({"type": "warning", "message": "Property valuation method not specified on ACORD 140"})
 
-    # ── Umbrella ──────────────────────────────────────────────────────────────
     if "ACORD_131" in selected_form_ids and not _fv(facts, "gl_limits"):
         issues.append({"type": "hard_stop", "message": "Umbrella selected but GL limits missing"})
 
-    # ── ACORD 127: coverage symbols ───────────────────────────────────────────
-    # FIX: corrected flag key from "has_auto" → "has_auto_coverage"
-    #      and "has_hired_non_owned" → "auto_has_hired_nonowned"
     if flags.get("has_auto_coverage") and flags.get("auto_has_hired_nonowned"):
         if not _fv(facts, "hired_auto_symbol") or not _fv(facts, "non_owned_symbol"):
             issues.append({
@@ -463,7 +415,6 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
                 "message": "Hired/Non-Owned exposure detected but coverage symbols not defined.",
             })
 
-    # ── Location count reconciliation ─────────────────────────────────────────
     locs_125 = _fv(facts, "locations") or []
     locs_140 = (_fv(facts, "property_locations") or []) if flags.get("has_property_coverage") else []
     if isinstance(locs_125, list) and isinstance(locs_140, list):
@@ -487,18 +438,9 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
 # ── Cross-document consistency ────────────────────────────────────────────────
 
 def check_doc_consistency(docs: List[dict]) -> List[str]:
-    """
-    Check that key identity fields are consistent across all uploaded documents.
-
-    Returns strings prefixed with "[hard_stop]" or "[warning]".
-    Caller parses the prefix to route to hard_stops or advisory lists.
-
-    FIX: total_revenue compared via _fv() (envelope-unwrapped) before float
-    parsing, preventing dict repr from producing garbage numbers.
-    """
+    """Check identity field consistency across documents."""
     issues: List[str] = []
 
-    # ── applicant_name mismatch: hard stop ───────────────────────────────────
     _applicant_vals = {_fv(d["facts"], "applicant_name") for d in docs if _fv(d["facts"], "applicant_name")}
     if len(_applicant_vals) > 1:
         issues.append(
@@ -506,7 +448,6 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
             f"Inconsistent applicant_name across docs: {sorted(str(v) for v in _applicant_vals)}"
         )
 
-    # ── Advisory exact-match fields ───────────────────────────────────────────
     for key in ("entity_type", "mailing_address"):
         vals = {_fv(d["facts"], key) for d in docs if _fv(d["facts"], key)}
         if len(vals) > 1:
@@ -514,7 +455,6 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
                 f"[warning] field={key} Inconsistent {key} across docs: {sorted(str(v) for v in vals)}"
             )
 
-    # ── FEIN hard stop ────────────────────────────────────────────────────────
     fein_vals = {_fv(d["facts"], "fein") for d in docs if _fv(d["facts"], "fein")}
     if len(fein_vals) > 1:
         issues.append(
@@ -522,7 +462,6 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
             "FEIN mismatch across uploaded documents. Submission blocked."
         )
 
-    # ── Policy date hard stops ────────────────────────────────────────────────
     eff_vals = {_fv(d["facts"], "effective_date") for d in docs if _fv(d["facts"], "effective_date")}
     if len(eff_vals) > 1:
         issues.append(
@@ -537,7 +476,6 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
             "Policy expiration date mismatch across documents. Submission blocked unless explained."
         )
 
-    # ── Lines of business: order-insensitive set comparison ──────────────────
     lob_sets = []
     for d in docs:
         lob = _fv(d["facts"], "lines_of_business")
@@ -550,11 +488,9 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
             f"{[sorted(s) for s in lob_sets]}"
         )
 
-    # ── total_revenue: flag if docs diverge by more than ±10% ────────────────
-    # FIX: use _fv() to unwrap OCR envelope before passing to the regex float parser.
     revenue_vals = []
     for d in docs:
-        raw = _fv(d["facts"], "total_revenue")   # envelope-unwrapped
+        raw = _fv(d["facts"], "total_revenue")
         if raw:
             try:
                 revenue_vals.append(float(re.sub(r"[^\d.]", "", str(raw))))
@@ -572,38 +508,348 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
     return issues
 
 
-# ── Loss history gradient scorer ─────────────────────────────────────────────
+# ── Confidence-weighted fill rate ────────────────────────────────────────────
 
-def _loss_history_score(facts, flags):
-    has_history = flags.get("has_loss_history", False)
+CONFIDENCE_SCORE = {
+    "deterministic": 1.00,
+    "filled":        1.00,
+    "ai_high":       0.85,
+    "ai_low":        0.50,
+    None:            0.00,
+}
+
+
+def confidence_fill_rate(mapped_data: dict, confidence_dict: dict) -> int:
+    """Calculate confidence-weighted fill rate."""
+    total = len(mapped_data)
+    if total == 0:
+        return 0
+    
+    weighted = sum(
+        CONFIDENCE_SCORE.get(confidence_dict.get(field), 0.0)
+        for field, val in mapped_data.items()
+        if val is not None and str(val).strip() not in ("", "null", "None")
+    )
+    return int((weighted / total) * 100)
+
+
+# ── Loss history integrity coefficient ───────────────────────────────────────
+
+def loss_integrity_coefficient(
+    loss_history_years: int,
+    report_age_days: int,
+    required_window: int = 5
+) -> float:
+    """
+    90-day grace period: reports < 90 days old score full recency.
+    After 90 days, recency decays linearly to 0 at 365 days.
+    """
+    years_ratio   = min((loss_history_years or 0) / required_window, 1.0)
+    recency_ratio = max(0.0, 1.0 - max(0, report_age_days - 90) / 275)
+    return round(years_ratio * recency_ratio, 3)
+
+
+def calculate_p4_loss_history(facts: dict, flags: dict) -> Tuple[int, List[str]]:
+    """Loss History Integrity pillar with coefficient-based scoring."""
+    λ = loss_integrity_coefficient(
+        loss_history_years = int(_fv(facts, "loss_history_years") or 0),
+        report_age_days    = int(_fv(facts, "loss_run_age_days") or 365)
+    )
     has_carrier = bool(_fv(facts, "prior_carrier"))
-    n_claims = _to_int(_fv(facts, "num_claims")) or 0
-    incurred = _to_int(_fv(facts, "total_incurred")) or 0
-    base = 50
-    if has_history: base += 20
-    if has_carrier: base += 15
-    if n_claims > 0: base += 10
-    if incurred >= 0 and has_history: base += 5
-    if n_claims > 5: base -= 10
-    if incurred > 250_000: base -= 5
-    return max(40, min(100, base))
+
+    if λ >= 0.85 and has_carrier:
+        return 100, []
+    elif λ >= 0.85:
+        return 80, ["Prior carrier name missing"]
+    elif λ >= 0.70:
+        return 65, ["Loss runs older than recommended — verify recency"]
+    elif λ >= 0.50:
+        return 40, ["Loss history incomplete — fewer than 3 years provided"]
+    elif λ > 0:
+        return 20, ["Loss history critically incomplete or stale"]
+    else:
+        return 10, ["No loss history provided — required for carrier submission"]
 
 
-# ── SQS calculation ───────────────────────────────────────────────────────────
+# ── LOB inference ─────────────────────────────────────────────────────────────
+
+NAICS_TO_LOB = {
+    "236": "contractor", "237": "contractor", "238": "contractor",
+    "722": "restaurant", "311": "restaurant", "312": "restaurant",
+    "511": "technology", "518": "technology", "519": "technology",
+    "541": "technology",
+    "321": "manufacturing","331": "manufacturing","332": "manufacturing",
+    "484": "transportation","485": "transportation","492": "transportation",
+}
+
+
+def infer_lob(facts: dict, flags: dict) -> str:
+    """Infer line of business from NAICS, flags, or operations description."""
+    naics = str(_fv(facts, "naics_code") or "")[:3]
+    if naics and naics in NAICS_TO_LOB:
+        return NAICS_TO_LOB[naics]
+    
+    if flags.get("is_contractor"):
+        return "contractor"
+    
+    desc = (_fv(facts, "operations_description") or "").lower()
+    if any(w in desc for w in ["restaurant","food","catering","kitchen","dining"]):
+        return "restaurant"
+    if any(w in desc for w in ["software","tech","saas","app","cloud","platform"]):
+        return "technology"
+    if any(w in desc for w in ["truck","freight","transport","delivery","fleet"]):
+        return "transportation"
+    
+    return "generic"
+
+
+# ── LOB-specific rules ────────────────────────────────────────────────────────
+
+LOB_RULES = {
+    "contractor": {
+        "required": ["percent_subcontracted", "years_in_business", "operations_description"],
+    },
+    "restaurant": {
+        "required": ["occupancy_type", "fire_protection_class", "years_in_business"],
+    },
+    "technology": {
+        "required": ["operations_description", "total_revenue", "num_employees"],
+    },
+    "transportation": {
+        "required": ["auto_vin_schedule", "auto_drivers", "auto_radius_of_operation"],
+    },
+    "generic": {
+        "required": ["operations_description", "total_revenue"],
+    },
+}
+
+
+def _calculate_cope_score(facts: dict, flags: dict) -> int:
+    """Calculate COPE score for Exposure & COPE pillar."""
+    if not flags.get("has_property_coverage"):
+        return 100
+    
+    min_ok = all([
+        bool(_fv(facts, "locations")),
+        bool(_fv(facts, "occupancy_type")),
+        bool(_fv(facts, "construction_type")),
+        bool(_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")),
+    ])
+    
+    if not min_ok:
+        return 0
+    
+    carrier_cope = [bool(_fv(facts, k)) for k in [
+        "year_built", "roof_year", "sprinkler_system",
+        "fire_protection_class", "valuation_method", "coinsurance_percentage",
+    ]]
+    
+    return int(60 + (sum(carrier_cope) / len(carrier_cope)) * 40)
+
+
+# ── Weight normalization ──────────────────────────────────────────────────────
+
+def normalize_weights(base_weights: dict, override: dict) -> dict:
+    """Normalize weights to sum to 1.0 after override."""
+    w = {**base_weights, **override}
+    total = sum(w.values())
+    return {k: v / total for k, v in w.items()}
+
+
+# ── Package-level SQS ─────────────────────────────────────────────────────────
+
+BASE_PILLAR_WEIGHTS = {
+    "data_integrity": 0.35,
+    "exposure_cope":  0.25,
+    "consistency":    0.20,
+    "loss_history":   0.15,
+    "narrative":      0.05
+}
+
+LOB_WEIGHT_OVERRIDES = {
+    "contractor":     {"exposure_cope": 0.30, "data_integrity": 0.30},
+    "restaurant":     {},
+    "technology":     {"narrative": 0.10, "exposure_cope": 0.20},
+    "transportation": {"exposure_cope": 0.30},
+    "generic":        {}
+}
+
+
+def calculate_package_sqs(
+    facts: dict,
+    flags: dict,
+    form_results: List[dict],
+    cross_issues: List[dict],
+    hard_stops: List[str],
+    soft_stops: List[str],
+    session_data: dict,
+    mapped_data: Optional[dict] = None,
+    confidence_dict: Optional[dict] = None,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    calculation_stage: str = "initial_extract",
+) -> dict:
+    """
+    Calculate package-level SQS with 5 pillars, LOB-aware weights, and full metadata.
+    """
+    lob = infer_lob(facts, flags)
+    weights = normalize_weights(BASE_PILLAR_WEIGHTS, LOB_WEIGHT_OVERRIDES.get(lob, {}))
+
+    # P1 — Data Integrity
+    tier1_ok, tier1_missing = check_tier1(facts, flags)
+    tier2_score, tier2_missing = check_tier2(facts)
+    conf_rate = confidence_fill_rate(mapped_data or {}, confidence_dict or {})
+    p1 = int((
+        (100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)) * 0.4 +
+        tier2_score * 0.35 +
+        conf_rate * 0.25
+    ))
+
+    # P2 — Exposure & COPE
+    lob_rules   = LOB_RULES.get(lob, LOB_RULES["generic"])
+    req_present = sum(1 for f in lob_rules["required"] if _fv(facts, f))
+    req_total   = len(lob_rules["required"])
+    lob_score   = int((req_present / req_total) * 100) if req_total else 100
+    cope_score  = _calculate_cope_score(facts, flags)
+    p2 = int(lob_score * 0.6 + cope_score * 0.4)
+
+    # P3 — Cross-Form Consistency
+    hard_cross  = [i for i in cross_issues if i.get("type") == "hard_stop"]
+    warn_cross  = [i for i in cross_issues if i.get("type") == "warning"]
+    p3 = max(0, 100 - len(hard_cross) * 25 - len(warn_cross) * 10)
+
+    # P4 — Loss History Integrity
+    p4, p4_recs = calculate_p4_loss_history(facts, flags)
+
+    # P5 — Narrative Quality
+    ops = _fv(facts, "operations_description") or ""
+    p5 = min(100, int(
+        (min(len(ops), 300) / 300) * 60 +
+        (20 if any(w in ops.lower() for w in ["safety","certified","osha","protocol"]) else 0) +
+        (20 if len(ops) > 100 else 0)
+    ))
+
+    # Weighted package score
+    raw = int(
+        p1 * weights["data_integrity"] +
+        p2 * weights["exposure_cope"]  +
+        p3 * weights["consistency"]    +
+        p4 * weights["loss_history"]   +
+        p5 * weights["narrative"]
+    )
+
+    # Hard stop penalty
+    if hard_stops or any(hard_cross):
+        raw = min(raw, 60)
+    elif soft_stops:
+        raw = min(raw, 85)
+    raw = max(0, raw)
+
+    # Tier determination
+    tier = (
+        "Carrier-Ready" if raw >= 90 else
+        "Quote-Ready"   if raw >= 78 else
+        "Review-Ready"  if raw >= 62 else
+        "At-Risk"       if raw >= 45 else
+        "Incomplete"
+    )
+
+    # SQS history management
+    history = session_data.get("sqs_history", [])
+    stage = calculation_stage
+    timestamp = datetime.utcnow().isoformat() + "Z"
+    
+    history.append({
+        "at": timestamp,
+        "score": raw,
+        "stage": stage,
+        "model_version": SQS_MODEL_VERSION
+    })
+
+    # Delta calculation
+    delta = raw - history[0]["score"] if len(history) > 1 else 0
+
+    # Top recommendations (merged from all components)
+    all_recs = list(tier1_missing) + list(tier2_missing) + list(p4_recs)
+    top_recs = all_recs[:5]
+
+    return {
+        "package_sqs_score": raw,
+        "tier": tier,
+        "lob": lob,
+        "pillars": {
+            "data_integrity": p1,
+            "exposure_cope": p2,
+            "consistency": p3,
+            "loss_history": p4,
+            "narrative": p5
+        },
+        "weights_used": weights,
+        "top_recommendations": top_recs,
+        "sqs_history": history,
+        "delta_this_session": delta,
+        "routing_decision": (
+            "auto_quote"      if raw >= 85 else
+            "priority_review" if raw >= 70 else
+            "standard_review" if raw >= 50 else
+            "hold"
+        ),
+        "narrative": "",  # Filled by generate_sqs_narrative at download
+        "timestamp": timestamp,
+        "model_version": SQS_MODEL_VERSION,
+        "session_id": session_id,
+        "user_id": user_id,
+        "calculation_stage": stage,
+    }
+
+
+# ── Recommendation impact estimation ──────────────────────────────────────────
+
+def _estimate_score_impact(
+    field: str,
+    component: str,
+    current_breakdown: dict,
+    weights: dict
+) -> int:
+    """Estimate SQS gain if field were filled."""
+    # Simplified heuristic: tier-1 fields worth more
+    tier1_fields = set(TIER1_FIELDS.keys())
+    tier2_fields = set(TIER2_FIELDS.keys())
+    
+    if field in tier1_fields:
+        base_impact = 15
+    elif field in tier2_fields:
+        base_impact = 8
+    else:
+        base_impact = 5
+    
+    # Weight by component importance
+    component_weight = weights.get(component, 0.10)
+    return int(base_impact * (component_weight / 0.25))
+
+
+# ── Per-form SQS (enhanced with metadata) ─────────────────────────────────────
 
 def calculate_sqs(
-    facts,
-    flags,
-    mapped_data,
-    form_schema,
-    selected_form_ids,
-    hard_stops,
-    soft_stops,
-    tier2_score,
-    form_id=None,
-    schema_size=None,
-    fields_mapped=None,
+    facts: dict,
+    flags: dict,
+    mapped_data: dict,
+    form_schema: dict,
+    selected_form_ids: List[str],
+    hard_stops: List[str],
+    soft_stops: List[str],
+    tier2_score: int,
+    form_id: Optional[str] = None,
+    schema_size: Optional[int] = None,
+    fields_mapped: Optional[int] = None,
+    confidence_dict: Optional[dict] = None,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    calculation_stage: str = "initial_extract",
 ) -> dict:
+    """
+    Per-form SQS calculation with full metadata and structured recommendations.
+    """
     extraction_quality = facts.get("_extraction_quality", 1.0)
     if isinstance(extraction_quality, float) and extraction_quality < 0.60:
         return {
@@ -612,26 +858,37 @@ def calculate_sqs(
             "tier": "Incomplete",
             "routing_decision": "hold",
             "issues": [f"Only {int(extraction_quality*100)}% of document was processed. Re-upload or reprocess."],
-            "recommendations": ["Re-upload document or contact support."],
+            "recommendations": [],
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "model_version": SQS_MODEL_VERSION,
+            "session_id": session_id,
+            "user_id": user_id,
+            "calculation_stage": calculation_stage,
         }
 
-    breakdown:       dict = {}
-    issues:          List[str] = []
-    recommendations: List[str] = []
+    breakdown: dict = {}
+    issues: List[str] = []
+    recommendations: List[dict] = []
     fraud_penalty = 0
 
-    fid          = form_id or (selected_form_ids[0] if selected_form_ids else "UNKNOWN")
+    fid = form_id or (selected_form_ids[0] if selected_form_ids else "UNKNOWN")
     is_cert_only = fid == "ACORD_25" or flags.get("is_certificate_doc", False)
-    total_fields  = schema_size  if schema_size  is not None else len(form_schema)
+    total_fields = schema_size if schema_size is not None else len(form_schema)
     filled_fields = fields_mapped if fields_mapped is not None else sum(
         1 for v in mapped_data.values()
         if v is not None and str(v).strip() not in ("", "null", "None")
     )
     fill_rate = int((filled_fields / total_fields) * 100) if total_fields > 0 else 0
 
+    # Use confidence-weighted fill rate if available
+    if confidence_dict:
+        conf_rate = confidence_fill_rate(mapped_data, confidence_dict)
+    else:
+        conf_rate = fill_rate
+
     # ── Structural completeness ───────────────────────────────────────────────
     if is_cert_only:
-        chks   = [
+        chks = [
             bool(_fv(facts, "applicant_name") or _fv(facts, "certificate_holder")),
             bool(_fv(facts, "effective_date")),
             bool(_fv(facts, "policy_number")),
@@ -640,7 +897,7 @@ def calculate_sqs(
         struct = int(sum(chks) / len(chks) * 100)
 
     elif fid == "ACORD_125":
-        chks   = [
+        chks = [
             bool(_fv(facts, "applicant_name")),
             bool(_fv(facts, "mailing_address")),
             bool(_fv(facts, "effective_date")),
@@ -648,20 +905,30 @@ def calculate_sqs(
             bool(_fv(facts, "contact_name") or _fv(facts, "contact_phone") or _fv(facts, "contact_email")),
             bool(_fv(facts, "producer_name")),
         ]
-        struct  = int(sum(chks) / len(chks) * 100)
+        struct = int(sum(chks) / len(chks) * 100)
         missing = [
-            l for l, ok in zip(
+            (l, f) for l, ok, f in zip(
                 ["applicant name", "mailing address", "effective date",
                  "lines of business", "contact info", "producer name"],
                 chks,
+                ["applicant_name", "mailing_address", "effective_date",
+                 "lines_of_business", "contact_name", "producer_name"]
             )
             if not ok
         ]
-        if missing:
-            recommendations.append("ACORD 125 missing: " + ", ".join(missing))
+        for label, field_name in missing:
+            recommendations.append({
+                "rec_id": f"rec_{field_name}",
+                "field": field_name,
+                "component": "structural_completeness",
+                "message": f"ACORD 125 missing: {label}",
+                "type": "missing_field",
+                "score_impact": 15 if field_name in TIER1_FIELDS else 8,
+                "priority": 1 if field_name in TIER1_FIELDS else 2,
+            })
 
     elif fid == "ACORD_126":
-        chks   = [
+        chks = [
             bool(_fv(facts, "gl_limits") or _fv(facts, "gl_aggregate") or _fv(facts, "gl_each_occurrence")),
             bool(_fv(facts, "gl_class_codes_by_location")),
             bool(_fv(facts, "operations_description")),
@@ -671,9 +938,25 @@ def calculate_sqs(
         struct = int(sum(chks) / len(chks) * 100)
         if not _fv(facts, "gl_class_codes_by_location"):
             issues.append("GL class codes missing")
-            recommendations.append("Provide GL class codes")
+            recommendations.append({
+                "rec_id": "rec_gl_class_codes",
+                "field": "gl_class_codes_by_location",
+                "component": "exposure_consistency",
+                "message": "Provide GL class codes",
+                "type": "missing_field",
+                "score_impact": 12,
+                "priority": 1,
+            })
         if not _fv(facts, "gl_form_type"):
-            recommendations.append("Specify GL form type: occurrence or claims-made")
+            recommendations.append({
+                "rec_id": "rec_gl_form_type",
+                "field": "gl_form_type",
+                "component": "exposure_consistency",
+                "message": "Specify GL form type: occurrence or claims-made",
+                "type": "missing_field",
+                "score_impact": 5,
+                "priority": 2,
+            })
 
     elif fid == "ACORD_140":
         min_cope = [
@@ -685,7 +968,15 @@ def calculate_sqs(
         if not all(min_cope):
             struct = 0
             issues.append("Minimum Viable COPE incomplete")
-            recommendations.append("Required: street address, occupancy, construction type, building/BPP value")
+            recommendations.append({
+                "rec_id": "rec_min_cope",
+                "field": "locations",
+                "component": "property_integrity",
+                "message": "Required: street address, occupancy, construction type, building/BPP value",
+                "type": "hard_stop",
+                "score_impact": 0,
+                "priority": 1,
+            })
         else:
             carrier_cope = [bool(_fv(facts, k)) for k in [
                 "year_built", "roof_year", "sprinkler_system",
@@ -693,19 +984,29 @@ def calculate_sqs(
             ]]
             struct = int(60 + (sum(carrier_cope) / len(carrier_cope)) * 40)
             mc = [
-                l for l, ok in zip(
+                (l, f) for l, ok, f in zip(
                     ["year built", "roof year", "sprinkler system",
                      "fire protection class", "valuation method", "coinsurance %"],
                     carrier_cope,
+                    ["year_built", "roof_year", "sprinkler_system",
+                     "fire_protection_class", "valuation_method", "coinsurance_percentage"]
                 )
                 if not ok
             ]
-            if mc:
-                recommendations.append("For Carrier-Grade COPE provide: " + ", ".join(mc))
+            for label, field_name in mc:
+                recommendations.append({
+                    "rec_id": f"rec_{field_name}",
+                    "field": field_name,
+                    "component": "property_integrity",
+                    "message": f"For Carrier-Grade COPE provide: {label}",
+                    "type": "suggestion",
+                    "score_impact": 6,
+                    "priority": 2,
+                })
     else:
-        struct = fill_rate
+        struct = conf_rate
 
-    # OCR confidence penalty: -6 per tier-1 field with ocr_confident=False, cap 30.
+    # OCR confidence penalty
     _ocr_tier1 = list(TIER1_FIELDS.keys()) + list(TIER1_CONTACT)
     ocr_low_count = sum(1 for k in _ocr_tier1 if not _focr(facts, k))
     ocr_penalty = min(30, ocr_low_count * 6)
@@ -732,13 +1033,12 @@ def calculate_sqs(
             bool(_fv(facts, "operations_description")),
             bool(_fv(facts, "gl_limits")),
         ]
-        exp_score  = int(sum(chks) / len(chks) * 100)
-        _gl_codes  = _fv(facts, "gl_class_codes_by_location")
+        exp_score = int(sum(chks) / len(chks) * 100)
+        _gl_codes = _fv(facts, "gl_class_codes_by_location")
         if isinstance(_gl_codes, list) and _gl_codes:
             exp_score = min(100, exp_score + 10)
         else:
             exp_score = max(0, exp_score - 15)
-            recommendations.append("Add GL class codes")
 
     elif fid == "ACORD_140":
         chks = [
@@ -750,7 +1050,15 @@ def calculate_sqs(
         exp_score = int(sum(chks) / len(chks) * 100)
         if not _fv(facts, "valuation_method"):
             exp_score = max(0, exp_score - 15)
-            recommendations.append("Specify RCV or ACV valuation method")
+            recommendations.append({
+                "rec_id": "rec_valuation_method",
+                "field": "valuation_method",
+                "component": "exposure_consistency",
+                "message": "Specify RCV or ACV valuation method",
+                "type": "missing_field",
+                "score_impact": 10,
+                "priority": 1,
+            })
 
     else:
         chks = [
@@ -762,21 +1070,37 @@ def calculate_sqs(
     breakdown["exposure_consistency"] = exp_score
 
     # ── Property integrity ────────────────────────────────────────────────────
-    _prop_hard = False   # triggers hard cap (≤ 60)
-    _prop_soft = False   # triggers soft cap (≤ 85)
+    _prop_hard = False
+    _prop_soft = False
 
     if fid == "ACORD_140":
-        prop = struct  # inherit structural score as base
+        prop = struct
         if flags.get("property_has_bi_coverage") and _fv(facts, "business_income_limit") and not _fv(facts, "period_of_restoration"):
             prop = max(0, prop - 8)
-            recommendations.append("Add Period of Restoration")
+            recommendations.append({
+                "rec_id": "rec_period_of_restoration",
+                "field": "period_of_restoration",
+                "component": "property_integrity",
+                "message": "Add Period of Restoration",
+                "type": "suggestion",
+                "score_impact": 8,
+                "priority": 2,
+            })
         if flags.get("property_has_peril_deductibles"):
             d = sum(bool(_fv(facts, f)) for f in [
                 "property_deductible_wind", "property_deductible_earthquake", "property_deductible_flood",
             ])
             if d == 0:
                 prop = max(0, prop - 10)
-                recommendations.append("Define peril deductibles")
+                recommendations.append({
+                    "rec_id": "rec_peril_deductibles",
+                    "field": "property_deductible_wind",
+                    "component": "property_integrity",
+                    "message": "Define peril deductibles",
+                    "type": "soft_warning",
+                    "score_impact": 10,
+                    "priority": 1,
+                })
 
     elif flags.get("has_property_coverage"):
         min_ok = all([
@@ -789,7 +1113,7 @@ def calculate_sqs(
             prop = 0
             issues.append("Minimum Viable COPE incomplete")
         else:
-            cc   = [bool(_fv(facts, k)) for k in [
+            cc = [bool(_fv(facts, k)) for k in [
                 "year_built", "roof_year", "sprinkler_system",
                 "fire_protection_class", "valuation_method", "coinsurance_percentage",
             ]]
@@ -797,29 +1121,21 @@ def calculate_sqs(
     else:
         prop = 100
 
-    # ── Property delta penalties ──────────────────────────────────────────────
-    # Applied on top of COPE tier logic. _prop_hard / _prop_soft control the cap
-    # gate below without mutating the caller-supplied hard_stops / soft_stops lists.
+    # Property delta penalties
     if fid == "ACORD_140" or flags.get("has_property_coverage"):
-        # Δ1: valuation method missing → -5 pts
         if not _fv(facts, "valuation_method"):
             prop = max(0, prop - 5)
-            recommendations.append(
-                "Specify property valuation method (RCV or ACV) — affects claim settlement"
-            )
 
-        # Δ2: BI limit present but period of restoration absent → soft cap
         if _fv(facts, "business_income_limit") and not _fv(facts, "period_of_restoration"):
             _prop_soft = True
             issues.append("BI coverage present but period of restoration not specified")
 
-        # Δ3: peril deductible flag set but values undefined → hard cap
         if flags.get("property_has_peril_deductibles"):
             _missing_perils = [
                 label for label, key in [
-                    ("wind/hail",  "property_deductible_wind"),
+                    ("wind/hail", "property_deductible_wind"),
                     ("earthquake", "property_deductible_earthquake"),
-                    ("flood",      "property_deductible_flood"),
+                    ("flood", "property_deductible_flood"),
                 ]
                 if not _fv(facts, key)
             ]
@@ -830,7 +1146,6 @@ def calculate_sqs(
                     + ", ".join(_missing_perils)
                 )
 
-        # Δ4: coinsurance percentage absent when property value is on file → -5 pts
         if (
             (_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value"))
             and not _fv(facts, "coinsurance_percentage")
@@ -838,15 +1153,20 @@ def calculate_sqs(
             prop = max(0, prop - 5)
             issues.append("Coinsurance percentage not specified for insured property")
 
-    # FIX: always write final prop value back to breakdown AFTER all delta
-    # adjustments so the UI component score reflects the post-delta value,
-    # not the mid-calculation intermediate.
     breakdown["property_integrity"] = max(0, prop)
 
     # ── Loss history alignment ────────────────────────────────────────────────
-    loss_score = _loss_history_score(facts, flags)
-    if not (flags.get("has_loss_history") or bool(_fv(facts, "num_claims"))):
-        recommendations.append("Attach 3–5 years of loss runs to improve SQS")
+    loss_score, loss_recs = calculate_p4_loss_history(facts, flags)
+    for rec_msg in loss_recs:
+        recommendations.append({
+            "rec_id": f"rec_loss_{len(recommendations)}",
+            "field": "loss_history_years",
+            "component": "loss_history_alignment",
+            "message": rec_msg,
+            "type": "suggestion",
+            "score_impact": 8,
+            "priority": 2,
+        })
     breakdown["loss_history_alignment"] = loss_score
 
     # ── Umbrella / limit adequacy ─────────────────────────────────────────────
@@ -855,7 +1175,15 @@ def calculate_sqs(
         umbrella_score = 100 if has_underlying else 0
         if not has_underlying:
             issues.append("Umbrella detected but no underlying GL/Auto limits")
-            recommendations.append("Provide underlying limits")
+            recommendations.append({
+                "rec_id": "rec_underlying_limits",
+                "field": "gl_limits",
+                "component": "umbrella_limit_adequacy",
+                "message": "Provide underlying limits",
+                "type": "hard_stop",
+                "score_impact": 0,
+                "priority": 1,
+            })
     else:
         umbrella_score = 100
     breakdown["umbrella_limit_adequacy"] = umbrella_score
@@ -864,8 +1192,8 @@ def calculate_sqs(
     narrative_score = min(tier2_score, 100)
     ops_desc = str(_fv(facts, "operations_description") or "")
     if len(ops_desc) > 50:
-        diversity     = _token_diversity(ops_desc)
-        bonus         = 15 if diversity > 0.6 else 10
+        diversity = _token_diversity(ops_desc)
+        bonus = 15 if diversity > 0.6 else 10
         narrative_score = min(100, narrative_score + bonus)
     breakdown["narrative_quality"] = narrative_score
 
@@ -882,7 +1210,7 @@ def calculate_sqs(
 
     # ── Cap gates ─────────────────────────────────────────────────────────────
     cope_hard = fid == "ACORD_140" and breakdown["property_integrity"] == 0
-    umb_fail  = flags.get("has_umbrella") and umbrella_score == 0
+    umb_fail = flags.get("has_umbrella") and umbrella_score == 0
 
     if hard_stops or cope_hard or umb_fail or _prop_hard:
         raw_score = min(raw_score, 60)
@@ -893,20 +1221,21 @@ def calculate_sqs(
 
     # ── Tier and routing ──────────────────────────────────────────────────────
     tier, tc = (
-        ("Carrier-Ready", "green")  if raw_score >= 90 else
-        ("Review-Ready",  "yellow") if raw_score >= 75 else
-        ("At-Risk",       "orange") if raw_score >= 60 else
+        ("Carrier-Ready", "green") if raw_score >= 90 else
+        ("Review-Ready", "yellow") if raw_score >= 75 else
+        ("At-Risk", "orange") if raw_score >= 60 else
         ("Decline-Prone", "red")
     )
     routing = (
-        # Strict > 85: score capped at exactly 85 by a soft_stop routes to
-        # "review", not "auto_quote". >= 85 would let soft_stop submissions
-        # through to auto_quote, defeating the soft cap's purpose.
-        "auto_quote"  if raw_score > 85 else
-        "review"      if raw_score >= 65 else
+        "auto_quote" if raw_score > 85 else
+        "review" if raw_score >= 65 else
         "full_review" if raw_score >= 40 else
         "hold"
     )
+    
+    # Sort recommendations by priority then score impact
+    recommendations.sort(key=lambda r: (-r.get("priority", 99), -r.get("score_impact", 0)))
+    
     risk_drivers = [
         {"component": k.replace("_", " ").title(), "score": v}
         for k, v in sorted(breakdown.items(), key=lambda x: x[1])[:3]
@@ -914,20 +1243,79 @@ def calculate_sqs(
     ]
 
     return {
-        "sqs_score":          raw_score,
-        "tier":               tier,
-        "tier_color":         tc,
-        "grade":              "A" if raw_score >= 90 else "B" if raw_score >= 80 else "C" if raw_score >= 70 else "D" if raw_score >= 60 else "F",
-        "routing_decision":   routing,
-        "breakdown":          breakdown,
-        "risk_drivers":       risk_drivers,
-        "issues":             issues,
-        "recommendations":    recommendations,
-        "fraud_penalty":      fraud_penalty,
-        "fill_rate":          fill_rate,
-        "form_id":            fid,
+        "sqs_score": raw_score,
+        "tier": tier,
+        "tier_color": tc,
+        "grade": "A" if raw_score >= 90 else "B" if raw_score >= 80 else "C" if raw_score >= 70 else "D" if raw_score >= 60 else "F",
+        "routing_decision": routing,
+        "breakdown": breakdown,
+        "risk_drivers": risk_drivers,
+        "issues": issues,
+        "recommendations": recommendations,
+        "fraud_penalty": fraud_penalty,
+        "fill_rate": fill_rate,
+        "confidence_fill_rate": conf_rate,
+        "form_id": fid,
         "compliance_checklist": risk_transfer_check(facts, flags, selected_form_ids),
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "model_version": SQS_MODEL_VERSION,
+        "session_id": session_id,
+        "user_id": user_id,
+        "calculation_stage": calculation_stage,
     }
+
+
+# ── Narrative generation ──────────────────────────────────────────────────────
+
+def generate_sqs_narrative(
+    sqs_result: dict,
+    delta_this_session: int,
+    resolved_recs: List[str],
+    ignored_recs: List[str]
+) -> str:
+    """
+    Generate narrative prose explaining SQS score.
+    Called at download only. Uses llama-3.3-70b-versatile.
+    """
+    try:
+        from config.settings import groq_chat
+        
+        breakdown = sqs_result.get("breakdown", {})
+        risk_drivers = sqs_result.get("risk_drivers", [])
+        score = sqs_result.get("sqs_score") or sqs_result.get("package_sqs_score")
+        tier = sqs_result.get("tier")
+        
+        prompt = f"""You are explaining submission quality to an insurance broker.
+
+SQS Score: {score}/100 ({tier})
+Session Delta: {'+' if delta_this_session >= 0 else ''}{delta_this_session} points
+
+Component Breakdown:
+{json.dumps(breakdown, indent=2)}
+
+Top Risk Drivers:
+{json.dumps(risk_drivers, indent=2)}
+
+Actions Taken This Session:
+- Resolved: {', '.join(resolved_recs) if resolved_recs else 'None'}
+- Ignored: {', '.join(ignored_recs) if ignored_recs else 'None'}
+
+Write a 3-paragraph narrative (150-250 words):
+1. Overall quality assessment and tier explanation
+2. What improved this session and what still needs work
+3. Next best action to increase score
+
+Use professional insurance language. Be direct and actionable."""
+
+        raw = groq_chat(
+            "llama-3.3-70b-versatile",
+            [{"role": "user", "content": prompt}]
+        )
+        return raw.strip()
+        
+    except Exception as ex:
+        logger.error(f"generate_sqs_narrative failed: {ex}")
+        return f"SQS Score: {score}/100 ({tier}). Session improvement: {'+' if delta_this_session >= 0 else ''}{delta_this_session} points."
 
 
 # ── Clarity pipeline (facts-only SQS) ────────────────────────────────────────
@@ -991,29 +1379,36 @@ def calculate_sqs_from_facts(
     soft_stops: List[str],
     tier2_score: int,
     form_id: str = None,
+    confidence_dict: Optional[dict] = None,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    calculation_stage: str = "initial_extract",
 ) -> dict:
     """
-    Calculate SQS for the Clarity pipeline without form generation.
-    Uses FORM_FIELD_INVENTORY to derive fill_rate instead of a live PDF schema.
-    All domain scoring logic is identical to calculate_sqs().
+    Calculate SQS for Clarity pipeline without form generation.
+    Uses FORM_FIELD_INVENTORY to derive fill_rate.
     """
-    fid       = form_id or (selected_form_ids[0] if selected_form_ids else "ACORD_125")
+    fid = form_id or (selected_form_ids[0] if selected_form_ids else "ACORD_125")
     inventory = FORM_FIELD_INVENTORY.get(fid, list(facts.keys()))
 
     synthetic_mapped = {k: _fv(facts, k) for k in inventory}
-    filled           = sum(1 for k in inventory if _fact_is_filled(_fv(facts, k)))
-    schema_size      = len(inventory)
+    filled = sum(1 for k in inventory if _fact_is_filled(_fv(facts, k)))
+    schema_size = len(inventory)
 
     return calculate_sqs(
-        facts            = facts,
-        flags            = flags,
-        mapped_data      = synthetic_mapped,
-        form_schema      = {k: {} for k in inventory},
-        selected_form_ids= selected_form_ids,
-        hard_stops       = hard_stops,
-        soft_stops       = soft_stops,
-        tier2_score      = tier2_score,
-        form_id          = fid,
-        schema_size      = schema_size,
-        fields_mapped    = filled,
+        facts=facts,
+        flags=flags,
+        mapped_data=synthetic_mapped,
+        form_schema={k: {} for k in inventory},
+        selected_form_ids=selected_form_ids,
+        hard_stops=hard_stops,
+        soft_stops=soft_stops,
+        tier2_score=tier2_score,
+        form_id=fid,
+        schema_size=schema_size,
+        fields_mapped=filled,
+        confidence_dict=confidence_dict,
+        session_id=session_id,
+        user_id=user_id,
+        calculation_stage=calculation_stage,
     )

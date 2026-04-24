@@ -56,13 +56,30 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(FORMS_SCHEMAS_DIR, exist_ok=True)
 
 
+_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
+
+
 def groq_chat(model: str, messages: list, temperature: float = 0, max_tokens: int = 4096,
               _retries: int = 2) -> str:
     """
-    Thin wrapper around groq_client.chat.completions.create with automatic
-    retry on transient 5xx errors (Groq occasionally returns 500).
-    Returns the raw content string; raises on permanent failure.
+    Provider-dispatching LLM wrapper. Controlled by LLM_PROVIDER env var.
+
+    groq  (default) — uses GROQ_API_KEY
+    claude          — uses ANTHROPIC_API_KEY; pass a claude-* model name
+    openai          — uses OPENAI_API_KEY; pass a gpt-* model name
+
+    The function is named groq_chat for backwards compatibility — all callers
+    use this name. Switching providers requires only changing LLM_PROVIDER.
     """
+    if _LLM_PROVIDER == "claude":
+        return _claude_chat(model, messages, temperature, max_tokens, _retries)
+    if _LLM_PROVIDER == "openai":
+        return _openai_chat(model, messages, temperature, max_tokens, _retries)
+    return _groq_chat(model, messages, temperature, max_tokens, _retries)
+
+
+def _groq_chat(model: str, messages: list, temperature: float, max_tokens: int,
+               _retries: int) -> str:
     last_ex = None
     for attempt in range(_retries + 1):
         try:
@@ -77,8 +94,60 @@ def groq_chat(model: str, messages: list, temperature: float = 0, max_tokens: in
             last_ex = ex
             status = getattr(ex, "status_code", None)
             if attempt < _retries and status in (429, 500, 502, 503, 504):
-                wait = 2 ** attempt  # 1s, 2s
+                wait = 2 ** attempt
                 logger.warning(f"Groq {status} on attempt {attempt+1}, retrying in {wait}s: {ex}")
+                time.sleep(wait)
+            else:
+                break
+    raise last_ex
+
+
+def _claude_chat(model: str, messages: list, temperature: float, max_tokens: int,
+                 _retries: int) -> str:
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+    last_ex = None
+    for attempt in range(_retries + 1):
+        try:
+            r = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=messages,
+            )
+            return (r.content[0].text or "").strip()
+        except Exception as ex:
+            last_ex = ex
+            status = getattr(ex, "status_code", None)
+            if attempt < _retries and status in (429, 500, 502, 503, 529):
+                wait = 2 ** attempt
+                logger.warning(f"Claude {status} on attempt {attempt+1}, retrying in {wait}s: {ex}")
+                time.sleep(wait)
+            else:
+                break
+    raise last_ex
+
+
+def _openai_chat(model: str, messages: list, temperature: float, max_tokens: int,
+                 _retries: int) -> str:
+    import openai as _openai
+    client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+    last_ex = None
+    for attempt in range(_retries + 1):
+        try:
+            r = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return (r.choices[0].message.content or "").strip()
+        except Exception as ex:
+            last_ex = ex
+            status = getattr(ex, "status_code", None)
+            if attempt < _retries and status in (429, 500, 502, 503):
+                wait = 2 ** attempt
+                logger.warning(f"OpenAI {status} on attempt {attempt+1}, retrying in {wait}s: {ex}")
                 time.sleep(wait)
             else:
                 break

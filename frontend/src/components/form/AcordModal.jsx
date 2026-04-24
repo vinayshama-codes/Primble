@@ -19,6 +19,21 @@ const SQS_WEIGHTS = {
   umbrella_limit_adequacy: 10, narrative_quality: 10,
 };
 
+const PACKAGE_PILLAR_LABELS = {
+  data_integrity: "Data Integrity",
+  exposure_cope:  "Exposure & COPE",
+  consistency:    "Cross-Form Consistency",
+  loss_history:   "Loss History",
+  narrative:      "Narrative Quality",
+};
+
+const REC_TYPE_STYLE = {
+  hard_stop:    { bg: "#fef2f2", border: "#fca5a5", color: "#991b1b", icon: "🚫" },
+  soft_warning: { bg: "#fffbeb", border: "#fde68a", color: "#92400e", icon: "⚠️" },
+  missing_field:{ bg: "#eff6ff", border: "#bfdbfe", color: "#1d4ed8", icon: "📋" },
+  suggestion:   { bg: "#f0fdf4", border: "#bbf7d0", color: "#166534", icon: "💡" },
+};
+
 const FALLBACK_CHAT_REPLY = "I'm not sure about that. Please contact your agent or broker for assistance.";
 
 // ── Delete Confirm Modal ───────────────────────────────────────────────────
@@ -201,6 +216,86 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
   );
 }
 
+// ── Download Pre-flight Modal ──────────────────────────────────────────────
+function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrideChange, onProceed, onCancel, loading }) {
+  const hardRecs  = openRecs.filter(r => r.recommendation_type === "hard_stop");
+  const otherRecs = openRecs.filter(r => r.recommendation_type !== "hard_stop");
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: "28px 28px 24px", maxWidth: 520, width: "100%", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column", gap: 0, maxHeight: "88vh", overflow: "hidden" }}>
+        <div style={{ flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#fef3c7", border: "2px solid #fde68a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>⚠️</div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>Open Recommendations</div>
+              <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length} item{openRecs.length !== 1 ? "s" : ""} flagged — review before downloading</div>
+            </div>
+          </div>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
+          {hardRecs.length > 0 && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>🚫 Hard Stops ({hardRecs.length})</div>
+              {hardRecs.map((r, i) => (
+                <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0" }}>• {r.message}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (–{r.score_impact} pts)</span> : ""}</div>
+              ))}
+            </div>
+          )}
+          {otherRecs.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {otherRecs.map((r, i) => {
+                const st = REC_TYPE_STYLE[r.recommendation_type] || REC_TYPE_STYLE.suggestion;
+                return (
+                  <div key={i} style={{ background: st.bg, border: `1px solid ${st.border}`, borderRadius: 7, padding: "8px 10px", display: "flex", alignItems: "flex-start", gap: 8 }}>
+                    <span style={{ fontSize: 13, flexShrink: 0 }}>{st.icon}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: st.color, fontWeight: 600 }}>{r.message}</div>
+                      {r.score_impact > 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>+{r.score_impact} pts if resolved</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {narrative && (
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 14px", marginTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>SQS Analysis Summary</div>
+              <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap" }}>{narrative}</p>
+            </div>
+          )}
+        </div>
+        <div style={{ flexShrink: 0 }}>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 5 }}>
+              Override Reason <span style={{ color: "#94a3b8", fontWeight: 400 }}>(required for E&O record)</span>
+            </label>
+            <textarea
+              value={overrideReason}
+              onChange={e => onOverrideChange(e.target.value)}
+              placeholder="e.g. Client acknowledged gaps and approved submission as-is"
+              rows={2}
+              style={{ width: "100%", padding: "8px 10px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 12, resize: "vertical", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }}
+              onFocus={e => e.target.style.borderColor = "#e6007a"}
+              onBlur={e => e.target.style.borderColor = "#e2e8f0"}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={onCancel} style={{ flex: 1, padding: "9px 0", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              Cancel
+            </button>
+            <button
+              onClick={onProceed}
+              disabled={loading || !overrideReason.trim()}
+              style={{ flex: 2, padding: "9px 0", borderRadius: 8, border: "none", background: overrideReason.trim() && !loading ? "#e6007a" : "#e2e8f0", color: overrideReason.trim() && !loading ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 700, cursor: overrideReason.trim() && !loading ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              {loading ? <><span style={{ width: 11, height: 11, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Processing…</> : "Download Anyway"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Dashboard Step ─────────────────────────────────────────────────────────
 function DashboardStep({ token, onResume, onNewPackage }) {
   const [sessions, setSessions] = useState([]);
@@ -347,6 +442,17 @@ export default function AcordModal({
   const [liteSqsData, setLiteSqsData] = useState(null);
   const [liteCoverLoading, setLiteCoverLoading] = useState(false);
 
+  // ── SQS enhancement state ──────────────────────────────────────────────────
+  const [packageSqs, setPackageSqs] = useState(null);
+  const [dismissingRec, setDismissingRec] = useState(null); // rec_id being dismissed
+  const [dismissReason, setDismissReason] = useState("");
+  const [dismissedRecs, setDismissedRecs] = useState(new Set());
+  const [showDownloadPreflight, setShowDownloadPreflight] = useState(false);
+  const [preflightRecs, setPreflightRecs] = useState([]);
+  const [preflightOverrideReason, setPreflightOverrideReason] = useState("");
+  const [preflightCallback, setPreflightCallback] = useState(null);
+  const [sqsNarrative, setSqsNarrative] = useState("");
+
   useEffect(() => {
     if (step !== "lite" || !sessionId || !token) return;
     fetch(`${API_BASE}/api/lite/generate-internal/${sessionId}`, { method: "POST", headers: { Authorization: `Bearer ${token}` } })
@@ -416,6 +522,13 @@ export default function AcordModal({
     finally { setArqLoadingQ(false); }
   };
 
+  const _resetSqsState = () => {
+    setPackageSqs(null); setDismissingRec(null); setDismissReason("");
+    setDismissedRecs(new Set()); setShowDownloadPreflight(false);
+    setPreflightRecs([]); setPreflightOverrideReason(""); setPreflightCallback(null);
+    setSqsNarrative("");
+  };
+
   const resetToUpload = () => {
     setFiles([]); setSessionId(null); setStep("upload"); setError(null);
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]);
@@ -425,6 +538,7 @@ export default function AcordModal({
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
     setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0);
+    _resetSqsState();
   };
 
   const goToDashboard = () => {
@@ -436,6 +550,7 @@ export default function AcordModal({
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
     setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0);
+    _resetSqsState();
   };
 
   const handleResumeSession = sid => {
@@ -555,6 +670,7 @@ export default function AcordModal({
       }
       if (!data.success) { setError("Form generation failed"); return; }
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
+      if (data.package_sqs) setPackageSqs(data.package_sqs);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");
       const readyMap = {}; (data.form_ids || []).forEach(fid => { readyMap[fid] = false; }); setPdfLoading(readyMap);
     } catch (e) { setError("Generation failed: " + e.message); }
@@ -585,8 +701,53 @@ export default function AcordModal({
     <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite", marginRight: 4 }} />
   );
 
-  const handleDownloadOne = formId => gatedDownload(() => _doDownloadOne(formId));
-  const handleDownloadAll = () => gatedDownload(() => _doDownloadAll());
+  const handleDismissRec = async (rec, currentScore) => {
+    if (!dismissReason.trim()) return;
+    setDismissingRec(rec.rec_id);
+    try {
+      await fetch(`${API_BASE}/api/audit/dismiss`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ session_id: sessionId, rec_id: rec.rec_id, override_reason: dismissReason.trim(), sqs_score_at_action: currentScore ?? 0 }),
+      });
+      setDismissedRecs(prev => new Set([...prev, rec.rec_id]));
+    } catch (_) {}
+    setDismissingRec(null);
+    setDismissReason("");
+  };
+
+  const _runPreflightThenDownload = async (downloadFn) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/audit/open/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = res.ok ? await res.json() : null;
+      const openRecs = data?.open_recommendations || [];
+      if (openRecs.length === 0) { downloadFn(); return; }
+      setPreflightRecs(openRecs); setPreflightOverrideReason(""); setPreflightCallback(() => downloadFn);
+      // Fetch narrative for the modal
+      try {
+        const nr = await fetch(`${API_BASE}/api/sqs/narrative/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+        const nd = nr.ok ? await nr.json() : null;
+        if (nd?.narrative) setSqsNarrative(nd.narrative);
+      } catch (_) {}
+      setShowDownloadPreflight(true);
+    } catch (_) { downloadFn(); }
+  };
+
+  const handlePreflightProceed = async () => {
+    setLoading(true);
+    try {
+      await fetch(`${API_BASE}/api/audit/download-anyway`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ session_id: sessionId, override_reason: preflightOverrideReason.trim() }),
+      });
+    } catch (_) {}
+    setShowDownloadPreflight(false);
+    if (preflightCallback) preflightCallback();
+  };
+
+  const handleDownloadOne = formId => gatedDownload(() => _runPreflightThenDownload(() => _doDownloadOne(formId)));
+  const handleDownloadAll = () => gatedDownload(() => _runPreflightThenDownload(() => _doDownloadAll()));
 
   const handleLiteCoverSheet = async () => {
     setLiteCoverLoading(true);
@@ -616,6 +777,17 @@ export default function AcordModal({
       </div>
       {showAcordModal && renderAcordLicenseModal()}
       {showARQModal && <ARQModal sessionId={sessionId} token={token} questions={arqQuestions} onClose={() => setShowARQModal(false)} onSuccess={() => { setShowARQModal(false); refreshArqData(); }} />}
+      {showDownloadPreflight && (
+        <DownloadPreflightModal
+          openRecs={preflightRecs}
+          narrative={sqsNarrative}
+          overrideReason={preflightOverrideReason}
+          onOverrideChange={setPreflightOverrideReason}
+          onProceed={handlePreflightProceed}
+          onCancel={() => { setShowDownloadPreflight(false); setPreflightCallback(null); }}
+          loading={loading}
+        />
+      )}
     </div>
   );
 
@@ -963,6 +1135,8 @@ export default function AcordModal({
                 <>
                   <div style={{ height: 1, background: "#f1f5f9", margin: "0 14px" }} />
                   <div style={{ padding: "14px 14px 12px" }}>
+
+                    {/* ── Score header ── */}
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                       <div style={{ width: 36, height: 36, borderRadius: "50%", background: gradeColor(activeSqs.grade), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{activeSqs.grade}</div>
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -971,15 +1145,53 @@ export default function AcordModal({
                           <span style={{ fontSize: 11, color: "#94a3b8" }}>/100</span>
                           <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, color: "#fff", marginLeft: 4, background: { green: "#10b981", yellow: "#f59e0b", orange: "#f97316", red: "#ef4444" }[activeSqs.tier_color] || "#94a3b8" }}>{activeSqs.tier}</span>
                         </div>
-                        <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 1, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>SQS Score</div>
+                        <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 1, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>Form SQS Score</div>
                       </div>
                     </div>
+
+                    {/* ── Confidence fill rate ── */}
+                    {activeSqs.confidence_fill_rate != null && (
+                      <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 7, padding: "7px 10px", marginBottom: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>Quality Fill Rate</span>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            {activeSqs.fill_rate != null && activeSqs.fill_rate !== activeSqs.confidence_fill_rate && (
+                              <span style={{ fontSize: 10, color: "#94a3b8", textDecoration: "line-through" }}>{activeSqs.fill_rate}%</span>
+                            )}
+                            <span style={{ fontSize: 12, fontWeight: 800, color: barColor(activeSqs.confidence_fill_rate) }}>{activeSqs.confidence_fill_rate}%</span>
+                          </div>
+                        </div>
+                        <div style={{ height: 4, background: "#e2e8f0", borderRadius: 2, overflow: "hidden" }}>
+                          <div style={{ height: "100%", width: `${activeSqs.confidence_fill_rate}%`, background: barColor(activeSqs.confidence_fill_rate), borderRadius: 2, transition: "width 0.6s ease" }} />
+                        </div>
+                        <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 3 }}>Producer edits = 100% · AI high = 85% · AI low = 50%</div>
+                      </div>
+                    )}
+
+                    {/* ── Session delta ── */}
+                    {packageSqs && packageSqs.sqs_history?.length > 1 && (
+                      <div style={{ background: packageSqs.delta_this_session >= 0 ? "rgba(16,185,129,0.06)" : "rgba(239,68,68,0.06)", border: `1px solid ${packageSqs.delta_this_session >= 0 ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.2)"}`, borderRadius: 7, padding: "6px 10px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 14 }}>{packageSqs.delta_this_session >= 0 ? "📈" : "📉"}</span>
+                        <div>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: packageSqs.delta_this_session >= 0 ? "#059669" : "#dc2626" }}>
+                            {packageSqs.delta_this_session >= 0 ? "+" : ""}{packageSqs.delta_this_session} pts this session
+                          </span>
+                          <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                            Started at {packageSqs.sqs_history[0].score} → now {packageSqs.package_sqs_score}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Routing decision ── */}
                     {activeSqs.routing_decision && (
                       <div style={{ padding: "5px 9px", borderRadius: 7, fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, background: { auto_quote: "#dcfce7", review: "#fef9c3", full_review: "#ffedd5", hold: "#fee2e2" }[activeSqs.routing_decision] || "#f1f5f9", color: { auto_quote: "#166534", review: "#854d0e", full_review: "#9a3412", hold: "#991b1b" }[activeSqs.routing_decision] || "#374151", border: `1px solid ${{ auto_quote: "#86efac", review: "#fde047", full_review: "#fdba74", hold: "#fca5a5" }[activeSqs.routing_decision] || "#e2e8f0"}` }}>
                         {{ auto_quote: "✅ Auto-Route to Quoting", review: "🔍 Light Review", full_review: "📋 Full Underwriter Review", hold: "🚫 Hold — Remediation Required" }[activeSqs.routing_decision]}
                       </div>
                     )}
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: activeSqs.risk_drivers?.length || activeSqs.issues?.length || activeSqs.recommendations?.length ? 10 : 0 }}>
+
+                    {/* ── Per-form breakdown bars ── */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
                       {Object.entries(activeSqs.breakdown || {}).map(([key, val]) => (
                         <div key={key}>
                           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
@@ -992,6 +1204,42 @@ export default function AcordModal({
                         </div>
                       ))}
                     </div>
+
+                    {/* ── Package SQS panel ── */}
+                    {packageSqs && (
+                      <div style={{ background: "#fafafa", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Package SQS</div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            {packageSqs.lob && packageSqs.lob !== "generic" && (
+                              <span style={{ fontSize: 9, fontWeight: 700, background: "rgba(230,0,122,0.08)", color: "#e6007a", borderRadius: 20, padding: "1px 6px", textTransform: "capitalize" }}>{packageSqs.lob}</span>
+                            )}
+                            <span style={{ fontSize: 16, fontWeight: 800, color: gradeColor(packageSqs.package_sqs_score >= 90 ? "A" : packageSqs.package_sqs_score >= 80 ? "B" : packageSqs.package_sqs_score >= 70 ? "C" : packageSqs.package_sqs_score >= 60 ? "D" : "F") }}>{packageSqs.package_sqs_score}</span>
+                            <span style={{ fontSize: 9, color: "#94a3b8" }}>/100</span>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                          {Object.entries(packageSqs.pillars || {}).map(([key, val]) => (
+                            <div key={key}>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginBottom: 2 }}>
+                                <span style={{ color: "#64748b" }}>{PACKAGE_PILLAR_LABELS[key] || key}</span>
+                                <span style={{ fontWeight: 700, color: barColor(val) }}>{val}</span>
+                              </div>
+                              <div style={{ height: 3, background: "#e2e8f0", borderRadius: 2, overflow: "hidden" }}>
+                                <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 2 }} />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {packageSqs.tier && (
+                          <div style={{ marginTop: 8, padding: "3px 8px", borderRadius: 5, fontSize: 10, fontWeight: 700, textAlign: "center", background: { "Carrier-Ready": "#dcfce7", "Quote-Ready": "#fef9c3", "Review-Ready": "#ffedd5", "At-Risk": "#fee2e2", "Incomplete": "#f1f5f9" }[packageSqs.tier] || "#f1f5f9", color: { "Carrier-Ready": "#166534", "Quote-Ready": "#854d0e", "Review-Ready": "#9a3412", "At-Risk": "#991b1b", "Incomplete": "#64748b" }[packageSqs.tier] || "#374151" }}>
+                            {packageSqs.tier}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ── Risk drivers ── */}
                     {activeSqs.risk_drivers?.length > 0 && (
                       <div style={{ background: "#fafafa", borderRadius: 7, padding: "8px 10px", marginBottom: 8, border: "1px solid #f1f5f9" }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Top Risk Drivers</div>
@@ -1004,8 +1252,66 @@ export default function AcordModal({
                         ))}
                       </div>
                     )}
-                    {activeSqs.issues?.length > 0 && <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "7px 10px", marginBottom: 6 }}><div style={{ fontSize: 10, fontWeight: 700, color: "#b45309", marginBottom: 3 }}>⚠️ Issues</div>{activeSqs.issues.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#64748b", padding: "1px 0" }}>• {s}</div>)}</div>}
-                    {activeSqs.recommendations?.length > 0 && <div style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 7, padding: "7px 10px" }}><div style={{ fontSize: 10, fontWeight: 700, color: "#059669", marginBottom: 3 }}>💡 Remediation</div>{activeSqs.recommendations.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#64748b", padding: "1px 0" }}>• {s}</div>)}</div>}
+
+                    {/* ── Issues ── */}
+                    {activeSqs.issues?.length > 0 && (
+                      <div style={{ background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.2)", borderRadius: 7, padding: "7px 10px", marginBottom: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#b45309", marginBottom: 3 }}>⚠️ Issues</div>
+                        {activeSqs.issues.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#64748b", padding: "1px 0" }}>• {s}</div>)}
+                      </div>
+                    )}
+
+                    {/* ── Structured recommendations with score_impact + dismiss ── */}
+                    {activeSqs.recommendations?.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Recommendations</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          {activeSqs.recommendations
+                            .filter(r => !dismissedRecs.has(typeof r === "string" ? r : r.rec_id))
+                            .map((rec, i) => {
+                              const isObj = typeof rec === "object" && rec !== null;
+                              const msg = isObj ? rec.message : rec;
+                              const impact = isObj ? rec.score_impact : null;
+                              const recId = isObj ? rec.rec_id : `legacy_${i}`;
+                              const recType = isObj ? rec.type : "suggestion";
+                              const st = REC_TYPE_STYLE[recType] || REC_TYPE_STYLE.suggestion;
+                              const isDismissing = dismissingRec === recId;
+                              return (
+                                <div key={recId} style={{ background: st.bg, border: `1px solid ${st.border}`, borderRadius: 8, padding: "8px 10px" }}>
+                                  <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
+                                    <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{st.icon}</span>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{msg}</div>
+                                      {impact > 0 && (
+                                        <div style={{ fontSize: 10, color: "#10b981", fontWeight: 700, marginTop: 2 }}>+{impact} pts if fixed</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {isObj && (
+                                    <div style={{ marginTop: 7, display: "flex", gap: 5, alignItems: "center" }}>
+                                      <input
+                                        placeholder="Dismiss reason…"
+                                        value={dismissingRec === recId ? dismissReason : ""}
+                                        onFocus={() => setDismissingRec(recId)}
+                                        onChange={e => { setDismissingRec(recId); setDismissReason(e.target.value); }}
+                                        style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
+                                        onKeyDown={e => { if (e.key === "Enter" && dismissReason.trim()) handleDismissRec(rec, activeSqs.sqs_score); }}
+                                      />
+                                      <button
+                                        onClick={() => handleDismissRec(rec, activeSqs.sqs_score)}
+                                        disabled={isDismissing || (dismissingRec === recId && !dismissReason.trim())}
+                                        style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, color: "#64748b", cursor: "pointer", whiteSpace: "nowrap", opacity: (dismissingRec === recId && !dismissReason.trim()) ? 0.5 : 1 }}>
+                                        {isDismissing ? "…" : "Dismiss"}
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
+
                   </div>
                 </>
               )}

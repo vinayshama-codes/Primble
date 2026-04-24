@@ -1,0 +1,120 @@
+CURRENT SYSTEM ARCHITECTURE : 
+
+<root>
+├── .claude/
+│    └── settings.local.json → Claude Code config
+├── ACORD Forms Decision Tree Only.docx → Decision tree doc
+├── .gitignore → Git ignore rules
+│
+├── backend/
+│    ├── config/
+│    │    ├── __init__.py
+│    │    ├── database.py → Database configuration
+│    │    └── settings.py → App settings
+│    ├── models/
+│    │    ├── __init__.py
+│    │    └── schemas.py → Pydantic data models
+│    ├── repositories/
+│    │    ├── __init__.py
+│    │    ├── audit_repository.py → Audit log repo
+│    │    ├── session_repository.py → Session management repo
+│    │    └── user_repository.py → User data repo
+│    ├── routes/
+│    │    ├── __init__.py
+│    │    ├── arq_routes.py → ARQ form endpoints
+│    │    ├── auth_routes.py → Authentication endpoints
+│    │    ├── dev_routes.py → Dev/debug routes
+│    │    ├── download_routes.py → File download endpoints
+│    │    ├── form_routes.py → Form submission endpoints
+│    │    ├── signature_routes.py → Signature endpoints
+│    │    └── stripe_routes.py → Stripe payment endpoints
+│    ├── services/
+│    │    ├── __init__.py
+│    │    ├── arq_service.py → ARQ form service
+│    │    ├── auth_service.py → Auth logic
+│    │    ├── cover_service.py → Cover sheet service
+│    │    ├── email_service.py → Email sending
+│    │    ├── extraction_service.py → Data extraction
+│    │    ├── fact_registry.py → Fact storage/lookup
+│    │    ├── form_service.py → Form processing
+│    │    ├── ocr_service.py → OCR processing
+│    │    ├── pdf_service.py → PDF generation/manipulation
+│    │    ├── pipeline_router.py → Processing pipeline router
+│    │    ├── scheduler_service.py → Job scheduling
+│    │    ├── sqs_service.py → AWS SQS integration
+│    │    └── stripe_service.py → Stripe integration
+│    ├── scripts/
+│    │    └── generate_fieldmaps.py → Generate form fieldmaps
+│    ├── utils/
+│    │    ├── __init__.py
+│    │    ├── helpers.py → Utility helpers
+│    │    └── validators.py → Data validation
+│    ├── forms_database/ → ACORD form schemas
+│    ├── forms_schemas/ → Pre-cached form schemas
+│    ├── templates/ → PDF template files
+│    ├── storage/ → File storage (uploads/generated)
+│    ├── tmp/ → Temporary processing files
+│    ├── venv/ → Python virtual environment
+│    ├── .env → Environment variables
+│    ├── .pytest_cache/ → Test cache
+│    ├── main.py → FastAPI app entry point
+│    ├── create_tables.py → DB initialization
+│    ├── migrate.py → DB migrations
+│    ├── requirements.txt → Python dependencies
+│    ├── test_q2.py → Test file
+│    └── sqlite3.exe → SQLite CLI
+│
+└── frontend/
+     ├── src/
+     │    ├── api/
+     │    │    ├── arqApi.js → ARQ API client
+     │    │    ├── authApi.js → Auth API client
+     │    │    ├── formApi.js → Form API client
+     │    │    └── stripeApi.js → Stripe API client
+     │    ├── components/
+     │    │    ├── arq/
+     │    │    │    ├── ARQModal.jsx
+     │    │    │    ├── ARQStatusPanel.jsx
+     │    │    │    └── ClientQuestionnaire.jsx
+     │    │    ├── auth/
+     │    │    │    ├── AuthModal.jsx
+     │    │    │    └── CompleteProfileModal.jsx
+     │    │    ├── billing/
+     │    │    │    ├── PlanModal.jsx
+     │    │    │    └── UpgradeModal.jsx
+     │    │    ├── form/
+     │    │    │    ├── AcordModal.jsx
+     │    │    │    └── PDFJsViewer.jsx
+     │    │    ├── layout/
+     │    │    │    ├── Header.jsx
+     │    │    │    └── LandingPage.jsx
+     │    │    ├── overlays/
+     │    │    │    ├── ProcessStageOverlay.jsx
+     │    │    │    ├── SaveStageOverlay.jsx
+     │    │    │    └── UpgradeStageOverlay.jsx
+     │    │    └── signature/
+     │    │         ├── NoSignaturePrompt.jsx
+     │    │         ├── SignatureModal.jsx
+     │    │         └── UseSignaturePrompt.jsx
+     │    ├── config/
+     │    │    └── constants.js → App constants
+     │    ├── hooks/
+     │    │    ├── useAuth.js → Auth state hook
+     │    │    ├── useSignature.js → Signature hook
+     │    │    └── useUpgradePolling.js → Plan upgrade polling
+     │    ├── styles/
+     │    │    └── injected.js → Injected CSS/styles
+     │    ├── utils/
+     │    │    └── formatters.js → Data formatters
+     │    ├── assets/ → React logo, etc.
+     │    ├── index.css → Global styles
+     │    └── App.jsx → Main app component
+     ├── public/ → Static files (favicon)
+     ├── vite.config.js → Vite build config
+     ├── index.html → HTML entry point
+     ├── eslint.config.js → ESLint rules
+     ├── README.md → Frontend readme
+     ├── .gitignore → Git ignore for frontend
+     ├── package.json → JS dependencies
+     ├── node_modules/ → JS packages
+     └── *.webp → Feature images

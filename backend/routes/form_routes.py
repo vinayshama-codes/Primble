@@ -25,7 +25,12 @@ from services.pdf_service import (
 )
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
-    check_doc_consistency,
+    check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION,
+)
+from services.audit_service import (
+    log_recommendations_presented,
+    log_field_change,
+    mark_recommendation_resolved,
 )
 
 router = APIRouter(tags=["forms"])
@@ -215,7 +220,42 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                          "sqs": r["sqs"], "fields_mapped": sum(1 for v in r["mapped"].values() if v is not None),
                          "schema_size": len(r["schema"])}
 
-    return JSONResponse({"success": True, "generated": summary, "form_ids": combined_ids, "cross_issues": cross_issues_deduped})
+    # Package-level SQS across all generated forms
+    sqs_results_list = [r["sqs"] for r in results.values() if r.get("sqs")]
+    package_sqs = calculate_package_sqs(
+        facts=session["facts"],
+        flags=session["flags"],
+        form_results=sqs_results_list,
+        cross_issues=cross_issues_deduped,
+        hard_stops=session.get("hard_stops", []),
+        soft_stops=session.get("soft_stops", []),
+        session_data=session,
+        session_id=req.session_id,
+        user_id=str(current_user["id"]),
+        calculation_stage="form_generated",
+    )
+
+    # Log all per-form recommendations for E&O audit trail
+    for fid, r in results.items():
+        sqs_data = r.get("sqs")
+        if sqs_data and sqs_data.get("recommendations"):
+            try:
+                log_recommendations_presented(
+                    session_id=req.session_id,
+                    user_id=str(current_user["id"]),
+                    sqs_result=sqs_data,
+                    model_version=SQS_MODEL_VERSION,
+                )
+            except Exception as _audit_ex:
+                logger.warning(f"Audit log failed for {fid}: {_audit_ex}")
+
+    return JSONResponse({
+        "success": True,
+        "generated": summary,
+        "form_ids": combined_ids,
+        "cross_issues": cross_issues_deduped,
+        "package_sqs": package_sqs,
+    })
 
 
 @router.post("/api/select-form")
@@ -386,6 +426,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
     r             = generated[form_id]
     current_state = r.get("field_state", dict(r.get("mapped", {})))
+    prev_state    = dict(current_state)   # snapshot before mutation for audit diff
     current_state.update(req.field_updates)
     confidence = r.get("confidence", {})
     for k, v in req.field_updates.items():
@@ -430,6 +471,51 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                     logger.error(f"update_pdf: signature re-injection failed: {ex}")
 
     cache_hash = hashlib.md5(new_pdf_bytes).hexdigest() if new_pdf_bytes else None
+
+    # ── Audit: log only fields whose value actually changed ──────────────────
+    for field_name, new_val in req.field_updates.items():
+        prev_val = prev_state.get(field_name)
+        new_str  = str(new_val).strip() if new_val is not None else ""
+        prev_str = str(prev_val).strip() if prev_val is not None else ""
+        if new_str == prev_str:
+            continue  # value unchanged — skip, do not log
+        try:
+            log_field_change(
+                session_id=req.session_id,
+                user_id=str(current_user["id"]),
+                form_id=form_id,
+                field_name=field_name,
+                fact_key=field_name,
+                source="producer",
+                previous_value=prev_str or None,
+                new_value=new_str,
+                confidence="filled" if new_str else None,
+                model_version=SQS_MODEL_VERSION,
+            )
+        except Exception as _fe:
+            logger.warning(f"field_source_audit log failed for {field_name}: {_fe}")
+
+    # ── Audit: auto-resolve recs whose field was just filled ─────────────────
+    # Compare old rec_ids vs new rec_ids — any that disappeared were fixed.
+    old_rec_ids = {
+        r2.get("rec_id") for r2 in (r.get("sqs") or {}).get("recommendations", [])
+        if isinstance(r2, dict) and r2.get("rec_id")
+    }
+    new_rec_ids = {
+        r2.get("rec_id") for r2 in sqs.get("recommendations", [])
+        if isinstance(r2, dict) and r2.get("rec_id")
+    }
+    for resolved_rec_id in old_rec_ids - new_rec_ids:
+        try:
+            mark_recommendation_resolved(
+                session_id=req.session_id,
+                rec_id=resolved_rec_id,
+                sqs_score_at_action=sqs.get("sqs_score") or 0,
+                model_version=SQS_MODEL_VERSION,
+            )
+        except Exception as _re:
+            logger.warning(f"mark_recommendation_resolved failed for {resolved_rec_id}: {_re}")
+
     generated[form_id].update({
         "field_state": current_state, "confidence": confidence, "sqs": sqs,
         "_pdf_cache_hash": cache_hash, "pdf_bytes": new_pdf_bytes, "signature_applied": new_sig_applied,

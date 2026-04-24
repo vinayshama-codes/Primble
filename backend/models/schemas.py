@@ -1,6 +1,62 @@
 from pydantic import BaseModel, EmailStr
 from typing import Dict, List, Optional
 
+# ── Audit table DDL — PostgreSQL / Supabase (imported by database.py) ────────
+# Each entry is a single statement (psycopg2 does not support multi-statement
+# strings; execute each one individually).
+
+SQS_RECOMMENDATION_AUDIT_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS sqs_recommendation_audit (
+        id                        TEXT PRIMARY KEY,
+        session_id                TEXT NOT NULL,
+        user_id                   TEXT NOT NULL,
+        form_id                   TEXT,
+        rec_id                    TEXT NOT NULL,
+        field                     TEXT,
+        recommendation_type       TEXT CHECK(recommendation_type IN
+                                      ('hard_stop','soft_warning','missing_field','suggestion')),
+        component                 TEXT,
+        message                   TEXT NOT NULL,
+        score_impact              INTEGER,
+        presented_at              TEXT NOT NULL,
+        action                    TEXT CHECK(action IN
+                                      ('resolved','dismissed','downloaded_anyway')),
+        action_at                 TEXT,
+        sqs_score_at_presentation INTEGER,
+        sqs_score_at_action       INTEGER,
+        override_reason           TEXT,
+        model_version             TEXT NOT NULL,
+        UNIQUE(session_id, rec_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_sqs_rec_session ON sqs_recommendation_audit(session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sqs_rec_user    ON sqs_recommendation_audit(user_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sqs_rec_action  ON sqs_recommendation_audit(action)",
+]
+
+FIELD_SOURCE_AUDIT_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS field_source_audit (
+        id             TEXT PRIMARY KEY,
+        session_id     TEXT NOT NULL,
+        user_id        TEXT NOT NULL,
+        form_id        TEXT,
+        field_name     TEXT NOT NULL,
+        fact_key       TEXT,
+        source         TEXT NOT NULL CHECK(source IN ('ai','producer','client_arq')),
+        previous_value TEXT,
+        new_value      TEXT,
+        confidence     TEXT CHECK(confidence IN ('deterministic','filled','ai_high','ai_low')),
+        changed_at     TEXT NOT NULL,
+        model_version  TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_field_audit_session ON field_source_audit(session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_field_audit_field   ON field_source_audit(field_name)",
+    "CREATE INDEX IF NOT EXISTS idx_field_audit_source  ON field_source_audit(source)",
+]
+
 
 class SignupRequest(BaseModel):
     email: EmailStr
@@ -84,3 +140,37 @@ class SaveSignatureRequest(BaseModel):
 class CompleteProfileRequest(BaseModel):
     organization_name: str
     acord_disclaimer_accepted: bool = False
+
+
+# ── Audit API request / response models ───────────────────────────────────────
+
+class DismissRecommendationRequest(BaseModel):
+    session_id: str
+    rec_id: str
+    override_reason: str
+    sqs_score_at_action: int
+
+
+class ResolveRecommendationRequest(BaseModel):
+    session_id: str
+    rec_id: str
+    sqs_score_at_action: int
+
+
+class DownloadAnywayRequest(BaseModel):
+    session_id: str
+    override_reason: Optional[str] = None
+
+
+class OpenRecommendationItem(BaseModel):
+    rec_id: str
+    field: Optional[str]
+    recommendation_type: Optional[str]
+    message: str
+    score_impact: Optional[int]
+
+
+class AuditSummaryResponse(BaseModel):
+    session_id: str
+    recommendations: Dict
+    field_changes: Dict

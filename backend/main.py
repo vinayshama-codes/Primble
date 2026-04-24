@@ -11,6 +11,7 @@ from routes.stripe_routes import router as stripe_router
 from routes.signature_routes import router as signature_router
 from routes.dev_routes import router as dev_router
 from routes.arq_routes import router as arq_router
+from routes.audit_routes import router as audit_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
@@ -38,11 +39,17 @@ app.include_router(stripe_router)
 app.include_router(signature_router)
 app.include_router(dev_router)
 app.include_router(arq_router)
+app.include_router(audit_router)
 
 
 @app.on_event("startup")
 async def startup():
     start_scheduler()
+    try:
+        from services.audit_service import init_audit_tables
+        init_audit_tables()
+    except Exception as _e:
+        logger.warning(f"Audit table init failed (non-fatal): {_e}")
 
 
 @app.on_event("shutdown")
