@@ -35,6 +35,21 @@ SQS_RECOMMENDATION_AUDIT_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_sqs_rec_action  ON sqs_recommendation_audit(action)",
 ]
 
+DOWNLOAD_AUDIT_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS download_audit (
+        id              TEXT PRIMARY KEY,
+        session_id      TEXT NOT NULL,
+        user_id         TEXT,
+        override_note   TEXT,
+        open_rec_count  INTEGER DEFAULT 0,
+        downloaded_at   TEXT NOT NULL,
+        model_version   TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_download_audit_session ON download_audit(session_id)",
+]
+
 FIELD_SOURCE_AUDIT_STATEMENTS = [
     """
     CREATE TABLE IF NOT EXISTS field_source_audit (
@@ -149,6 +164,11 @@ class DismissRecommendationRequest(BaseModel):
     rec_id: str
     override_reason: str
     sqs_score_at_action: int
+    message: Optional[str] = None
+    field: Optional[str] = None
+    component: Optional[str] = None
+    score_impact: Optional[int] = None
+    form_id: Optional[str] = None
 
 
 class ResolveRecommendationRequest(BaseModel):

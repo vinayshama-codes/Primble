@@ -14,6 +14,7 @@ export default function PDFJsViewer({
   savedSignature, isSigned, onSignApplied, onOpenSignatureModal,
   clientFilledFields = [],
   onRefreshFields,
+  onSqsUpdate,
 }) {
   const canvasRef              = useRef(null);
   const containerRef           = useRef(null);
@@ -395,9 +396,11 @@ export default function PDFJsViewer({
             body: JSON.stringify({ session_id: sessionId, field_updates: { ...allValues, __form_id__: formId, __signed__: isSignedLocal ? "1" : "0", __cleared_sig_fields__: JSON.stringify(clearedSigFields) } }),
           });
           if (res.ok) {
+            const data = await res.json();
             setFieldValues({ ...allValues }); originalFieldValuesRef.current = { ...allValues }; clearedSigFieldsRef.current = new Set();
             const allSigF = fieldsRef.current.filter(f => _isSigField(f.name)).map(f => f.name);
             if (allSigF.length > 0 && allSigF.every(n => clearedSigFields.includes(n))) setIsSignedLocal(false);
+            if (data?.sqs && onSqsUpdate) onSqsUpdate(formId, data.sqs);
             setSaveStatus("generating");
             _loadPdfInBackground(allValues);
           } else { setSaveStatus("error"); }

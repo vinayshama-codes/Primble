@@ -17,6 +17,7 @@ from services.auth_service import get_current_user, validate_token_from_request
 from services.extraction_service import extract_facts_long, identify_doc_type, merge_facts, select_primary_truth
 from services.form_service import (
     filter_available_forms, load_all_forms, match_forms, process_single_form,
+    score_extra_forms,
 )
 from services.ocr_service import extract_text, extract_zip
 from services.pdf_service import (
@@ -125,6 +126,11 @@ async def upload_declaration(
         combined_ocr_text          = " ".join(d.get("text", "") for d in processed_docs)
         recommendations            = match_forms(merged_facts, mflags, available_forms, text=combined_ocr_text)
 
+        # Score every non-triggered form against the extracted facts so the
+        # "Add more ACORD forms" section also shows a live coverage percentage.
+        triggered_ids              = {r["form_id"] for r in recommendations}
+        extra_forms_scored         = score_extra_forms(merged_facts, triggered_ids, available_forms)
+
         # Deduplicate across all files, preserve insertion order
         unique_low_conf = list(dict.fromkeys(all_low_conf))
 
@@ -156,8 +162,9 @@ async def upload_declaration(
             "recommendations": recommendations,
             "low_confidence_tokens": unique_low_conf,
             "truncation_warnings": truncation_warnings,
-            "all_available_forms": [{"form_id": f["form_id"], "form_name": f["form_name"],
-                                      "description": f.get("description","")} for f in available_forms],
+            # extra_forms_scored carries live confidence + reason + fields_filled/total
+            # for every available form that was NOT in the triggered recommendations.
+            "all_available_forms": extra_forms_scored,
         })
     except Exception as ex:
         logger.error(f"Upload error: {ex}")
@@ -222,18 +229,23 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
 
     # Package-level SQS across all generated forms
     sqs_results_list = [r["sqs"] for r in results.values() if r.get("sqs")]
-    package_sqs = calculate_package_sqs(
-        facts=session["facts"],
-        flags=session["flags"],
-        form_results=sqs_results_list,
-        cross_issues=cross_issues_deduped,
-        hard_stops=session.get("hard_stops", []),
-        soft_stops=session.get("soft_stops", []),
-        session_data=session,
-        session_id=req.session_id,
-        user_id=str(current_user["id"]),
-        calculation_stage="form_generated",
-    )
+    try:
+        package_sqs = calculate_package_sqs(
+            facts=session["facts"],
+            flags=session["flags"],
+            form_results=sqs_results_list,
+            cross_issues=cross_issues_deduped,
+            hard_stops=session.get("hard_stops", []),
+            soft_stops=session.get("soft_stops", []),
+            session_data=session,
+            session_id=req.session_id,
+            user_id=str(current_user["id"]),
+            calculation_stage="form_generated",
+        )
+        logger.info(f"package_sqs calculated: score={package_sqs.get('package_sqs_score')}, tier={package_sqs.get('tier')}")
+    except Exception as _pkg_ex:
+        logger.error(f"calculate_package_sqs failed: {_pkg_ex}", exc_info=True)
+        package_sqs = None
 
     # Log all per-form recommendations for E&O audit trail
     for fid, r in results.items():
@@ -437,8 +449,18 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         elif confidence.get(k) == "filled":
             confidence[k] = "low_confidence"
 
+    # Sync edited PDF field values back into facts so SQS components reflect edits
+    from services.pdf_service import _ACORD_FIELD_RULES
+    updated_facts = dict(session["facts"])
+    for pdf_field, new_val in req.field_updates.items():
+        val_str = str(new_val).strip() if new_val is not None else ""
+        for pattern, fact_key in _ACORD_FIELD_RULES:
+            if fact_key and not fact_key.startswith("_") and pattern in pdf_field:
+                updated_facts[fact_key] = val_str if val_str not in ("", "null", "None") else None
+                break
+
     sqs = calculate_sqs(
-        facts=session["facts"], flags=session["flags"],
+        facts=updated_facts, flags=session["flags"],
         mapped_data=current_state, form_schema=r.get("schema", {}),
         selected_form_ids=session.get("selected_form_ids", []),
         hard_stops=session.get("hard_stops", []), soft_stops=session.get("soft_stops", []),
@@ -520,7 +542,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         "field_state": current_state, "confidence": confidence, "sqs": sqs,
         "_pdf_cache_hash": cache_hash, "pdf_bytes": new_pdf_bytes, "signature_applied": new_sig_applied,
     })
-    upd_processing_session(req.session_id, {"generated_forms": generated})
+    upd_processing_session(req.session_id, {"generated_forms": generated, "facts": updated_facts})
     return JSONResponse({"success": True, "sqs": sqs})
 
 

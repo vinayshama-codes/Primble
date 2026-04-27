@@ -1370,30 +1370,29 @@ def _deterministic_reconcile(field: str, candidates: Dict[str, dict]) -> Optiona
     if field == "applicant_name":
         scored = sorted(
             candidates.items(),
-            key=lambda x: _name_quality_score(x[1]["original"]),
+            key=lambda x: _name_quality_score(x[0]),
             reverse=True,
         )
-        best_val,  best_data  = scored[0]
+        best_val, _ = scored[0]
         if len(scored) > 1:
             second_val, _ = scored[1]
-            gap = (_name_quality_score(best_data["original"])
-                   - _name_quality_score(candidates[second_val]["original"]))
+            gap = _name_quality_score(best_val) - _name_quality_score(second_val)
             if gap >= 0.3:
                 logger.info(
-                    f"reconciliation deterministic: applicant_name → {best_data['original']!r} "
+                    f"reconciliation deterministic: applicant_name → {best_val!r} "
                     f"(quality gap={gap:.2f})"
                 )
-                return best_data["original"]
+                return best_val
         # No clear quality winner — fall through to LLM
         return None
 
     if field in ("effective_date", "expiration_date", "fein", "policy_number"):
         if len(by_freq) >= 2 and by_freq[0][1]["frequency"] > by_freq[1][1]["frequency"]:
             logger.info(
-                f"reconciliation deterministic: {field} → {top_data['original']!r} "
+                f"reconciliation deterministic: {field} → {top_val!r} "
                 f"(freq={top_data['frequency']})"
             )
-            return top_data["original"]
+            return top_val
         return None  # tie → LLM
 
     return None  # unknown field → LLM

@@ -1014,7 +1014,16 @@ def calculate_sqs(
     breakdown["structural_completeness"] = struct
 
     # ── Exposure consistency ──────────────────────────────────────────────────
-    if fid == "ACORD_125":
+    if is_cert_only:
+        chks = [
+            bool(_fv(facts, "gl_limits") or _fv(facts, "gl_aggregate") or _fv(facts, "gl_each_occurrence")),
+            bool(_fv(facts, "policy_number")),
+            bool(_fv(facts, "effective_date") and _fv(facts, "expiration_date")),
+            bool(_fv(facts, "applicant_name") or _fv(facts, "certificate_holder")),
+        ]
+        exp_score = int(sum(chks) / len(chks) * 100)
+
+    elif fid == "ACORD_125":
         chks = [
             bool(_fv(facts, "total_revenue") or _fv(facts, "total_payroll")),
             bool(_fv(facts, "operations_description")),
@@ -1285,27 +1294,13 @@ def generate_sqs_narrative(
         score = sqs_result.get("sqs_score") or sqs_result.get("package_sqs_score")
         tier = sqs_result.get("tier")
         
-        prompt = f"""You are explaining submission quality to an insurance broker.
+        prompt = f"""Summarize this insurance submission quality in one concise paragraph (60-80 words). Be direct and professional.
 
-SQS Score: {score}/100 ({tier})
-Session Delta: {'+' if delta_this_session >= 0 else ''}{delta_this_session} points
+Score: {score}/100 ({tier}) | Change this session: {'+' if delta_this_session >= 0 else ''}{delta_this_session} pts
+Top risk drivers: {', '.join(str(r) for r in risk_drivers[:3]) if risk_drivers else 'none'}
+Resolved: {', '.join(resolved_recs) if resolved_recs else 'none'} | Ignored: {', '.join(ignored_recs) if ignored_recs else 'none'}
 
-Component Breakdown:
-{json.dumps(breakdown, indent=2)}
-
-Top Risk Drivers:
-{json.dumps(risk_drivers, indent=2)}
-
-Actions Taken This Session:
-- Resolved: {', '.join(resolved_recs) if resolved_recs else 'None'}
-- Ignored: {', '.join(ignored_recs) if ignored_recs else 'None'}
-
-Write a 3-paragraph narrative (150-250 words):
-1. Overall quality assessment and tier explanation
-2. What improved this session and what still needs work
-3. Next best action to increase score
-
-Use professional insurance language. Be direct and actionable."""
+One paragraph only. State the score tier, the main gap, and the single most impactful next action."""
 
         raw = groq_chat(
             "llama-3.3-70b-versatile",

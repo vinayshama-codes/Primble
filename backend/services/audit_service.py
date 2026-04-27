@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from config.database import get_db
-from models.schemas import SQS_RECOMMENDATION_AUDIT_STATEMENTS, FIELD_SOURCE_AUDIT_STATEMENTS
+from models.schemas import SQS_RECOMMENDATION_AUDIT_STATEMENTS, FIELD_SOURCE_AUDIT_STATEMENTS, DOWNLOAD_AUDIT_STATEMENTS
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ def init_audit_tables() -> None:
     conn = get_db()
     cur  = conn.cursor()
     try:
-        for stmt in SQS_RECOMMENDATION_AUDIT_STATEMENTS + FIELD_SOURCE_AUDIT_STATEMENTS:
+        for stmt in SQS_RECOMMENDATION_AUDIT_STATEMENTS + FIELD_SOURCE_AUDIT_STATEMENTS + DOWNLOAD_AUDIT_STATEMENTS:
             try:
                 cur.execute(stmt)
                 conn.commit()
@@ -160,31 +160,42 @@ def log_download_with_open_recs(
     session_id: str,
     override_reason: Optional[str],
     model_version: str,
+    user_id: Optional[str] = None,
 ) -> int:
     """
-    Bulk-stamp all open (action IS NULL) recommendations as 'downloaded_anyway'.
-    Called when the user proceeds through the download pre-flight gate.
-    Returns count of rows updated.
+    1. Stamps all still-open recs as 'downloaded_anyway' (no override_reason — that lives in download_audit).
+    2. Inserts one row into download_audit with the override note as its own record.
+    Returns count of rec rows stamped.
     """
+    now  = datetime.now(timezone.utc).isoformat()
     conn = get_db()
     cur  = conn.cursor()
     try:
+        # Stamp open recs — no override_reason written here
         cur.execute(
             """
             UPDATE sqs_recommendation_audit
-            SET action          = 'downloaded_anyway',
-                action_at       = %s,
-                override_reason = %s
+            SET action    = 'downloaded_anyway',
+                action_at = %s
             WHERE session_id = %s AND action IS NULL
             """,
-            (datetime.now(timezone.utc).isoformat(), override_reason, session_id),
+            (now, session_id),
         )
         count = cur.rowcount
+
+        # Write the override note to its own table
+        cur.execute(
+            """
+            INSERT INTO download_audit (id, session_id, user_id, override_note, open_rec_count, downloaded_at, model_version)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (f"dl_{uuid.uuid4().hex}", session_id, user_id, override_reason or "", count, now, model_version),
+        )
         conn.commit()
-        logger.info(f"Logged downloaded_anyway for {count} open recs (session {session_id})")
+        logger.info(f"Logged download for session {session_id}: {count} open recs stamped, override note saved")
         return count
     except Exception as ex:
-        logger.error(f"Failed to log download_anyway: {ex}")
+        logger.error(f"Failed to log download: {ex}")
         conn.rollback()
         return 0
     finally:
@@ -197,26 +208,42 @@ def mark_recommendation_resolved(
     rec_id: str,
     sqs_score_at_action: int,
     model_version: str,
+    user_id: Optional[str] = None,
+    form_id: Optional[str] = None,
 ) -> bool:
-    """Mark a recommendation as resolved when the producer fixes the flagged field."""
+    """Mark a recommendation as resolved. Upserts the row if it was never logged."""
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_db()
     cur  = conn.cursor()
     try:
         cur.execute(
             """
-            UPDATE sqs_recommendation_audit
-            SET action              = 'resolved',
-                action_at           = %s,
-                sqs_score_at_action = %s
-            WHERE session_id = %s AND rec_id = %s AND action IS NULL
+            INSERT INTO sqs_recommendation_audit (
+                id, session_id, user_id, form_id, rec_id, field,
+                recommendation_type, component, message, score_impact,
+                presented_at, sqs_score_at_presentation, model_version,
+                action, action_at, sqs_score_at_action
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (session_id, rec_id) DO UPDATE
+                SET action              = 'resolved',
+                    action_at           = EXCLUDED.action_at,
+                    sqs_score_at_action = EXCLUDED.sqs_score_at_action
+                WHERE sqs_recommendation_audit.action IS NULL
             """,
-            (datetime.now(timezone.utc).isoformat(), sqs_score_at_action, session_id, rec_id),
+            (
+                f"audit_{uuid.uuid4().hex}",
+                session_id,
+                user_id,
+                form_id,
+                rec_id,
+                None, "suggestion", None, None, None,
+                now, sqs_score_at_action, model_version,
+                "resolved", now, sqs_score_at_action,
+            ),
         )
-        success = cur.rowcount > 0
         conn.commit()
-        if success:
-            logger.info(f"Marked rec {rec_id} resolved (session {session_id})")
-        return success
+        logger.info(f"Marked rec {rec_id} resolved (session {session_id})")
+        return True
     except Exception as ex:
         logger.error(f"Failed to resolve recommendation: {ex}")
         conn.rollback()
@@ -232,33 +259,56 @@ def mark_recommendation_dismissed(
     override_reason: str,
     sqs_score_at_action: int,
     model_version: str,
+    message: Optional[str] = None,
+    field: Optional[str] = None,
+    component: Optional[str] = None,
+    score_impact: Optional[int] = None,
+    user_id: Optional[str] = None,
+    form_id: Optional[str] = None,
 ) -> bool:
-    """Mark a recommendation as dismissed with a required override reason."""
+    """Mark a recommendation as dismissed. Upserts the row if it was never logged."""
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_db()
     cur  = conn.cursor()
     try:
         cur.execute(
             """
-            UPDATE sqs_recommendation_audit
-            SET action              = 'dismissed',
-                action_at           = %s,
-                sqs_score_at_action = %s,
-                override_reason     = %s
-            WHERE session_id = %s AND rec_id = %s AND action IS NULL
+            INSERT INTO sqs_recommendation_audit (
+                id, session_id, user_id, form_id, rec_id, field,
+                recommendation_type, component, message, score_impact,
+                presented_at, sqs_score_at_presentation, model_version,
+                action, action_at, sqs_score_at_action, override_reason
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (session_id, rec_id) DO UPDATE
+                SET action              = 'dismissed',
+                    action_at           = EXCLUDED.action_at,
+                    sqs_score_at_action = EXCLUDED.sqs_score_at_action,
+                    override_reason     = EXCLUDED.override_reason
+                WHERE sqs_recommendation_audit.action IS NULL
             """,
             (
-                datetime.now(timezone.utc).isoformat(),
+                f"audit_{uuid.uuid4().hex}",
+                session_id,
+                user_id,
+                form_id,
+                rec_id,
+                field,
+                "suggestion",
+                component,
+                message,
+                score_impact,
+                now,
+                sqs_score_at_action,
+                model_version,
+                "dismissed",
+                now,
                 sqs_score_at_action,
                 override_reason,
-                session_id,
-                rec_id,
             ),
         )
-        success = cur.rowcount > 0
         conn.commit()
-        if success:
-            logger.info(f"Marked rec {rec_id} dismissed (session {session_id})")
-        return success
+        logger.info(f"Marked rec {rec_id} dismissed (session {session_id})")
+        return True
     except Exception as ex:
         logger.error(f"Failed to dismiss recommendation: {ex}")
         conn.rollback()

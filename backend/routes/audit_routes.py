@@ -33,6 +33,12 @@ async def dismiss_recommendation(
         override_reason=req.override_reason,
         sqs_score_at_action=req.sqs_score_at_action,
         model_version=SQS_MODEL_VERSION,
+        message=req.message,
+        field=req.field,
+        component=req.component,
+        score_impact=req.score_impact,
+        user_id=str(current_user["id"]),
+        form_id=req.form_id,
     )
     return JSONResponse({"success": success})
 
@@ -69,6 +75,7 @@ async def download_anyway(
         session_id=req.session_id,
         override_reason=req.override_reason,
         model_version=SQS_MODEL_VERSION,
+        user_id=str(current_user["id"]),
     )
     return JSONResponse({"success": True, "logged_count": count})
 

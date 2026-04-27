@@ -216,19 +216,68 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
   );
 }
 
+// ── Side panel recommendation row — own local state avoids shared-state race ──
+function SidePanelRec({ rec, index, sqsScore, onDismiss }) {
+  const [reason, setReason] = useState("");
+  const isObj  = typeof rec === "object" && rec !== null;
+  const msg    = isObj ? rec.message : rec;
+  const impact = isObj ? rec.score_impact : null;
+  const recId  = isObj ? rec.rec_id : `legacy_${index}`;
+  const recType = isObj ? rec.type : "suggestion";
+  const st = REC_TYPE_STYLE[recType] || REC_TYPE_STYLE.suggestion;
+
+  const submit = () => onDismiss(rec, sqsScore, reason);
+  const dismiss = () => onDismiss(rec, sqsScore, "");
+
+  return (
+    <div style={{ background: st.bg, border: `1px solid ${st.border}`, borderRadius: 8, padding: "8px 10px" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
+        <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{st.icon}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{msg}</div>
+          {impact > 0 && <div style={{ fontSize: 10, color: "#10b981", fontWeight: 700, marginTop: 2 }}>+{impact} pts if fixed</div>}
+        </div>
+      </div>
+      {isObj && (
+        <div style={{ marginTop: 7, display: "flex", gap: 5, alignItems: "center" }}>
+          <input
+            placeholder="Add a reason (optional)…"
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") submit(); }}
+            style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
+          />
+          {reason.trim() && (
+            <button
+              onMouseDown={e => { e.preventDefault(); submit(); }}
+              style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #6366f1", background: "#6366f1", fontSize: 10, fontWeight: 600, color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>
+              Submit
+            </button>
+          )}
+          <button
+            onMouseDown={e => { e.preventDefault(); dismiss(); }}
+            style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, color: "#64748b", cursor: "pointer", whiteSpace: "nowrap" }}>
+            Dismiss
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Download Pre-flight Modal ──────────────────────────────────────────────
 function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrideChange, onProceed, onCancel, loading }) {
-  const hardRecs  = openRecs.filter(r => r.recommendation_type === "hard_stop");
-  const otherRecs = openRecs.filter(r => r.recommendation_type !== "hard_stop");
+  const hardRecs = openRecs.filter(r => r.recommendation_type === "hard_stop");
+  const softRecs = openRecs.filter(r => r.recommendation_type !== "hard_stop");
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ background: "#fff", borderRadius: 16, padding: "28px 28px 24px", maxWidth: 520, width: "100%", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column", gap: 0, maxHeight: "88vh", overflow: "hidden" }}>
         <div style={{ flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <div style={{ width: 40, height: 40, borderRadius: "50%", background: "#fef3c7", border: "2px solid #fde68a", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>⚠️</div>
+            <div style={{ width: 40, height: 40, borderRadius: "50%", background: openRecs.length > 0 ? "#fef3c7" : "#f0fdf4", border: `2px solid ${openRecs.length > 0 ? "#fde68a" : "#bbf7d0"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{openRecs.length > 0 ? "⚠️" : "✅"}</div>
             <div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>Open Recommendations</div>
-              <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length} item{openRecs.length !== 1 ? "s" : ""} flagged — review before downloading</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
+              <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length > 0 ? `${openRecs.length} item${openRecs.length !== 1 ? "s" : ""} flagged — review before downloading` : "All clear — review the SQS summary below"}</div>
             </div>
           </div>
         </div>
@@ -241,33 +290,25 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
               ))}
             </div>
           )}
-          {otherRecs.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {otherRecs.map((r, i) => {
-                const st = REC_TYPE_STYLE[r.recommendation_type] || REC_TYPE_STYLE.suggestion;
-                return (
-                  <div key={i} style={{ background: st.bg, border: `1px solid ${st.border}`, borderRadius: 7, padding: "8px 10px", display: "flex", alignItems: "flex-start", gap: 8 }}>
-                    <span style={{ fontSize: 13, flexShrink: 0 }}>{st.icon}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, color: st.color, fontWeight: 600 }}>{r.message}</div>
-                      {r.score_impact > 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>+{r.score_impact} pts if resolved</div>}
-                    </div>
-                  </div>
-                );
-              })}
+          {softRecs.length > 0 && (
+            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>⚠️ Open Recommendations ({softRecs.length})</div>
+              {softRecs.map((r, i) => (
+                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0" }}>• {r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> (+{r.score_impact} pts if fixed)</span> : ""}</div>
+              ))}
             </div>
           )}
           {narrative && (
-            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 14px", marginTop: 12 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 8 }}>SQS Analysis Summary</div>
-              <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.65, margin: 0, whiteSpace: "pre-wrap" }}>{narrative}</p>
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px 18px", marginTop: softRecs.length > 0 || hardRecs.length > 0 ? 10 : 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 10 }}>📊 SQS Analysis Summary</div>
+              <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.75, margin: 0 }}>{narrative.replace(/\n+/g, " ").trim()}</p>
             </div>
           )}
         </div>
         <div style={{ flexShrink: 0 }}>
           <div style={{ marginBottom: 12 }}>
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 5 }}>
-              Override Reason <span style={{ color: "#94a3b8", fontWeight: 400 }}>(required for E&O record)</span>
+              Override Note <span style={{ color: "#94a3b8", fontWeight: 400 }}>(recommended for E&O record)</span>
             </label>
             <textarea
               value={overrideReason}
@@ -285,8 +326,8 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
             </button>
             <button
               onClick={onProceed}
-              disabled={loading || !overrideReason.trim()}
-              style={{ flex: 2, padding: "9px 0", borderRadius: 8, border: "none", background: overrideReason.trim() && !loading ? "#e6007a" : "#e2e8f0", color: overrideReason.trim() && !loading ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 700, cursor: overrideReason.trim() && !loading ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              disabled={loading}
+              style={{ flex: 2, padding: "9px 0", borderRadius: 8, border: "none", background: !loading ? "#e6007a" : "#e2e8f0", color: !loading ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 700, cursor: !loading ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
               {loading ? <><span style={{ width: 11, height: 11, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Processing…</> : "Download Anyway"}
             </button>
           </div>
@@ -444,14 +485,13 @@ export default function AcordModal({
 
   // ── SQS enhancement state ──────────────────────────────────────────────────
   const [packageSqs, setPackageSqs] = useState(null);
-  const [dismissingRec, setDismissingRec] = useState(null); // rec_id being dismissed
-  const [dismissReason, setDismissReason] = useState("");
   const [dismissedRecs, setDismissedRecs] = useState(new Set());
   const [showDownloadPreflight, setShowDownloadPreflight] = useState(false);
   const [preflightRecs, setPreflightRecs] = useState([]);
   const [preflightOverrideReason, setPreflightOverrideReason] = useState("");
   const [preflightCallback, setPreflightCallback] = useState(null);
   const [sqsNarrative, setSqsNarrative] = useState("");
+  const [downloadPreflightLoading, setDownloadPreflightLoading] = useState(false);
 
   useEffect(() => {
     if (step !== "lite" || !sessionId || !token) return;
@@ -701,48 +741,78 @@ export default function AcordModal({
     <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite", marginRight: 4 }} />
   );
 
-  const handleDismissRec = async (rec, currentScore) => {
-    if (!dismissReason.trim()) return;
-    setDismissingRec(rec.rec_id);
-    try {
-      await fetch(`${API_BASE}/api/audit/dismiss`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: sessionId, rec_id: rec.rec_id, override_reason: dismissReason.trim(), sqs_score_at_action: currentScore ?? 0 }),
+  const handleDismissRec = (rec, currentScore, reason = "") => {
+    const id = rec?.rec_id;
+    if (!id) return;
+    // Remove from dismissedRecs set (for filter)
+    setDismissedRecs(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+    // Also remove directly from generatedForms so rec doesn't reappear on re-render
+    if (activeFormId) {
+      setGeneratedForms(prev => {
+        const form = prev[activeFormId];
+        if (!form?.sqs?.recommendations) return prev;
+        return {
+          ...prev,
+          [activeFormId]: {
+            ...form,
+            sqs: {
+              ...form.sqs,
+              recommendations: form.sqs.recommendations.filter(r =>
+                (typeof r === "object" ? r.rec_id : r) !== id
+              ),
+            },
+          },
+        };
       });
-      setDismissedRecs(prev => new Set([...prev, rec.rec_id]));
-    } catch (_) {}
-    setDismissingRec(null);
-    setDismissReason("");
+    }
+    fetch(`${API_BASE}/api/audit/dismiss`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        session_id: sessionId,
+        rec_id: id,
+        override_reason: reason.trim() || "No reason provided",
+        sqs_score_at_action: currentScore ?? 0,
+        message: rec.message ?? null,
+        field: rec.field ?? null,
+        component: rec.component ?? null,
+        score_impact: rec.score_impact ?? null,
+        form_id: activeFormId ?? null,
+      }),
+    }).catch(() => {});
   };
 
   const _runPreflightThenDownload = async (downloadFn) => {
+    setDownloadPreflightLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/audit/open/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
-      const data = res.ok ? await res.json() : null;
-      const openRecs = data?.open_recommendations || [];
-      if (openRecs.length === 0) { downloadFn(); return; }
-      setPreflightRecs(openRecs); setPreflightOverrideReason(""); setPreflightCallback(() => downloadFn);
-      // Fetch narrative for the modal
-      try {
-        const nr = await fetch(`${API_BASE}/api/sqs/narrative/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
-        const nd = nr.ok ? await nr.json() : null;
-        if (nd?.narrative) setSqsNarrative(nd.narrative);
-      } catch (_) {}
+      const [recsRes, narrativeRes] = await Promise.allSettled([
+        fetch(`${API_BASE}/api/audit/open/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE}/api/sqs/narrative/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      const recsData = recsRes.status === "fulfilled" && recsRes.value.ok ? await recsRes.value.json() : null;
+      const openRecs = recsData?.open_recommendations || [];
+      const narrativeData = narrativeRes.status === "fulfilled" && narrativeRes.value.ok ? await narrativeRes.value.json() : null;
+      if (narrativeData?.narrative) setSqsNarrative(narrativeData.narrative);
+      setPreflightRecs(openRecs);
+      setPreflightOverrideReason("");
+      setPreflightCallback(() => downloadFn);
       setShowDownloadPreflight(true);
     } catch (_) { downloadFn(); }
+    finally { setDownloadPreflightLoading(false); }
   };
 
-  const handlePreflightProceed = async () => {
-    setLoading(true);
-    try {
-      await fetch(`${API_BASE}/api/audit/download-anyway`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ session_id: sessionId, override_reason: preflightOverrideReason.trim() }),
-      });
-    } catch (_) {}
+  const handlePreflightProceed = () => {
     setShowDownloadPreflight(false);
+    // Fire audit log in background — don't block the download
+    fetch(`${API_BASE}/api/audit/download-anyway`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ session_id: sessionId, override_reason: preflightOverrideReason.trim() }),
+    }).catch(() => {});
     if (preflightCallback) preflightCallback();
   };
 
@@ -777,6 +847,7 @@ export default function AcordModal({
       </div>
       {showAcordModal && renderAcordLicenseModal()}
       {showARQModal && <ARQModal sessionId={sessionId} token={token} questions={arqQuestions} onClose={() => setShowARQModal(false)} onSuccess={() => { setShowARQModal(false); refreshArqData(); }} />}
+      {downloadPreflightLoading && <ProcessStageOverlay stages={["Checking recommendations", "Loading SQS summary"]} advanceAfter={1800} />}
       {showDownloadPreflight && (
         <DownloadPreflightModal
           openRecs={preflightRecs}
@@ -830,7 +901,7 @@ export default function AcordModal({
         {showGenerateOverlay && <ProcessStageOverlay stages={[`Selecting ${checkedFormIds.size} form${checkedFormIds.size !== 1 ? "s" : ""}…`, "Generating with AI…"]} advanceAfter={3000} />}
         {showDownloadOverlay && <ProcessStageOverlay stages={["Preparing your form…", "Packaging for download…"]} advanceAfter={2000} />}
 
-        {loading && !showUploadOverlay && !showGenerateOverlay && !showDownloadOverlay && (
+        {loading && !showUploadOverlay && !showGenerateOverlay && !showDownloadOverlay && step !== "editor" && (
           <div className="loading-overlay"><div className="loading-spinner" /><p className="loading-text">{processingStage || "Processing..."}</p></div>
         )}
 
@@ -1059,18 +1130,33 @@ export default function AcordModal({
             )}
             <div className="form-selection-list">
               <div className="form-selection-header"><span className="form-selection-title">Recommended Forms</span><span className="form-selection-hint">{checkedFormIds.size} selected</span></div>
-              {recommendations.map((rec, i) => (
-                <div key={rec.form_id} className={`form-select-row ${checkedFormIds.has(rec.form_id) ? "form-row-checked" : ""}`}>
-                  <label className="form-select-checkbox-label">
-                    <input type="checkbox" checked={checkedFormIds.has(rec.form_id)} onChange={() => toggleForm(rec.form_id)} className="form-select-checkbox" />
-                    <div className="form-select-info">
-                      <div className="form-select-name"><span className="rec-rank">#{i + 1}</span>{rec.form_name}</div>
-                      <div className="form-select-meta"><span className="confidence-badge">Match {((rec.confidence || 0) * 100).toFixed(0)}%</span><span className="form-select-reason">{rec.reason}</span></div>
-                    </div>
-                  </label>
-                  <button className="btn-icon-only" onClick={() => toggleForm(rec.form_id)}>{checkedFormIds.has(rec.form_id) ? "✓" : "+"}</button>
-                </div>
-              ))}
+              {recommendations.map((rec, i) => {
+                const pct = Math.round((rec.confidence || 0) * 100);
+                const tooltipText = rec.fields_total > 0
+                  ? `${rec.fields_filled} of ${rec.fields_total} required fields found in your document`
+                  : rec.reason || "";
+                return (
+                  <div key={rec.form_id} className={`form-select-row ${checkedFormIds.has(rec.form_id) ? "form-row-checked" : ""}`}>
+                    <label className="form-select-checkbox-label">
+                      <input type="checkbox" checked={checkedFormIds.has(rec.form_id)} onChange={() => toggleForm(rec.form_id)} className="form-select-checkbox" />
+                      <div className="form-select-info">
+                        <div className="form-select-name"><span className="rec-rank">#{i + 1}</span>{rec.form_name}</div>
+                        <div className="form-select-meta">
+                          <span
+                            className="confidence-badge"
+                            title={tooltipText}
+                            style={{ cursor: "help" }}
+                          >
+                            Match {pct}%
+                          </span>
+                          <span className="form-select-reason">{rec.reason || rec.trigger_reason}</span>
+                        </div>
+                      </div>
+                    </label>
+                    <button className="btn-icon-only" onClick={() => toggleForm(rec.form_id)}>{checkedFormIds.has(rec.form_id) ? "✓" : "+"}</button>
+                  </div>
+                );
+              })}
             </div>
             {extraForms.length > 0 && (
               <div className="add-forms-section">
@@ -1079,14 +1165,36 @@ export default function AcordModal({
                 </button>
                 {showAddForms && (
                   <div className="extra-forms-list">
-                    {extraForms.map(f => (
-                      <div key={f.form_id} className={`form-select-row ${checkedFormIds.has(f.form_id) ? "form-row-checked" : ""}`}>
-                        <label className="form-select-checkbox-label">
-                          <input type="checkbox" checked={checkedFormIds.has(f.form_id)} onChange={() => toggleForm(f.form_id)} className="form-select-checkbox" />
-                          <div className="form-select-info"><div className="form-select-name">{f.form_name}</div>{f.description && <div className="form-select-reason">{f.description}</div>}</div>
-                        </label>
-                      </div>
-                    ))}
+                    {extraForms.map(f => {
+                      const pct = Math.round((f.confidence || 0) * 100);
+                      const tooltipText = f.fields_total > 0
+                        ? `${f.fields_filled} of ${f.fields_total} required fields found in your document`
+                        : f.description || "";
+                      return (
+                        <div key={f.form_id} className={`form-select-row ${checkedFormIds.has(f.form_id) ? "form-row-checked" : ""}`}>
+                          <label className="form-select-checkbox-label">
+                            <input type="checkbox" checked={checkedFormIds.has(f.form_id)} onChange={() => toggleForm(f.form_id)} className="form-select-checkbox" />
+                            <div className="form-select-info">
+                              <div className="form-select-name">{f.form_name}</div>
+                              <div className="form-select-meta">
+                                {pct > 0 && (
+                                  <span
+                                    className="confidence-badge confidence-badge--extra"
+                                    title={tooltipText}
+                                    style={{ cursor: "help" }}
+                                  >
+                                    Match {pct}%
+                                  </span>
+                                )}
+                                {(f.reason || f.description) && (
+                                  <span className="form-select-reason">{f.reason || f.description}</span>
+                                )}
+                              </div>
+                            </div>
+                          </label>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1191,19 +1299,32 @@ export default function AcordModal({
                     )}
 
                     {/* ── Per-form breakdown bars ── */}
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
-                      {Object.entries(activeSqs.breakdown || {}).map(([key, val]) => (
-                        <div key={key}>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
-                            <span style={{ color: "#64748b" }}>{SQS_LABELS[key] || key} <span style={{ color: "#e2e8f0" }}>({SQS_WEIGHTS[key] || 0}%)</span></span>
-                            <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>
-                          </div>
-                          <div style={{ height: 5, background: "#f1f5f9", borderRadius: 3, overflow: "hidden" }}>
-                            <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 3, transition: "width 0.6s ease" }} />
-                          </div>
+                    {/* doc-sourced = driven by uploaded documents, not form field edits */}
+                    {(() => {
+                      const docSourced = new Set(["property_integrity", "loss_history_alignment", "narrative_quality"]);
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+                          {Object.entries(activeSqs.breakdown || {}).map(([key, val]) => (
+                            <div key={key}>
+                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+                                <span style={{ color: "#64748b" }}>
+                                  {SQS_LABELS[key] || key}
+                                  <span style={{ color: "#cbd5e1" }}> ({SQS_WEIGHTS[key] || 0}%)</span>
+                                  {docSourced.has(key) && (
+                                    <span title="Sourced from uploaded documents — editing form fields won't change this" style={{ marginLeft: 4, fontSize: 9, color: "#94a3b8", cursor: "help" }}>📄</span>
+                                  )}
+                                </span>
+                                <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>
+                              </div>
+                              <div style={{ height: 5, background: "#f1f5f9", borderRadius: 3, overflow: "hidden" }}>
+                                <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 3, transition: "width 0.6s ease" }} />
+                              </div>
+                            </div>
+                          ))}
+                          <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2 }}>📄 = sourced from uploaded docs, not form edits</div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })()}
 
                     {/* ── Package SQS panel ── */}
                     {packageSqs && (
@@ -1268,46 +1389,15 @@ export default function AcordModal({
                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                           {activeSqs.recommendations
                             .filter(r => !dismissedRecs.has(typeof r === "string" ? r : r.rec_id))
-                            .map((rec, i) => {
-                              const isObj = typeof rec === "object" && rec !== null;
-                              const msg = isObj ? rec.message : rec;
-                              const impact = isObj ? rec.score_impact : null;
-                              const recId = isObj ? rec.rec_id : `legacy_${i}`;
-                              const recType = isObj ? rec.type : "suggestion";
-                              const st = REC_TYPE_STYLE[recType] || REC_TYPE_STYLE.suggestion;
-                              const isDismissing = dismissingRec === recId;
-                              return (
-                                <div key={recId} style={{ background: st.bg, border: `1px solid ${st.border}`, borderRadius: 8, padding: "8px 10px" }}>
-                                  <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
-                                    <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{st.icon}</span>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                      <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{msg}</div>
-                                      {impact > 0 && (
-                                        <div style={{ fontSize: 10, color: "#10b981", fontWeight: 700, marginTop: 2 }}>+{impact} pts if fixed</div>
-                                      )}
-                                    </div>
-                                  </div>
-                                  {isObj && (
-                                    <div style={{ marginTop: 7, display: "flex", gap: 5, alignItems: "center" }}>
-                                      <input
-                                        placeholder="Dismiss reason…"
-                                        value={dismissingRec === recId ? dismissReason : ""}
-                                        onFocus={() => setDismissingRec(recId)}
-                                        onChange={e => { setDismissingRec(recId); setDismissReason(e.target.value); }}
-                                        style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
-                                        onKeyDown={e => { if (e.key === "Enter" && dismissReason.trim()) handleDismissRec(rec, activeSqs.sqs_score); }}
-                                      />
-                                      <button
-                                        onClick={() => handleDismissRec(rec, activeSqs.sqs_score)}
-                                        disabled={isDismissing || (dismissingRec === recId && !dismissReason.trim())}
-                                        style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, color: "#64748b", cursor: "pointer", whiteSpace: "nowrap", opacity: (dismissingRec === recId && !dismissReason.trim()) ? 0.5 : 1 }}>
-                                        {isDismissing ? "…" : "Dismiss"}
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
+                            .map((rec, i) => (
+                              <SidePanelRec
+                                key={typeof rec === "object" && rec !== null ? rec.rec_id : `legacy_${i}`}
+                                rec={rec}
+                                index={i}
+                                sqsScore={activeSqs.sqs_score}
+                                onDismiss={handleDismissRec}
+                              />
+                            ))}
                         </div>
                       </div>
                     )}
@@ -1377,6 +1467,10 @@ export default function AcordModal({
                 onOpenSignatureModal={onOpenSignatureModal}
                 clientFilledFields={clientFilledFields}
                 onRefreshFields={refreshArqData}
+                onSqsUpdate={(fid, newSqs) => setGeneratedForms(prev => ({
+                  ...prev,
+                  [fid]: { ...prev[fid], sqs: newSqs }
+                }))}
               />
             </div>
           </div>
