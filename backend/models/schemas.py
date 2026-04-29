@@ -72,6 +72,26 @@ FIELD_SOURCE_AUDIT_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_field_audit_source  ON field_source_audit(source)",
 ]
 
+JOBS_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS jobs (
+        job_id           TEXT PRIMARY KEY,
+        session_id       TEXT REFERENCES processing_sessions(id) ON DELETE SET NULL,
+        user_id          TEXT NOT NULL,
+        job_type         TEXT NOT NULL,
+        status           TEXT NOT NULL DEFAULT 'pending',
+        payload          JSONB,
+        result           JSONB,
+        error_message    TEXT,
+        progress_message TEXT,
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_jobs_session_id ON jobs(session_id)",
+    "CREATE INDEX IF NOT EXISTS idx_jobs_user_id    ON jobs(user_id)",
+]
+
 
 class SignupRequest(BaseModel):
     email: EmailStr

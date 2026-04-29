@@ -8,6 +8,7 @@ from models.schemas import (
     ResolveRecommendationRequest,
     DownloadAnywayRequest,
 )
+from repositories.session_repository import get_processing_session
 from services.audit_service import (
     get_open_recommendations,
     get_audit_summary,
@@ -22,11 +23,22 @@ router = APIRouter(tags=["audit"])
 logger = logging.getLogger(__name__)
 
 
+def _verify_session_owner(session_id: str, current_user: dict) -> None:
+    """Raise 403 if the session does not belong to current_user."""
+    try:
+        session = get_processing_session(session_id)
+    except HTTPException:
+        raise HTTPException(404, "Session not found")
+    if str(session.get("user_id", "")) != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+
+
 @router.post("/api/audit/dismiss")
 async def dismiss_recommendation(
     req: DismissRecommendationRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    _verify_session_owner(req.session_id, current_user)
     success = mark_recommendation_dismissed(
         session_id=req.session_id,
         rec_id=req.rec_id,
@@ -48,6 +60,7 @@ async def resolve_recommendation(
     req: ResolveRecommendationRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    _verify_session_owner(req.session_id, current_user)
     success = mark_recommendation_resolved(
         session_id=req.session_id,
         rec_id=req.rec_id,
@@ -62,6 +75,7 @@ async def get_open_recs(
     session_id: str,
     current_user: dict = Depends(get_current_user),
 ):
+    _verify_session_owner(session_id, current_user)
     recs = get_open_recommendations(session_id)
     return JSONResponse({"success": True, "open_recommendations": recs, "count": len(recs)})
 
@@ -71,6 +85,7 @@ async def download_anyway(
     req: DownloadAnywayRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    _verify_session_owner(req.session_id, current_user)
     count = log_download_with_open_recs(
         session_id=req.session_id,
         override_reason=req.override_reason,
@@ -85,6 +100,7 @@ async def audit_summary(
     session_id: str,
     current_user: dict = Depends(get_current_user),
 ):
+    _verify_session_owner(session_id, current_user)
     summary = get_audit_summary(session_id)
     return JSONResponse({"success": True, **summary})
 
@@ -94,22 +110,13 @@ async def sqs_narrative(
     session_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    """
-    Generate (or regenerate) a prose narrative for this session's SQS.
-    Pulls the stored SQS result from the session, derives delta / resolved / ignored
-    counts from the audit table, then calls the LLM narrative generator.
-    """
-    from repositories.session_repository import get_processing_session
-    from services.audit_service import get_audit_summary
+    _verify_session_owner(session_id, current_user)
 
     try:
         session = get_processing_session(session_id)
-    except Exception:
-        session = None
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    except HTTPException:
+        raise HTTPException(404, "Session not found")
 
-    # Pick the best SQS result — fall back to first form's SQS
     generated = session.get("generated_forms", {})
     sqs_result: dict = {}
     if generated:
@@ -119,14 +126,12 @@ async def sqs_narrative(
     if not sqs_result:
         raise HTTPException(status_code=404, detail="No SQS data found for this session")
 
-    # Derive delta / resolved / ignored from the audit table
-    summary = get_audit_summary(session_id)
-    rec_counts = summary.get("recommendations", {})
-    resolved_count = int(rec_counts.get("resolved") or 0)
+    summary     = get_audit_summary(session_id)
+    rec_counts  = summary.get("recommendations", {})
+    resolved_count  = int(rec_counts.get("resolved") or 0)
     dismissed_count = int(rec_counts.get("dismissed") or 0)
     delta = sqs_result.get("sqs_score") or sqs_result.get("package_sqs_score") or 0
 
-    # Build lightweight label lists for the narrative prompt
     resolved_recs = [f"{resolved_count} recommendation(s) resolved"] if resolved_count else []
     ignored_recs  = [f"{dismissed_count} recommendation(s) dismissed"] if dismissed_count else []
 

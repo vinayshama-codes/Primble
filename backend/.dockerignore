@@ -1,0 +1,44 @@
+# Secrets — never bake into the image
+.env
+.env.*
+*.env
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Test / dev artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Local job storage and user-uploaded / generated documents — never bake into image
+tmp/
+storage/
+
+# Local SQLite database (dev only)
+*.db
+
+# IDE / OS artifacts
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Alembic migration history (mounted at runtime if needed)
+# alembic/versions/
+
+# Git
+.git/
+.gitignore

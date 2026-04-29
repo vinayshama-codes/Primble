@@ -87,8 +87,8 @@ export default function PDFJsViewer({
     if (!pdfjsReady || !pdfUrl) return;
     pdfUrlRef.current = pdfUrl;
     setLoadError(false); setLoadingStage("loading");
-    const url  = `${pdfUrl}&_r=${Date.now()}`;
-    const task = window.pdfjsLib.getDocument(url);
+    const url  = `${pdfUrl}?_r=${Date.now()}`;
+    const task = window.pdfjsLib.getDocument({ url, httpHeaders: { Authorization: `Bearer ${token}` } });
     task.promise
       .then(doc => { setPdfDoc(doc); setTotalPages(doc.numPages); })
       .catch(err => {
@@ -146,7 +146,7 @@ export default function PDFJsViewer({
 
   // ── fetchFields (used by handleRefresh) ────────────────────────────────
   const fetchFields = () =>
-    fetch(`${API_BASE}/api/fields/${sessionId}/${formId}?token=${token}`)
+    fetch(`${API_BASE}/api/fields/${sessionId}/${formId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data?.success) return;
@@ -183,7 +183,7 @@ export default function PDFJsViewer({
   useEffect(() => {
     if (!sessionId || !formId || !token) return;
     const controller = new AbortController();
-    fetch(`${API_BASE}/api/fields/${sessionId}/${formId}?token=${token}`, { signal: controller.signal })
+    fetch(`${API_BASE}/api/fields/${sessionId}/${formId}`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data?.success) return;
@@ -352,8 +352,8 @@ export default function PDFJsViewer({
       const res = await fetch(`${API_BASE}/api/apply-signature/${sessionId}/${formId}`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) {
         setApplySigStage("rendering");
-        const freshUrl = `${pdfUrlRef.current || pdfUrl}&_sig=${Date.now()}`;
-        const newDoc   = await window.pdfjsLib.getDocument(freshUrl).promise;
+        const freshUrl = `${pdfUrlRef.current || pdfUrl}?_sig=${Date.now()}`;
+        const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, httpHeaders: { Authorization: `Bearer ${token}` } }).promise;
         const page     = await newDoc.getPage(pageNum);
         const avail    = containerRef.current ? containerRef.current.clientWidth - 48 : 720;
         const scale    = Math.min(2.2, Math.max(1.0, avail / page.getViewport({ scale: 1 }).width));
@@ -412,7 +412,7 @@ export default function PDFJsViewer({
 
   const _loadPdfInBackground = (currentValues) => {
     if (!pdfjsReady) return;
-    window.pdfjsLib.getDocument(`${pdfUrlRef.current || pdfUrl}&_r=${Date.now()}`).promise
+    window.pdfjsLib.getDocument({ url: `${pdfUrlRef.current || pdfUrl}?_r=${Date.now()}`, httpHeaders: { Authorization: `Bearer ${token}` } }).promise
       .then(async newDoc => {
         try {
           const page    = await newDoc.getPage(pageNum);

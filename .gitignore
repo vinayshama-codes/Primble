@@ -1,17 +1,28 @@
 # Secrets
 .env
 backend/.env
+frontend/.env
+frontend/.env.local
+frontend/.env.production
 
 # Python
 venv/
+.venv/
 __pycache__/
 *.pyc
+*.pyo
 
 # Temp / generated files
 backend/tmp/
 backend/__pycache__/
 
+# User-uploaded and generated PDF files — never commit real document data
+backend/storage/
+backend/acordly.db
+
 # Node
 node_modules/
+frontend/dist/
+
 # Added by code-review-graph
 .code-review-graph/

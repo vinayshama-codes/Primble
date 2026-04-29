@@ -314,22 +314,52 @@ def extract_text(file_path: str) -> Tuple[str, List[str]]:
 # ZIP extraction
 # ---------------------------------------------------------------------------
 
+_ZIP_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024  # 500 MB total uncompressed cap
+_ZIP_MAX_RATIO             = 100                 # reject any single entry > 100:1 ratio
+
+
 def extract_zip(zip_path: str) -> List[str]:
     """
     Extract PDF and image files from a ZIP archive.
     Returns list of extracted file paths saved to UPLOAD_DIR.
     Skips unsupported extensions silently.
+
+    ZIP bomb guards:
+    - Rejects archives whose total uncompressed size exceeds 500 MB.
+    - Skips individual entries with a compression ratio above 100:1.
     """
     extracted: List[str] = []
     supported_exts = {".pdf"} | set(SUPPORTED_IMG)
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
-            for name in zf.namelist():
-                ext = os.path.splitext(name.lower())[1]
+            infos = zf.infolist()
+
+            # Guard 1: total uncompressed size
+            total_uncompressed = sum(i.file_size for i in infos)
+            if total_uncompressed > _ZIP_MAX_UNCOMPRESSED_BYTES:
+                logger.error(
+                    f"extract_zip: archive too large when uncompressed "
+                    f"({total_uncompressed / 1024 / 1024:.0f} MB): {zip_path}"
+                )
+                return []
+
+            for info in infos:
+                # Guard 2: per-entry compression ratio
+                if info.compress_size > 0:
+                    ratio = info.file_size / info.compress_size
+                    if ratio > _ZIP_MAX_RATIO:
+                        logger.warning(
+                            f"extract_zip: skipping '{info.filename}' — "
+                            f"compression ratio {ratio:.0f}:1 exceeds limit"
+                        )
+                        continue
+
+                ext = os.path.splitext(info.filename.lower())[1]
                 if ext in supported_exts:
-                    out = os.path.join(UPLOAD_DIR, os.path.basename(name))
+                    safe_name = f"{uuid.uuid4().hex}_{os.path.basename(info.filename)}"
+                    out = os.path.join(UPLOAD_DIR, safe_name)
                     with open(out, "wb") as fh:
-                        fh.write(zf.read(name))
+                        fh.write(zf.read(info.filename))
                     extracted.append(out)
     except zipfile.BadZipFile as ex:
         logger.error(f"extract_zip: bad zip file {zip_path}: {ex}")

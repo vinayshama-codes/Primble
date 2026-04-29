@@ -29,6 +29,7 @@ from services.email_service import (
     send_arq_submitted_notification,
 )
 from config.settings import FRONTEND_URL
+from utils.rate_limiter import check_arq_public_rate_limit, check_arq_submit_rate_limit, check_arq_chat_rate_limit
 
 router = APIRouter(prefix="/api/arq", tags=["arq"])
 logger = logging.getLogger(__name__)
@@ -62,12 +63,6 @@ async def generate_questions(
     generated = proc_session.get("generated_forms", {})
     if not generated:
         raise HTTPException(400, "No forms generated yet — generate forms first")
-
-    for fid, fd in generated.items():
-        conf = fd.get("confidence", {})
-        logger.info(f"DEBUG ARQ Form {fid}: confidence sample = {dict(list(conf.items())[:5])}")
-        field_state = fd.get("field_state") or fd.get("mapped", {})
-        logger.info(f"DEBUG ARQ Form {fid}: field_state sample = {dict(list(field_state.items())[:5])}")
 
     questions = generate_arq_questions(
         facts=proc_session.get("facts", {}),
@@ -166,8 +161,10 @@ async def send_arq(
 
 
 @router.get("/client-view/{token}")
-async def client_view(token: str):
+async def client_view(token: str, request: Request):
     """Public endpoint: return questionnaire data for client."""
+    client_ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "unknown")).split(",")[0].strip()
+    check_arq_public_rate_limit(client_ip)
     # Basic token format check
     if not token or len(token) > 128 or not re.match(r"^[a-f0-9\-]+$", token):
         return JSONResponse({"success": False, "error": "not_found", "message": "Questionnaire not found."}, status_code=404)
@@ -233,6 +230,8 @@ async def client_view(token: str):
 @router.post("/submit/{token}")
 async def submit_arq(token: str, request: Request):
     """Public endpoint: client submits answers."""
+    client_ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "unknown")).split(",")[0].strip()
+    check_arq_submit_rate_limit(client_ip)
     if not token or len(token) > 128:
         return JSONResponse({"success": False, "message": "Invalid token."}, status_code=400)
 
@@ -311,12 +310,26 @@ async def arq_chat(token: str, request: Request):
     """
     from config.settings import groq_client
 
-    if not token or len(token) > 128:
+    # Rate limit by IP before any heavy processing
+    client_ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "unknown")).split(",")[0].strip()
+    check_arq_chat_rate_limit(client_ip)
+
+    if not token or len(token) > 128 or not re.match(r"^[a-f0-9\-]+$", token):
         return JSONResponse({"success": False, "reply": "Session not found."}, status_code=404)
 
     arq = get_arq_by_token(token)
     if not arq:
         return JSONResponse({"success": False, "reply": "Session not found."}, status_code=404)
+
+    # Reject chat on expired or already-submitted sessions
+    now     = datetime.now(timezone.utc)
+    expires = datetime.fromisoformat(arq["expires_at"].replace("Z", "+00:00"))
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if now > expires:
+        return JSONResponse({"success": False, "reply": "This questionnaire link has expired."}, status_code=410)
+    if arq.get("status") == "submitted":
+        return JSONResponse({"success": False, "reply": "This questionnaire has already been submitted."}, status_code=409)
 
     body = await request.json()
     message = _sanitize_str(body.get("message", ""), 500)
@@ -470,5 +483,9 @@ async def get_client_filled(
     session_id: str,
     current_user: dict = Depends(get_current_user),
 ):
+    from fastapi import HTTPException
+    proc_session = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     fields = get_client_filled_fields(session_id)
     return JSONResponse({"success": True, "client_filled_fields": fields})

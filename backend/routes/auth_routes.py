@@ -18,6 +18,7 @@ from services.auth_service import (
 from services.email_service import send_verification_email, _send_generic_email
 from utils.helpers import generate_verification_code
 from utils.validators import validate_work_email, validate_password
+from utils.rate_limiter import check_auth_rate_limit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ async def signup(req: SignupRequest):
     except Exception as ex:
         cur.close(); conn.close()
         from fastapi import HTTPException
-        raise HTTPException(500, f"Database error: {ex}")
+        raise HTTPException(500, "Account creation failed. Please try again.")
     finally:
         try: cur.close(); conn.close()
         except: pass
@@ -118,7 +119,7 @@ async def verify_email(req: VerifyEmailRequest):
         conn.commit()
     except Exception as ex:
         conn.rollback(); cur.close(); conn.close()
-        raise HTTPException(500, f"Account creation failed: {ex}")
+        raise HTTPException(500, "Account creation failed. Please try again.")
     finally:
         try: cur.close(); conn.close()
         except: pass
@@ -136,6 +137,7 @@ async def resend_verification(request: Request):
     email = body.get("email")
     if not email:
         raise HTTPException(400, "Email required")
+    check_auth_rate_limit(str(email).lower())
     conn = get_db(); cur = conn.cursor()
     cur.execute("SELECT * FROM pending_signups WHERE email = %s", (email,))
     row = cur.fetchone()
@@ -156,6 +158,7 @@ async def resend_verification(request: Request):
 @router.post("/login")
 async def login(req: LoginRequest):
     from fastapi import HTTPException
+    check_auth_rate_limit(req.email.lower())
     conn = get_db(); cur = conn.cursor()
     cur.execute("SELECT * FROM users WHERE email = %s", (req.email,))
     row = cur.fetchone()
@@ -184,6 +187,8 @@ async def login(req: LoginRequest):
 async def forgot_password(request: Request):
     body  = await request.json()
     email = (body.get("email") or "").strip().lower()
+    if email:
+        check_auth_rate_limit(email)
     if not email:
         from fastapi import HTTPException
         raise HTTPException(400, "Email required")
@@ -229,7 +234,7 @@ async def reset_password(request: Request):
     row = cur.fetchone()
     if not row:
         cur.close(); conn.close()
-        raise HTTPException(404, "Account not found")
+        raise HTTPException(400, "Invalid request")
     user           = dict(row)
     stored_code    = user.get("verification_code", "")
     stored_expires = user.get("verification_expires", "")
@@ -298,9 +303,9 @@ async def google_auth(req: GoogleAuthRequest):
                          "acord_license_confirmed": bool(int(user.get("acord_license_confirmed",0) or 0)),
                          "acord_disclaimer_accepted": bool(disclaimer)}}
     except ValueError as e:
-        raise HTTPException(401, f"Invalid Google token: {e}")
+        raise HTTPException(401, "Authentication failed. Please try again.")
     except Exception as e:
-        raise HTTPException(401, f"Google auth failed: {e}")
+        raise HTTPException(401, "Authentication failed. Please try again.")
 
 
 @router.post("/complete-profile")

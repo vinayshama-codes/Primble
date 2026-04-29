@@ -69,7 +69,7 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
         return {"checkout_url": session.url}
     except Exception as e:
         logger.error(f"Stripe checkout error: {e}")
-        raise HTTPException(500, f"Stripe error: {e}")
+        raise HTTPException(500, "Payment processing failed. Please try again.")
 
 
 @router.post("/webhook")
@@ -77,18 +77,41 @@ async def stripe_webhook(request: Request):
     from fastapi import HTTPException
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
+
+    if not STRIPE_WEBHOOK_SECRET:
+        logger.error("STRIPE_WEBHOOK_SECRET is not configured — rejecting webhook")
+        raise HTTPException(400, "Webhook secret not configured")
+
     try:
-        if STRIPE_WEBHOOK_SECRET:
-            event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
-        else:
-            logger.warning("STRIPE_WEBHOOK_SECRET not set")
-            event = stripe.Event.construct_from(json.loads(payload), stripe.api_key)
-    except stripe.error.SignatureVerificationError as e:
+        event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+    except stripe.error.SignatureVerificationError:
         raise HTTPException(400, "Invalid webhook signature")
     except Exception as e:
-        raise HTTPException(400, f"Webhook error: {e}")
+        raise HTTPException(400, "Webhook processing error")
 
-    logger.info(f"Stripe webhook: {event['type']}")
+    event_id   = event.get("id", "")
+    event_type = event["type"]
+    logger.info(f"Stripe webhook: {event_type} ({event_id})")
+
+    # Atomic idempotency — INSERT first, process only if we own the row.
+    # Using INSERT ... ON CONFLICT DO NOTHING + rowcount avoids the SELECT→INSERT
+    # race window where two concurrent deliveries both pass a plain SELECT check.
+    if event_id:
+        now_str   = datetime.now(timezone.utc).isoformat()
+        conn_idem = get_db()
+        cur_idem  = conn_idem.cursor()
+        cur_idem.execute(
+            """INSERT INTO processed_webhook_events (event_id, event_type, processed_at)
+               VALUES (%s, %s, %s) ON CONFLICT (event_id) DO NOTHING""",
+            (event_id, event_type, now_str),
+        )
+        inserted = cur_idem.rowcount
+        conn_idem.commit()
+        cur_idem.close()
+        conn_idem.close()
+        if inserted == 0:
+            logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
+            return {"received": True}
 
     def _resolve_user(obj):
         user_id = obj["client_reference_id"] if "client_reference_id" in obj else None
@@ -330,7 +353,7 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         import traceback
         logger.error(f"verify-upgrade error: {e}\n{traceback.format_exc()}")
-        raise HTTPException(500, f"Stripe verification failed: {e}")
+        raise HTTPException(500, "Subscription verification failed. Please try again.")
 
 
 @router.post("/create-overage-checkout")
@@ -383,7 +406,7 @@ async def create_overage_checkout(
         return {"checkout_url": session.url}
     except Exception as e:
         logger.error(f"Overage checkout error: {e}")
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, "Could not create checkout session. Please try again.")
 
 
 @router.post("/apply-overage")
@@ -398,7 +421,7 @@ async def apply_overage(
     try:
         cs = stripe.checkout.Session.retrieve(req.stripe_session_id)
     except Exception as e:
-        raise HTTPException(400, f"Could not verify payment: {e}")
+        raise HTTPException(400, "Could not verify payment. Please try again.")
 
     cs = json.loads(str(cs))
     if cs.get("payment_status") != "paid":
@@ -512,7 +535,7 @@ async def cancel_subscription(current_user: dict = Depends(get_current_user)):
 
         return {"success": True, "message": "Subscription will cancel at the end of the current billing period."}
     except stripe.error.InvalidRequestError as e:
-        raise HTTPException(400, f"Could not cancel subscription: {e}")
+        raise HTTPException(400, "Could not cancel subscription. Please contact support.")
     except HTTPException:
         raise
     except Exception as e:

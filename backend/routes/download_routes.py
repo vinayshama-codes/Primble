@@ -1,8 +1,7 @@
-#dowmload_routes.py
-
 import hashlib
 import io
 import logging
+import time
 import zipfile
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -17,6 +16,7 @@ from services.cover_service import generate_ai_cover_narrative, build_cover_page
 from services.pdf_service import regenerate_pdf_for_form
 from services.stripe_service import evaluate_package_limit, create_overage_invoice_item
 from services.sqs_service import calculate_sqs
+from services import s3_service
 
 router = APIRouter(tags=["downloads"])
 logger = logging.getLogger(__name__)
@@ -25,6 +25,42 @@ logger = logging.getLogger(__name__)
 # user re-downloads without changing facts, forms, SQS, or flags.
 # No TTL: the dict lives for the process lifetime and clears on restart.
 _COVER_CACHE: dict = {}
+
+# ── Download counter idempotency ──────────────────────────────────────────────
+# Prevents double-counting when a user clicks download twice in rapid succession
+# or retries on a network error.  A (user_id, session_id, form_ids_hash) key is
+# locked for _DEDUP_WINDOW_SECONDS using Redis SETNX; falls back to an in-process
+# dict (safe under the GIL for single-worker deployments).
+_DEDUP_WINDOW_SECONDS = 300  # 5-minute window — short enough to let genuine re-downloads through
+
+try:
+    from utils.rate_limiter import _redis as _dl_redis  # re-use existing Redis connection
+except Exception:
+    _dl_redis = None
+
+_dedup_seen: dict = {}  # {key: expiry_timestamp}
+
+
+def _acquire_download_lock(user_id: str, session_id: str, form_ids_hash: str) -> bool:
+    """Return True (and acquire lock) if this is a fresh download; False if duplicate."""
+    key = f"dl_counted:{user_id}:{session_id}:{form_ids_hash}"
+    now = time.time()
+
+    if _dl_redis is not None:
+        try:
+            acquired = _dl_redis.set(key, "1", nx=True, ex=_DEDUP_WINDOW_SECONDS)
+            return bool(acquired)
+        except Exception as ex:
+            logger.warning("download dedup Redis error, using in-process fallback: %s", ex)
+
+    # In-process fallback: evict expired keys, then check/set.
+    stale = [k for k, exp in list(_dedup_seen.items()) if exp <= now]
+    for k in stale:
+        del _dedup_seen[k]
+    if key in _dedup_seen:
+        return False
+    _dedup_seen[key] = now + _DEDUP_WINDOW_SECONDS
+    return True
 
 
 def _cover_cache_key(facts: dict, form_ids: list, sqs_results: dict, flags: dict) -> str:
@@ -76,10 +112,13 @@ async def download_pdf(
         pkg_eval = evaluate_package_limit(fresh)
 
     proc_session   = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     generated      = proc_session.get("generated_forms", {})
     form_name      = generated.get(form_id, {}).get("form_name", form_id)
     user_signature = fresh.get("signature_data") or None
     pdf_bytes      = regenerate_pdf_for_form(proc_session, form_id, force=True, user_signature=user_signature)
+    s3_service.upload_pdf(session_id, form_id, pdf_bytes)
     facts        = proc_session.get("facts", {})
     flags        = proc_session.get("flags", {})
     org_name     = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
@@ -101,18 +140,22 @@ async def download_pdf(
         zf.writestr(f"{form_id}_FILLED.pdf", pdf_bytes)
     zip_buf.seek(0)
 
-    conn = get_db(); cur = conn.cursor()
-    if sub == "free":
-        cur.execute("UPDATE users SET downloads_used = downloads_used + 1 WHERE id = %s", (fresh["id"],))
-    elif sub in ("essentials", "professional") and pkg_eval:
-        cur.execute("UPDATE users SET packages_used = packages_used + 1 WHERE id = %s", (fresh["id"],))
-        if pkg_eval["status"] == "overage":
-            stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
-            if stripe_queued:
-                cur.execute("UPDATE users SET overage_packages_invoiced = COALESCE(overage_packages_invoiced,0) + 1 WHERE id = %s", (fresh["id"],))
-            else:
-                cur.execute("UPDATE users SET overage_packages_pending = COALESCE(overage_packages_pending,0) + 1 WHERE id = %s", (fresh["id"],))
-    conn.commit(); cur.close(); conn.close()
+    _ids_hash = hashlib.md5(form_id.encode()).hexdigest()[:8]
+    if _acquire_download_lock(fresh["id"], session_id, _ids_hash):
+        conn = get_db(); cur = conn.cursor()
+        if sub == "free":
+            cur.execute("UPDATE users SET downloads_used = downloads_used + 1 WHERE id = %s", (fresh["id"],))
+        elif sub in ("essentials", "professional") and pkg_eval:
+            cur.execute("UPDATE users SET packages_used = packages_used + 1 WHERE id = %s", (fresh["id"],))
+            if pkg_eval["status"] == "overage":
+                stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
+                if stripe_queued:
+                    cur.execute("UPDATE users SET overage_packages_invoiced = COALESCE(overage_packages_invoiced,0) + 1 WHERE id = %s", (fresh["id"],))
+                else:
+                    cur.execute("UPDATE users SET overage_packages_pending = COALESCE(overage_packages_pending,0) + 1 WHERE id = %s", (fresh["id"],))
+        conn.commit(); cur.close(); conn.close()
+    else:
+        logger.info("download_pdf: duplicate download skipped for user=%s session=%s form=%s", fresh["id"], session_id, form_id)
 
     write_audit_log(user=fresh, action="download", form_id=form_id, form_name=form_name,
                     session_id=session_id, ip_address=request.client.host if request.client else None)
@@ -156,9 +199,10 @@ async def download_all(
         pkg_eval = evaluate_package_limit(fresh)
 
     proc_session   = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     generated      = proc_session.get("generated_forms", {})
     if not generated:
-        from fastapi import HTTPException
         raise HTTPException(400, "No forms generated yet")
 
     user_signature = fresh.get("signature_data") or None
@@ -166,6 +210,7 @@ async def download_all(
     for fid in generated.keys():
         try:
             acord_pdfs[fid] = regenerate_pdf_for_form(proc_session, fid, force=True, user_signature=user_signature)
+            s3_service.upload_pdf(session_id, fid, acord_pdfs[fid])
         except Exception as ex:
             logger.error(f"Skipping {fid}: {ex}")
 
@@ -191,18 +236,22 @@ async def download_all(
             zf.writestr(f"{fid}_FILLED.pdf", pb)
     zip_buf.seek(0)
 
-    conn = get_db(); cur = conn.cursor()
-    if sub == "free":
-        cur.execute("UPDATE users SET downloads_used = downloads_used + 1 WHERE id = %s", (fresh["id"],))
-    elif sub in ("essentials", "professional") and pkg_eval:
-        cur.execute("UPDATE users SET packages_used = packages_used + 1 WHERE id = %s", (fresh["id"],))
-        if pkg_eval["status"] == "overage":
-            stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
-            if stripe_queued:
-                cur.execute("UPDATE users SET overage_packages_invoiced = COALESCE(overage_packages_invoiced,0) + 1 WHERE id = %s", (fresh["id"],))
-            else:
-                cur.execute("UPDATE users SET overage_packages_pending = COALESCE(overage_packages_pending,0) + 1 WHERE id = %s", (fresh["id"],))
-    conn.commit(); cur.close(); conn.close()
+    _ids_hash = hashlib.md5((",".join(sorted(generated.keys()))).encode()).hexdigest()[:8]
+    if _acquire_download_lock(fresh["id"], session_id, _ids_hash):
+        conn = get_db(); cur = conn.cursor()
+        if sub == "free":
+            cur.execute("UPDATE users SET downloads_used = downloads_used + 1 WHERE id = %s", (fresh["id"],))
+        elif sub in ("essentials", "professional") and pkg_eval:
+            cur.execute("UPDATE users SET packages_used = packages_used + 1 WHERE id = %s", (fresh["id"],))
+            if pkg_eval["status"] == "overage":
+                stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
+                if stripe_queued:
+                    cur.execute("UPDATE users SET overage_packages_invoiced = COALESCE(overage_packages_invoiced,0) + 1 WHERE id = %s", (fresh["id"],))
+                else:
+                    cur.execute("UPDATE users SET overage_packages_pending = COALESCE(overage_packages_pending,0) + 1 WHERE id = %s", (fresh["id"],))
+        conn.commit(); cur.close(); conn.close()
+    else:
+        logger.info("download_all: duplicate download skipped for user=%s session=%s", fresh["id"], session_id)
 
     write_audit_log(user=fresh, action="download_zip", form_id=", ".join(generated.keys()),
                     form_name=f"ZIP Bundle ({len(generated)} forms + cover page)",
@@ -227,6 +276,8 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
     if current_user.get("subscription_tier") != "lite":
         raise HTTPException(403, "This endpoint is for Lite plan users only.")
     proc_session = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     facts      = proc_session.get("facts", {})
     flags      = proc_session.get("flags", {})
     hard_stops = proc_session.get("hard_stops", [])
@@ -247,6 +298,8 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
     if current_user.get("subscription_tier") != "lite":
         raise HTTPException(403, "This endpoint is for Lite plan users only.")
     proc_session = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     facts       = proc_session.get("facts", {})
     flags       = proc_session.get("flags", {})
     hard_stops  = proc_session.get("hard_stops", [])

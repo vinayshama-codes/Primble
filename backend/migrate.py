@@ -1,7 +1,7 @@
 """
 migrate.py
-Run once to add ARQ reminder columns to existing arq_sessions table.
-Safe to re-run — uses IF NOT EXISTS / exception catch per column.
+Run once to apply incremental schema migrations.
+Safe to re-run — uses IF NOT EXISTS / exception catch per statement.
 """
 import os
 import psycopg2
@@ -41,6 +41,42 @@ def run_migration():
                 created_at  TEXT NOT NULL
             )
         """, "table arq_notifications"),
+        # ------------------------------------------------------------------ #
+        # jobs table — async job tracking (Step 5)
+        # ------------------------------------------------------------------ #
+        ("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id           TEXT PRIMARY KEY,
+                session_id       TEXT REFERENCES processing_sessions(id) ON DELETE SET NULL,
+                user_id          TEXT NOT NULL,
+                job_type         TEXT NOT NULL,
+                status           TEXT NOT NULL DEFAULT 'pending',
+                payload          JSONB,
+                result           JSONB,
+                error_message    TEXT,
+                progress_message TEXT,
+                created_at       TEXT NOT NULL,
+                updated_at       TEXT NOT NULL
+            )
+        """, "table jobs"),
+        ("CREATE INDEX IF NOT EXISTS idx_jobs_session_id ON jobs(session_id)",
+         "idx_jobs_session_id"),
+        ("CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)",
+         "idx_jobs_user_id"),
+        # processing_sessions — user_id index for fast per-user session lookups
+        ("CREATE INDEX IF NOT EXISTS idx_processing_sessions_user_id ON processing_sessions(user_id)",
+         "idx_processing_sessions_user_id"),
+        # s3_pdf_key column — stores S3 object key instead of keeping PDF bytes in BYTEA
+        ("ALTER TABLE processing_sessions ADD COLUMN IF NOT EXISTS s3_pdf_key TEXT",
+         "processing_sessions.s3_pdf_key"),
+        # stripe_events — idempotency table to deduplicate webhook deliveries
+        ("""
+            CREATE TABLE IF NOT EXISTS stripe_events (
+                event_id    TEXT PRIMARY KEY,
+                event_type  TEXT NOT NULL,
+                processed_at TEXT NOT NULL
+            )
+        """, "table stripe_events"),
     ]
 
     for sql, label in migrations:

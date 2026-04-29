@@ -64,6 +64,29 @@ def get_current_user(authorization: str = Header(None)) -> dict:
     return user
 
 
+def get_user_from_token_request(token_query: Optional[str], authorization: Optional[str]) -> Optional[dict]:
+    """Validate token and return the associated user dict, or None if invalid/expired."""
+    raw_token = None
+    if authorization and authorization.startswith("Bearer "):
+        raw_token = authorization.replace("Bearer ", "")
+    elif token_query:
+        raw_token = token_query
+    if not raw_token:
+        return None
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute(
+        """SELECT u.* FROM users u
+           JOIN sessions s ON s.user_id = u.id
+           WHERE s.token = %s AND s.expires_at > %s""",
+        (raw_token, datetime.now(timezone.utc).isoformat()),
+    )
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+    return dict(user) if user else None
+
+
 def validate_token_from_request(token_query: Optional[str], authorization: Optional[str]) -> bool:
     raw_token = None
     if authorization and authorization.startswith("Bearer "):

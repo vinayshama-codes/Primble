@@ -357,65 +357,197 @@ function DashboardStep({ token, onResume, onNewPackage }) {
     try { await fetch(`${API_BASE}/api/sessions/${sid}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); } catch (_) {}
   };
 
-  const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
-  const avgSqs = sqsMap => { const scores = Object.values(sqsMap || {}).map(s => s?.sqs_score).filter(n => n != null); return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null; };
-  const sqsColor = v => v >= 75 ? "#10b981" : v >= 50 ? "#f59e0b" : "#ef4444";
+  const fmtDate = iso => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    const diffDays = Math.floor((Date.now() - d) / 86400000);
+    if (diffDays === 0) return "Today";
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: diffDays > 300 ? "numeric" : undefined });
+  };
+
+  const avgSqs = sqsMap => {
+    const scores = Object.values(sqsMap || {}).map(s => s?.sqs_score).filter(n => n != null);
+    return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+  };
+  const sqsColor  = v => v >= 75 ? "#10b981" : v >= 50 ? "#f59e0b" : "#ef4444";
+  const sqsBg     = v => v >= 75 ? "rgba(16,185,129,0.1)" : v >= 50 ? "rgba(245,158,11,0.1)" : "rgba(239,68,68,0.1)";
+  const sqsGrade  = v => v >= 90 ? "A" : v >= 75 ? "B" : v >= 60 ? "C" : v >= 50 ? "D" : "F";
+
+  const totalForms = sessions.reduce((acc, s) => acc + (s.form_ids?.length || 0), 0);
+  const allScores  = sessions.map(s => avgSqs(s.sqs)).filter(n => n != null);
+  const globalAvg  = allScores.length ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length) : null;
 
   return (
-    <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 0 48px" }}>
+    <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 0 48px" }}>
       {deleteTarget && <DeleteConfirmModal onConfirm={() => handleDelete(deleteTarget)} onCancel={() => setDeleteTarget(null)} />}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 28 }}>
+
+      {/* ── Header ── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
         <div>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", letterSpacing: "0.06em", marginBottom: 6, textTransform: "uppercase" }}>Submissions</div>
-          <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: 0, lineHeight: 1.2 }}>Package Dashboard</h2>
-          <p style={{ fontSize: 14, color: "#64748b", marginTop: 5 }}>Resume any in-progress submission or start a new one.</p>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#e6007a", boxShadow: "0 0 0 3px rgba(230,0,122,0.15)" }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", letterSpacing: "0.08em", textTransform: "uppercase" }}>Submissions</span>
+          </div>
+          <h2 style={{ fontSize: 28, fontWeight: 800, color: "#0f172a", margin: 0, lineHeight: 1.15, letterSpacing: "-0.02em" }}>Recent Packages</h2>
+          <p style={{ fontSize: 14, color: "#64748b", marginTop: 6 }}>Pick up where you left off or start a new submission.</p>
         </div>
         <button onClick={onNewPackage}
-          style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 20px", background: "#e6007a", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(230,0,122,0.3)", whiteSpace: "nowrap" }}
-          onMouseEnter={e => { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.transform = "none"; }}>
-          <span style={{ fontSize: 16 }}>+</span> New Package
+          style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 22px", background: "linear-gradient(135deg,#e6007a,#c4006a)", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 16px rgba(230,0,122,0.35)", whiteSpace: "nowrap", letterSpacing: "-0.01em", transition: "all 0.2s" }}
+          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 8px 24px rgba(230,0,122,0.45)"; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35)"; }}>
+          <span style={{ fontSize: 18, lineHeight: 1 }}>+</span> New Package
         </button>
       </div>
+
+      {/* ── Stats strip (only when sessions exist) ── */}
+      {!loading && sessions.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 28 }}>
+          {[
+            { icon: "🗂️", value: sessions.length, label: "Total Packages", color: "#e6007a", bgColor: "rgba(230,0,122,0.07)" },
+            { icon: globalAvg != null ? sqsGrade(globalAvg) : "—", value: globalAvg != null ? `${globalAvg}` : "—", sublabel: "/100", label: "Avg SQS Score", color: globalAvg != null ? sqsColor(globalAvg) : "#94a3b8", bgColor: globalAvg != null ? sqsBg(globalAvg) : "#f1f5f9", iconIsText: true },
+            { icon: "📋", value: totalForms, label: "Forms Generated", color: "#4f7cff", bgColor: "rgba(79,124,255,0.08)" },
+          ].map((stat, i) => (
+            <div key={i} style={{ background: "#fff", border: "1px solid #e8edf5", borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.03)" }}>
+              <div style={{ width: 38, height: 38, borderRadius: 10, background: stat.bgColor, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {stat.iconIsText
+                  ? <span style={{ fontSize: 15, fontWeight: 800, color: stat.color }}>{stat.icon}</span>
+                  : <span style={{ fontSize: 17 }}>{stat.icon}</span>}
+              </div>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: stat.color, lineHeight: 1 }}>
+                  {stat.value}{stat.sublabel && <span style={{ fontSize: 11, fontWeight: 500, color: "#94a3b8" }}>{stat.sublabel}</span>}
+                </div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{stat.label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {loading ? (
-        <div style={{ textAlign: "center", padding: "80px 0" }}>
-          <div style={{ width: 36, height: 36, border: "3px solid #f1f5f9", borderTopColor: "#e6007a", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 14px" }} />
-          <p style={{ color: "#94a3b8", fontSize: 14 }}>Loading packages…</p>
+        /* ── Skeleton cards ── */
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {[1, 2, 3].map(i => (
+            <div key={i} style={{ background: "#fff", borderRadius: 14, border: "1px solid #e8edf5", display: "flex", alignItems: "stretch", overflow: "hidden", opacity: 1 - (i - 1) * 0.22 }}>
+              <div style={{ width: 4, background: "#f1f5f9" }} />
+              <div style={{ flex: 1, padding: "18px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, background: "#f1f5f9", animation: "pulse 1.5s ease-in-out infinite", flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ height: 13, width: `${72 - i * 8}%`, background: "#f1f5f9", borderRadius: 5, marginBottom: 9, animation: "pulse 1.5s ease-in-out infinite" }} />
+                  <div style={{ height: 10, width: "40%", background: "#f1f5f9", borderRadius: 5, animation: "pulse 1.5s ease-in-out infinite" }} />
+                </div>
+                <div style={{ width: 52, height: 52, borderRadius: "50%", background: "#f1f5f9", animation: "pulse 1.5s ease-in-out infinite", flexShrink: 0 }} />
+              </div>
+            </div>
+          ))}
         </div>
       ) : sessions.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "80px 24px", background: "#fafafa", borderRadius: 16, border: "2px dashed #e2e8f0" }}>
-          <div style={{ width: 64, height: 64, borderRadius: 16, background: "rgba(230,0,122,0.06)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 16px" }}>📂</div>
-          <p style={{ fontSize: 16, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>No packages yet</p>
-          <p style={{ fontSize: 14, color: "#64748b", marginBottom: 24 }}>Upload your first submission documents to get started.</p>
-          <button onClick={onNewPackage} style={{ padding: "10px 24px", background: "#e6007a", color: "#fff", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer" }}>+ Start First Package</button>
+        /* ── Empty state ── */
+        <div style={{ textAlign: "center", padding: "56px 24px 64px", background: "#fff", borderRadius: 20, border: "1.5px dashed #e2e8f0", position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg,#e6007a,#4f7cff,#10b981)", borderRadius: "20px 20px 0 0" }} />
+          <div style={{ width: 72, height: 72, borderRadius: 20, background: "linear-gradient(135deg,rgba(230,0,122,0.1),rgba(79,124,255,0.1))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, margin: "0 auto 20px", border: "1px solid rgba(230,0,122,0.12)" }}>📂</div>
+          <p style={{ fontSize: 19, fontWeight: 800, color: "#0f172a", marginBottom: 8, letterSpacing: "-0.02em" }}>No packages yet</p>
+          <p style={{ fontSize: 14, color: "#64748b", lineHeight: 1.65, maxWidth: 330, margin: "0 auto 32px" }}>Upload your first submission documents — Acordly will extract data and fill ACORD forms automatically.</p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 28, flexWrap: "wrap" }}>
+            {[["📄", "Upload docs"], ["⚡", "AI extracts data"], ["✅", "Download forms"]].map(([icon, label], i, arr) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 9, padding: "7px 14px" }}>
+                  <span style={{ fontSize: 14 }}>{icon}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#475569" }}>{label}</span>
+                </div>
+                {i < arr.length - 1 && <span style={{ color: "#d1d5db", fontSize: 13, fontWeight: 600 }}>→</span>}
+              </div>
+            ))}
+          </div>
+          <button onClick={onNewPackage}
+            style={{ padding: "12px 30px", background: "linear-gradient(135deg,#e6007a,#c4006a)", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 16px rgba(230,0,122,0.35)", transition: "all 0.2s" }}
+            onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 8px 24px rgba(230,0,122,0.45)"; }}
+            onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35)"; }}>
+            + Start First Package
+          </button>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {sessions.map(s => {
-            const avg = avgSqs(s.sqs);
-            return (
-              <div key={s.session_id} className="session-card"
-                onClick={() => onResume(s.session_id)}
-                style={{ background: "#fff", border: "1px solid #e8edf5", borderRadius: 12, padding: "16px 18px", cursor: "pointer", display: "flex", alignItems: "center", gap: 14, transition: "all 0.18s", position: "relative", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = "#e6007a"; e.currentTarget.style.boxShadow = "0 4px 20px rgba(230,0,122,0.1)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = "#e8edf5"; e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.04)"; e.currentTarget.style.transform = "none"; }}>
-                <div style={{ width: 42, height: 42, borderRadius: 10, background: "linear-gradient(135deg, rgba(230,0,122,0.1), rgba(230,0,122,0.05))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>📄</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.applicant}</div>
-                  <div style={{ fontSize: 12, color: "#64748b", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    {s.form_ids.length > 0 && <span style={{ background: "#f1f5f9", borderRadius: 4, padding: "1px 6px" }}>{s.form_ids.join(", ")}</span>}
-                    {s.lines?.length > 0 && <span>{s.lines.slice(0, 2).join(", ")}{s.lines.length > 2 ? ` +${s.lines.length - 2}` : ""}</span>}
+        /* ── Session list ── */
+        <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 10, paddingLeft: 2 }}>
+            {sessions.length} Package{sessions.length !== 1 ? "s" : ""}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {sessions.map(s => {
+              const avg   = avgSqs(s.sqs);
+              const color = avg != null ? sqsColor(avg)  : "#94a3b8";
+              const bg    = avg != null ? sqsBg(avg)     : "rgba(148,163,184,0.08)";
+              const grade = avg != null ? sqsGrade(avg)  : null;
+              const formCount = s.form_ids?.length || 0;
+              return (
+                <div key={s.session_id} className="session-card"
+                  onClick={() => onResume(s.session_id)}
+                  style={{ background: "#fff", border: "1px solid #e8edf5", borderRadius: 14, cursor: "pointer", display: "flex", alignItems: "stretch", transition: "all 0.18s", position: "relative", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflow: "hidden" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#e6007a"; e.currentTarget.style.boxShadow = "0 4px 24px rgba(230,0,122,0.12)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#e8edf5"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)"; e.currentTarget.style.transform = "none"; }}>
+
+                  {/* Left score-coloured accent bar */}
+                  <div style={{ width: 4, background: color, borderRadius: "14px 0 0 14px", flexShrink: 0, transition: "background 0.2s" }} />
+
+                  {/* Card body */}
+                  <div style={{ flex: 1, padding: "15px 18px", display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+
+                    {/* Icon */}
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: `linear-gradient(135deg,${color}1a,${color}09)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0, border: `1px solid ${color}22` }}>
+                      📄
+                    </div>
+
+                    {/* Text */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: "-0.01em" }}>
+                        {s.applicant || "Unnamed Package"}
+                      </div>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                        {formCount > 0 && (
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "#4f7cff", background: "rgba(79,124,255,0.08)", border: "1px solid rgba(79,124,255,0.18)", borderRadius: 6, padding: "2px 8px" }}>
+                            {formCount} form{formCount !== 1 ? "s" : ""}
+                          </span>
+                        )}
+                        {s.form_ids?.slice(0, 4).map(fid => (
+                          <span key={fid} style={{ fontSize: 11, color: "#64748b", background: "#f1f5f9", border: "1px solid #e8edf5", borderRadius: 5, padding: "2px 7px", fontWeight: 500 }}>{fid}</span>
+                        ))}
+                        {(s.form_ids?.length || 0) > 4 && <span style={{ fontSize: 11, color: "#94a3b8" }}>+{s.form_ids.length - 4}</span>}
+                        {s.lines?.length > 0 && (
+                          <span style={{ fontSize: 11, color: "#94a3b8" }}>· {s.lines.slice(0, 2).join(", ")}{s.lines.length > 2 ? ` +${s.lines.length - 2}` : ""}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Date */}
+                    <div style={{ flexShrink: 0, textAlign: "right", marginRight: 6 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>{fmtDate(s.updated_at)}</div>
+                    </div>
+
+                    {/* SQS circle badge */}
+                    <div style={{ width: 52, height: 52, borderRadius: "50%", background: bg, border: `2px solid ${color}44`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {avg != null ? (
+                        <>
+                          <span style={{ fontSize: 14, fontWeight: 800, color, lineHeight: 1 }}>{avg}</span>
+                          <span style={{ fontSize: 9, fontWeight: 700, color, opacity: 0.75, marginTop: 1 }}>{grade}</span>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600, textAlign: "center", lineHeight: 1.3 }}>SQS{"\n"}—</span>
+                      )}
+                    </div>
+
+                    {/* Chevron */}
+                    <div style={{ color: "#cbd5e1", flexShrink: 0, display: "flex", alignItems: "center" }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </div>
+
+                    <button className="session-delete-btn" onClick={e => { e.stopPropagation(); setDeleteTarget(s.session_id); }} title="Delete session" style={{ position: "absolute", top: 10, right: 10 }}>✕</button>
                   </div>
                 </div>
-                <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  {avg != null && <div style={{ fontSize: 17, fontWeight: 800, color: sqsColor(avg), marginBottom: 1, lineHeight: 1 }}>{avg}<span style={{ fontSize: 10, fontWeight: 500, color: "#94a3b8" }}>/100</span></div>}
-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>{fmtDate(s.updated_at)}</div>
-                </div>
-                <div style={{ color: "#cbd5e1", fontSize: 16, flexShrink: 0 }}>→</div>
-                <button className="session-delete-btn" onClick={e => { e.stopPropagation(); setDeleteTarget(s.session_id); }} title="Delete session">✕</button>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
@@ -1457,7 +1589,7 @@ export default function AcordModal({
             <div className="editor-main">
               <PDFJsViewer
                 key={activeFormId}
-                pdfUrl={`${API_BASE}/api/get-pdf/${sessionId}/${activeFormId}?token=${token}`}
+                pdfUrl={`${API_BASE}/api/get-pdf/${sessionId}/${activeFormId}`}
                 formName={activeFormId ? (generatedForms[activeFormId]?.form_name || activeFormId) : ""}
                 onFormNav={{ goPrev, goNext, activeIdx, total: formIdList.length }}
                 sessionId={sessionId} formId={activeFormId} token={token}

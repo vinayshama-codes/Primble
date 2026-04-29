@@ -80,6 +80,8 @@ async def apply_signature(
         raise HTTPException(400, "No signature saved. Please set up your signature first.")
 
     proc_session = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     generated    = proc_session.get("generated_forms", {})
 
     if form_id not in generated:
@@ -103,7 +105,7 @@ async def apply_signature(
         signed_pdf = inject_signature_into_pdf(tpl, field_data, confidence, sig)
     except Exception as ex:
         logger.error(f"apply-signature error form={form_id}: {ex}", exc_info=True)
-        raise HTTPException(500, f"Signature injection failed: {ex}")
+        raise HTTPException(500, "Signature processing failed. Please try again.")
 
     if not signed_pdf or len(signed_pdf) == 0:
         raise HTTPException(500, "Signature injection produced an empty PDF")
@@ -115,7 +117,6 @@ async def apply_signature(
     generated[form_id]["pdf_bytes"]         = signed_pdf
     generated[form_id]["_pdf_cache_hash"]   = state_hash
     generated[form_id]["signature_applied"] = True
-    generated[form_id]["signature_b64"]     = sig
 
     upd_processing_session(session_id, {"generated_forms": generated})
 

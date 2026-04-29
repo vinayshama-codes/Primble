@@ -1,13 +1,67 @@
 import logging
+import os
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 from config.settings import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 
+_POOL_MIN = int(os.getenv("DB_POOL_MIN", "1"))
+_POOL_MAX = int(os.getenv("DB_POOL_MAX", "10"))
 
-def get_db():
-    return psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+_pool: psycopg2.pool.ThreadedConnectionPool = None
+
+
+class _PooledConn:
+    """
+    Proxy around a borrowed psycopg2 connection.
+    .close() returns it to the pool (with a rollback to reset state) instead of
+    discarding it — so all existing call sites work unchanged.
+    """
+    def __init__(self, conn, pool):
+        self.__dict__["_conn"] = conn
+        self.__dict__["_pool"] = pool
+
+    def __getattr__(self, name):
+        return getattr(self.__dict__["_conn"], name)
+
+    def cursor(self, *args, **kwargs):
+        return self.__dict__["_conn"].cursor(*args, **kwargs)
+
+    def commit(self):
+        return self.__dict__["_conn"].commit()
+
+    def rollback(self):
+        return self.__dict__["_conn"].rollback()
+
+    def close(self):
+        conn = self.__dict__["_conn"]
+        pool = self.__dict__["_pool"]
+        try:
+            if not conn.closed:
+                conn.rollback()   # reset uncommitted state before returning
+        except Exception:
+            pass
+        pool.putconn(conn)
+
+
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _pool
+    if _pool is None:
+        _pool = psycopg2.pool.ThreadedConnectionPool(
+            _POOL_MIN,
+            _POOL_MAX,
+            DATABASE_URL,
+            cursor_factory=psycopg2.extras.RealDictCursor,
+        )
+        logger.info(f"DB pool created (min={_POOL_MIN}, max={_POOL_MAX})")
+    return _pool
+
+
+def get_db() -> _PooledConn:
+    p = _get_pool()
+    return _PooledConn(p.getconn(), p)
 
 
 def init_db():
@@ -182,6 +236,29 @@ def init_db():
     ]:
         try:
             cur.execute(f"ALTER TABLE arq_sessions ADD COLUMN {col} {definition}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+    # Webhook idempotency — stores processed Stripe event IDs to prevent
+    # duplicate side-effects when Stripe retries on network errors.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS processed_webhook_events (
+            event_id     TEXT PRIMARY KEY,
+            event_type   TEXT NOT NULL,
+            processed_at TEXT NOT NULL
+        )
+    """)
+
+    # S3 migration — add s3_key column so PDF bytes can be stored on S3 instead
+    # of (or alongside) PostgreSQL BYTEA.  pdf_bytes made nullable so rows with
+    # an s3_key don't need to duplicate the bytes in the DB.
+    for _stmt in [
+        "ALTER TABLE session_pdf_bytes ADD COLUMN s3_key TEXT",
+        "ALTER TABLE session_pdf_bytes ALTER COLUMN pdf_bytes DROP NOT NULL",
+    ]:
+        try:
+            cur.execute(_stmt)
             conn.commit()
         except Exception:
             conn.rollback()

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import uuid
 import psycopg2
 from datetime import datetime, timezone
@@ -8,6 +9,13 @@ from typing import Optional
 from config.database import get_db
 from fastapi import HTTPException
 from services.extraction_service import _fv
+from services.s3_service import (
+    download_pdf as _s3_download,
+    upload_pdf   as _s3_upload,
+    is_configured as _s3_configured,
+)
+
+_IS_PROD = os.getenv("ENVIRONMENT", "development").lower() == "production"
 
 logger = logging.getLogger(__name__)
 
@@ -34,15 +42,22 @@ def _session_to_db(data: dict) -> dict:
 def _session_from_db(data: dict, sid: str) -> dict:
     conn = get_db()
     cur  = conn.cursor()
-    cur.execute("SELECT form_id, pdf_bytes FROM session_pdf_bytes WHERE session_id = %s", (sid,))
-    rows   = cur.fetchall()
+    # SELECT * so we pick up s3_key if the column exists (added by init_db migration).
+    cur.execute("SELECT * FROM session_pdf_bytes WHERE session_id = %s", (sid,))
+    rows      = cur.fetchall()
     cur.close()
     conn.close()
-    pb_map    = {r["form_id"]: bytes(r["pdf_bytes"]) for r in rows}
     generated = data.get("generated_forms", {})
-    for fid, form_data in generated.items():
-        if fid in pb_map:
-            form_data["pdf_bytes"] = pb_map[fid]
+    for row in rows:
+        fid    = row["form_id"]
+        s3_key = row.get("s3_key")
+        pb     = None
+        if s3_key:
+            pb = _s3_download(s3_key)   # returns None if S3 fails or unconfigured
+        if pb is None and row.get("pdf_bytes"):
+            pb = bytes(row["pdf_bytes"])
+        if pb is not None and fid in generated:
+            generated[fid]["pdf_bytes"] = pb
     return data
 
 
@@ -54,14 +69,41 @@ def _save_pdf_bytes(sid: str, generated: dict):
     cur  = conn.cursor()
     for fid, form_data in generated.items():
         pb = form_data.get("pdf_bytes")
-        if pb is not None:
-            cur.execute(
-                """INSERT INTO session_pdf_bytes (session_id, form_id, pdf_bytes, updated_at)
-                   VALUES (%s, %s, %s, %s)
-                   ON CONFLICT (session_id, form_id)
-                   DO UPDATE SET pdf_bytes = EXCLUDED.pdf_bytes, updated_at = EXCLUDED.updated_at""",
-                (sid, fid, psycopg2.Binary(pb), now),
+        if pb is None:
+            continue
+        if _s3_configured():
+            s3_key = _s3_upload(sid, fid, pb)
+            if s3_key:
+                # S3 success — store key, omit BYTEA to save DB space.
+                cur.execute(
+                    """INSERT INTO session_pdf_bytes (session_id, form_id, pdf_bytes, s3_key, updated_at)
+                       VALUES (%s, %s, NULL, %s, %s)
+                       ON CONFLICT (session_id, form_id)
+                       DO UPDATE SET pdf_bytes = NULL, s3_key = EXCLUDED.s3_key,
+                                     updated_at = EXCLUDED.updated_at""",
+                    (sid, fid, s3_key, now),
+                )
+                continue
+            # S3 upload failed
+            if _IS_PROD:
+                logger.error("S3 PDF upload failed for session %s form %s in production — not falling back to BYTEA", sid, fid)
+                raise HTTPException(503, "PDF storage failed. Please try again.")
+            # Development only: fall through to BYTEA path below
+            logger.warning("S3 PDF upload failed for session %s form %s — falling back to BYTEA (dev only)", sid, fid)
+        elif _IS_PROD:
+            # Production without S3 configured is a hard stop.
+            raise HTTPException(
+                503,
+                "PDF storage requires S3 in production. Set AWS_S3_BUCKET.",
             )
+        cur.execute(
+            """INSERT INTO session_pdf_bytes (session_id, form_id, pdf_bytes, updated_at)
+               VALUES (%s, %s, %s, %s)
+               ON CONFLICT (session_id, form_id)
+               DO UPDATE SET pdf_bytes = EXCLUDED.pdf_bytes,
+                             updated_at = EXCLUDED.updated_at""",
+            (sid, fid, psycopg2.Binary(pb), now),
+        )
     conn.commit()
     cur.close()
     conn.close()

@@ -317,19 +317,22 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         _add("ACORD_130",
              "ACORD 130 - Workers Compensation Application",
              trigger_weight=0.95,
-             trigger_reason="has_workers_comp flag detected")
+             trigger_reason="has_workers_comp flag detected",
+             template_pending=True)
 
     if flags.get("has_auto_coverage"):
         _add("ACORD_127",
              "ACORD 127 - Business Auto Section",
              trigger_weight=0.95,
-             trigger_reason="has_auto_coverage flag detected")
+             trigger_reason="has_auto_coverage flag detected",
+             template_pending=True)
 
     if flags.get("has_umbrella"):
         _add("ACORD_131",
              "ACORD 131 - Umbrella / Excess Liability",
              trigger_weight=0.95,
-             trigger_reason="has_umbrella flag detected")
+             trigger_reason="has_umbrella flag detected",
+             template_pending=True)
 
     if flags.get("has_property_coverage"):
         _add("ACORD_140",
@@ -341,7 +344,8 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         _add("ACORD_141",
              "ACORD 141 - Property Schedule",
              trigger_weight=0.95,
-             trigger_reason="has_property_coverage and has_multiple_locations flags detected")
+             trigger_reason="has_property_coverage and has_multiple_locations flags detected",
+             template_pending=True)
 
     if flags.get("has_certificate_request") or flags.get("is_certificate_doc"):
         _add("ACORD_25",

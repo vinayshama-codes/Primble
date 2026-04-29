@@ -1,19 +1,21 @@
 import logging
 import os
-from typing import Optional
+import uuid
 from fastapi import Request
 
-from fastapi import APIRouter, Depends, File, Header, Query, UploadFile, HTTPException, File, Response
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, File, Response
 from fastapi.responses import JSONResponse, Response
 from typing import List
 
 from config.database import get_db
-from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG
+from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING
+from utils.json_logging import get_trace_id
+from services.job_queue import get_job_queue, JOB_TYPE_EXTRACTION, JOB_TYPE_FORM_GENERATION, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED
 from models.schemas import BulkFormSelectionRequest, FormSelectionRequest, PDFUpdateRequest
 from repositories.session_repository import (
     get_processing_session, new_processing_session, upd_processing_session,
 )
-from services.auth_service import get_current_user, validate_token_from_request
+from services.auth_service import get_current_user
 from services.extraction_service import extract_facts_long, identify_doc_type, merge_facts, select_primary_truth
 from services.form_service import (
     filter_available_forms, load_all_forms, match_forms, process_single_form,
@@ -33,6 +35,10 @@ from services.audit_service import (
     log_field_change,
     mark_recommendation_resolved,
 )
+from utils.rate_limiter import check_upload_rate_limit
+from utils.concurrency import try_acquire_heavy, release_heavy
+from utils.mime_validator import validate_file_mime
+from utils.virus_scanner import scan_file_bytes
 
 router = APIRouter(tags=["forms"])
 logger = logging.getLogger(__name__)
@@ -43,6 +49,8 @@ async def upload_declaration(
     files: List[UploadFile] = File(...),
     current_user: dict = Depends(get_current_user),
 ):
+    check_upload_rate_limit(current_user["id"])
+
     conn = get_db(); cur = conn.cursor()
     cur.execute("SELECT payment_status FROM users WHERE id = %s", (current_user["id"],))
     row = cur.fetchone(); cur.close(); conn.close()
@@ -53,21 +61,99 @@ async def upload_declaration(
         if ps == "archived":    raise HTTPException(403, "Account archived. Contact support@acordly.ai.")
         if ps == "soft_locked": raise HTTPException(403, "Account disabled. Please update your billing.")
 
+    uploaded_paths: list = []   # original files written to disk (including ZIPs)
+    all_paths: list      = []   # files to process (PDFs/images; may include ZIP contents)
+    _sem_acquired: bool  = False
+    _job_id              = None
+    _async_mode          = False
     try:
-        all_paths = []
+        if len(files) > MAX_FILES_PER_UPLOAD:
+            raise HTTPException(400, f"Too many files — maximum {MAX_FILES_PER_UPLOAD} per upload.")
+
         for f in files:
-            path = os.path.join(UPLOAD_DIR, f.filename)
+            # Read with hard size cap — prevents memory exhaustion from large uploads.
+            content = await f.read(MAX_UPLOAD_SIZE_BYTES + 1)
+            if len(content) > MAX_UPLOAD_SIZE_BYTES:
+                raise HTTPException(
+                    413,
+                    f"File '{f.filename}' exceeds the "
+                    f"{MAX_UPLOAD_SIZE_BYTES // 1024 // 1024} MB limit.",
+                )
+            ext = os.path.splitext((f.filename or "upload").lower())[1]
+            # MIME/magic-byte validation — reject files whose content doesn't match extension.
+            mime_ok, mime_err = validate_file_mime(content, ext)
+            if not mime_ok:
+                raise HTTPException(400, mime_err)
+            # Virus/malware scan — fail-closed in production.
+            scan_file_bytes(content, f.filename or "upload")
+            # Sanitize filename: strip any path components, prefix with uuid to
+            # prevent collisions and path-traversal attacks.
+            safe_name = f"{uuid.uuid4().hex}_{os.path.basename(f.filename or 'upload')}"
+            path = os.path.join(UPLOAD_DIR, safe_name)
             with open(path, "wb") as fp:
-                fp.write(await f.read())
-            ext = os.path.splitext(f.filename.lower())[1]
+                fp.write(content)
+            uploaded_paths.append(path)
             if ext == ".zip":
                 all_paths.extend(extract_zip(path))
             elif ext == ".pdf" or ext in SUPPORTED_IMG:
                 all_paths.append(path)
 
         if not all_paths:
-            from fastapi import HTTPException
             raise HTTPException(400, "No supported files found")
+
+        if not await try_acquire_heavy():
+            raise HTTPException(
+                429,
+                "Server busy — too many concurrent requests. Please retry in 30 seconds.",
+                headers={"Retry-After": "30"},
+            )
+        _sem_acquired = True
+
+        if ENABLE_ASYNC_PROCESSING:
+            # Async mode: upload source files to S3 so the worker can access them
+            # after this request ends and temp files are deleted.
+            from services.s3_service import upload_source_file, is_configured as _s3_ok
+            if not _s3_ok():
+                raise HTTPException(
+                    503,
+                    "Async processing requires S3 storage. Set AWS_S3_BUCKET or disable ENABLE_ASYNC_PROCESSING.",
+                )
+            _upload_id  = uuid.uuid4().hex
+            s3_keys     = []
+            for path in all_paths:
+                fname = os.path.basename(path)
+                try:
+                    with open(path, "rb") as fh:
+                        data = fh.read()
+                    key = upload_source_file(data, fname, _upload_id)
+                    if key is None:
+                        raise HTTPException(503, "Failed to upload files to S3 for async processing.")
+                    s3_keys.append(key)
+                except HTTPException:
+                    raise
+                except Exception as _e:
+                    raise HTTPException(503, "Failed to stage files for async processing.")
+
+            _queue      = get_job_queue()
+            _job_payload = {
+                "s3_keys": s3_keys,
+                "user_id": str(current_user["id"]),
+            }
+            _job_id = await _queue.enqueue(JOB_TYPE_EXTRACTION, _job_payload, str(current_user["id"]))
+            _async_mode = True
+            return JSONResponse(
+                status_code=202,
+                content={"job_id": _job_id, "session_id": None, "poll_url": f"/api/jobs/{_job_id}/status"},
+            )
+
+        # Sync mode: enqueue for status tracking, then process inline.
+        _queue      = get_job_queue()
+        _job_payload = {
+            "file_paths": all_paths,
+            "user_id":    str(current_user["id"]),
+        }
+        _job_id = await _queue.enqueue(JOB_TYPE_EXTRACTION, _job_payload, str(current_user["id"]))
+        await _queue.update_status(_job_id, STATUS_PROCESSING, progress_message="Extracting text from documents...")
 
         processed_docs = []
         all_low_conf:  list = []
@@ -97,6 +183,8 @@ async def upload_declaration(
         tier1_ok, tier1_missing = check_tier1(merged_facts, mflags)
 
         if not tier1_ok:
+            if _job_id:
+                await _queue.update_status(_job_id, STATUS_FAILED, error="tier1_validation_failed")
             return JSONResponse({"success": False, "gate": "tier1_fail",
                                   "message": "Submission missing required fields",
                                   "missing_fields": tier1_missing, "flags": mflags})
@@ -144,6 +232,9 @@ async def upload_declaration(
             "low_confidence_tokens": unique_low_conf,
         })
 
+        if _job_id:
+            await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": sid})
+
         truncation_warnings = [
             {"filename": d["filename"], "warning": d["truncation_warning"]}
             for d in processed_docs if d.get("truncation_warning")
@@ -166,10 +257,33 @@ async def upload_declaration(
             # for every available form that was NOT in the triggered recommendations.
             "all_available_forms": extra_forms_scored,
         })
+    except HTTPException:
+        raise
     except Exception as ex:
-        logger.error(f"Upload error: {ex}")
-        from fastapi import HTTPException
-        raise HTTPException(500, str(ex))
+        logger.error(f"Upload error [trace={get_trace_id()}]: {ex}", exc_info=True)
+        if _job_id:
+            try:
+                await get_job_queue().update_status(_job_id, STATUS_FAILED, error=type(ex).__name__)
+            except Exception:
+                pass
+        raise HTTPException(500, "Processing failed. Please try again.")
+    finally:
+        if _sem_acquired:
+            release_heavy()
+        if not _async_mode:
+            # Sync mode: safe to delete temp files — processing is complete.
+            for _p in set(uploaded_paths) | set(all_paths):
+                try:
+                    os.remove(_p)
+                except OSError:
+                    pass
+        # In async mode the files were already uploaded to S3; delete temp copies.
+        elif _async_mode:
+            for _p in set(uploaded_paths) | set(all_paths):
+                try:
+                    os.remove(_p)
+                except OSError:
+                    pass
 
 
 @router.post("/api/select-forms-bulk")
@@ -187,6 +301,24 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             raise HTTPException(403, "Account disabled. Please update your billing.")
 
     session = get_processing_session(req.session_id)
+    if session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+
+    _queue  = get_job_queue()
+    _fg_payload = {
+        "session_id": req.session_id,
+        "form_ids":   req.form_ids,
+        "user_id":    str(current_user["id"]),
+    }
+    _job_id = await _queue.enqueue(JOB_TYPE_FORM_GENERATION, _fg_payload, str(current_user["id"]), session_id=req.session_id)
+    await _queue.update_status(_job_id, STATUS_PROCESSING, progress_message="Generating ACORD forms...")
+
+    if ENABLE_ASYNC_PROCESSING:
+        return JSONResponse(
+            status_code=202,
+            content={"job_id": _job_id, "session_id": req.session_id, "poll_url": f"/api/jobs/{_job_id}/status"},
+        )
+
     results = {}
     combined_ids = req.form_ids
 
@@ -204,6 +336,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             logger.error(f"Error processing {form_id}: {ex}")
 
     if not results:
+        await _queue.update_status(_job_id, STATUS_FAILED, error="No forms could be generated")
         raise HTTPException(400, "No forms could be generated")
 
     cross_issues_raw     = cross_validate(session["facts"], session["flags"], combined_ids)
@@ -261,6 +394,8 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             except Exception as _audit_ex:
                 logger.warning(f"Audit log failed for {fid}: {_audit_ex}")
 
+    await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": req.session_id, "form_ids": combined_ids})
+
     return JSONResponse({
         "success": True,
         "generated": summary,
@@ -283,6 +418,8 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         raise HTTPException(403, "This endpoint is for Lite plan users only.")
 
     session = get_processing_session(session_id)
+    if session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
     recommendations = session.get("recommendations", [])
     form_ids = [r["form_id"] for r in recommendations]
 
@@ -337,13 +474,12 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
 @router.get("/api/fields/{session_id}/{form_id}")
 async def get_form_fields(
     session_id: str, form_id: str,
-    token: Optional[str] = Query(default=None),
-    authorization: str   = Header(default=None),
+    current_user: dict = Depends(get_current_user),
 ):
     from fastapi import HTTPException
-    if not validate_token_from_request(token, authorization):
-        raise HTTPException(401, "Not authenticated")
     proc_session = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     generated    = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form '{form_id}' not found")
@@ -372,16 +508,15 @@ async def get_form_fields(
 async def mark_client_filled(
     session_id: str, form_id: str,
     request: Request,
-    token: Optional[str] = Query(default=None),
-    authorization: str   = Header(default=None),
+    current_user: dict = Depends(get_current_user),
 ):
     """After client fills ARQ, mark those fields as 'filled' confidence and store client_filled list."""
     from fastapi import HTTPException
-    if not validate_token_from_request(token, authorization):
-        raise HTTPException(401, "Not authenticated")
     body       = await request.json()
     field_names = body.get("field_names", [])
     proc_session = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     generated    = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form '{form_id}' not found")
@@ -400,13 +535,12 @@ async def mark_client_filled(
 @router.get("/api/get-pdf/{session_id}/{form_id}")
 async def get_pdf(
     session_id: str, form_id: str,
-    token: Optional[str] = Query(default=None),
-    authorization: str = Header(default=None),
+    current_user: dict = Depends(get_current_user),
 ):
     from fastapi import HTTPException
-    if not validate_token_from_request(token, authorization):
-        raise HTTPException(401, "Not authenticated")
     proc_session = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     generated    = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form {form_id} not generated")
@@ -422,6 +556,8 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
     import hashlib, json
     from fastapi import HTTPException
     session   = get_processing_session(req.session_id)
+    if session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     generated = session.get("generated_forms", {})
     active_id = session.get("active_form_id")
 
@@ -548,7 +684,10 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
 @router.get("/api/session/{session_id}")
 async def get_session(session_id: str, current_user: dict = Depends(get_current_user)):
+    from fastapi import HTTPException
     proc_session = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     generated    = proc_session.get("generated_forms", {})
     summary      = {fid: {"form_id": r.get("form_id", fid), "form_name": r.get("form_name", fid),
                            "form": r.get("form", {}), "sqs": r.get("sqs", {})} for fid, r in generated.items()}
@@ -579,6 +718,8 @@ async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depen
     from fastapi import HTTPException
     from datetime import datetime, timezone
     proc_session = get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
     generated    = proc_session.get("generated_forms", {})
     facts        = proc_session.get("facts", {})
     org_name     = current_user.get("organization_name") or current_user.get("full_name") or "Unknown Org"
@@ -739,3 +880,56 @@ async def clarity_analyze(
         "flags":              flags,
         "compliance_checklist": sqs_combined.get("compliance_checklist", []),
     })
+
+
+_PRESIGN_ALLOWED_EXTS = {".pdf", ".zip", ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
+_EXT_TO_CONTENT_TYPE = {
+    ".pdf":  "application/pdf",
+    ".zip":  "application/zip",
+    ".jpg":  "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png":  "image/png",
+    ".bmp":  "image/bmp",
+    ".tiff": "image/tiff",
+    ".tif":  "image/tiff",
+    ".webp": "image/webp",
+}
+
+
+@router.post("/api/upload/presign")
+async def get_presigned_upload_url(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Return a presigned S3 POST URL for direct browser-to-S3 upload.
+
+    Request body JSON: {"filename": "acord125.pdf"}
+    Response:         {"url": "...", "fields": {...}, "s3_key": "..."}
+
+    The client uploads directly to S3, then passes s3_key in the extraction
+    payload to tell the worker where the file lives.
+    """
+    from services.s3_service import generate_presigned_upload_url, is_configured as _s3_ok
+
+    if not _s3_ok():
+        raise HTTPException(503, "S3 is not configured. Use the multipart upload endpoint instead.")
+
+    check_upload_rate_limit(str(current_user["id"]))
+
+    body = await request.json()
+    filename = (body.get("filename") or "").strip()
+    if not filename:
+        raise HTTPException(400, "filename is required")
+
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in _PRESIGN_ALLOWED_EXTS:
+        raise HTTPException(400, f"File type '{ext}' is not supported. Allowed: {', '.join(sorted(_PRESIGN_ALLOWED_EXTS))}")
+
+    content_type = _EXT_TO_CONTENT_TYPE.get(ext, "application/octet-stream")
+    upload_id    = uuid.uuid4().hex
+    result       = generate_presigned_upload_url(filename, upload_id, content_type)
+    if result is None:
+        raise HTTPException(503, "Could not generate upload URL. Please try again.")
+
+    return JSONResponse({"success": True, **result})

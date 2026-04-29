@@ -15,7 +15,29 @@ FRONTEND_URL          = os.getenv("FRONTEND_URL", "http://localhost:5173")
 REDIS_URL             = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_BILLING_PORTAL_URL = os.getenv("STRIPE_BILLING_PORTAL_URL", "https://billing.stripe.com/p/login/")
-OCR_PROVIDER          = os.getenv("OCR_PROVIDER", "easyocr").lower()
+OCR_PROVIDER              = os.getenv("OCR_PROVIDER", "easyocr").lower()
+ENABLE_ASYNC_PROCESSING   = os.getenv("ENABLE_ASYNC_PROCESSING", "false").lower() == "true"
+
+# CORS — explicit allowlist.
+# In production set ALLOWED_ORIGINS=https://app.acordly.ai (comma-separated for multiple).
+# Localhost defaults are only active when ENVIRONMENT != production.
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+_env         = os.getenv("ENVIRONMENT", "development").lower()
+
+if _raw_origins.strip():
+    ALLOWED_ORIGINS: list = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+elif _env == "production":
+    # Refuse to start with wildcard CORS in production.
+    raise RuntimeError(
+        "ALLOWED_ORIGINS env var must be set in production. "
+        "Example: ALLOWED_ORIGINS=https://app.acordly.ai"
+    )
+else:
+    ALLOWED_ORIGINS = list({FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"})
+
+# Upload limits
+MAX_UPLOAD_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024  # default 50 MB per file
+MAX_FILES_PER_UPLOAD  = int(os.getenv("MAX_FILES_PER_UPLOAD", "10"))
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
 groq_client    = Groq(api_key=os.getenv("GROQ_API_KEY"))

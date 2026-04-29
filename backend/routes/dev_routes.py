@@ -1,5 +1,6 @@
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -12,6 +13,18 @@ from services.scheduler_service import run_daily_payment_lifecycle
 
 router = APIRouter(tags=["dev"])
 logger = logging.getLogger(__name__)
+
+_ADMIN_EMAILS: set = {
+    e.strip().lower()
+    for e in os.getenv("ADMIN_EMAILS", "").split(",")
+    if e.strip()
+}
+
+
+def _require_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    if current_user.get("email", "").lower() not in _ADMIN_EMAILS:
+        raise HTTPException(403, "Admin access required")
+    return current_user
 
 
 @router.post("/api/acord/confirm-license")
@@ -57,7 +70,7 @@ async def get_audit_log(
 
 
 @router.post("/api/billing/payment-lifecycle")
-async def run_payment_lifecycle():
+async def run_payment_lifecycle(_: dict = Depends(_require_admin)):
     await run_daily_payment_lifecycle()
     return {
         "processed":   True,

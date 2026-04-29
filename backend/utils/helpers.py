@@ -1,10 +1,11 @@
-import random
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
 
 def generate_verification_code() -> str:
-    return str(random.randint(100000, 999999))
+    # 6-digit code: randbelow(900000) gives 0-899999, +100000 gives 100000-999999
+    return str(secrets.randbelow(900000) + 100000)
 
 
 def _safe_parse_dt(raw) -> Optional[datetime]:
