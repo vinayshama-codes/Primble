@@ -5,7 +5,6 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# Sentry must be initialised before any application code runs.
 _SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 if _SENTRY_DSN:
     import sentry_sdk
@@ -22,11 +21,10 @@ if _SENTRY_DSN:
             FastApiIntegration(transaction_style="url"),
             LoggingIntegration(level=logging.WARNING, event_level=logging.ERROR),
         ],
-        # Never send PII (form data, emails, user content)
         send_default_pii=False,
     )
 
-from config.database import get_db
+from config.database import create_pool, close_pool, get_pool, init_db
 from config.settings import ALLOWED_ORIGINS, MAX_UPLOAD_SIZE_BYTES  # noqa: F401
 from services.scheduler_service import start_scheduler, stop_scheduler
 from utils.json_logging import JsonFormatter, set_trace_id
@@ -40,11 +38,11 @@ from routes.audit_routes import router as audit_router
 from routes.job_routes import router as job_router
 from routes.admin_routes import router as admin_router
 
-_DEV_ROUTES_ENABLED   = os.getenv("DEV_ROUTES_ENABLED", "false").lower() == "true"
-_ENVIRONMENT          = os.getenv("ENVIRONMENT", "development").lower()
-_IS_PROD              = _ENVIRONMENT == "production"
-_JOB_QUEUE_BACKEND    = os.getenv("JOB_QUEUE_BACKEND", "local_file").lower()
-_SCHEDULER_ENABLED    = os.getenv("SCHEDULER_ENABLED", "false" if _IS_PROD else "true").lower() == "true"
+_DEV_ROUTES_ENABLED = os.getenv("DEV_ROUTES_ENABLED", "false").lower() == "true"
+_ENVIRONMENT        = os.getenv("ENVIRONMENT", "development").lower()
+_IS_PROD            = _ENVIRONMENT == "production"
+_JOB_QUEUE_BACKEND  = os.getenv("JOB_QUEUE_BACKEND", "local_file").lower()
+_SCHEDULER_ENABLED  = os.getenv("SCHEDULER_ENABLED", "false" if _IS_PROD else "true").lower() == "true"
 
 _json_handler = logging.StreamHandler()
 _json_handler.setFormatter(JsonFormatter())
@@ -119,7 +117,6 @@ if _DEV_ROUTES_ENABLED:
 
 @app.on_event("startup")
 async def startup():
-    # Production guards — refuse to start with unsafe configuration.
     if _IS_PROD and _JOB_QUEUE_BACKEND in ("local_file", "memory"):
         raise RuntimeError(
             f"JOB_QUEUE_BACKEND='{_JOB_QUEUE_BACKEND}' is not allowed in production. "
@@ -127,6 +124,23 @@ async def startup():
         )
     if _IS_PROD and _DEV_ROUTES_ENABLED:
         raise RuntimeError("DEV_ROUTES_ENABLED=true is not allowed in production.")
+
+    # Initialize asyncpg connection pool
+    await create_pool()
+    logger.info("Database pool created (asyncpg)")
+
+    # Run DDL migrations
+    try:
+        await init_db()
+    except Exception as _e:
+        logger.warning(f"DB init failed (non-fatal): {_e}")
+
+    # Create audit tables
+    try:
+        from services.audit_service import init_audit_tables
+        await init_audit_tables()
+    except Exception as _e:
+        logger.warning(f"Audit table init failed (non-fatal): {_e}")
 
     if _SCHEDULER_ENABLED:
         start_scheduler()
@@ -136,17 +150,13 @@ async def startup():
             "Run a dedicated scheduler process with SCHEDULER_ENABLED=true."
         )
 
-    try:
-        from services.audit_service import init_audit_tables
-        init_audit_tables()
-    except Exception as _e:
-        logger.warning(f"Audit table init failed (non-fatal): {_e}")
-
 
 @app.on_event("shutdown")
 async def shutdown():
     if _SCHEDULER_ENABLED:
         stop_scheduler()
+    await close_pool()
+    logger.info("Database pool closed")
 
 
 @app.get("/")
@@ -155,13 +165,10 @@ def home():
 
 
 @app.get("/api/health")
-def health():
+async def health():
     try:
-        conn     = get_db()
-        cur      = conn.cursor()
-        cur.execute("SELECT 1")
-        cur.close()
-        conn.close()
+        async with get_pool().acquire() as conn:
+            await conn.execute("SELECT 1")
         return {"status": "healthy"}
     except Exception:
         logger.exception("Health check failed")

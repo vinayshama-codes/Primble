@@ -1,8 +1,9 @@
-import os
-import time
+import asyncio
 import logging
+import os
+
+import httpx
 import stripe
-from groq import Groq
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -18,16 +19,12 @@ STRIPE_BILLING_PORTAL_URL = os.getenv("STRIPE_BILLING_PORTAL_URL", "https://bill
 OCR_PROVIDER              = os.getenv("OCR_PROVIDER", "easyocr").lower()
 ENABLE_ASYNC_PROCESSING   = os.getenv("ENABLE_ASYNC_PROCESSING", "false").lower() == "true"
 
-# CORS — explicit allowlist.
-# In production set ALLOWED_ORIGINS=https://app.acordly.ai (comma-separated for multiple).
-# Localhost defaults are only active when ENVIRONMENT != production.
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "")
 _env         = os.getenv("ENVIRONMENT", "development").lower()
 
 if _raw_origins.strip():
     ALLOWED_ORIGINS: list = [o.strip() for o in _raw_origins.split(",") if o.strip()]
 elif _env == "production":
-    # Refuse to start with wildcard CORS in production.
     raise RuntimeError(
         "ALLOWED_ORIGINS env var must be set in production. "
         "Example: ALLOWED_ORIGINS=https://app.acordly.ai"
@@ -35,12 +32,20 @@ elif _env == "production":
 else:
     ALLOWED_ORIGINS = list({FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"})
 
-# Upload limits
-MAX_UPLOAD_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024  # default 50 MB per file
+MAX_UPLOAD_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 MAX_FILES_PER_UPLOAD  = int(os.getenv("MAX_FILES_PER_UPLOAD", "10"))
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
-groq_client    = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+# Sync Groq client — kept for use inside executor threads (ocr_service, legacy paths)
+from groq import Groq, AsyncGroq
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+# Async Groq client with 30-second HTTP timeout — used from async code
+_groq_async = AsyncGroq(
+    api_key=os.getenv("GROQ_API_KEY"),
+    http_client=httpx.AsyncClient(timeout=30.0),
+)
 
 SOFT_BUFFER_PCT    = 0.05
 STRIPE_CURRENCY    = "usd"
@@ -77,35 +82,40 @@ SUPPORTED_IMG = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(FORMS_SCHEMAS_DIR, exist_ok=True)
 
-
 _LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 
 
-def groq_chat(model: str, messages: list, temperature: float = 0, max_tokens: int = 4096,
-              _retries: int = 2) -> str:
+# ASYNC-SAFE
+async def groq_chat(
+    model: str,
+    messages: list,
+    temperature: float = 0,
+    max_tokens: int = 4096,
+    _retries: int = 2,
+) -> str:
     """
-    Provider-dispatching LLM wrapper. Controlled by LLM_PROVIDER env var.
-
-    groq  (default) — uses GROQ_API_KEY
-    claude          — uses ANTHROPIC_API_KEY; pass a claude-* model name
-    openai          — uses OPENAI_API_KEY; pass a gpt-* model name
-
-    The function is named groq_chat for backwards compatibility — all callers
-    use this name. Switching providers requires only changing LLM_PROVIDER.
+    Async provider-dispatching LLM wrapper. Controlled by LLM_PROVIDER env var.
+    All retry waits use asyncio.sleep — never blocks the event loop.
     """
     if _LLM_PROVIDER == "claude":
-        return _claude_chat(model, messages, temperature, max_tokens, _retries)
+        return await _claude_chat(model, messages, temperature, max_tokens, _retries)
     if _LLM_PROVIDER == "openai":
-        return _openai_chat(model, messages, temperature, max_tokens, _retries)
-    return _groq_chat(model, messages, temperature, max_tokens, _retries)
+        return await _openai_chat(model, messages, temperature, max_tokens, _retries)
+    return await _groq_chat(model, messages, temperature, max_tokens, _retries)
 
 
-def _groq_chat(model: str, messages: list, temperature: float, max_tokens: int,
-               _retries: int) -> str:
+# ASYNC-SAFE
+async def _groq_chat(
+    model: str,
+    messages: list,
+    temperature: float,
+    max_tokens: int,
+    _retries: int,
+) -> str:
     last_ex = None
     for attempt in range(_retries + 1):
         try:
-            r = groq_client.chat.completions.create(
+            r = await _groq_async.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=temperature,
@@ -117,21 +127,32 @@ def _groq_chat(model: str, messages: list, temperature: float, max_tokens: int,
             status = getattr(ex, "status_code", None)
             if attempt < _retries and status in (429, 500, 502, 503, 504):
                 wait = 2 ** attempt
-                logger.warning(f"Groq {status} on attempt {attempt+1}, retrying in {wait}s: {ex}")
-                time.sleep(wait)
+                logger.warning(
+                    f"Groq {status} on attempt {attempt+1}, retrying in {wait}s: {ex}"
+                )
+                await asyncio.sleep(wait)  # non-blocking
             else:
                 break
     raise last_ex
 
 
-def _claude_chat(model: str, messages: list, temperature: float, max_tokens: int,
-                 _retries: int) -> str:
+# ASYNC-SAFE
+async def _claude_chat(
+    model: str,
+    messages: list,
+    temperature: float,
+    max_tokens: int,
+    _retries: int,
+) -> str:
     import anthropic
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY", ""))
+    client = anthropic.AsyncAnthropic(
+        api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+        http_client=httpx.AsyncClient(timeout=30.0),
+    )
     last_ex = None
     for attempt in range(_retries + 1):
         try:
-            r = client.messages.create(
+            r = await client.messages.create(
                 model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -143,21 +164,32 @@ def _claude_chat(model: str, messages: list, temperature: float, max_tokens: int
             status = getattr(ex, "status_code", None)
             if attempt < _retries and status in (429, 500, 502, 503, 529):
                 wait = 2 ** attempt
-                logger.warning(f"Claude {status} on attempt {attempt+1}, retrying in {wait}s: {ex}")
-                time.sleep(wait)
+                logger.warning(
+                    f"Claude {status} on attempt {attempt+1}, retrying in {wait}s: {ex}"
+                )
+                await asyncio.sleep(wait)  # non-blocking
             else:
                 break
     raise last_ex
 
 
-def _openai_chat(model: str, messages: list, temperature: float, max_tokens: int,
-                 _retries: int) -> str:
+# ASYNC-SAFE
+async def _openai_chat(
+    model: str,
+    messages: list,
+    temperature: float,
+    max_tokens: int,
+    _retries: int,
+) -> str:
     import openai as _openai
-    client = _openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
+    client = _openai.AsyncOpenAI(
+        api_key=os.getenv("OPENAI_API_KEY", ""),
+        http_client=httpx.AsyncClient(timeout=30.0),
+    )
     last_ex = None
     for attempt in range(_retries + 1):
         try:
-            r = client.chat.completions.create(
+            r = await client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=temperature,
@@ -169,8 +201,10 @@ def _openai_chat(model: str, messages: list, temperature: float, max_tokens: int
             status = getattr(ex, "status_code", None)
             if attempt < _retries and status in (429, 500, 502, 503):
                 wait = 2 ** attempt
-                logger.warning(f"OpenAI {status} on attempt {attempt+1}, retrying in {wait}s: {ex}")
-                time.sleep(wait)
+                logger.warning(
+                    f"OpenAI {status} on attempt {attempt+1}, retrying in {wait}s: {ex}"
+                )
+                await asyncio.sleep(wait)  # non-blocking
             else:
                 break
     raise last_ex

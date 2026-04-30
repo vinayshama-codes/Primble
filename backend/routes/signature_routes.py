@@ -4,7 +4,7 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from config.database import get_db
+from config.database import get_pool
 from config.settings import TEMPLATE_DIR
 from models.schemas import SaveSignatureRequest
 from repositories.session_repository import get_processing_session, upd_processing_session
@@ -26,15 +26,11 @@ async def save_signature(
     if sig is not None and len(sig) > 5_000_000:
         raise HTTPException(400, "Signature image too large (max ~5 MB)")
 
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "UPDATE users SET signature_data = %s WHERE id = %s",
-        (sig, current_user["id"]),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET signature_data = $1 WHERE id = $2",
+            sig, current_user["id"],
+        )
 
     action = "cleared" if sig is None else "saved"
     logger.info(f"Signature {action}: user={current_user['id']}")
@@ -43,15 +39,11 @@ async def save_signature(
 
 @router.get("/api/auth/get-signature")
 async def get_signature(current_user: dict = Depends(get_current_user)):
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT signature_data FROM users WHERE id = %s",
-        (current_user["id"],),
-    )
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT signature_data FROM users WHERE id = $1",
+            current_user["id"],
+        )
     sig = dict(row).get("signature_data") if row else None
     return {"success": True, "signature_data": sig}
 
@@ -62,15 +54,11 @@ async def apply_signature(
     form_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT signature_data FROM users WHERE id = %s",
-        (current_user["id"],),
-    )
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT signature_data FROM users WHERE id = $1",
+            current_user["id"],
+        )
 
     if not row:
         raise HTTPException(404, "User not found")
@@ -79,10 +67,10 @@ async def apply_signature(
     if not sig:
         raise HTTPException(400, "No signature saved. Please set up your signature first.")
 
-    proc_session = get_processing_session(session_id)
+    proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    generated    = proc_session.get("generated_forms", {})
+    generated = proc_session.get("generated_forms", {})
 
     if form_id not in generated:
         raise HTTPException(404, f"Form '{form_id}' not found in session")
@@ -118,10 +106,6 @@ async def apply_signature(
     generated[form_id]["_pdf_cache_hash"]   = state_hash
     generated[form_id]["signature_applied"] = True
 
-    upd_processing_session(session_id, {"generated_forms": generated})
+    await upd_processing_session(session_id, {"generated_forms": generated})
 
-    return {
-        "success":  True,
-        "form_id":  form_id,
-        "message":  "Signature applied successfully",
-    }
+    return {"success": True, "form_id": form_id, "message": "Signature applied successfully"}

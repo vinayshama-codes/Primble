@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -m pytest tests/test_production_guards.py -v)"
+      "Bash(python -m pytest tests/test_production_guards.py -v)",
+      "Bash(awk '{print $9, $5}')",
+      "PowerShell(& \"C:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\\\\backend\\\\venv\\\\Scripts\\\\pip.exe\" install asyncpg)"
     ]
   }
 }

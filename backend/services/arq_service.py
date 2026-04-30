@@ -1,14 +1,23 @@
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import List, Tuple, Optional
 
-from config.database import get_db
-from config.settings import FRONTEND_URL, groq_client
+import httpx
+from groq import AsyncGroq
+
+from config.database import get_pool
+from config.settings import FRONTEND_URL
 
 logger = logging.getLogger(__name__)
+
+_arq_groq_async = AsyncGroq(
+    api_key=os.getenv("GROQ_API_KEY"),
+    http_client=httpx.AsyncClient(timeout=30.0),
+)
 
 # ---------------------------------------------------------------------------
 # Answer format validators
@@ -254,22 +263,20 @@ def _split_concatenated(token: str) -> str:
     token = token.strip().lower()
     if not token:
         return token
-    
-    # If token is already a normal word (no weird concatenation), return as-is
+
     if len(token) < 20 and ' ' not in token and token.isalpha():
         return token
-    
+
     if token in _SPLIT_CACHE:
         return _SPLIT_CACHE[token]
-    
+
     original = token
     result_parts = []
     i = 0
     token_len = len(token)
-    
+
     while i < token_len:
         matched = False
-        # Try to match longest words first
         for word in _INSURANCE_WORDS:
             word_len = len(word)
             if i + word_len <= token_len and token[i:i+word_len] == word:
@@ -277,61 +284,46 @@ def _split_concatenated(token: str) -> str:
                 i += word_len
                 matched = True
                 break
-        
+
         if not matched:
-            # Take a single character but DON'T add space after single letters
-            # unless it's a real word boundary
             result_parts.append(token[i])
             i += 1
-    
-    # Join with spaces only between actual words, not between every letter
+
     result = " ".join(result_parts)
-    
-    # Clean up: Remove spaces that create single-letter breaks
-    # Fix common patterns like "p a c k a g e" -> "package"
-    import re
-    # If result has many single letters with spaces, try to recombine
+
     if re.search(r'\b[a-z]\s+[a-z]\s+[a-z]', result):
-        # Remove spaces between letters that are likely part of same word
         result = re.sub(r'([a-z])\s+(?=[a-z])', r'\1', result)
-    
+
     _SPLIT_CACHE[original] = result
     return result
 
 
 def _field_name_to_readable(field_name: str) -> str:
     """Convert field name to readable text without trailing characters."""
-    # Remove trailing single letters (like 'a' at the end)
     name = re.sub(r'[_\s]+[a-zA-Z]$', '', field_name)
     name = re.sub(r'[_\s]+\d+$', '', name)
-    
-    # Split by underscores, spaces, or hyphens
+
     tokens = re.split(r'[_\-\s]+', name)
-    
+
     expanded = []
     for tok in tokens:
         if not tok:
             continue
-        # Handle camelCase
         tok = re.sub(r'([a-z])([A-Z])', r'\1 \2', tok)
         tok = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', tok)
-        
-        # Process each part
+
         for sub in tok.split():
             if len(sub) == 1 and sub.lower() == 'a':
-                # Skip single 'a' characters as they're likely artifacts
                 continue
             result = _split_concatenated(sub)
             if result and result != 'a':
                 expanded.append(result)
-    
+
     readable = " ".join(expanded).strip()
     readable = re.sub(r'\s+', ' ', readable)
-    
-    # Remove any trailing 'a' or ' a' patterns
     readable = re.sub(r'\s+a$', '', readable)
     readable = re.sub(r'^a\s+', '', readable)
-    
+
     return readable.lower()
 
 
@@ -342,36 +334,27 @@ def _clean_duplicate_words(text: str) -> str:
     """Remove duplicate consecutive words and stray characters."""
     if not text:
         return text
-    
-    import re
-    
-    # Remove duplicate consecutive words (case insensitive)
+
     words = text.split()
     cleaned = []
     prev_word = None
-    
+
     for word in words:
-        # Skip if same as previous word (case insensitive)
         if prev_word and word.lower() == prev_word.lower():
             continue
         cleaned.append(word)
         prev_word = word
-    
+
     text = ' '.join(cleaned)
-    
-    # Remove stray 'a' at the end of sentences
     text = re.sub(r'\s+a([\.\?\!]|$)', r'\1', text)
-    
-    # Fix "policy policy" pattern specifically
     text = re.sub(r'\b(policy)\s+\1\b', r'\1', text, flags=re.IGNORECASE)
-    
-    # Remove spaces before punctuation
     text = re.sub(r'\s+([\.\?\!,])', r'\1', text)
-    
+
     return text
 
 
-def _humanize_fields_with_groq(field_names: list[str]) -> dict[str, str]:
+# ASYNC-SAFE
+async def _humanize_fields_with_groq(field_names: list[str]) -> dict[str, str]:
     uncached = [f for f in field_names if f not in _HUMANIZED_CACHE]
     if not uncached:
         return {f: _HUMANIZED_CACHE[f] for f in field_names}
@@ -398,7 +381,7 @@ Fields:
 {numbered_lines}"""
 
     try:
-        response = groq_client.chat.completions.create(
+        response = await _arq_groq_async.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
@@ -428,7 +411,6 @@ Fields:
 def _resolve_question(field_name: str) -> tuple[str, str | None]:
     q = _FIELD_QUESTION_MAP.get(field_name)
     if q:
-        # Clean duplicate words
         q = _clean_duplicate_words(q)
         return q, None
 
@@ -458,49 +440,37 @@ def _resolve_question(field_name: str) -> tuple[str, str | None]:
 
 
 def _clean_answer(raw: str, field_name: str) -> Optional[str]:
-    """
-    Sanitize, validate format by field name, and return cleaned answer.
-    Returns None if answer is empty, placeholder, or fails format validation.
-    """
+    """Sanitize, validate format by field name, and return cleaned answer."""
     if raw is None:
         return None
     val = str(raw).strip()
 
-    # Empty / placeholder values
     if not val or val.lower() in ("n/a", "na", "?", "unknown", "none", "null", "-", "--", "tbd", "unsure"):
         return None
 
-    # Strip HTML tags
     val = re.sub(r"<[^>]*>", "", val).strip()
 
-    # Policy number cleanup
     if "policy_number" in field_name.lower():
         val = re.sub(r"(?i)^policy\s*(number|#|no\.?|num\.?)[\s:]*", "", val).strip()
-        # Fix duplicate "policy" words
         val = re.sub(r'\b(policy)\s+\1\b', r'\1', val, flags=re.IGNORECASE)
 
-    # Truncate
     if len(val) > 500:
         val = val[:500].strip()
 
     if not val:
         return None
 
-    # Format validation by field name
     fmt = _field_format_type(field_name)
-    
-    # For checkbox fields, ensure we have proper Yes/No values
+
     if fmt == "checkbox" or field_name.lower().find("indicator") >= 0:
-        # Convert various yes/no representations
         yes_values = ("yes", "true", "1", "y", "on", "checked")
-        no_values = ("no", "false", "0", "n", "off", "unchecked")
-        
+        no_values  = ("no", "false", "0", "n", "off", "unchecked")
+
         if val.lower() in yes_values:
             return "Yes"
         elif val.lower() in no_values:
             return "No"
         else:
-            # Not a valid checkbox answer
             logger.warning(f"ARQ answer rejected: field={field_name} expected=checkbox val={val!r}")
             return None
 
@@ -510,7 +480,6 @@ def _clean_answer(raw: str, field_name: str) -> Optional[str]:
             return None
 
     elif fmt == "phone":
-        # Normalize common separators before checking
         normalized = val.replace(" ", "").replace("-", "").replace(".", "").replace("(", "").replace(")", "")
         if not normalized.lstrip("+").isdigit() or len(normalized.lstrip("+")) < 7:
             logger.warning(f"ARQ answer rejected: field={field_name} expected=phone/fax val={val!r}")
@@ -522,7 +491,6 @@ def _clean_answer(raw: str, field_name: str) -> Optional[str]:
             return None
 
     elif fmt == "number":
-        # Soft validation — log but do not reject (user may write "$1M" or "1 million")
         clean_num = val.replace(" ", "").replace(",", "").replace("$", "")
         if not re.match(r"^\d+(\.\d+)?$", clean_num):
             logger.info(f"ARQ answer number format unusual: field={field_name} val={val!r}")
@@ -534,7 +502,8 @@ def _clean_answer(raw: str, field_name: str) -> Optional[str]:
 # Question generation
 # ---------------------------------------------------------------------------
 
-def generate_arq_questions(
+# ASYNC-SAFE
+async def generate_arq_questions(
     facts: dict,
     flags: dict,
     generated_forms: dict,
@@ -604,7 +573,7 @@ def generate_arq_questions(
             groq_needed.append(field_name)
 
     if groq_needed:
-        _humanize_fields_with_groq(groq_needed)
+        await _humanize_fields_with_groq(groq_needed)
 
     for field_name, form_ids in missing_fields.items():
         if field_name in seen_field_names:
@@ -672,7 +641,22 @@ def generate_arq_questions(
 # ARQ session CRUD
 # ---------------------------------------------------------------------------
 
-def create_arq_session(
+def _decode_arq_row(row: dict) -> dict:
+    """Decode JSON string columns if not already parsed by asyncpg codec."""
+    for col in ("questions", "answers"):
+        val = row.get(col)
+        if isinstance(val, str):
+            try:
+                row[col] = json.loads(val)
+            except Exception:
+                pass
+        elif val is None:
+            row[col] = {} if col == "answers" else []
+    return row
+
+
+# ASYNC-SAFE
+async def create_arq_session(
     processing_session_id: str,
     user_id: str,
     client_email: str,
@@ -685,100 +669,74 @@ def create_arq_session(
     now     = datetime.now(timezone.utc).isoformat()
     expires = (datetime.now(timezone.utc) + timedelta(days=expires_days)).isoformat()
 
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        """INSERT INTO arq_sessions
-           (id, session_id, user_id, token, email, client_name, status, questions, answers,
-            expires_at, created_at)
-           VALUES (%s,%s,%s,%s,%s,%s,'pending',%s,'{}', %s,%s)""",
-        (arq_id, processing_session_id, user_id, token,
-         client_email, client_name or "",
-         json.dumps(questions), expires, now),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            """INSERT INTO arq_sessions
+               (id, session_id, user_id, token, email, client_name, status, questions, answers,
+                expires_at, created_at)
+               VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,'{}',$8,$9)""",
+            arq_id, processing_session_id, user_id, token,
+            client_email, client_name or "",
+            json.dumps(questions), expires, now,
+        )
     logger.info(f"ARQ session created: {arq_id} for session={processing_session_id}")
     return {"arq_id": arq_id, "token": token, "expires_at": expires}
 
 
-def get_arq_by_token(token: str) -> Optional[dict]:
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute("SELECT * FROM arq_sessions WHERE token = %s", (token,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+# ASYNC-SAFE
+async def get_arq_by_token(token: str) -> Optional[dict]:
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM arq_sessions WHERE token = $1", token
+        )
     if not row:
         return None
-    result = dict(row)
-    if isinstance(result.get("questions"), str):
-        result["questions"] = json.loads(result["questions"])
-    if isinstance(result.get("answers"), str):
-        result["answers"] = json.loads(result["answers"])
-    return result
+    return _decode_arq_row(dict(row))
 
 
-def get_arq_by_id(arq_id: str) -> Optional[dict]:
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute("SELECT * FROM arq_sessions WHERE id = %s", (arq_id,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+# ASYNC-SAFE
+async def get_arq_by_id(arq_id: str) -> Optional[dict]:
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM arq_sessions WHERE id = $1", arq_id
+        )
     if not row:
         return None
-    result = dict(row)
-    if isinstance(result.get("questions"), str):
-        result["questions"] = json.loads(result["questions"])
-    if isinstance(result.get("answers"), str):
-        result["answers"] = json.loads(result["answers"])
-    return result
+    return _decode_arq_row(dict(row))
 
 
-def get_arq_sessions_for_user(user_id: str) -> List[dict]:
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT * FROM arq_sessions WHERE user_id = %s ORDER BY created_at DESC",
-        (user_id,),
-    )
-    rows = [dict(r) for r in cur.fetchall()]
-    cur.close()
-    conn.close()
-    for r in rows:
-        if isinstance(r.get("questions"), str):
-            r["questions"] = json.loads(r["questions"])
-        if isinstance(r.get("answers"), str):
-            r["answers"] = json.loads(r["answers"])
-    return rows
+# ASYNC-SAFE
+async def get_arq_sessions_for_user(user_id: str) -> List[dict]:
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM arq_sessions WHERE user_id = $1 ORDER BY created_at DESC",
+            user_id,
+        )
+    return [_decode_arq_row(dict(r)) for r in rows]
 
 
-def mark_arq_viewed(token: str):
-    now  = datetime.now(timezone.utc).isoformat()
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "UPDATE arq_sessions SET viewed_at=%s WHERE token=%s AND viewed_at IS NULL",
-        (now, token),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+# ASYNC-SAFE
+async def mark_arq_viewed(token: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE arq_sessions SET viewed_at=$1 WHERE token=$2 AND viewed_at IS NULL",
+            now, token,
+        )
 
 
-def submit_arq_answers(
+# ASYNC-SAFE
+async def submit_arq_answers(
     token: str,
     raw_answers: dict,
     processing_session_id: str,
     generated_forms: dict,
 ) -> Tuple[bool, str, List[str]]:
-    arq = get_arq_by_token(token)
+    arq = await get_arq_by_token(token)
     if not arq:
         return False, "ARQ session not found.", []
 
-    now = datetime.now(timezone.utc)
+    now     = datetime.now(timezone.utc)
     expires = datetime.fromisoformat(arq["expires_at"].replace("Z", "+00:00"))
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=timezone.utc)
@@ -788,8 +746,8 @@ def submit_arq_answers(
     if arq["status"] == "submitted":
         return False, "This questionnaire has already been submitted.", []
 
-    questions    = arq["questions"]
-    cleaned      = {}
+    questions      = arq["questions"]
+    cleaned        = {}
     updated_fields = []
 
     for q in questions:
@@ -805,26 +763,23 @@ def submit_arq_answers(
             updated_fields.append(field_name)
 
     now_iso = now.isoformat()
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "UPDATE arq_sessions SET answers=%s, status='submitted', submitted_at=%s WHERE token=%s",
-        (json.dumps(cleaned), now_iso, token),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE arq_sessions SET answers=$1, status='submitted', submitted_at=$2 WHERE token=$3",
+            json.dumps(cleaned), now_iso, token,
+        )
 
     return True, "Answers submitted successfully.", updated_fields
 
 
-def apply_arq_answers_to_session(
+# ASYNC-SAFE
+async def apply_arq_answers_to_session(
     arq_id: str,
     processing_session_id: str,
 ) -> Tuple[bool, List[str]]:
     from repositories.session_repository import get_processing_session, upd_processing_session
 
-    arq = get_arq_by_id(arq_id)
+    arq = await get_arq_by_id(arq_id)
     if not arq or arq["status"] != "submitted":
         return False, []
 
@@ -840,7 +795,7 @@ def apply_arq_answers_to_session(
             field_to_forms[fn] = q.get("form_ids", [])
 
     try:
-        proc_session = get_processing_session(processing_session_id)
+        proc_session = await get_processing_session(processing_session_id)
     except Exception as ex:
         logger.error(f"apply_arq_answers: cannot load session {processing_session_id}: {ex}")
         return False, []
@@ -863,21 +818,18 @@ def apply_arq_answers_to_session(
         if field_name not in updated:
             updated.append(field_name)
 
-    upd_processing_session(processing_session_id, {"generated_forms": generated})
+    await upd_processing_session(processing_session_id, {"generated_forms": generated})
     logger.info(f"ARQ {arq_id}: applied {len(updated)} fields to session {processing_session_id}")
     return True, updated
 
 
-def get_client_filled_fields(processing_session_id: str) -> List[str]:
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT answers FROM arq_sessions WHERE session_id=%s AND status='submitted'",
-        (processing_session_id,),
-    )
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+# ASYNC-SAFE
+async def get_client_filled_fields(processing_session_id: str) -> List[str]:
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT answers FROM arq_sessions WHERE session_id=$1 AND status='submitted'",
+            processing_session_id,
+        )
     fields = []
     for row in rows:
         answers = row["answers"]
@@ -888,15 +840,16 @@ def get_client_filled_fields(processing_session_id: str) -> List[str]:
     return list(set(fields))
 
 
-def send_arq_reminder(arq_id: str, user: dict) -> bool:
+# ASYNC-SAFE
+async def send_arq_reminder(arq_id: str, user: dict) -> bool:
     from services.email_service import send_arq_reminder_email
 
-    arq = get_arq_by_id(arq_id)
+    arq = await get_arq_by_id(arq_id)
     if not arq or arq["status"] == "submitted":
         return False
 
-    now       = datetime.now(timezone.utc)
-    expires   = datetime.fromisoformat(arq["expires_at"].replace("Z", "+00:00"))
+    now     = datetime.now(timezone.utc)
+    expires = datetime.fromisoformat(arq["expires_at"].replace("Z", "+00:00"))
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=timezone.utc)
     if now > expires:
@@ -916,57 +869,44 @@ def send_arq_reminder(arq_id: str, user: dict) -> bool:
 
     if ok:
         now_iso = now.isoformat()
-        conn = get_db()
-        cur  = conn.cursor()
-        cur.execute(
-            """UPDATE arq_sessions
-               SET reminder_sent=1,
-                   reminder_count=COALESCE(reminder_count,0)+1,
-                   last_reminder_at=%s
-               WHERE id=%s""",
-            (now_iso, arq_id),
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                """UPDATE arq_sessions
+                   SET reminder_sent=1,
+                       reminder_count=COALESCE(reminder_count,0)+1,
+                       last_reminder_at=$1
+                   WHERE id=$2""",
+                now_iso, arq_id,
+            )
 
     return ok
 
 
-def create_arq_notification(arq_id: str, user_id: str, notif_type: str):
+# ASYNC-SAFE
+async def create_arq_notification(arq_id: str, user_id: str, notif_type: str) -> None:
     notif_id = str(uuid.uuid4())
     now      = datetime.now(timezone.utc).isoformat()
-    conn     = get_db()
-    cur      = conn.cursor()
-    cur.execute(
-        "INSERT INTO arq_notifications (id, arq_id, user_id, type, read_status, created_at) VALUES (%s,%s,%s,%s,0,%s)",
-        (notif_id, arq_id, user_id, notif_type, now),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "INSERT INTO arq_notifications (id, arq_id, user_id, type, read_status, created_at) VALUES ($1,$2,$3,$4,0,$5)",
+            notif_id, arq_id, user_id, notif_type, now,
+        )
 
 
-def get_arq_notifications(user_id: str) -> List[dict]:
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT * FROM arq_notifications WHERE user_id=%s ORDER BY created_at DESC LIMIT 50",
-        (user_id,),
-    )
-    rows = [dict(r) for r in cur.fetchall()]
-    cur.close()
-    conn.close()
-    return rows
+# ASYNC-SAFE
+async def get_arq_notifications(user_id: str) -> List[dict]:
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM arq_notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50",
+            user_id,
+        )
+    return [dict(r) for r in rows]
 
 
-def mark_notifications_read(user_id: str):
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "UPDATE arq_notifications SET read_status=1 WHERE user_id=%s",
-        (user_id,),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+# ASYNC-SAFE
+async def mark_notifications_read(user_id: str) -> None:
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE arq_notifications SET read_status=1 WHERE user_id=$1",
+            user_id,
+        )

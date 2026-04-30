@@ -2,11 +2,10 @@ import json
 import logging
 import os
 import uuid
-import psycopg2
 from datetime import datetime, timezone
 from typing import Optional
 
-from config.database import get_db
+from config.database import get_pool
 from fastapi import HTTPException
 from services.extraction_service import _fv
 from services.s3_service import (
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _strip_null_bytes(obj):
-    """Recursively remove \u0000 null bytes from all strings — PostgreSQL rejects them."""
+    """Recursively remove \\u0000 null bytes from all strings — PostgreSQL rejects them."""
     if isinstance(obj, str):
         return obj.replace('\x00', '')
     if isinstance(obj, dict):
@@ -39,21 +38,20 @@ def _session_to_db(data: dict) -> dict:
     return _strip_null_bytes(clean)
 
 
-def _session_from_db(data: dict, sid: str) -> dict:
-    conn = get_db()
-    cur  = conn.cursor()
-    # SELECT * so we pick up s3_key if the column exists (added by init_db migration).
-    cur.execute("SELECT * FROM session_pdf_bytes WHERE session_id = %s", (sid,))
-    rows      = cur.fetchall()
-    cur.close()
-    conn.close()
+# ASYNC-SAFE
+async def _session_from_db(data: dict, sid: str) -> dict:
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM session_pdf_bytes WHERE session_id = $1", sid
+        )
     generated = data.get("generated_forms", {})
     for row in rows:
-        fid    = row["form_id"]
+        row   = dict(row)
+        fid   = row["form_id"]
         s3_key = row.get("s3_key")
-        pb     = None
+        pb    = None
         if s3_key:
-            pb = _s3_download(s3_key)   # returns None if S3 fails or unconfigured
+            pb = _s3_download(s3_key)
         if pb is None and row.get("pdf_bytes"):
             pb = bytes(row["pdf_bytes"])
         if pb is not None and fid in generated:
@@ -61,87 +59,85 @@ def _session_from_db(data: dict, sid: str) -> dict:
     return data
 
 
-def _save_pdf_bytes(sid: str, generated: dict):
+# ASYNC-SAFE
+async def _save_pdf_bytes(sid: str, generated: dict) -> None:
     if not generated:
         return
-    now  = datetime.now(timezone.utc).isoformat()
-    conn = get_db()
-    cur  = conn.cursor()
-    for fid, form_data in generated.items():
-        pb = form_data.get("pdf_bytes")
-        if pb is None:
-            continue
-        if _s3_configured():
-            s3_key = _s3_upload(sid, fid, pb)
-            if s3_key:
-                # S3 success — store key, omit BYTEA to save DB space.
-                cur.execute(
-                    """INSERT INTO session_pdf_bytes (session_id, form_id, pdf_bytes, s3_key, updated_at)
-                       VALUES (%s, %s, NULL, %s, %s)
+    now = datetime.now(timezone.utc).isoformat()
+    async with get_pool().acquire() as conn:
+        async with conn.transaction():
+            for fid, form_data in generated.items():
+                pb = form_data.get("pdf_bytes")
+                if pb is None:
+                    continue
+                if _s3_configured():
+                    s3_key = _s3_upload(sid, fid, pb)
+                    if s3_key:
+                        await conn.execute(
+                            """INSERT INTO session_pdf_bytes
+                                   (session_id, form_id, pdf_bytes, s3_key, updated_at)
+                               VALUES ($1,$2,NULL,$3,$4)
+                               ON CONFLICT (session_id, form_id)
+                               DO UPDATE SET pdf_bytes=NULL, s3_key=EXCLUDED.s3_key,
+                                             updated_at=EXCLUDED.updated_at""",
+                            sid, fid, s3_key, now,
+                        )
+                        continue
+                    if _IS_PROD:
+                        logger.error(
+                            "S3 PDF upload failed for session %s form %s in production", sid, fid
+                        )
+                        raise HTTPException(503, "PDF storage failed. Please try again.")
+                    logger.warning(
+                        "S3 PDF upload failed for session %s form %s — BYTEA fallback (dev only)",
+                        sid, fid,
+                    )
+                elif _IS_PROD:
+                    raise HTTPException(
+                        503, "PDF storage requires S3 in production. Set AWS_S3_BUCKET."
+                    )
+                await conn.execute(
+                    """INSERT INTO session_pdf_bytes
+                           (session_id, form_id, pdf_bytes, updated_at)
+                       VALUES ($1,$2,$3,$4)
                        ON CONFLICT (session_id, form_id)
-                       DO UPDATE SET pdf_bytes = NULL, s3_key = EXCLUDED.s3_key,
-                                     updated_at = EXCLUDED.updated_at""",
-                    (sid, fid, s3_key, now),
+                       DO UPDATE SET pdf_bytes=EXCLUDED.pdf_bytes,
+                                     updated_at=EXCLUDED.updated_at""",
+                    sid, fid, pb, now,
                 )
-                continue
-            # S3 upload failed
-            if _IS_PROD:
-                logger.error("S3 PDF upload failed for session %s form %s in production — not falling back to BYTEA", sid, fid)
-                raise HTTPException(503, "PDF storage failed. Please try again.")
-            # Development only: fall through to BYTEA path below
-            logger.warning("S3 PDF upload failed for session %s form %s — falling back to BYTEA (dev only)", sid, fid)
-        elif _IS_PROD:
-            # Production without S3 configured is a hard stop.
-            raise HTTPException(
-                503,
-                "PDF storage requires S3 in production. Set AWS_S3_BUCKET.",
-            )
-        cur.execute(
-            """INSERT INTO session_pdf_bytes (session_id, form_id, pdf_bytes, updated_at)
-               VALUES (%s, %s, %s, %s)
-               ON CONFLICT (session_id, form_id)
-               DO UPDATE SET pdf_bytes = EXCLUDED.pdf_bytes,
-                             updated_at = EXCLUDED.updated_at""",
-            (sid, fid, psycopg2.Binary(pb), now),
-        )
-    conn.commit()
-    cur.close()
-    conn.close()
 
 
-def new_processing_session(data: dict) -> str:
+# ASYNC-SAFE
+async def new_processing_session(data: dict) -> str:
     sid  = str(uuid.uuid4())
     now  = datetime.now(timezone.utc).isoformat()
-    _save_pdf_bytes(sid, data.get("generated_forms", {}))
+    await _save_pdf_bytes(sid, data.get("generated_forms", {}))
     clean = _session_to_db(data)
-    conn  = get_db()
-    cur   = conn.cursor()
-    cur.execute(
-        "INSERT INTO processing_sessions (id, user_id, data, created_at, updated_at) VALUES (%s,%s,%s,%s,%s)",
-        (sid, data.get("user_id", ""), json.dumps(clean), now, now),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "INSERT INTO processing_sessions (id, user_id, data, created_at, updated_at)"
+            " VALUES ($1,$2,$3,$4,$5)",
+            sid, data.get("user_id", ""), clean, now, now,
+        )
     logger.info(f"Processing session created: {sid}")
     return sid
 
 
-def get_processing_session(sid: str) -> dict:
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute("SELECT data FROM processing_sessions WHERE id = %s", (sid,))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+# ASYNC-SAFE
+async def get_processing_session(sid: str) -> dict:
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT data FROM processing_sessions WHERE id = $1", sid
+        )
     if not row:
         raise HTTPException(404, f"Processing session {sid} not found")
     data = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
-    return _session_from_db(data, sid)
+    return await _session_from_db(data, sid)
 
 
-def upd_processing_session(sid: str, updates: dict):
-    current = get_processing_session(sid)
+# ASYNC-SAFE
+async def upd_processing_session(sid: str, updates: dict) -> None:
+    current = await get_processing_session(sid)
     if "generated_forms" in updates:
         existing_gen = current.get("generated_forms", {})
         for fid, form_data in updates["generated_forms"].items():
@@ -150,34 +146,20 @@ def upd_processing_session(sid: str, updates: dict):
             else:
                 existing_gen[fid].update(form_data)
         current["generated_forms"] = existing_gen
-        _save_pdf_bytes(sid, current["generated_forms"])
+        await _save_pdf_bytes(sid, current["generated_forms"])
     for k, v in updates.items():
         if k != "generated_forms":
             current[k] = v
     clean = _session_to_db(current)
     now   = datetime.now(timezone.utc).isoformat()
-    conn  = get_db()
-    cur   = conn.cursor()
-    cur.execute(
-        "UPDATE processing_sessions SET data = %s, updated_at = %s WHERE id = %s",
-        (json.dumps(clean), now, sid),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE processing_sessions SET data=$1, updated_at=$2 WHERE id=$3",
+            clean, now, sid,
+        )
+
 
 def compute_session_status(data: dict) -> str:
-    """
-    Derive the display status of a session from its stored data.
-
-    NOT_STARTED  — uploaded but no forms generated or Clarity analysis run
-    IN_PROGRESS  — forms generated / Clarity analysis done, never downloaded
-    COMPLETED    — at least one download (single or ZIP) has been recorded
-
-    This is the single source of truth for the dashboard badge.
-    Never store status directly — always compute it from these fields
-    so it cannot go stale.
-    """
     if data.get("last_downloaded_at"):
         return "COMPLETED"
     if data.get("generated_forms") or data.get("clarity_result"):
@@ -185,37 +167,36 @@ def compute_session_status(data: dict) -> str:
     return "NOT_STARTED"
 
 
-def list_sessions_for_user(user_id: str) -> list:
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT id, data, created_at, updated_at FROM processing_sessions WHERE user_id = %s ORDER BY updated_at DESC LIMIT 50",
-        (user_id,),
-    )
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+# ASYNC-SAFE
+async def list_sessions_for_user(user_id: str) -> list:
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, data, created_at, updated_at"
+            " FROM processing_sessions"
+            " WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 50",
+            user_id,
+        )
     result = []
     for row in rows:
-        data      = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
-        generated = data.get("generated_forms", {})
-        facts     = data.get("facts", {})
+        row  = dict(row)
+        data = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
+        generated  = data.get("generated_forms", {})
+        facts      = data.get("facts", {})
         sqs_scores = {fid: fd.get("sqs", {}) for fid, fd in generated.items()}
 
-        # Include Clarity SQS if no Assembly forms were generated
         clarity = data.get("clarity_result", {})
         if not sqs_scores and clarity.get("sqs_combined"):
             sqs_scores = {"clarity": clarity["sqs_combined"]}
 
         result.append({
-            "session_id":          row["id"],
-            "created_at":          row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
-            "updated_at":          row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
-            "last_downloaded_at":  data.get("last_downloaded_at"),
-            "applicant":           _fv(facts, "applicant_name") or "Unknown Applicant",
-            "lines":               facts.get("lines_of_business") or [],
-            "form_ids":            list(generated.keys()),
-            "sqs":                 sqs_scores,
-            "status":              compute_session_status(data),
+            "session_id":         row["id"],
+            "created_at":         row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"]),
+            "updated_at":         row["updated_at"].isoformat() if hasattr(row["updated_at"], "isoformat") else str(row["updated_at"]),
+            "last_downloaded_at": data.get("last_downloaded_at"),
+            "applicant":          _fv(facts, "applicant_name") or "Unknown Applicant",
+            "lines":              facts.get("lines_of_business") or [],
+            "form_ids":           list(generated.keys()),
+            "sqs":                sqs_scores,
+            "status":             compute_session_status(data),
         })
     return result

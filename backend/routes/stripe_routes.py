@@ -6,7 +6,7 @@ import stripe
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from config.database import get_db
+from config.database import get_pool
 from config.settings import PLANS, FRONTEND_URL, STRIPE_WEBHOOK_SECRET
 from models.schemas import ApplyOverageRequest, CheckoutRequest, OverageCheckoutRequest
 from services.auth_service import get_current_user
@@ -32,7 +32,6 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
     plan_cfg   = PLANS[plan][cycle]
     plan_label = f"Acordly {plan.title()} — {'Annual' if cycle == 'annual' else 'Monthly'}"
 
-    # Cancel any existing active subscriptions before creating a new one
     customer_id = current_user.get("stripe_customer_id")
     if customer_id:
         try:
@@ -59,7 +58,6 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
                 "metadata": {"plan": plan, "billing_cycle": cycle, "user_id": str(current_user["id"])}
             },
         )
-        # Attach to existing Stripe customer if available so card is pre-filled
         if customer_id:
             checkout_kwargs["customer"] = customer_id
         else:
@@ -72,6 +70,7 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
         raise HTTPException(500, "Payment processing failed. Please try again.")
 
 
+# ASYNC-SAFE
 @router.post("/webhook")
 async def stripe_webhook(request: Request):
     from fastapi import HTTPException
@@ -86,51 +85,43 @@ async def stripe_webhook(request: Request):
         event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
     except stripe.error.SignatureVerificationError:
         raise HTTPException(400, "Invalid webhook signature")
-    except Exception as e:
+    except Exception:
         raise HTTPException(400, "Webhook processing error")
 
     event_id   = event.get("id", "")
     event_type = event["type"]
     logger.info(f"Stripe webhook: {event_type} ({event_id})")
 
-    # Atomic idempotency — INSERT first, process only if we own the row.
-    # Using INSERT ... ON CONFLICT DO NOTHING + rowcount avoids the SELECT→INSERT
-    # race window where two concurrent deliveries both pass a plain SELECT check.
     if event_id:
-        now_str   = datetime.now(timezone.utc).isoformat()
-        conn_idem = get_db()
-        cur_idem  = conn_idem.cursor()
-        cur_idem.execute(
-            """INSERT INTO processed_webhook_events (event_id, event_type, processed_at)
-               VALUES (%s, %s, %s) ON CONFLICT (event_id) DO NOTHING""",
-            (event_id, event_type, now_str),
-        )
-        inserted = cur_idem.rowcount
-        conn_idem.commit()
-        cur_idem.close()
-        conn_idem.close()
-        if inserted == 0:
+        now_str = datetime.now(timezone.utc).isoformat()
+        async with get_pool().acquire() as conn:
+            status = await conn.execute(
+                "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                event_id, event_type, now_str,
+            )
+        if int(status.split()[-1]) == 0:
             logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
             return {"received": True}
 
-    def _resolve_user(obj):
-        user_id = obj["client_reference_id"] if "client_reference_id" in obj else None
+    # ASYNC-SAFE
+    async def _resolve_user(obj):
+        uid = obj.get("client_reference_id")
         email = obj.get("customer_email") or (obj.get("customer_details") or {}).get("email")
-        conn = get_db(); cur = conn.cursor()
-        if user_id:
-            cur.execute("SELECT id FROM users WHERE id = %s", (user_id,))
-            row = cur.fetchone()
-            if not row: user_id = None
-        if not user_id and email:
-            cur.execute("SELECT id FROM users WHERE email = %s", (email,))
-            row = cur.fetchone()
-            if row: user_id = dict(row)["id"]
-        cur.close(); conn.close()
-        return user_id
+        async with get_pool().acquire() as conn:
+            if uid:
+                row = await conn.fetchrow("SELECT id FROM users WHERE id = $1", uid)
+                if not row:
+                    uid = None
+            if not uid and email:
+                row = await conn.fetchrow("SELECT id FROM users WHERE email = $1", email)
+                if row:
+                    uid = dict(row)["id"]
+        return uid
 
     if event["type"] == "checkout.session.completed":
         obj = json.loads(str(event["data"]["object"]))
-        user_id = _resolve_user(obj)
+        user_id = await _resolve_user(obj)
         metadata = obj.get("metadata", {})
 
         if metadata.get("type") == "overage":
@@ -138,18 +129,20 @@ async def stripe_webhook(request: Request):
             uid = metadata.get("user_id") or user_id
             sid = obj.get("id", "")
             if uid and qty > 0 and sid:
-                conn = get_db(); cur = conn.cursor()
-                cur.execute("SELECT stripe_session_id FROM applied_overage_sessions WHERE stripe_session_id = %s", (sid,))
-                if not cur.fetchone():
-                    now = datetime.now(timezone.utc).isoformat()
-                    cur.execute("UPDATE users SET packages_limit = packages_limit + %s WHERE id = %s", (qty, uid))
-                    cur.execute("INSERT INTO applied_overage_sessions VALUES (%s,%s,%s,%s)", (sid, str(uid), qty, now))
-                    conn.commit()
-                cur.close(); conn.close()
+                async with get_pool().acquire() as conn:
+                    existing = await conn.fetchrow(
+                        "SELECT stripe_session_id FROM applied_overage_sessions WHERE stripe_session_id = $1", sid
+                    )
+                    if not existing:
+                        now = datetime.now(timezone.utc).isoformat()
+                        await conn.execute(
+                            "UPDATE users SET packages_limit = packages_limit + $1 WHERE id = $2", qty, uid
+                        )
+                        await conn.execute(
+                            "INSERT INTO applied_overage_sessions VALUES ($1,$2,$3,$4)", sid, str(uid), qty, now
+                        )
             return {"received": True}
 
-        # Setup-mode sessions are payment method updates only — skip subscription DB update
-        # but still fall through to the auto-retry block below so the new card is used immediately
         if obj.get("mode") != "setup":
             sub_id = obj.get("subscription")
             if not sub_id and obj.get("customer"):
@@ -161,18 +154,21 @@ async def stripe_webhook(request: Request):
             if user_id and plan in PLANS and cycle in PLANS[plan] and sub_id:
                 cfg = PLANS[plan][cycle]
                 now = datetime.now(timezone.utc).isoformat()
-                conn = get_db(); cur = conn.cursor()
                 stripe_customer = obj.get("customer")
-                if stripe_customer:
-                    cur.execute("UPDATE users SET stripe_customer_id = %s WHERE id = %s", (stripe_customer, user_id))
-                cur.execute("""UPDATE users SET subscription_tier=%s, stripe_subscription_id=%s,
-                    packages_limit=%s, packages_used=0, billing_cycle=%s, billing_period_start=%s,
-                    overage_rate=%s, payment_status='ok', payment_failed_at=NULL,
-                    overage_packages_pending=0, overage_packages_invoiced=0 WHERE id=%s""",
-                    (plan, sub_id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id))
-                conn.commit(); cur.close(); conn.close()
+                async with get_pool().acquire() as conn:
+                    if stripe_customer:
+                        await conn.execute(
+                            "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
+                            stripe_customer, user_id,
+                        )
+                    await conn.execute(
+                        """UPDATE users SET subscription_tier=$1, stripe_subscription_id=$2,
+                            packages_limit=$3, packages_used=0, billing_cycle=$4, billing_period_start=$5,
+                            overage_rate=$6, payment_status='ok', payment_failed_at=NULL,
+                            overage_packages_pending=0, overage_packages_invoiced=0 WHERE id=$7""",
+                        plan, sub_id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id,
+                    )
 
-        # Auto-retry any open invoices after new card added
         customer_id = obj.get("customer")
         if customer_id:
             pm = None
@@ -186,8 +182,6 @@ async def stripe_webhook(request: Request):
                             invoice_settings={"default_payment_method": pm}
                         )
                         logger.info(f"Set default payment method {pm} for {customer_id}")
-                        # Also update the subscription's own payment method so future
-                        # invoices don't revert to the old card
                         try:
                             subs = stripe.Subscription.list(customer=customer_id, limit=10)
                             for sub in subs.auto_paging_iter():
@@ -230,12 +224,14 @@ async def stripe_webhook(request: Request):
             sub_id = (parent.get("subscription_details") or {}).get("subscription")
         if sub_id:
             now = datetime.now(timezone.utc).isoformat()
-            conn = get_db(); cur = conn.cursor()
-            cur.execute("""UPDATE users SET packages_used=0, billing_period_start=%s,
-                payment_status='ok', payment_failed_at=NULL,
-                overage_packages_pending=0, overage_packages_invoiced=0
-                WHERE stripe_subscription_id=%s""", (now, sub_id))
-            conn.commit(); cur.close(); conn.close()
+            async with get_pool().acquire() as conn:
+                await conn.execute(
+                    """UPDATE users SET packages_used=0, billing_period_start=$1,
+                        payment_status='ok', payment_failed_at=NULL,
+                        overage_packages_pending=0, overage_packages_invoiced=0
+                        WHERE stripe_subscription_id=$2""",
+                    now, sub_id,
+                )
 
     elif event["type"] == "invoice.payment_failed":
         obj = json.loads(str(event["data"]["object"]))
@@ -245,26 +241,43 @@ async def stripe_webhook(request: Request):
             sub_id = (parent.get("subscription_details") or {}).get("subscription")
         if sub_id:
             now = datetime.now(timezone.utc).isoformat()
-            conn = get_db(); cur = conn.cursor()
-            cur.execute("UPDATE users SET payment_status='failed', payment_failed_at=COALESCE(payment_failed_at,%s) WHERE stripe_subscription_id=%s", (now, sub_id))
-            conn.commit()
-            # Only send the day-1 email on the very first failure (payment_failed_at was NULL before this update)
-            cur.execute("SELECT email, full_name, payment_failed_at FROM users WHERE stripe_subscription_id = %s", (sub_id,))
-            row = cur.fetchone(); cur.close(); conn.close()
+            async with get_pool().acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET payment_status='failed',"
+                    " payment_failed_at=COALESCE(payment_failed_at,$1)"
+                    " WHERE stripe_subscription_id=$2",
+                    now, sub_id,
+                )
+                row = await conn.fetchrow(
+                    "SELECT email, full_name, payment_failed_at FROM users WHERE stripe_subscription_id = $1",
+                    sub_id,
+                )
             if row:
                 row = dict(row)
-                failed_at_str = row.get("payment_failed_at") or ""
-                # COALESCE means payment_failed_at == now only on first failure
-                is_first_failure = failed_at_str.startswith(now[:16])  # match to the minute
+                failed_at_val = row.get("payment_failed_at")
+                if failed_at_val is not None:
+                    failed_at_str = (
+                        failed_at_val.isoformat()
+                        if hasattr(failed_at_val, "isoformat")
+                        else str(failed_at_val)
+                    )
+                else:
+                    failed_at_str = ""
+                is_first_failure = failed_at_str.startswith(now[:16])
                 if is_first_failure:
-                    _send_payment_failed_email(row["email"], row.get("full_name",""), day=1)
+                    _send_payment_failed_email(row["email"], row.get("full_name", ""), day=1)
 
     elif event["type"] == "customer.subscription.deleted":
         sub_id = json.loads(str(event["data"]["object"])).get("id")
         if sub_id:
-            conn = get_db(); cur = conn.cursor()
-            cur.execute("UPDATE users SET subscription_tier='free', packages_limit=0, packages_used=0, payment_status='ok', payment_failed_at=NULL, stripe_subscription_id=NULL, overage_packages_pending=0, overage_packages_invoiced=0 WHERE stripe_subscription_id=%s", (sub_id,))
-            conn.commit(); cur.close(); conn.close()
+            async with get_pool().acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET subscription_tier='free', packages_limit=0, packages_used=0,"
+                    " payment_status='ok', payment_failed_at=NULL, stripe_subscription_id=NULL,"
+                    " overage_packages_pending=0, overage_packages_invoiced=0"
+                    " WHERE stripe_subscription_id=$1",
+                    sub_id,
+                )
             logger.info(f"Subscription deleted: user downgraded to free for sub {sub_id}")
 
     elif event["type"] == "customer.subscription.updated":
@@ -274,38 +287,47 @@ async def stripe_webhook(request: Request):
         status = obj.get("status", "")
         metadata = obj.get("metadata") or {}
         new_plan = metadata.get("plan") if isinstance(metadata, dict) else getattr(metadata, "plan", None)
-        new_cycle = (metadata.get("billing_cycle") if isinstance(metadata, dict) else getattr(metadata, "billing_cycle", None)) or "monthly"
+        new_cycle = (
+            metadata.get("billing_cycle") if isinstance(metadata, dict)
+            else getattr(metadata, "billing_cycle", None)
+        ) or "monthly"
         if sub_id:
-            conn = get_db(); cur = conn.cursor()
-            # Sync plan/tier if Stripe metadata carries it and the subscription is active
-            if new_plan and new_plan in PLANS and status == "active":
-                cfg = PLANS[new_plan].get(new_cycle) or PLANS[new_plan]["monthly"]
-                cur.execute("""UPDATE users SET subscription_tier=%s, billing_cycle=%s,
-                    packages_limit=%s, overage_rate=%s
-                    WHERE stripe_subscription_id=%s AND subscription_tier != %s""",
-                    (new_plan, new_cycle, cfg["packages"], cfg["overage_rate"], sub_id, new_plan))
-                if cur.rowcount:
-                    logger.info(f"subscription.updated: synced plan={new_plan} for sub {sub_id}")
-            if cancel_at_period_end:
-                # Subscription marked for cancellation — confirm status in DB
-                cur.execute("UPDATE users SET payment_status='canceling' WHERE stripe_subscription_id=%s AND payment_status NOT IN ('failed','soft_locked','suspended','archived')", (sub_id,))
-            elif status == "active" and not cancel_at_period_end:
-                # Subscription renewed or reactivated — clear canceling state
-                cur.execute("UPDATE users SET payment_status='ok', payment_failed_at=NULL WHERE stripe_subscription_id=%s AND payment_status='canceling'", (sub_id,))
-            conn.commit(); cur.close(); conn.close()
+            async with get_pool().acquire() as conn:
+                if new_plan and new_plan in PLANS and status == "active":
+                    cfg = PLANS[new_plan].get(new_cycle) or PLANS[new_plan]["monthly"]
+                    exec_status = await conn.execute(
+                        """UPDATE users SET subscription_tier=$1, billing_cycle=$2,
+                            packages_limit=$3, overage_rate=$4
+                            WHERE stripe_subscription_id=$5 AND subscription_tier != $6""",
+                        new_plan, new_cycle, cfg["packages"], cfg["overage_rate"], sub_id, new_plan,
+                    )
+                    if int(exec_status.split()[-1]):
+                        logger.info(f"subscription.updated: synced plan={new_plan} for sub {sub_id}")
+                if cancel_at_period_end:
+                    await conn.execute(
+                        "UPDATE users SET payment_status='canceling'"
+                        " WHERE stripe_subscription_id=$1"
+                        " AND payment_status NOT IN ('failed','soft_locked','suspended','archived')",
+                        sub_id,
+                    )
+                elif status == "active" and not cancel_at_period_end:
+                    await conn.execute(
+                        "UPDATE users SET payment_status='ok', payment_failed_at=NULL"
+                        " WHERE stripe_subscription_id=$1 AND payment_status='canceling'",
+                        sub_id,
+                    )
 
     return {"received": True}
 
 
+# ASYNC-SAFE
 @router.post("/verify-upgrade")
 async def verify_upgrade(current_user: dict = Depends(get_current_user)):
     from fastapi import HTTPException
-    user_email = current_user.get("email")
-    user_id = current_user.get("id")
+    user_email  = current_user.get("email")
+    user_id     = current_user.get("id")
     customer_id = current_user.get("stripe_customer_id")
     try:
-        # Always verify against Stripe — never rely solely on DB state.
-        # This handles upgrades, downgrades, and cross-plan changes.
         customers_to_check = []
         if customer_id:
             customers_to_check.append(type("C", (), {"id": customer_id})())
@@ -319,34 +341,48 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
         for customer in customers_to_check:
             subs = stripe.Subscription.list(customer=customer.id, status="active", limit=5)
             if subs.data:
-                sub = subs.data[0]; sub_id = sub.id
+                sub    = subs.data[0]
+                sub_id = sub.id
                 raw_meta = getattr(sub, "metadata", None) or {}
-                plan = (raw_meta.get("plan") if isinstance(raw_meta, dict) else getattr(raw_meta, "plan", None)) or None
-                cycle = (raw_meta.get("billing_cycle") if isinstance(raw_meta, dict) else getattr(raw_meta, "billing_cycle", None)) or "monthly"
-                # Fall back to resolving plan from price amount if metadata is missing
+                plan = (
+                    raw_meta.get("plan") if isinstance(raw_meta, dict)
+                    else getattr(raw_meta, "plan", None)
+                ) or None
+                cycle = (
+                    raw_meta.get("billing_cycle") if isinstance(raw_meta, dict)
+                    else getattr(raw_meta, "billing_cycle", None)
+                ) or "monthly"
                 if not plan or plan not in PLANS:
                     try:
                         price_amount = sub.items.data[0].price.unit_amount
-                        plan = next((p for p, cfg in PLANS.items()
-                                     for c, v in cfg.items() if v["amount"] == price_amount), "essentials")
+                        plan = next(
+                            (p for p, cfg in PLANS.items()
+                             for c, v in cfg.items() if v["amount"] == price_amount),
+                            "essentials",
+                        )
                     except Exception:
                         plan = "essentials"
                 cfg = PLANS.get(plan, {}).get(cycle) or PLANS["essentials"]["monthly"]
                 now = datetime.now(timezone.utc).isoformat()
-                conn = get_db(); cur = conn.cursor()
-                cur.execute("""UPDATE users SET subscription_tier=%s, stripe_subscription_id=%s,
-                    stripe_customer_id=%s, packages_limit=%s, billing_cycle=%s, billing_period_start=%s,
-                    overage_rate=%s, payment_status='ok', payment_failed_at=NULL WHERE id=%s""",
-                    (plan, sub_id, customer.id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id))
-                conn.commit(); cur.close(); conn.close()
+                async with get_pool().acquire() as conn:
+                    await conn.execute(
+                        """UPDATE users SET subscription_tier=$1, stripe_subscription_id=$2,
+                            stripe_customer_id=$3, packages_limit=$4, billing_cycle=$5,
+                            billing_period_start=$6, overage_rate=$7,
+                            payment_status='ok', payment_failed_at=NULL WHERE id=$8""",
+                        plan, sub_id, customer.id, cfg["packages"], cycle,
+                        now, cfg["overage_rate"], user_id,
+                    )
                 logger.info(f"verify-upgrade synced user {user_id} to plan={plan} sub={sub_id}")
                 return {"subscription_tier": plan, "upgraded": True, "reason": "stripe_verified"}
 
-        # No active subscription in Stripe — reset to free
         if current_user.get("subscription_tier") not in ("free", None):
-            conn = get_db(); cur = conn.cursor()
-            cur.execute("UPDATE users SET subscription_tier='free', stripe_subscription_id=NULL, packages_limit=0 WHERE id=%s", (user_id,))
-            conn.commit(); cur.close(); conn.close()
+            async with get_pool().acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET subscription_tier='free', stripe_subscription_id=NULL,"
+                    " packages_limit=0 WHERE id=$1",
+                    user_id,
+                )
         return {"subscription_tier": "free", "upgraded": False, "reason": "no_active_subscription"}
     except stripe.error.AuthenticationError:
         raise HTTPException(500, "Stripe API key not configured")
@@ -366,9 +402,9 @@ async def create_overage_checkout(
         raise HTTPException(500, "Stripe not configured")
 
     tier = current_user.get("subscription_tier", "free")
-    overage_rate_cents = int(current_user.get("overage_rate") or (150 if tier == "essentials" else 125))
+    overage_rate_cents  = int(current_user.get("overage_rate") or (150 if tier == "essentials" else 125))
     overage_rate_dollars = overage_rate_cents / 100
-    qty = max(1, min(req.quantity, 10000))
+    qty        = max(1, min(req.quantity, 10000))
     tier_label = "Essentials" if tier == "essentials" else "Professional"
     description = (
         f"Acordly {tier_label} — {qty} additional ACORD packages "
@@ -409,6 +445,7 @@ async def create_overage_checkout(
         raise HTTPException(500, "Could not create checkout session. Please try again.")
 
 
+# ASYNC-SAFE
 @router.post("/apply-overage")
 async def apply_overage(
     req: ApplyOverageRequest,
@@ -420,7 +457,7 @@ async def apply_overage(
 
     try:
         cs = stripe.checkout.Session.retrieve(req.stripe_session_id)
-    except Exception as e:
+    except Exception:
         raise HTTPException(400, "Could not verify payment. Please try again.")
 
     cs = json.loads(str(cs))
@@ -441,66 +478,47 @@ async def apply_overage(
     if qty <= 0:
         raise HTTPException(400, "Invalid quantity in session metadata")
 
-    conn = get_db()
-    cur = conn.cursor()
+    async with get_pool().acquire() as conn:
+        user_row = await conn.fetchrow("SELECT id FROM users WHERE id = $1", current_user["id"])
+        if not user_row:
+            raise HTTPException(404, "User not found")
 
-    cur.execute(
-        "SELECT id FROM users WHERE id = %s",
-        (current_user["id"],),
-    )
-    if not cur.fetchone():
-        cur.close()
-        conn.close()
-        raise HTTPException(404, "User not found")
-
-    cur.execute(
-        "SELECT stripe_session_id FROM applied_overage_sessions WHERE stripe_session_id = %s",
-        (req.stripe_session_id,),
-    )
-    if cur.fetchone():
-        cur.close()
-        conn.close()
-        conn2 = get_db()
-        cur2 = conn2.cursor()
-        cur2.execute(
-            "SELECT packages_limit FROM users WHERE id = %s",
-            (current_user["id"],),
+        existing = await conn.fetchrow(
+            "SELECT stripe_session_id FROM applied_overage_sessions WHERE stripe_session_id = $1",
+            req.stripe_session_id,
         )
-        row = dict(cur2.fetchone())
-        cur2.close()
-        conn2.close()
-        return {
-            "credited": False,
-            "already_applied": True,
-            "packages_limit": row["packages_limit"],
-        }
+        if existing:
+            limit_row = await conn.fetchrow(
+                "SELECT packages_limit FROM users WHERE id = $1", current_user["id"]
+            )
+            return {
+                "credited": False,
+                "already_applied": True,
+                "packages_limit": dict(limit_row)["packages_limit"],
+            }
 
-    now = datetime.now(timezone.utc).isoformat()
-    cur.execute(
-        "UPDATE users SET packages_limit = packages_limit + %s WHERE id = %s",
-        (qty, current_user["id"]),
-    )
-    cur.execute(
-        "INSERT INTO applied_overage_sessions (stripe_session_id, user_id, qty, applied_at) VALUES (%s,%s,%s,%s)",
-        (req.stripe_session_id, str(current_user["id"]), qty, now),
-    )
-    conn.commit()
-
-    cur.execute(
-        "SELECT packages_limit FROM users WHERE id = %s",
-        (current_user["id"],),
-    )
-    updated = dict(cur.fetchone())
-    cur.close()
-    conn.close()
+        now = datetime.now(timezone.utc).isoformat()
+        await conn.execute(
+            "UPDATE users SET packages_limit = packages_limit + $1 WHERE id = $2",
+            qty, current_user["id"],
+        )
+        await conn.execute(
+            "INSERT INTO applied_overage_sessions"
+            " (stripe_session_id, user_id, qty, applied_at) VALUES ($1,$2,$3,$4)",
+            req.stripe_session_id, str(current_user["id"]), qty, now,
+        )
+        updated = await conn.fetchrow(
+            "SELECT packages_limit FROM users WHERE id = $1", current_user["id"]
+        )
 
     return {
         "credited": True,
         "qty": qty,
-        "packages_limit": updated["packages_limit"],
+        "packages_limit": dict(updated)["packages_limit"],
     }
 
 
+# ASYNC-SAFE
 @router.post("/cancel-subscription")
 async def cancel_subscription(current_user: dict = Depends(get_current_user)):
     from fastapi import HTTPException
@@ -510,7 +528,6 @@ async def cancel_subscription(current_user: dict = Depends(get_current_user)):
         raise HTTPException(400, "No Stripe customer found for this account.")
 
     try:
-        # Always resolve the real active subscription from Stripe — never trust DB alone
         active_subs = stripe.Subscription.list(customer=customer_id, status="active", limit=5)
         subs = list(active_subs.auto_paging_iter())
         if not subs:
@@ -525,16 +542,14 @@ async def cancel_subscription(current_user: dict = Depends(get_current_user)):
             cancelled_ids.append(real_sub_id)
             logger.info(f"Set cancel_at_period_end=True for sub {real_sub_id} (customer {customer_id})")
 
-        # Sync the correct subscription ID back to DB and mark as canceling
-        conn = get_db(); cur = conn.cursor()
-        cur.execute(
-            "UPDATE users SET payment_status='canceling', stripe_subscription_id=%s WHERE id=%s",
-            (cancelled_ids[0], current_user["id"])
-        )
-        conn.commit(); cur.close(); conn.close()
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET payment_status='canceling', stripe_subscription_id=$1 WHERE id=$2",
+                cancelled_ids[0], current_user["id"],
+            )
 
         return {"success": True, "message": "Subscription will cancel at the end of the current billing period."}
-    except stripe.error.InvalidRequestError as e:
+    except stripe.error.InvalidRequestError:
         raise HTTPException(400, "Could not cancel subscription. Please contact support.")
     except HTTPException:
         raise
@@ -543,13 +558,14 @@ async def cancel_subscription(current_user: dict = Depends(get_current_user)):
         raise HTTPException(500, "Failed to cancel subscription.")
 
 
+# ASYNC-SAFE
 @router.post("/create-portal-session")
 async def create_portal_session(user: dict = Depends(get_current_user)):
     from fastapi import HTTPException
 
     if not user.get("stripe_customer_id"):
         try:
-            plan = user.get("subscription_tier", "essentials")
+            plan          = user.get("subscription_tier", "essentials")
             billing_cycle = user.get("billing_cycle", "monthly") or "monthly"
 
             if plan not in PLANS or plan == "free":
@@ -559,7 +575,6 @@ async def create_portal_session(user: dict = Depends(get_current_user)):
 
             plan_data = PLANS[plan][billing_cycle]
 
-            # Check if a Stripe customer already exists for this email before creating a new one
             existing_customers = stripe.Customer.list(email=user["email"], limit=1)
             if existing_customers.data:
                 customer = existing_customers.data[0]
@@ -571,34 +586,28 @@ async def create_portal_session(user: dict = Depends(get_current_user)):
                     metadata={"user_id": user["id"]},
                 )
 
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute(
-                "UPDATE users SET stripe_customer_id = %s WHERE id = %s",
-                (customer.id, user["id"]),
-            )
-            conn.commit()
-            cur.close()
-            conn.close()
+            async with get_pool().acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
+                    customer.id, user["id"],
+                )
 
-            # If this customer already has an active subscription, return a setup session instead
             active_subs = stripe.Subscription.list(customer=customer.id, status="active", limit=1)
             if active_subs.data:
-                existing_sub = active_subs.data[0]
-                sub_meta = getattr(existing_sub, "metadata", None) or {}
+                existing_sub  = active_subs.data[0]
+                sub_meta      = getattr(existing_sub, "metadata", None) or {}
                 existing_plan = getattr(sub_meta, "plan", None) or plan
                 existing_cycle = getattr(sub_meta, "billing_cycle", None) or billing_cycle
-                existing_cfg = PLANS.get(existing_plan, {}).get(existing_cycle, PLANS["essentials"]["monthly"])
+                existing_cfg  = PLANS.get(existing_plan, {}).get(existing_cycle, PLANS["essentials"]["monthly"])
                 now = datetime.now(timezone.utc).isoformat()
-                conn2 = get_db(); cur2 = conn2.cursor()
-                cur2.execute(
-                    """UPDATE users SET stripe_subscription_id=%s, subscription_tier=%s,
-                       billing_cycle=%s, packages_limit=%s, overage_rate=%s,
-                       payment_status='ok', payment_failed_at=NULL WHERE id=%s""",
-                    (existing_sub.id, existing_plan, existing_cycle,
-                     existing_cfg["packages"], existing_cfg["overage_rate"], user["id"])
-                )
-                conn2.commit(); cur2.close(); conn2.close()
+                async with get_pool().acquire() as conn:
+                    await conn.execute(
+                        """UPDATE users SET stripe_subscription_id=$1, subscription_tier=$2,
+                           billing_cycle=$3, packages_limit=$4, overage_rate=$5,
+                           payment_status='ok', payment_failed_at=NULL WHERE id=$6""",
+                        existing_sub.id, existing_plan, existing_cycle,
+                        existing_cfg["packages"], existing_cfg["overage_rate"], user["id"],
+                    )
                 logger.info(f"Restored subscription {existing_sub.id} for user {user['id']} from Stripe")
                 setup_session = stripe.checkout.Session.create(
                     customer=customer.id,
@@ -650,17 +659,3 @@ async def create_portal_session(user: dict = Depends(get_current_user)):
     except Exception as ex:
         logger.error(f"Portal session failed: {ex}")
         raise HTTPException(500, "Could not open billing portal.")
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import stripe
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from config.database import get_db
+from config.database import get_pool
 from config.settings import DATABASE_URL
 from services.email_service import _send_payment_failed_email
 from utils.helpers import _safe_parse_dt
@@ -14,21 +14,21 @@ from utils.helpers import _safe_parse_dt
 logger    = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
-# Kept alive for the process lifetime — advisory lock is session-scoped and
-# drops the moment this connection closes.
-_lock_conn = None
-_ADVISORY_LOCK_ID = 7654321098  # arbitrary stable integer for this application
+# Kept alive for the process lifetime — advisory lock is session-scoped.
+_lock_conn        = None
+_ADVISORY_LOCK_ID = 7654321098
 
 
+# ASYNC-SAFE
 async def run_daily_payment_lifecycle():
     try:
-        now  = datetime.now(timezone.utc)
-        conn = get_db()
-        cur  = conn.cursor()
-        cur.execute("SELECT id, email, full_name, payment_failed_at, payment_status, stripe_customer_id FROM users WHERE payment_failed_at IS NOT NULL")
-        rows = [dict(r) for r in cur.fetchall()]
-        cur.close()
-        conn.close()
+        now = datetime.now(timezone.utc)
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, email, full_name, payment_failed_at, payment_status, stripe_customer_id "
+                "FROM users WHERE payment_failed_at IS NOT NULL"
+            )
+        rows = [dict(r) for r in rows]
 
         for row in rows:
             try:
@@ -40,7 +40,6 @@ async def run_daily_payment_lifecycle():
                 new_status     = current_status
                 email_day      = None
 
-                # Silent retry on days 2, 4, 6 while still in "failed" state
                 if days_since in (2, 4, 6) and current_status == "failed":
                     customer_id = row.get("stripe_customer_id")
                     if customer_id:
@@ -73,12 +72,11 @@ async def run_daily_payment_lifecycle():
                     email_day  = 7
 
                 if new_status != current_status:
-                    conn2 = get_db()
-                    cur2  = conn2.cursor()
-                    cur2.execute("UPDATE users SET payment_status=%s WHERE id=%s", (new_status, row["id"]))
-                    conn2.commit()
-                    cur2.close()
-                    conn2.close()
+                    async with get_pool().acquire() as conn:
+                        await conn.execute(
+                            "UPDATE users SET payment_status=$1 WHERE id=$2",
+                            new_status, row["id"],
+                        )
                     logger.info(f"Lifecycle: user={row['id']} {current_status} → {new_status} (day {days_since})")
 
                 if email_day:
@@ -90,40 +88,37 @@ async def run_daily_payment_lifecycle():
         logger.error(f"Lifecycle cron failed: {ex}")
 
 
+# ASYNC-SAFE
 async def run_arq_auto_reminders():
     """Send automatic reminders for ARQ sessions pending > 3 days with no submission."""
     try:
-        from services.arq_service import send_arq_reminder, get_arq_by_id
+        from services.arq_service import send_arq_reminder
 
-        now         = datetime.now(timezone.utc)
-        cutoff      = (now - timedelta(days=3)).isoformat()
-        conn        = get_db()
-        cur         = conn.cursor()
-        # Pending ARQs created more than 3 days ago, not yet submitted, not expired, reminder_count < 1
-        cur.execute("""
-            SELECT a.id, a.user_id
-            FROM arq_sessions a
-            WHERE a.status = 'pending'
-              AND a.created_at <= %s
-              AND a.expires_at > %s
-              AND COALESCE(a.reminder_count, 0) < 1
-        """, (cutoff, now.isoformat()))
-        rows = [dict(r) for r in cur.fetchall()]
-        cur.close()
-        conn.close()
+        now    = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(days=3)).isoformat()
+
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT a.id, a.user_id
+                   FROM arq_sessions a
+                   WHERE a.status = 'pending'
+                     AND a.created_at <= $1
+                     AND a.expires_at > $2
+                     AND COALESCE(a.reminder_count, 0) < 1""",
+                cutoff, now.isoformat(),
+            )
+        rows = [dict(r) for r in rows]
 
         for row in rows:
             try:
-                conn2 = get_db()
-                cur2  = conn2.cursor()
-                cur2.execute("SELECT email, full_name FROM users WHERE id=%s", (row["user_id"],))
-                user_row = cur2.fetchone()
-                cur2.close()
-                conn2.close()
+                async with get_pool().acquire() as conn:
+                    user_row = await conn.fetchrow(
+                        "SELECT email, full_name FROM users WHERE id=$1", row["user_id"]
+                    )
                 if user_row:
                     user = dict(user_row)
                     user["id"] = row["user_id"]
-                    ok = send_arq_reminder(row["id"], user)
+                    ok = await send_arq_reminder(row["id"], user)
                     logger.info(f"ARQ auto-reminder: arq_id={row['id']} ok={ok}")
             except Exception as ex:
                 logger.error(f"ARQ auto-reminder error arq_id={row['id']}: {ex}")
@@ -131,14 +126,11 @@ async def run_arq_auto_reminders():
         logger.error(f"ARQ auto-reminder cron failed: {ex}")
 
 
+# ASYNC-SAFE
 async def run_retention_cleanup():
     """
     Nightly data-retention sweep (runs at 03:00 UTC).
-
-    - Jobs: delete terminal rows older than JOBS_RETENTION_DAYS (default 30).
-    - ARQ sessions: delete expired sessions older than ARQ_RETENTION_DAYS (default 90).
-    - Processing sessions: delete sessions with no activity for SESSION_RETENTION_DAYS (default 180).
-    - pending_signups: delete rows older than 48 hours (verification window expired).
+    Deletes stale jobs, ARQ sessions, processing sessions, and pending signups.
     """
     import os as _os
 
@@ -146,47 +138,41 @@ async def run_retention_cleanup():
     arq_days     = int(_os.getenv("ARQ_RETENTION_DAYS",     "90"))
     session_days = int(_os.getenv("SESSION_RETENTION_DAYS", "180"))
 
-    now = datetime.now(timezone.utc)
+    now            = datetime.now(timezone.utc)
     jobs_cutoff    = (now - timedelta(days=jobs_days)).isoformat()
     arq_cutoff     = (now - timedelta(days=arq_days)).isoformat()
     session_cutoff = (now - timedelta(days=session_days)).isoformat()
     signup_cutoff  = (now - timedelta(hours=48)).isoformat()
 
     try:
-        conn = get_db()
-        cur  = conn.cursor()
+        async with get_pool().acquire() as conn:
+            async with conn.transaction():
+                r1 = await conn.execute(
+                    "DELETE FROM jobs WHERE status IN ('completed','failed') AND updated_at < $1",
+                    jobs_cutoff,
+                )
+                r2 = await conn.execute(
+                    "DELETE FROM arq_sessions WHERE expires_at < $1 AND created_at < $2",
+                    now.isoformat(), arq_cutoff,
+                )
+                r3 = await conn.execute(
+                    "DELETE FROM processing_sessions WHERE updated_at < $1",
+                    session_cutoff,
+                )
+                r4 = await conn.execute(
+                    "DELETE FROM pending_signups WHERE created_at < $1",
+                    signup_cutoff,
+                )
 
-        cur.execute(
-            "DELETE FROM jobs WHERE status IN ('completed','failed') AND updated_at < %s",
-            (jobs_cutoff,),
-        )
-        deleted_jobs = cur.rowcount
-
-        cur.execute(
-            "DELETE FROM arq_sessions WHERE expires_at < %s AND created_at < %s",
-            (now.isoformat(), arq_cutoff),
-        )
-        deleted_arq = cur.rowcount
-
-        cur.execute(
-            "DELETE FROM processing_sessions WHERE updated_at < %s",
-            (session_cutoff,),
-        )
-        deleted_sessions = cur.rowcount
-
-        cur.execute(
-            "DELETE FROM pending_signups WHERE created_at < %s",
-            (signup_cutoff,),
-        )
-        deleted_signups = cur.rowcount
-
-        conn.commit()
-        cur.close()
-        conn.close()
+        def _row_count(status: str) -> int:
+            try:
+                return int(status.split()[-1])
+            except Exception:
+                return 0
 
         logger.info(
             "Retention cleanup: deleted jobs=%d arq=%d sessions=%d pending_signups=%d",
-            deleted_jobs, deleted_arq, deleted_sessions, deleted_signups,
+            _row_count(r1), _row_count(r2), _row_count(r3), _row_count(r4),
         )
     except Exception as ex:
         logger.error("Retention cleanup failed: %s", ex)
@@ -195,8 +181,9 @@ async def run_retention_cleanup():
 def start_scheduler():
     global _lock_conn
     try:
-        # Use a raw (non-pooled) connection so the advisory lock lives for the
-        # entire process lifetime without consuming a pool slot.
+        # Raw psycopg2 connection for the advisory lock — intentionally non-pooled.
+        # The lock must live for the entire process lifetime; asyncpg pool connections
+        # are recycled and would release the lock on checkout/checkin.
         _lock_conn = psycopg2.connect(
             DATABASE_URL,
             cursor_factory=psycopg2.extras.RealDictCursor,
@@ -221,9 +208,9 @@ def start_scheduler():
             "starting scheduler anyway (verify only one worker is running)"
         )
 
-    scheduler.add_job(run_daily_payment_lifecycle, "cron", hour=9, minute=0)
-    scheduler.add_job(run_arq_auto_reminders, "cron", hour=10, minute=0)
-    scheduler.add_job(run_retention_cleanup, "cron", hour=3, minute=0)
+    scheduler.add_job(run_daily_payment_lifecycle, "cron", hour=9,  minute=0)
+    scheduler.add_job(run_arq_auto_reminders,      "cron", hour=10, minute=0)
+    scheduler.add_job(run_retention_cleanup,        "cron", hour=3,  minute=0)
     scheduler.start()
     logger.info("Schedulers started: payment lifecycle + ARQ auto-reminders + retention cleanup")
 
@@ -236,7 +223,7 @@ def stop_scheduler():
         pass
     if _lock_conn:
         try:
-            _lock_conn.close()   # releases the advisory lock
+            _lock_conn.close()
         except Exception:
             pass
         _lock_conn = None

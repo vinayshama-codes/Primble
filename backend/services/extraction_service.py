@@ -1,6 +1,6 @@
 import asyncio
 import collections
-import concurrent.futures as _cf
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -10,9 +10,13 @@ import random
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Tuple, Dict, Any
 
 from config.settings import groq_chat
+
+# ASYNC-SAFE: shared executor for CPU-bound blocking work (tiktoken, sync helpers)
+_EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
 
 logger = logging.getLogger(__name__)
 
@@ -567,7 +571,8 @@ def _validate_parsed(result: dict, context: str) -> dict:
 
 # ── Fix 2: Strict JSON parse for extraction output ────────────────────────────
 
-def _safe_json_parse(raw: str, context: str = "") -> dict:
+# ASYNC-SAFE
+async def _safe_json_parse(raw: str, context: str = "") -> dict:
     """
     Parse LLM extraction output. Expects: {"facts": {...}, "flags": {...}}.
     On parse failure: LLM repair (max 2 repair attempts), full raw passed each time.
@@ -600,7 +605,6 @@ def _safe_json_parse(raw: str, context: str = "") -> dict:
                             f"_safe_json_parse [{context}]: repair attempt {attempt} "
                             "produced 0 non-null facts — continuing"
                         )
-                        # Do not raise here — try next repair
                         if attempt < 2:
                             pass
                         else:
@@ -613,9 +617,8 @@ def _safe_json_parse(raw: str, context: str = "") -> dict:
                 else:
                     return result
             except RuntimeError:
-                raise   # schema violations propagate immediately
+                raise
             except (json.JSONDecodeError, ValueError):
-                # Heuristic: LLM returned a bare dict (facts only) → wrap
                 try:
                     bare = json.loads(candidate)
                     if isinstance(bare, dict) and "facts" not in bare and "flags" not in bare:
@@ -634,14 +637,14 @@ def _safe_json_parse(raw: str, context: str = "") -> dict:
                 + (f" [{context}]" if context else "") + ", requesting LLM repair"
             )
             try:
-                raw = groq_chat(
+                raw = await groq_chat(
                     "llama-3.1-8b-instant",
                     [{
                         "role": "user",
                         "content": (
                             "Fix the malformed JSON. Return ONLY a valid JSON object. "
                             "Do not add any explanation or markdown.\n\n"
-                            + raw[:3000]   # 🔥 IMPORTANT: truncate
+                            + raw[:3000]
                         ),
                     }],
                 )
@@ -1021,7 +1024,8 @@ def _annotate_facts(
 
 # ── Core extraction ───────────────────────────────────────────────────────────
 
-def extract_facts(
+# ASYNC-SAFE
+async def extract_facts(
     text: str,
     low_confidence_tokens: Optional[List[str]] = None,
     context_prefix: str = "",
@@ -1032,8 +1036,6 @@ def extract_facts(
     Pipeline: LLM → _safe_json_parse → _validate_parsed → _annotate_facts (strict order).
     Cache key: model + PROMPT_VERSION + SCHEMA_VERSION + ctx_hash + lct_hash + text.
     Raises RuntimeError on any failure — never swallowed.
-    
-    NEW: source parameter for confidence labeling ("ai" or "producer")
     """
     if len(text) < 30:
         return {"facts": {}, "flags": {}}
@@ -1078,12 +1080,9 @@ def extract_facts(
         + _EXTRACT_PROMPT_SUFFIX
     )
 
-    raw = groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
+    raw = await groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
 
-    # Pipeline order: parse → validate → annotate (never reversed)
-    result   = _safe_json_parse(raw, context=f"key={ck[:8]}")
-    # _validate_parsed already called inside _safe_json_parse on the raw LLM dict.
-    # result["facts"] now contains clean str/None/list/structured-dict values.
+    result   = await _safe_json_parse(raw, context=f"key={ck[:8]}")
     annotated, manual_conf = _annotate_facts(result["facts"], low_confidence_tokens, source=source)
     result["facts"] = annotated
     if manual_conf:
@@ -1398,7 +1397,8 @@ def _deterministic_reconcile(field: str, candidates: Dict[str, dict]) -> Optiona
     return None  # unknown field → LLM
 
 
-def _run_reconciliation(conflicts: Dict[str, dict], result: dict) -> None:
+# ASYNC-SAFE
+async def _run_reconciliation(conflicts: Dict[str, dict], result: dict) -> None:
     """
     Resolve per-field conflicts between chunk extractions.
 
@@ -1454,7 +1454,7 @@ def _run_reconciliation(conflicts: Dict[str, dict], result: dict) -> None:
             "Return ONLY a JSON object: {\"field_name\": \"chosen_value\"}.\n\n"
             "Conflicts:\n" + json.dumps(llm_conflicts, indent=2)
         )
-        raw      = groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
+        raw      = await groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
         resolved = _parse_flat_json(raw, context="reconciliation")
         for k, v in resolved.items():
             if k not in _OCR_CRITICAL_FIELDS or _is_empty(v):
@@ -1552,6 +1552,7 @@ class _AdaptiveSemaphore:
 
 # ── Async extraction ──────────────────────────────────────────────────────────
 
+# ASYNC-SAFE
 async def extract_facts_async(
     text: str,
     low_confidence_tokens: Optional[List[str]] = None,
@@ -1568,10 +1569,7 @@ async def extract_facts_async(
     last_ex: Optional[Exception] = None
     for attempt in range(3):
         try:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None, extract_facts, text, low_confidence_tokens, context_prefix, source
-            )
+            return await extract_facts(text, low_confidence_tokens, context_prefix, source)
         except RuntimeError:
             raise
         except Exception as ex:
@@ -1631,18 +1629,6 @@ async def _gather_chunks_async(
         f"failed={failed} llm_calls={total_llm_calls}"
     )
     return results
-
-
-# ── Fix 9: Thread-based async runner ─────────────────────────────────────────
-
-def _run_async(coro) -> Any:
-    """
-    Always spawns a new thread with its own event loop.
-    Deterministic under any framework (FastAPI/uvloop/sync).
-    No get_running_loop() branching — no deadlock paths.
-    """
-    with _cf.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, coro).result()
 
 
 # ── Transient runtime error classification ────────────────────────────────────
@@ -1714,7 +1700,8 @@ def _count_claims_from_text(text: str) -> int:
 
 # ── Core pipeline ─────────────────────────────────────────────────────────────
 
-def _run_extraction(
+# ASYNC-SAFE
+async def _run_extraction(
     text: str,
     doc_type: str,
     low_confidence_tokens: Optional[List[str]],
@@ -1727,7 +1714,7 @@ def _run_extraction(
         text,
         max_chars=chunk_size,
         overlap_pct=overlap_pct,
-        max_chunks=cap
+        max_chunks=cap,
     )
 
     if len(chunks) > cap:
@@ -1743,61 +1730,41 @@ def _run_extraction(
         f"chunks={len(chunks)} total_chars={len(text)} est_tokens={estimate_tokens(text):,}"
     )
 
-    partials = _run_async(
-        _gather_chunks_async(chunks, low_confidence_tokens, doc_type)
-    )
+    partials = await _gather_chunks_async(chunks, low_confidence_tokens, doc_type)
 
-    # ─────────────────────────────────────────────
-    # PATCH 3: Partial failure handling + retry
-    # ─────────────────────────────────────────────
     failed = [p["_chunk_idx"] for p in partials if p.get("chunk_failed")]
 
     if failed:
-        errors = [p.get("chunk_error", "?") for p in partials if p.get("chunk_failed")]
+        errors     = [p.get("chunk_error", "?") for p in partials if p.get("chunk_failed")]
         fail_ratio = len(failed) / len(chunks)
 
-        # CASE 1: Majority failed → retry smaller chunks
         if fail_ratio > 0.5 and chunk_size > 1500:
             new_chunk_size = int(chunk_size * 0.6)
             logger.warning(
                 f"_run_extraction: majority failed ({len(failed)}/{len(chunks)}), "
                 f"retrying {chunk_size} → {new_chunk_size}"
             )
-            return _run_extraction(
-                text,
-                doc_type,
-                low_confidence_tokens,
-                new_chunk_size,
-                cap
-            )
+            return await _run_extraction(text, doc_type, low_confidence_tokens, new_chunk_size, cap)
 
-        # CASE 2: Minority failed → continue with partial results
         if fail_ratio <= 0.5:
             logger.warning(
                 f"_run_extraction: {len(failed)}/{len(chunks)} chunks failed "
-                f"(below threshold) — continuing with partial results. "
-                f"indices={failed}"
+                f"(below threshold) — continuing with partial results. indices={failed}"
             )
             partials = [p for p in partials if not p.get("chunk_failed")]
-
         else:
-            # CASE 3: Still failing after retry → hard fail
             raise RuntimeError(
                 f"extraction: {len(failed)}/{len(chunks)} chunks permanently failed "
                 f"doc_type='{doc_type}' indices={failed} errors={errors}"
             )
 
-    # ─────────────────────────────────────────────
-
     result = _merge_list_fields(partials, list_keys=_LONG_DOC_LIST_KEYS)
 
-    # Fix 6: row-level claim count with header exclusion
     if doc_type == "loss_run":
         regex_count = _count_claims_from_text(text)
         if regex_count > 0:
             existing     = result.get("facts", {}).get("num_claims")
             existing_val = 0
-
             if existing:
                 try:
                     existing_val = int(str(
@@ -1807,20 +1774,19 @@ def _run_extraction(
                     ).replace(",", ""))
                 except (ValueError, TypeError):
                     pass
-
             if regex_count > existing_val:
                 result.setdefault("facts", {})
                 result["facts"]["num_claims"] = {
                     "value": str(regex_count),
                     "confidence": "ai_high",
-                    "source": "ai"
+                    "source": "ai",
                 }
 
     conflicts = _build_reconciliation_payload(partials, text)
 
     if conflicts:
         logger.info(f"reconciliation triggered fields={list(conflicts.keys())}")
-        _run_reconciliation(conflicts, result)
+        await _run_reconciliation(conflicts, result)
     else:
         logger.info("reconciliation: no conflicts — skipped")
 
@@ -1828,30 +1794,29 @@ def _run_extraction(
 
 # ── Fix 10: Unified single+long extraction path ───────────────────────────────
 
-def _extract_any(
+# ASYNC-SAFE
+async def _extract_any(
     text: str,
     doc_type: str,
     low_confidence_tokens: Optional[List[str]],
 ) -> dict:
     """
-    Fix 10: NO bypass path for single-chunk documents.
     All documents go through extract_facts() which enforces the full pipeline:
     LLM → _safe_json_parse → _validate_parsed → _annotate_facts.
-    The only difference for single-chunk docs is no chunking loop and no reconciliation
-    (legitimately unnecessary when there is only one chunk and no conflicts to resolve).
     """
     chunk_size = _effective_chunk_size(ACTIVE_MODEL)
     cap        = DOC_TYPE_CHUNK_LIMITS.get(doc_type, DOC_TYPE_CHUNK_LIMITS["default"])
 
     if len(text) <= chunk_size:
-        return extract_facts(text, low_confidence_tokens, context_prefix="", source="ai")
+        return await extract_facts(text, low_confidence_tokens, context_prefix="", source="ai")
 
-    return _run_extraction(text, doc_type, low_confidence_tokens, chunk_size, cap)
+    return await _run_extraction(text, doc_type, low_confidence_tokens, chunk_size, cap)
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
-def extract_facts_long(
+# ASYNC-SAFE
+async def extract_facts_long(
     text: str,
     doc_type: str,
     low_confidence_tokens: Optional[List[str]] = None,
@@ -1866,7 +1831,7 @@ def extract_facts_long(
     _check_cost_guardrail(text, doc_type)
 
     try:
-        result = _extract_any(text, doc_type, low_confidence_tokens)
+        result = await _extract_any(text, doc_type, low_confidence_tokens)
     except ValueError:
         raise
     except RuntimeError as first_err:
@@ -1874,9 +1839,9 @@ def extract_facts_long(
             raise
         logger.warning(f"extract_facts_long: attempt 1 failed ({first_err}) — doc-level retry")
         wait = 3 + random.uniform(0, 2)
-        time.sleep(wait)
+        await asyncio.sleep(wait)
         try:
-            result = _extract_any(text, doc_type, low_confidence_tokens)
+            result = await _extract_any(text, doc_type, low_confidence_tokens)
         except RuntimeError as second_err:
             raise RuntimeError(
                 f"extract_facts_long: doc_type='{doc_type}' failed after 2 attempts. "

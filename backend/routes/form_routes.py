@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, File, R
 from fastapi.responses import JSONResponse, Response
 from typing import List
 
-from config.database import get_db
+from config.database import get_pool
 from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING
 from utils.json_logging import get_trace_id
 from services.job_queue import get_job_queue, JOB_TYPE_EXTRACTION, JOB_TYPE_FORM_GENERATION, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED
@@ -44,6 +44,7 @@ router = APIRouter(tags=["forms"])
 logger = logging.getLogger(__name__)
 
 
+# ASYNC-SAFE
 @router.post("/api/upload-declaration")
 async def upload_declaration(
     files: List[UploadFile] = File(...),
@@ -51,18 +52,18 @@ async def upload_declaration(
 ):
     check_upload_rate_limit(current_user["id"])
 
-    conn = get_db(); cur = conn.cursor()
-    cur.execute("SELECT payment_status FROM users WHERE id = %s", (current_user["id"],))
-    row = cur.fetchone(); cur.close(); conn.close()
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT payment_status FROM users WHERE id = $1", current_user["id"]
+        )
     if row:
         ps = dict(row).get("payment_status", "ok") or "ok"
-        from fastapi import HTTPException
         if ps == "suspended":   raise HTTPException(403, "Account suspended due to non-payment.")
         if ps == "archived":    raise HTTPException(403, "Account archived. Contact support@acordly.ai.")
         if ps == "soft_locked": raise HTTPException(403, "Account disabled. Please update your billing.")
 
-    uploaded_paths: list = []   # original files written to disk (including ZIPs)
-    all_paths: list      = []   # files to process (PDFs/images; may include ZIP contents)
+    uploaded_paths: list = []
+    all_paths: list      = []
     _sem_acquired: bool  = False
     _job_id              = None
     _async_mode          = False
@@ -71,7 +72,6 @@ async def upload_declaration(
             raise HTTPException(400, f"Too many files — maximum {MAX_FILES_PER_UPLOAD} per upload.")
 
         for f in files:
-            # Read with hard size cap — prevents memory exhaustion from large uploads.
             content = await f.read(MAX_UPLOAD_SIZE_BYTES + 1)
             if len(content) > MAX_UPLOAD_SIZE_BYTES:
                 raise HTTPException(
@@ -80,14 +80,10 @@ async def upload_declaration(
                     f"{MAX_UPLOAD_SIZE_BYTES // 1024 // 1024} MB limit.",
                 )
             ext = os.path.splitext((f.filename or "upload").lower())[1]
-            # MIME/magic-byte validation — reject files whose content doesn't match extension.
             mime_ok, mime_err = validate_file_mime(content, ext)
             if not mime_ok:
                 raise HTTPException(400, mime_err)
-            # Virus/malware scan — fail-closed in production.
             scan_file_bytes(content, f.filename or "upload")
-            # Sanitize filename: strip any path components, prefix with uuid to
-            # prevent collisions and path-traversal attacks.
             safe_name = f"{uuid.uuid4().hex}_{os.path.basename(f.filename or 'upload')}"
             path = os.path.join(UPLOAD_DIR, safe_name)
             with open(path, "wb") as fp:
@@ -110,16 +106,14 @@ async def upload_declaration(
         _sem_acquired = True
 
         if ENABLE_ASYNC_PROCESSING:
-            # Async mode: upload source files to S3 so the worker can access them
-            # after this request ends and temp files are deleted.
             from services.s3_service import upload_source_file, is_configured as _s3_ok
             if not _s3_ok():
                 raise HTTPException(
                     503,
                     "Async processing requires S3 storage. Set AWS_S3_BUCKET or disable ENABLE_ASYNC_PROCESSING.",
                 )
-            _upload_id  = uuid.uuid4().hex
-            s3_keys     = []
+            _upload_id = uuid.uuid4().hex
+            s3_keys    = []
             for path in all_paths:
                 fname = os.path.basename(path)
                 try:
@@ -131,23 +125,22 @@ async def upload_declaration(
                     s3_keys.append(key)
                 except HTTPException:
                     raise
-                except Exception as _e:
+                except Exception:
                     raise HTTPException(503, "Failed to stage files for async processing.")
 
-            _queue      = get_job_queue()
+            _queue       = get_job_queue()
             _job_payload = {
                 "s3_keys": s3_keys,
                 "user_id": str(current_user["id"]),
             }
-            _job_id = await _queue.enqueue(JOB_TYPE_EXTRACTION, _job_payload, str(current_user["id"]))
+            _job_id     = await _queue.enqueue(JOB_TYPE_EXTRACTION, _job_payload, str(current_user["id"]))
             _async_mode = True
             return JSONResponse(
                 status_code=202,
                 content={"job_id": _job_id, "session_id": None, "poll_url": f"/api/jobs/{_job_id}/status"},
             )
 
-        # Sync mode: enqueue for status tracking, then process inline.
-        _queue      = get_job_queue()
+        _queue       = get_job_queue()
         _job_payload = {
             "file_paths": all_paths,
             "user_id":    str(current_user["id"]),
@@ -158,12 +151,12 @@ async def upload_declaration(
         processed_docs = []
         all_low_conf:  list = []
         for path in all_paths:
-            text, low_conf = extract_text(path)
+            text, low_conf = await extract_text(path)
             if len(text) < 30:
                 continue
             all_low_conf  += low_conf
             doc_type       = identify_doc_type(text)
-            extracted      = extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
+            extracted      = await extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
             processed_docs.append({
                 "filename": os.path.basename(path), "path": path, "doc_type": doc_type,
                 "text": text, "facts": extracted.get("facts", {}), "flags": extracted.get("flags", {}),
@@ -172,14 +165,11 @@ async def upload_declaration(
             })
 
         if not processed_docs:
-            from fastapi import HTTPException
             raise HTTPException(400, "No readable text found in uploaded files")
 
         primary              = select_primary_truth(processed_docs)
         merged_facts, mflags = merge_facts(processed_docs, primary)
-        # Expose primary doc type in flags so check_tier1 can relax producer/contact
-        # requirements for carrier-issued declaration pages.
-        mflags["_doc_type"] = primary.get("doc_type", "unknown")
+        mflags["_doc_type"]  = primary.get("doc_type", "unknown")
         tier1_ok, tier1_missing = check_tier1(merged_facts, mflags)
 
         if not tier1_ok:
@@ -192,7 +182,6 @@ async def upload_declaration(
         tier2_score, tier2_missing = check_tier2(merged_facts)
         hard_stops, soft_stops     = evaluate_stops(merged_facts, mflags)
 
-        # Cross-document consistency: flag mismatched applicant_name / FEIN / effective_date
         consistency_issues = check_doc_consistency(processed_docs)
         doc_conflicts = []
         if consistency_issues:
@@ -207,22 +196,17 @@ async def upload_declaration(
                 else:
                     hard_stops = list(hard_stops) + [issue]
 
-        all_forms                  = load_all_forms()
-        available_forms            = filter_available_forms(all_forms)
-        # Combine raw OCR text from all docs for keyword-based form triggers
-        # (builders risk, inland marine, certificate, evidence of property).
-        combined_ocr_text          = " ".join(d.get("text", "") for d in processed_docs)
-        recommendations            = match_forms(merged_facts, mflags, available_forms, text=combined_ocr_text)
+        all_forms       = load_all_forms()
+        available_forms = filter_available_forms(all_forms)
+        combined_ocr_text = " ".join(d.get("text", "") for d in processed_docs)
+        recommendations   = match_forms(merged_facts, mflags, available_forms, text=combined_ocr_text)
 
-        # Score every non-triggered form against the extracted facts so the
-        # "Add more ACORD forms" section also shows a live coverage percentage.
-        triggered_ids              = {r["form_id"] for r in recommendations}
-        extra_forms_scored         = score_extra_forms(merged_facts, triggered_ids, available_forms)
+        triggered_ids      = {r["form_id"] for r in recommendations}
+        extra_forms_scored = score_extra_forms(merged_facts, triggered_ids, available_forms)
 
-        # Deduplicate across all files, preserve insertion order
         unique_low_conf = list(dict.fromkeys(all_low_conf))
 
-        sid = new_processing_session({
+        sid = await new_processing_session({
             "user_id": current_user["id"], "docs": processed_docs,
             "primary_doc": primary["filename"], "facts": merged_facts, "flags": mflags,
             "tier2_score": tier2_score, "tier2_missing": tier2_missing,
@@ -253,8 +237,6 @@ async def upload_declaration(
             "recommendations": recommendations,
             "low_confidence_tokens": unique_low_conf,
             "truncation_warnings": truncation_warnings,
-            # extra_forms_scored carries live confidence + reason + fields_filled/total
-            # for every available form that was NOT in the triggered recommendations.
             "all_available_forms": extra_forms_scored,
         })
     except HTTPException:
@@ -271,13 +253,11 @@ async def upload_declaration(
         if _sem_acquired:
             release_heavy()
         if not _async_mode:
-            # Sync mode: safe to delete temp files — processing is complete.
             for _p in set(uploaded_paths) | set(all_paths):
                 try:
                     os.remove(_p)
                 except OSError:
                     pass
-        # In async mode the files were already uploaded to S3; delete temp copies.
         elif _async_mode:
             for _p in set(uploaded_paths) | set(all_paths):
                 try:
@@ -286,25 +266,26 @@ async def upload_declaration(
                     pass
 
 
+# ASYNC-SAFE
 @router.post("/api/select-forms-bulk")
 async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = Depends(get_current_user)):
-    from fastapi import HTTPException
     if current_user.get("subscription_tier") == "lite":
         raise HTTPException(403, "Form generation is not included in the Lite plan.")
 
-    conn = get_db(); cur = conn.cursor()
-    cur.execute("SELECT payment_status FROM users WHERE id = %s", (current_user["id"],))
-    row = cur.fetchone(); cur.close(); conn.close()
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT payment_status FROM users WHERE id = $1", current_user["id"]
+        )
     if row:
         ps = dict(row).get("payment_status", "ok") or "ok"
         if ps in ("soft_locked", "suspended", "archived"):
             raise HTTPException(403, "Account disabled. Please update your billing.")
 
-    session = get_processing_session(req.session_id)
+    session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
 
-    _queue  = get_job_queue()
+    _queue      = get_job_queue()
     _fg_payload = {
         "session_id": req.session_id,
         "form_ids":   req.form_ids,
@@ -319,7 +300,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             content={"job_id": _job_id, "session_id": req.session_id, "poll_url": f"/api/jobs/{_job_id}/status"},
         )
 
-    results = {}
+    results     = {}
     combined_ids = req.form_ids
 
     for form_id in req.form_ids:
@@ -348,7 +329,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             seen_msgs.add(msg)
             cross_issues_deduped.append(issue)
 
-    upd_processing_session(req.session_id, {
+    await upd_processing_session(req.session_id, {
         "selected_form_ids": combined_ids, "generated_forms": results,
         "active_form_id": combined_ids[0] if combined_ids else None,
         "cross_issues_last": cross_issues_deduped,
@@ -360,7 +341,6 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                          "sqs": r["sqs"], "fields_mapped": sum(1 for v in r["mapped"].values() if v is not None),
                          "schema_size": len(r["schema"])}
 
-    # Package-level SQS across all generated forms
     sqs_results_list = [r["sqs"] for r in results.values() if r.get("sqs")]
     try:
         package_sqs = calculate_package_sqs(
@@ -380,12 +360,11 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         logger.error(f"calculate_package_sqs failed: {_pkg_ex}", exc_info=True)
         package_sqs = None
 
-    # Log all per-form recommendations for E&O audit trail
     for fid, r in results.items():
         sqs_data = r.get("sqs")
         if sqs_data and sqs_data.get("recommendations"):
             try:
-                log_recommendations_presented(
+                await log_recommendations_presented(
                     session_id=req.session_id,
                     user_id=str(current_user["id"]),
                     sqs_result=sqs_data,
@@ -413,11 +392,10 @@ async def select_form(req: FormSelectionRequest, current_user: dict = Depends(ge
 @router.post("/api/lite/generate-internal/{session_id}")
 async def lite_generate_internal(session_id: str, current_user: dict = Depends(get_current_user)):
     """Silently generate forms for Lite users to power ARQ and SQS — forms are never exposed or downloadable."""
-    from fastapi import HTTPException
     if current_user.get("subscription_tier") != "lite":
         raise HTTPException(403, "This endpoint is for Lite plan users only.")
 
-    session = get_processing_session(session_id)
+    session = await get_processing_session(session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
     recommendations = session.get("recommendations", [])
@@ -450,15 +428,14 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         if msg not in seen_msgs:
             seen_msgs.add(msg); cross_issues_deduped.append(issue)
 
-    upd_processing_session(session_id, {
+    await upd_processing_session(session_id, {
         "selected_form_ids": form_ids,
         "generated_forms": results,
         "active_form_id": form_ids[0] if form_ids else None,
         "cross_issues_last": cross_issues_deduped,
     })
 
-    # Return SQS summary across all generated forms — no form content exposed
-    sqs_list = [r["sqs"] for r in results.values() if r.get("sqs")]
+    sqs_list  = [r["sqs"] for r in results.values() if r.get("sqs")]
     avg_score = int(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
     first_sqs = sqs_list[0] if sqs_list else {}
     return JSONResponse({
@@ -476,11 +453,10 @@ async def get_form_fields(
     session_id: str, form_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    from fastapi import HTTPException
-    proc_session = get_processing_session(session_id)
+    proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    generated    = proc_session.get("generated_forms", {})
+    generated = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form '{form_id}' not found")
     r   = generated[form_id]
@@ -511,24 +487,22 @@ async def mark_client_filled(
     current_user: dict = Depends(get_current_user),
 ):
     """After client fills ARQ, mark those fields as 'filled' confidence and store client_filled list."""
-    from fastapi import HTTPException
-    body       = await request.json()
+    body        = await request.json()
     field_names = body.get("field_names", [])
-    proc_session = get_processing_session(session_id)
+    proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    generated    = proc_session.get("generated_forms", {})
+    generated = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form '{form_id}' not found")
     r = generated[form_id]
-    # Update confidence to "filled" for client-filled fields
     confidence = r.get("confidence", {})
     for fn in field_names:
         confidence[fn] = "filled"
-    r["confidence"]          = confidence
+    r["confidence"]           = confidence
     r["client_filled_fields"] = list(set(r.get("client_filled_fields", []) + field_names))
     generated[form_id] = r
-    upd_processing_session(session_id, {"generated_forms": generated})
+    await upd_processing_session(session_id, {"generated_forms": generated})
     return JSONResponse({"success": True})
 
 
@@ -537,25 +511,25 @@ async def get_pdf(
     session_id: str, form_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    from fastapi import HTTPException
-    proc_session = get_processing_session(session_id)
+    proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    generated    = proc_session.get("generated_forms", {})
+    generated = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form {form_id} not generated")
-    r = generated[form_id]
     pdf_bytes = regenerate_pdf_for_form(proc_session, form_id)
-    return Response(content=pdf_bytes, media_type="application/pdf",
-                    headers={"Content-Disposition": f"inline; filename={form_id}_preview.pdf",
-                             "Cache-Control": "no-store, no-cache, must-revalidate"})
+    return Response(
+        content=pdf_bytes, media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={form_id}_preview.pdf",
+                 "Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
 
 
+# ASYNC-SAFE
 @router.post("/api/update-pdf")
 async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_current_user)):
     import hashlib, json
-    from fastapi import HTTPException
-    session   = get_processing_session(req.session_id)
+    session   = await get_processing_session(req.session_id)
     if session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
     generated = session.get("generated_forms", {})
@@ -574,18 +548,16 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
     r             = generated[form_id]
     current_state = r.get("field_state", dict(r.get("mapped", {})))
-    prev_state    = dict(current_state)   # snapshot before mutation for audit diff
+    prev_state    = dict(current_state)
     current_state.update(req.field_updates)
     confidence = r.get("confidence", {})
     for k, v in req.field_updates.items():
         val = str(v).strip() if v is not None else ""
         if val and val not in ("null", "None"):
             confidence[k] = "filled"
-        # If user cleared a field, restore to low_confidence so it shows up in ARQ again
         elif confidence.get(k) == "filled":
             confidence[k] = "low_confidence"
 
-    # Sync edited PDF field values back into facts so SQS components reflect edits
     from services.pdf_service import _ACORD_FIELD_RULES
     updated_facts = dict(session["facts"])
     for pdf_field, new_val in req.field_updates.items():
@@ -603,17 +575,18 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         tier2_score=session.get("tier2_score", 50),
     )
 
-    was_signed    = bool(r.get("signature_applied")) and len(cleared_sig_fields) == 0
-    new_pdf_bytes = None
+    was_signed      = bool(r.get("signature_applied")) and len(cleared_sig_fields) == 0
+    new_pdf_bytes   = None
     new_sig_applied = False
 
     tpl = os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
     if os.path.exists(tpl):
         new_pdf_bytes = fill_pdf(tpl, current_state, confidence)
         if was_signed:
-            conn = get_db(); cur = conn.cursor()
-            cur.execute("SELECT signature_data FROM users WHERE id = %s", (current_user["id"],))
-            row = cur.fetchone(); cur.close(); conn.close()
+            async with get_pool().acquire() as conn:
+                row = await conn.fetchrow(
+                    "SELECT signature_data FROM users WHERE id = $1", current_user["id"]
+                )
             sig = dict(row).get("signature_data") if row else None
             if sig:
                 from services.pdf_service import inject_signature_into_pdf
@@ -630,15 +603,14 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
     cache_hash = hashlib.md5(new_pdf_bytes).hexdigest() if new_pdf_bytes else None
 
-    # ── Audit: log only fields whose value actually changed ──────────────────
     for field_name, new_val in req.field_updates.items():
         prev_val = prev_state.get(field_name)
         new_str  = str(new_val).strip() if new_val is not None else ""
         prev_str = str(prev_val).strip() if prev_val is not None else ""
         if new_str == prev_str:
-            continue  # value unchanged — skip, do not log
+            continue
         try:
-            log_field_change(
+            await log_field_change(
                 session_id=req.session_id,
                 user_id=str(current_user["id"]),
                 form_id=form_id,
@@ -653,8 +625,6 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         except Exception as _fe:
             logger.warning(f"field_source_audit log failed for {field_name}: {_fe}")
 
-    # ── Audit: auto-resolve recs whose field was just filled ─────────────────
-    # Compare old rec_ids vs new rec_ids — any that disappeared were fixed.
     old_rec_ids = {
         r2.get("rec_id") for r2 in (r.get("sqs") or {}).get("recommendations", [])
         if isinstance(r2, dict) and r2.get("rec_id")
@@ -665,7 +635,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
     }
     for resolved_rec_id in old_rec_ids - new_rec_ids:
         try:
-            mark_recommendation_resolved(
+            await mark_recommendation_resolved(
                 session_id=req.session_id,
                 rec_id=resolved_rec_id,
                 sqs_score_at_action=sqs.get("sqs_score") or 0,
@@ -678,60 +648,62 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         "field_state": current_state, "confidence": confidence, "sqs": sqs,
         "_pdf_cache_hash": cache_hash, "pdf_bytes": new_pdf_bytes, "signature_applied": new_sig_applied,
     })
-    upd_processing_session(req.session_id, {"generated_forms": generated, "facts": updated_facts})
+    await upd_processing_session(req.session_id, {"generated_forms": generated, "facts": updated_facts})
     return JSONResponse({"success": True, "sqs": sqs})
 
 
 @router.get("/api/session/{session_id}")
 async def get_session(session_id: str, current_user: dict = Depends(get_current_user)):
-    from fastapi import HTTPException
-    proc_session = get_processing_session(session_id)
+    proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    generated    = proc_session.get("generated_forms", {})
-    summary      = {fid: {"form_id": r.get("form_id", fid), "form_name": r.get("form_name", fid),
-                           "form": r.get("form", {}), "sqs": r.get("sqs", {})} for fid, r in generated.items()}
+    generated = proc_session.get("generated_forms", {})
+    summary   = {fid: {"form_id": r.get("form_id", fid), "form_name": r.get("form_name", fid),
+                        "form": r.get("form", {}), "sqs": r.get("sqs", {})} for fid, r in generated.items()}
     return JSONResponse({"session_id": session_id, "generated_forms": summary,
                          "cross_issues": proc_session.get("cross_issues_last", [])})
+
 
 @router.get("/api/sessions")
 async def list_sessions(current_user: dict = Depends(get_current_user)):
     from repositories.session_repository import list_sessions_for_user
-    sessions = list_sessions_for_user(str(current_user["id"]))
+    sessions = await list_sessions_for_user(str(current_user["id"]))
     return JSONResponse({"success": True, "sessions": sessions})
 
 
+# ASYNC-SAFE
 @router.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str, current_user: dict = Depends(get_current_user)):
-    conn = get_db(); cur = conn.cursor()
-    cur.execute(
-        "DELETE FROM processing_sessions WHERE id = %s AND user_id = %s",
-        (session_id, str(current_user["id"])),
-    )
-    cur.execute("DELETE FROM session_pdf_bytes WHERE session_id = %s", (session_id,))
-    conn.commit(); cur.close(); conn.close()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "DELETE FROM processing_sessions WHERE id = $1 AND user_id = $2",
+            session_id, str(current_user["id"]),
+        )
+        await conn.execute(
+            "DELETE FROM session_pdf_bytes WHERE session_id = $1", session_id
+        )
     return JSONResponse({"success": True})
+
 
 @router.get("/api/send-to-epic/{session_id}/{form_id}")
 async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depends(get_current_user)):
     import json
-    from fastapi import HTTPException
     from datetime import datetime, timezone
-    proc_session = get_processing_session(session_id)
+    proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    generated    = proc_session.get("generated_forms", {})
-    facts        = proc_session.get("facts", {})
-    org_name     = current_user.get("organization_name") or current_user.get("full_name") or "Unknown Org"
-    timestamp    = datetime.now(timezone.utc).isoformat() + "Z"
+    generated = proc_session.get("generated_forms", {})
+    facts     = proc_session.get("facts", {})
+    org_name  = current_user.get("organization_name") or current_user.get("full_name") or "Unknown Org"
+    timestamp = datetime.now(timezone.utc).isoformat() + "Z"
 
     def _build_payload(fid, r):
         field_data = r.get("field_state") or r.get("mapped", {})
         sqs        = r.get("sqs", {})
         return {"form_id": fid, "form_name": r.get("form_name", fid),
                 "sqs": {"score": sqs.get("sqs_score"), "grade": sqs.get("grade"),
-                        "tier": sqs.get("tier"), "routing_decision": sqs.get("routing_decision"), "breakdown": sqs.get("breakdown",{})},
-                "fields": {k: v for k, v in field_data.items() if v is not None and str(v).strip() not in ("","null","None")}}
+                        "tier": sqs.get("tier"), "routing_decision": sqs.get("routing_decision"), "breakdown": sqs.get("breakdown", {})},
+                "fields": {k: v for k, v in field_data.items() if v is not None and str(v).strip() not in ("", "null", "None")}}
 
     if form_id == "all":
         epic_payload = {"source": "acordly", "version": "12.3.1", "export_type": "bulk",
@@ -743,14 +715,13 @@ async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depen
                         "timestamp": timestamp, "session_id": session_id,
                         "user_email": current_user.get("email"), "organization": org_name,
                         "applicant": facts.get("applicant_name"), "effective_date": facts.get("effective_date"),
-                        "lines_of_business": facts.get("lines_of_business",[]), **_build_payload(form_id, generated[form_id])}
+                        "lines_of_business": facts.get("lines_of_business", []), **_build_payload(form_id, generated[form_id])}
     else:
         raise HTTPException(404, f"Form '{form_id}' not found")
 
     logger.info(f"EPIC EXPORT: form={form_id} session={session_id[:8]} user={current_user.get('email')}\n{json.dumps(epic_payload, indent=2, default=str)}")
 
-    # Mark session as completed — EPIC export counts the same as a download
-    upd_processing_session(session_id, {
+    await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
     })
 
@@ -769,15 +740,7 @@ async def clarity_analyze(
     """
     Clarity pipeline: produce SQS scoring, ARQ questions, and cross-validation
     without generating ACORD PDF forms.
-
-    Cost: 0 batch LLM calls (form field mapping is skipped entirely).
-    Form matching (stage1 + stage2) still runs to identify which ACORD forms
-    are relevant so SQS is scored per-form correctly.
-
-    Replaces /api/lite/generate-internal + /api/lite/analyze for Lite users.
-    When the Clarity product line launches this will also serve Clarity tiers.
     """
-    from fastapi import HTTPException
     from services.pipeline_router import is_assembly
     from services.sqs_service import calculate_sqs_from_facts, cross_validate
     from services.arq_service import generate_arq_questions_from_facts
@@ -785,7 +748,6 @@ async def clarity_analyze(
 
     tier = current_user.get("subscription_tier", "free") or "free"
 
-    # Block Assembly tier users — they should use the full form generation pipeline
     if is_assembly(tier):
         raise HTTPException(
             403,
@@ -793,7 +755,7 @@ async def clarity_analyze(
             "Assembly plan users should use /api/select-forms-bulk.",
         )
 
-    session     = get_processing_session(session_id)
+    session     = await get_processing_session(session_id)
     facts       = session.get("facts", {})
     flags       = session.get("flags", {})
     hard_stops  = session.get("hard_stops", [])
@@ -803,12 +765,9 @@ async def clarity_analyze(
     if session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
 
-    # --- Form matching (deterministic — zero LLM calls) ---
-    matched = match_forms_deterministic(facts, flags)
-
+    matched           = match_forms_deterministic(facts, flags)
     selected_form_ids = [f["form_id"] for f in matched]
 
-    # --- SQS per form — zero LLM calls ---
     sqs_per_form: dict = {}
     for fid in selected_form_ids:
         try:
@@ -824,13 +783,11 @@ async def clarity_analyze(
         except Exception as ex:
             logger.error(f"Clarity SQS error for {fid}: {ex}")
 
-    # Combined SQS: average score across all forms, carry first form's metadata
-    sqs_scores = [s.get("sqs_score", 0) for s in sqs_per_form.values()]
-    avg_score   = int(sum(sqs_scores) / max(len(sqs_scores), 1)) if sqs_scores else 0
-    first_sqs   = next(iter(sqs_per_form.values()), {})
+    sqs_scores   = [s.get("sqs_score", 0) for s in sqs_per_form.values()]
+    avg_score    = int(sum(sqs_scores) / max(len(sqs_scores), 1)) if sqs_scores else 0
+    first_sqs    = next(iter(sqs_per_form.values()), {})
     sqs_combined = {**first_sqs, "sqs_score": avg_score, "form_id": "combined"}
 
-    # --- ARQ questions — zero LLM calls ---
     arq_questions = generate_arq_questions_from_facts(
         facts=facts,
         flags=flags,
@@ -839,7 +796,6 @@ async def clarity_analyze(
         soft_stops=soft_stops,
     )
 
-    # --- Cross-validation — deterministic, zero LLM calls ---
     cross_issues_raw = cross_validate(facts, flags, selected_form_ids)
     seen_msgs, cross_issues = set(), []
     for issue in cross_issues_raw:
@@ -848,13 +804,10 @@ async def clarity_analyze(
             seen_msgs.add(msg)
             cross_issues.append(issue)
 
-    # Propagate hard_stop-typed cross-issues into the hard_stops list so the
-    # frontend receives a single authoritative list and can block submission.
-    cross_hard_msgs = [i["message"] for i in cross_issues if i.get("type") == "hard_stop"]
+    cross_hard_msgs      = [i["message"] for i in cross_issues if i.get("type") == "hard_stop"]
     effective_hard_stops = list(hard_stops) + [m for m in cross_hard_msgs if m not in hard_stops]
 
-    # --- Persist results into session (no generated_forms — Clarity never produces PDFs) ---
-    upd_processing_session(session_id, {
+    await upd_processing_session(session_id, {
         "selected_form_ids": selected_form_ids,
         "clarity_result": {
             "sqs_per_form":   sqs_per_form,
@@ -903,12 +856,6 @@ async def get_presigned_upload_url(
 ):
     """
     Return a presigned S3 POST URL for direct browser-to-S3 upload.
-
-    Request body JSON: {"filename": "acord125.pdf"}
-    Response:         {"url": "...", "fields": {...}, "s3_key": "..."}
-
-    The client uploads directly to S3, then passes s3_key in the extraction
-    payload to tell the worker where the file lives.
     """
     from services.s3_service import generate_presigned_upload_url, is_configured as _s3_ok
 
@@ -917,7 +864,7 @@ async def get_presigned_upload_url(
 
     check_upload_rate_limit(str(current_user["id"]))
 
-    body = await request.json()
+    body     = await request.json()
     filename = (body.get("filename") or "").strip()
     if not filename:
         raise HTTPException(400, "filename is required")

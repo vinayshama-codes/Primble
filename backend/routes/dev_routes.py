@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from config.database import get_db
+from config.database import get_pool
 from repositories.audit_repository import write_audit_log
 from services.auth_service import get_current_user
 from services.email_service import _send_payment_failed_email
@@ -27,23 +27,20 @@ def _require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
 
 
+# ASYNC-SAFE
 @router.post("/api/acord/confirm-license")
 async def confirm_acord_license(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    now  = datetime.now(timezone.utc).isoformat()
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "UPDATE users SET acord_license_confirmed=1, acord_license_confirmed_at=%s WHERE id=%s",
-        (now, current_user["id"]),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    now = datetime.now(timezone.utc).isoformat()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET acord_license_confirmed=1, acord_license_confirmed_at=$1 WHERE id=$2",
+            now, current_user["id"],
+        )
 
-    write_audit_log(
+    await write_audit_log(
         user={**current_user, "acord_license_confirmed": 1},
         action="license_confirmed",
         ip_address=request.client.host if request.client else None,
@@ -51,30 +48,27 @@ async def confirm_acord_license(
     return {"success": True, "acord_license_confirmed": True}
 
 
+# ASYNC-SAFE
 @router.get("/api/acord/audit-log")
 async def get_audit_log(
     current_user: dict = Depends(get_current_user),
     limit: int = 100,
     offset: int = 0,
 ):
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT * FROM acord_audit_log WHERE user_id = %s ORDER BY timestamp DESC LIMIT %s OFFSET %s",
-        (current_user["id"], limit, offset),
-    )
-    rows = [dict(r) for r in cur.fetchall()]
-    cur.close()
-    conn.close()
-    return {"success": True, "entries": rows, "count": len(rows)}
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM acord_audit_log WHERE user_id = $1 ORDER BY timestamp DESC LIMIT $2 OFFSET $3",
+            current_user["id"], limit, offset,
+        )
+    return {"success": True, "entries": [dict(r) for r in rows], "count": len(rows)}
 
 
 @router.post("/api/billing/payment-lifecycle")
 async def run_payment_lifecycle(_: dict = Depends(_require_admin)):
     await run_daily_payment_lifecycle()
     return {
-        "processed":   True,
-        "checked_at":  datetime.now(timezone.utc).isoformat(),
+        "processed":  True,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -99,6 +93,7 @@ async def test_email(
     return {"sent": sent, "to": to, "day": day}
 
 
+# ASYNC-SAFE
 @router.post("/api/dev/simulate-payment-failure")
 async def simulate_payment_failure(
     request: Request,
@@ -115,15 +110,11 @@ async def simulate_payment_failure(
     else:
         final_status = "failed"
 
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "UPDATE users SET payment_status=%s, payment_failed_at=%s WHERE id=%s",
-        (final_status, fake_dt, current_user["id"]),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET payment_status=$1, payment_failed_at=$2 WHERE id=$3",
+            final_status, fake_dt, current_user["id"],
+        )
 
     logger.info(
         f"DEV: simulated payment failure {days_ago} days ago "
@@ -143,30 +134,27 @@ async def simulate_payment_failure(
     )
     logger.info(
         f"DEV simulate: sent day={email_day} email "
-        f"to {current_user['email']}: {'✅' if sent else '❌'}"
+        f"to {current_user['email']}: {'ok' if sent else 'FAILED'}"
     )
 
     return {
-        "success":          True,
+        "success":           True,
         "payment_failed_at": fake_dt,
-        "days_ago":         days_ago,
-        "status_set":       final_status,
-        "email_sent":       sent,
-        "email_day":        email_day,
+        "days_ago":          days_ago,
+        "status_set":        final_status,
+        "email_sent":        sent,
+        "email_day":         email_day,
     }
 
 
+# ASYNC-SAFE
 @router.post("/api/stripe/reconcile-overage")
 async def reconcile_overage(current_user: dict = Depends(get_current_user)):
     from config.settings import SOFT_BUFFER_PCT
     from services.stripe_service import create_overage_invoice_item
 
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute("SELECT * FROM users WHERE id = %s", (current_user["id"],))
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", current_user["id"])
 
     if not row:
         raise HTTPException(404, "User not found")
@@ -188,8 +176,8 @@ async def reconcile_overage(current_user: dict = Depends(get_current_user)):
 
     if uninvoiced == 0:
         return {
-            "success": True,
-            "message": "No uninvoiced overages found.",
+            "success":   True,
+            "message":   "No uninvoiced overages found.",
             "uninvoiced": 0,
         }
 
@@ -203,15 +191,11 @@ async def reconcile_overage(current_user: dict = Depends(get_current_user)):
             failed += 1
 
     if queued > 0:
-        conn = get_db()
-        cur  = conn.cursor()
-        cur.execute(
-            "UPDATE users SET overage_packages_invoiced = overage_packages_invoiced + %s WHERE id = %s",
-            (queued, current_user["id"]),
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET overage_packages_invoiced = overage_packages_invoiced + $1 WHERE id = $2",
+                queued, current_user["id"],
+            )
 
     logger.info(
         f"Reconcile overage: user={current_user['id']} "
@@ -219,14 +203,14 @@ async def reconcile_overage(current_user: dict = Depends(get_current_user)):
     )
 
     return {
-        "success":          True,
-        "packages_used":    pkgs_used,
-        "packages_limit":   pkgs_limit,
-        "soft_buffer":      soft_buffer,
+        "success":           True,
+        "packages_used":     pkgs_used,
+        "packages_limit":    pkgs_limit,
+        "soft_buffer":       soft_buffer,
         "billable_overages": billable_overages,
-        "already_invoiced": already_invoiced,
-        "newly_queued":     queued,
-        "failed":           failed,
+        "already_invoiced":  already_invoiced,
+        "newly_queued":      queued,
+        "failed":            failed,
         "message": (
             f"Queued {queued} overage invoice item(s) to Stripe."
             if queued else "All overages already invoiced."
@@ -234,36 +218,28 @@ async def reconcile_overage(current_user: dict = Depends(get_current_user)):
     }
 
 
+# ASYNC-SAFE
 @router.post("/api/count-download")
 async def count_download(current_user: dict = Depends(get_current_user)):
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT subscription_tier, downloads_used FROM users WHERE id = %s",
-        (current_user["id"],),
-    )
-    row = cur.fetchone()
-    if not row:
-        cur.close()
-        conn.close()
-        raise HTTPException(404, "User not found")
-
-    row  = dict(row)
-    sub  = row.get("subscription_tier", "free") or "free"
-    used = int(row.get("downloads_used", 0) or 0)
-
-    if sub == "free" and used >= 3:
-        cur.close()
-        conn.close()
-        return {"success": False, "upgrade_required": True}
-
-    if sub == "free":
-        cur.execute(
-            "UPDATE users SET downloads_used = downloads_used + 1 WHERE id = %s",
-            (current_user["id"],),
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT subscription_tier, downloads_used FROM users WHERE id = $1",
+            current_user["id"],
         )
-        conn.commit()
+        if not row:
+            raise HTTPException(404, "User not found")
 
-    cur.close()
-    conn.close()
+        row  = dict(row)
+        sub  = row.get("subscription_tier", "free") or "free"
+        used = int(row.get("downloads_used", 0) or 0)
+
+        if sub == "free" and used >= 3:
+            return {"success": False, "upgrade_required": True}
+
+        if sub == "free":
+            await conn.execute(
+                "UPDATE users SET downloads_used = downloads_used + 1 WHERE id = $1",
+                current_user["id"],
+            )
+
     return {"success": True}

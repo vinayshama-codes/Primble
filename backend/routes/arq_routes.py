@@ -1,12 +1,12 @@
-#arq_routes.py
 import logging
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from config.database import get_db
+from config.database import get_pool
+from config.settings import FRONTEND_URL
 from repositories.session_repository import get_processing_session
 from services.arq_service import (
     apply_arq_answers_to_session,
@@ -24,11 +24,7 @@ from services.arq_service import (
     submit_arq_answers,
 )
 from services.auth_service import get_current_user
-from services.email_service import (
-    send_arq_email,
-    send_arq_submitted_notification,
-)
-from config.settings import FRONTEND_URL
+from services.email_service import send_arq_email, send_arq_submitted_notification
 from utils.rate_limiter import check_arq_public_rate_limit, check_arq_submit_rate_limit, check_arq_chat_rate_limit
 
 router = APIRouter(prefix="/api/arq", tags=["arq"])
@@ -38,7 +34,6 @@ EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 def _sanitize_str(val: str, max_len: int = 500) -> str:
-    """Strip HTML tags and truncate."""
     if not val:
         return ""
     val = re.sub(r"<[^>]*>", "", str(val))
@@ -50,10 +45,8 @@ async def generate_questions(
     session_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    """Generate ARQ questions from a processing session's missing fields."""
-    from fastapi import HTTPException
     try:
-        proc_session = get_processing_session(session_id)
+        proc_session = await get_processing_session(session_id)
     except Exception:
         raise HTTPException(404, "Processing session not found")
 
@@ -64,7 +57,7 @@ async def generate_questions(
     if not generated:
         raise HTTPException(400, "No forms generated yet — generate forms first")
 
-    questions = generate_arq_questions(
+    questions = await generate_arq_questions(
         facts=proc_session.get("facts", {}),
         flags=proc_session.get("flags", {}),
         generated_forms=generated,
@@ -89,8 +82,6 @@ async def send_arq(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    """Create ARQ session and send email to client."""
-    from fastapi import HTTPException
     body = await request.json()
 
     session_id   = _sanitize_str(body.get("session_id", ""), 128)
@@ -110,14 +101,13 @@ async def send_arq(
         raise HTTPException(400, "Too many questions in a single ARQ")
 
     try:
-        proc_session = get_processing_session(session_id)
+        proc_session = await get_processing_session(session_id)
     except Exception:
         raise HTTPException(404, "Processing session not found")
 
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
 
-    # Strip pre-filled answers; sanitize question text
     clean_questions = []
     for q in questions:
         clean_questions.append({
@@ -126,10 +116,10 @@ async def send_arq(
             "forms":         _sanitize_str(q.get("forms", ""), 100),
             "form_ids":      q.get("form_ids", []),
             "field_type":    _sanitize_str(q.get("field_type", "text"), 32),
-            "current_value": "",  # never forward pre-filled values
+            "current_value": "",
         })
 
-    arq_data = create_arq_session(
+    arq_data = await create_arq_session(
         processing_session_id=session_id,
         user_id=current_user["id"],
         client_email=client_email,
@@ -162,14 +152,13 @@ async def send_arq(
 
 @router.get("/client-view/{token}")
 async def client_view(token: str, request: Request):
-    """Public endpoint: return questionnaire data for client."""
     client_ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "unknown")).split(",")[0].strip()
     check_arq_public_rate_limit(client_ip)
-    # Basic token format check
+
     if not token or len(token) > 128 or not re.match(r"^[a-f0-9\-]+$", token):
         return JSONResponse({"success": False, "error": "not_found", "message": "Questionnaire not found."}, status_code=404)
 
-    arq = get_arq_by_token(token)
+    arq = await get_arq_by_token(token)
     if not arq:
         return JSONResponse({"success": False, "error": "not_found", "message": "Questionnaire not found."}, status_code=404)
 
@@ -180,47 +169,42 @@ async def client_view(token: str, request: Request):
 
     if now > expires:
         return JSONResponse({"success": False, "error": "expired", "message": "This link has expired."}, status_code=410)
-
     if arq["status"] == "submitted":
         return JSONResponse({"success": False, "error": "already_submitted", "message": "Already submitted."}, status_code=409)
 
-    mark_arq_viewed(token)
+    await mark_arq_viewed(token)
 
-    # Fetch producer contact details to pass to client (optional display)
     producer_email = ""
     producer_phone = ""
     producer_name  = ""
     try:
-        conn = get_db()
-        cur  = conn.cursor()
-        cur.execute("SELECT email, full_name FROM users WHERE id=%s", (arq["user_id"],)) #remove phone from only for now
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
+        async with get_pool().acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT email, full_name FROM users WHERE id=$1", arq["user_id"]
+            )
         if row:
-            producer_email = row.get("email", "") or ""
-            producer_phone = row.get("phone", "") or ""
-            producer_name  = row.get("full_name", "") or ""
+            producer_email = dict(row).get("email", "") or ""
+            producer_name  = dict(row).get("full_name", "") or ""
     except Exception as ex:
         logger.warning(f"client_view: could not fetch producer info: {ex}")
 
-    questions_for_client = []
-    for q in arq.get("questions", []):
-        questions_for_client.append({
+    questions_for_client = [
+        {
             "field_name":    q["field_name"],
             "question":      q["question"],
             "hint":          q.get("hint", ""),
             "forms":         q.get("forms", ""),
             "field_type":    q.get("field_type", "text"),
-            "current_value": "",  # never pre-fill for client
-        })
+            "current_value": "",
+        }
+        for q in arq.get("questions", [])
+    ]
 
     return JSONResponse({
         "success":        True,
         "client_name":    arq.get("client_name", ""),
         "questions":      questions_for_client,
         "expires_at":     arq["expires_at"],
-        # Producer contact — optional, client UI renders only if present
         "producer_name":  producer_name,
         "producer_email": producer_email,
         "producer_phone": producer_phone,
@@ -229,33 +213,30 @@ async def client_view(token: str, request: Request):
 
 @router.post("/submit/{token}")
 async def submit_arq(token: str, request: Request):
-    """Public endpoint: client submits answers."""
     client_ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "unknown")).split(",")[0].strip()
     check_arq_submit_rate_limit(client_ip)
+
     if not token or len(token) > 128:
         return JSONResponse({"success": False, "message": "Invalid token."}, status_code=400)
 
-    body = await request.json()
+    body        = await request.json()
     raw_answers = body.get("answers", {})
 
     if not isinstance(raw_answers, dict) or not raw_answers:
         return JSONResponse({"success": False, "message": "No answers provided."}, status_code=400)
-
-    # Limit payload size
     if len(raw_answers) > 500:
         return JSONResponse({"success": False, "message": "Too many fields in submission."}, status_code=400)
 
-    # Sanitize all answer values
     sanitized_answers = {
         _sanitize_str(k, 128): _sanitize_str(str(v), 500)
         for k, v in raw_answers.items()
     }
 
-    arq = get_arq_by_token(token)
+    arq = await get_arq_by_token(token)
     if not arq:
         return JSONResponse({"success": False, "message": "Questionnaire not found."}, status_code=404)
 
-    ok, msg, updated_fields = submit_arq_answers(
+    ok, msg, updated_fields = await submit_arq_answers(
         token=token,
         raw_answers=sanitized_answers,
         processing_session_id=arq["session_id"],
@@ -265,20 +246,18 @@ async def submit_arq(token: str, request: Request):
     if not ok:
         return JSONResponse({"success": False, "message": msg}, status_code=400)
 
-    apply_ok, applied_fields = apply_arq_answers_to_session(
+    apply_ok, applied_fields = await apply_arq_answers_to_session(
         arq_id=arq["id"],
         processing_session_id=arq["session_id"],
     )
 
-    create_arq_notification(arq["id"], arq["user_id"], "submitted")
+    await create_arq_notification(arq["id"], arq["user_id"], "submitted")
 
     try:
-        conn = get_db()
-        cur  = conn.cursor()
-        cur.execute("SELECT email, full_name FROM users WHERE id=%s", (arq["user_id"],))
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
+        async with get_pool().acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT email, full_name FROM users WHERE id=$1", arq["user_id"]
+            )
         if row:
             producer = dict(row)
             send_arq_submitted_notification(
@@ -304,24 +283,18 @@ async def submit_arq(token: str, request: Request):
 
 @router.post("/chat/{token}")
 async def arq_chat(token: str, request: Request):
-    """
-    Public endpoint — client asks a question about the questionnaire.
-    Body: { message: str, history: [{role, content}] }
-    """
-    from config.settings import groq_client
+    from config.settings import groq_chat
 
-    # Rate limit by IP before any heavy processing
     client_ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "unknown")).split(",")[0].strip()
     check_arq_chat_rate_limit(client_ip)
 
     if not token or len(token) > 128 or not re.match(r"^[a-f0-9\-]+$", token):
         return JSONResponse({"success": False, "reply": "Session not found."}, status_code=404)
 
-    arq = get_arq_by_token(token)
+    arq = await get_arq_by_token(token)
     if not arq:
         return JSONResponse({"success": False, "reply": "Session not found."}, status_code=404)
 
-    # Reject chat on expired or already-submitted sessions
     now     = datetime.now(timezone.utc)
     expires = datetime.fromisoformat(arq["expires_at"].replace("Z", "+00:00"))
     if expires.tzinfo is None:
@@ -331,85 +304,60 @@ async def arq_chat(token: str, request: Request):
     if arq.get("status") == "submitted":
         return JSONResponse({"success": False, "reply": "This questionnaire has already been submitted."}, status_code=409)
 
-    body = await request.json()
+    body    = await request.json()
     message = _sanitize_str(body.get("message", ""), 500)
     history = body.get("history", [])
 
     if not message:
         return JSONResponse({"success": False, "reply": "No message provided."}, status_code=400)
 
-    # Limit history depth to prevent token bloat
     history = [h for h in history[-6:] if h.get("role") in ("user", "assistant") and h.get("content")]
 
-    # Get all questions from the ARQ session
-    questions = arq.get("questions", [])
-    
-    # Build a clear list of questions for context
-    question_list = []
-    for idx, q in enumerate(questions, 1):
-        question_text = q.get("question", "")
-        field_name = q.get("field_name", "")
-        question_list.append(f"{idx}. {question_text} (Field: {field_name})")
-    
-    questions_context = "\n".join(question_list) if question_list else "No specific questions available."
+    questions      = arq.get("questions", [])
+    question_list  = [f"{i}. {q.get('question','')} (Field: {q.get('field_name','')})" for i, q in enumerate(questions, 1)]
+    questions_ctx  = "\n".join(question_list) if question_list else "No specific questions available."
 
-    # Improved system prompt with clear instructions
     system_prompt = f"""You are a helpful form assistant helping a business owner complete an insurance application questionnaire.
 
 IMPORTANT RULES:
 1. ONLY answer questions related to the specific questions listed below
-2. If asked about something NOT in the list, say: "I'm sorry, I can only help with questions from this insurance form. Please ask me about one of the specific questions below."
+2. If asked about something NOT in the list, say: "I'm sorry, I can only help with questions from this insurance form."
 3. Explain insurance terms in simple, plain English
 4. Be helpful but concise (2-4 sentences maximum)
 5. NEVER invent information or give legal advice
-6. If you don't know the answer, say: "I don't have enough information to answer that. Please contact your insurance agent for help."
 
 Here are the EXACT questions from this insurance form:
 
-{questions_context}
-
-Remember: ONLY answer questions about the specific fields listed above. For any other question, politely redirect to the form questions."""
+{questions_ctx}"""
 
     messages = [{"role": "system", "content": system_prompt}]
-    
-    # Add conversation history
     for h in history:
         messages.append({"role": h["role"], "content": _sanitize_str(h.get("content", ""), 500)})
-    
     messages.append({"role": "user", "content": message})
 
-    fallback = "I'm sorry, I can only help with questions about this insurance form. Please ask me about one of the specific questions listed above, or contact your agent for assistance."
+    fallback = "I'm sorry, I can only help with questions about this insurance form. Please contact your agent for assistance."
 
     try:
-        response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=messages,
+        reply = await groq_chat(
+            "llama-3.1-8b-instant",
+            messages,
             temperature=0.3,
             max_tokens=300,
         )
-        reply = (response.choices[0].message.content or "").strip()
-        
-        # If reply is empty or too generic, use fallback
         if not reply or len(reply) < 5:
             reply = fallback
-            
-        # Check if the reply is just repeating the question
-        if reply.lower() == message.lower():
-            reply = fallback
-            
         return JSONResponse({"success": True, "reply": reply})
-        
     except Exception as ex:
         logger.error(f"ARQ chat failed: {ex}")
         return JSONResponse({"success": True, "reply": fallback})
+
 
 @router.get("/status/{arq_id}")
 async def get_arq_status(
     arq_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    from fastapi import HTTPException
-    arq = get_arq_by_id(arq_id)
+    arq = await get_arq_by_id(arq_id)
     if not arq:
         raise HTTPException(404, "ARQ session not found")
     if arq["user_id"] != current_user["id"]:
@@ -421,9 +369,9 @@ async def get_arq_status(
         "status":          arq["status"],
         "client_email":    arq["email"],
         "client_name":     arq.get("client_name", ""),
-        "created_at":      arq["created_at"],
-        "submitted_at":    arq.get("submitted_at"),
-        "viewed_at":       arq.get("viewed_at"),
+        "created_at":      str(arq["created_at"]),
+        "submitted_at":    str(arq.get("submitted_at") or ""),
+        "viewed_at":       str(arq.get("viewed_at") or ""),
         "expires_at":      arq["expires_at"],
         "reminder_count":  arq.get("reminder_count", 0),
         "fields_answered": len(arq.get("answers", {})),
@@ -436,16 +384,13 @@ async def list_arqs(
     session_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT id, status, email, client_name, created_at, submitted_at, expires_at, reminder_count FROM arq_sessions WHERE session_id=%s AND user_id=%s ORDER BY created_at DESC",
-        (session_id, current_user["id"]),
-    )
-    rows = [dict(r) for r in cur.fetchall()]
-    cur.close()
-    conn.close()
-    return JSONResponse({"success": True, "arq_sessions": rows})
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, status, email, client_name, created_at, submitted_at, expires_at, reminder_count "
+            "FROM arq_sessions WHERE session_id=$1 AND user_id=$2 ORDER BY created_at DESC",
+            session_id, current_user["id"],
+        )
+    return JSONResponse({"success": True, "arq_sessions": [dict(r) for r in rows]})
 
 
 @router.post("/remind/{arq_id}")
@@ -453,8 +398,7 @@ async def send_reminder(
     arq_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    from fastapi import HTTPException
-    arq = get_arq_by_id(arq_id)
+    arq = await get_arq_by_id(arq_id)
     if not arq:
         raise HTTPException(404, "ARQ session not found")
     if arq["user_id"] != current_user["id"]:
@@ -462,19 +406,19 @@ async def send_reminder(
     if arq["status"] == "submitted":
         raise HTTPException(400, "Client has already submitted this questionnaire")
 
-    ok = send_arq_reminder(arq_id, current_user)
+    ok = await send_arq_reminder(arq_id, current_user)
     return JSONResponse({"success": ok, "message": "Reminder sent." if ok else "Failed to send reminder."})
 
 
 @router.get("/notifications")
 async def get_notifications(current_user: dict = Depends(get_current_user)):
-    notifs = get_arq_notifications(current_user["id"])
+    notifs = await get_arq_notifications(current_user["id"])
     return JSONResponse({"success": True, "notifications": notifs})
 
 
 @router.post("/notifications/read")
 async def mark_read(current_user: dict = Depends(get_current_user)):
-    mark_notifications_read(current_user["id"])
+    await mark_notifications_read(current_user["id"])
     return JSONResponse({"success": True})
 
 
@@ -483,9 +427,8 @@ async def get_client_filled(
     session_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    from fastapi import HTTPException
-    proc_session = get_processing_session(session_id)
+    proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    fields = get_client_filled_fields(session_id)
+    fields = await get_client_filled_fields(session_id)
     return JSONResponse({"success": True, "client_filled_fields": fields})

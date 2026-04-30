@@ -1,8 +1,10 @@
+import asyncio
 import os
 import logging
 import uuid
 import zipfile
 from typing import List, Tuple
+from concurrent.futures import ThreadPoolExecutor
 
 import pdfplumber
 from config.settings import UPLOAD_DIR, SUPPORTED_IMG, OCR_PROVIDER
@@ -10,29 +12,17 @@ from utils.text_cleaner import clean_text
 
 logger = logging.getLogger(__name__)
 
+# Shared executor for all blocking OCR/PDF operations
+_OCR_EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
+
 # ---------------------------------------------------------------------------
 # OCR confidence thresholds
-# Used for token-level flagging only.
-# Per-field threshold logic lives in extraction_service.py.
 # ---------------------------------------------------------------------------
-OCR_CONFIDENCE_THRESHOLD = 0.70   # default / fallback for token flagging
+OCR_CONFIDENCE_THRESHOLD = 0.70
+_DOC_REVIEW_THRESHOLD    = 0.50
+_MIN_NATIVE_TEXT_LEN     = 100
+_MAX_LOW_CONF_FRACTION   = 0.40
 
-# Minimum confidence across ALL tokens before flagging the document for
-# manual review (document-level, not token-level).
-_DOC_REVIEW_THRESHOLD = 0.50
-
-# Minimum native-text length before falling back to image OCR.
-_MIN_NATIVE_TEXT_LEN = 100
-
-# Maximum fraction of tokens that can be low-confidence before the full
-# document is flagged for manual review.
-_MAX_LOW_CONF_FRACTION = 0.40
-
-# ---------------------------------------------------------------------------
-# OCR confusion normalization — mirrors extraction_service._normalize_for_ocr_check.
-# Applied to tokens BEFORE confidence comparison to reduce false negatives
-# caused by common OCR substitutions.
-# ---------------------------------------------------------------------------
 _OCR_CONFUSION_MAP = str.maketrans({
     "O": "0", "o": "0",
     "l": "1", "I": "1",
@@ -42,25 +32,15 @@ _OCR_CONFUSION_MAP = str.maketrans({
 
 
 def _normalize_token(token: str) -> str:
-    """Normalize OCR-confusable chars. Applied before confidence filtering."""
     return token.translate(_OCR_CONFUSION_MAP)
 
 
 def _numeric_correction_score(token: str) -> float:
-    """
-    Heuristic: if a token looks like a number but contains alpha chars that
-    are common OCR substitutions (O for 0, l for 1), score it lower so it
-    gets flagged as low-confidence more aggressively.
-
-    Returns a penalty in [0, 1]: 0 = no penalty, 1 = max penalty.
-    Callers subtract this from the raw OCR confidence.
-    """
     norm = _normalize_token(token)
     if not norm.replace(".", "").replace(",", "").isdigit():
         return 0.0
-    # Compare original vs normalized — difference indicates substitution risk
     diff_chars = sum(1 for a, b in zip(token, norm) if a != b)
-    return min(1.0, diff_chars * 0.15)   # 15% penalty per suspicious char, capped at 100%
+    return min(1.0, diff_chars * 0.15)
 
 
 def _flag_for_manual_review(
@@ -69,19 +49,11 @@ def _flag_for_manual_review(
     total_token_count: int,
     source_path: str,
 ) -> bool:
-    """
-    Returns True if the document should be flagged for manual review.
-    Criteria:
-      1. More than _MAX_LOW_CONF_FRACTION of tokens are low-confidence.
-      2. Extracted text is empty or near-empty.
-    Logs a WARNING when flagging.
-    """
     if not full_text.strip() or len(full_text.strip()) < 50:
         logger.warning(
             f"ocr_service: MANUAL REVIEW flagged — empty/near-empty OCR output: {source_path}"
         )
         return True
-
     if total_token_count > 0:
         frac = len(low_conf_tokens) / total_token_count
         if frac > _MAX_LOW_CONF_FRACTION:
@@ -90,7 +62,6 @@ def _flag_for_manual_review(
                 f"({len(low_conf_tokens)}/{total_token_count}): {source_path}"
             )
             return True
-
     return False
 
 
@@ -113,9 +84,7 @@ def _get_easyocr():
 
 
 # ---------------------------------------------------------------------------
-# Provider OCR implementations
-# Each returns (full_text, low_confidence_tokens, total_token_count).
-# total_token_count is needed for _flag_for_manual_review fraction check.
+# Provider OCR implementations (sync — called via executor)
 # ---------------------------------------------------------------------------
 
 def _ocr_easyocr(img_path: str) -> Tuple[str, List[str], int]:
@@ -124,18 +93,17 @@ def _ocr_easyocr(img_path: str) -> Tuple[str, List[str], int]:
         if reader is None:
             logger.error(f"EasyOCR not available — returning empty for {img_path}")
             return "", [], 0
-        results   = reader.readtext(img_path, detail=1)   # [(bbox, text, conf), ...]
+        results   = reader.readtext(img_path, detail=1)
         all_texts = [text for (_, text, _) in results]
         full_text = "\n".join(all_texts).strip()
         total     = len(results)
         low_conf: List[str] = []
         for (_, text, conf) in results:
-            # Apply numeric confusion penalty before threshold check
             penalty    = _numeric_correction_score(text)
             adj_conf   = max(0.0, conf - penalty)
             norm_token = _normalize_token(text)
             if adj_conf < OCR_CONFIDENCE_THRESHOLD:
-                low_conf.append(norm_token)  # store normalized form for downstream matching
+                low_conf.append(norm_token)
         return full_text, low_conf, total
     except Exception as ex:
         logger.error(f"EasyOCR error on {img_path}: {ex}")
@@ -173,7 +141,11 @@ def _ocr_google_vision(img_path: str) -> Tuple[str, List[str], int]:
 def _ocr_aws_textract(img_path: str) -> Tuple[str, List[str], int]:
     try:
         import boto3
-        c = boto3.client("textract", region_name=os.getenv("AWS_REGION", "us-east-1"))
+        c = boto3.client(
+            "textract",
+            region_name=os.getenv("AWS_REGION", "us-east-1"),
+            config=boto3.session.Config(connect_timeout=30, read_timeout=30),
+        )
         with open(img_path, "rb") as f:
             content = f.read()
         response  = c.detect_document_text(Document={"Bytes": content})
@@ -195,27 +167,31 @@ def _ocr_aws_textract(img_path: str) -> Tuple[str, List[str], int]:
         return "", [], 0
 
 
+def _run_ocr_provider(img_path: str) -> Tuple[str, List[str], int]:
+    """Dispatch to the configured OCR provider (sync, called via executor)."""
+    if OCR_PROVIDER == "google":
+        return _ocr_google_vision(img_path)
+    elif OCR_PROVIDER == "aws":
+        return _ocr_aws_textract(img_path)
+    else:
+        return _ocr_easyocr(img_path)
+
+
 # ---------------------------------------------------------------------------
 # Public OCR dispatcher
 # ---------------------------------------------------------------------------
 
-def ocr_image_file(img_path: str) -> Tuple[str, List[str]]:
+# ASYNC-SAFE
+async def ocr_image_file(img_path: str) -> Tuple[str, List[str]]:
     """
     Return (full_text, low_confidence_tokens) for an image file.
-    Dispatches to OCR_PROVIDER env var. Falls back to EasyOCR on unknown providers.
-
-    Flags for manual review if token low-confidence fraction exceeds threshold
-    or if OCR output is empty — adds 'needs_manual_review' marker to returned tokens.
-    (Callers can check: 'needs_manual_review' in low_confidence_tokens.)
+    Runs blocking OCR in a thread pool executor.
     """
-    if OCR_PROVIDER == "google":
-        full_text, low_conf, total = _ocr_google_vision(img_path)
-    elif OCR_PROVIDER == "aws":
-        full_text, low_conf, total = _ocr_aws_textract(img_path)
-    else:
-        full_text, low_conf, total = _ocr_easyocr(img_path)
+    loop = asyncio.get_running_loop()
+    full_text, low_conf, total = await loop.run_in_executor(
+        _OCR_EXECUTOR, _run_ocr_provider, img_path
+    )
 
-    # Deduplicate low-conf tokens (preserve order)
     low_conf = list(dict.fromkeys(low_conf))
 
     if _flag_for_manual_review(full_text, low_conf, total, img_path):
@@ -229,10 +205,7 @@ def ocr_image_file(img_path: str) -> Tuple[str, List[str]]:
 # ---------------------------------------------------------------------------
 
 def extract_images_from_pdf(pdf_path: str) -> List[str]:
-    """
-    Render each PDF page as PNG via PyMuPDF at 2x zoom (~144 dpi).
-    Returns list of temp file paths. Caller owns cleanup.
-    """
+    """Render each PDF page as PNG via PyMuPDF at 2x zoom. Caller owns cleanup."""
     out_paths: List[str] = []
     try:
         import fitz
@@ -249,19 +222,9 @@ def extract_images_from_pdf(pdf_path: str) -> List[str]:
     return out_paths
 
 
-def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
-    """
-    Return (full_text, low_confidence_tokens) for a PDF.
-
-    Strategy:
-      1. pdfplumber native text extraction (fast, no confidence data).
-      2. If extracted text < _MIN_NATIVE_TEXT_LEN (scanned PDF),
-         fall back to page-by-page image OCR with confidence tokens.
-
-    Native PDFs: low_conf is always [] (no word-level confidence from pdfplumber).
-    """
-    text     = ""
-    low_conf: List[str] = []
+def _pdfplumber_extract(pdf_path: str) -> str:
+    """Sync pdfplumber text extraction — called via executor."""
+    text = ""
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
@@ -270,14 +233,27 @@ def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
                     text += t + "\n"
     except Exception as ex:
         logger.error(f"pdfplumber error on {pdf_path}: {ex}")
+    return text
 
+
+# ASYNC-SAFE
+async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
+    """
+    Return (full_text, low_confidence_tokens) for a PDF.
+    pdfplumber runs in thread pool executor to avoid blocking the event loop.
+    Falls back to image OCR for scanned PDFs.
+    """
+    loop = asyncio.get_running_loop()
+    text = await loop.run_in_executor(_OCR_EXECUTOR, _pdfplumber_extract, pdf_path)
+
+    low_conf: List[str] = []
     if len(text.strip()) < _MIN_NATIVE_TEXT_LEN:
         logger.info(
             f"Native text too short ({len(text.strip())} chars) — image OCR fallback: {pdf_path}"
         )
-        img_paths = extract_images_from_pdf(pdf_path)
+        img_paths = await loop.run_in_executor(_OCR_EXECUTOR, extract_images_from_pdf, pdf_path)
         for ip in img_paths:
-            page_text, page_low = ocr_image_file(ip)
+            page_text, page_low = await ocr_image_file(ip)
             text     += page_text + "\n"
             low_conf += page_low
             try:
@@ -285,7 +261,6 @@ def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
             except OSError:
                 pass
 
-    # Deduplicate low-conf tokens
     low_conf = list(dict.fromkeys(low_conf))
     return text.strip(), low_conf
 
@@ -294,16 +269,17 @@ def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
 # Public file dispatcher
 # ---------------------------------------------------------------------------
 
-def extract_text(file_path: str) -> Tuple[str, List[str]]:
+# ASYNC-SAFE
+async def extract_text(file_path: str) -> Tuple[str, List[str]]:
     """
     Return (full_text, low_confidence_tokens) for any supported file type.
-    Returns ("", []) for unsupported types — callers should check len(text) > 0.
+    Returns ("", []) for unsupported types.
     """
     ext = os.path.splitext(file_path.lower())[1]
     if ext == ".pdf":
-        raw_text, low_conf = extract_text_from_pdf(file_path)
+        raw_text, low_conf = await extract_text_from_pdf(file_path)
     elif ext in SUPPORTED_IMG:
-        raw_text, low_conf = ocr_image_file(file_path)
+        raw_text, low_conf = await ocr_image_file(file_path)
     else:
         logger.warning(f"extract_text: unsupported file type '{ext}' for {file_path}")
         return "", []
@@ -314,27 +290,17 @@ def extract_text(file_path: str) -> Tuple[str, List[str]]:
 # ZIP extraction
 # ---------------------------------------------------------------------------
 
-_ZIP_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024  # 500 MB total uncompressed cap
-_ZIP_MAX_RATIO             = 100                 # reject any single entry > 100:1 ratio
+_ZIP_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024  # 500 MB
+_ZIP_MAX_RATIO              = 100
 
 
 def extract_zip(zip_path: str) -> List[str]:
-    """
-    Extract PDF and image files from a ZIP archive.
-    Returns list of extracted file paths saved to UPLOAD_DIR.
-    Skips unsupported extensions silently.
-
-    ZIP bomb guards:
-    - Rejects archives whose total uncompressed size exceeds 500 MB.
-    - Skips individual entries with a compression ratio above 100:1.
-    """
+    """Extract PDF and image files from a ZIP archive. ZIP bomb guarded."""
     extracted: List[str] = []
     supported_exts = {".pdf"} | set(SUPPORTED_IMG)
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
             infos = zf.infolist()
-
-            # Guard 1: total uncompressed size
             total_uncompressed = sum(i.file_size for i in infos)
             if total_uncompressed > _ZIP_MAX_UNCOMPRESSED_BYTES:
                 logger.error(
@@ -342,9 +308,7 @@ def extract_zip(zip_path: str) -> List[str]:
                     f"({total_uncompressed / 1024 / 1024:.0f} MB): {zip_path}"
                 )
                 return []
-
             for info in infos:
-                # Guard 2: per-entry compression ratio
                 if info.compress_size > 0:
                     ratio = info.file_size / info.compress_size
                     if ratio > _ZIP_MAX_RATIO:
@@ -353,7 +317,6 @@ def extract_zip(zip_path: str) -> List[str]:
                             f"compression ratio {ratio:.0f}:1 exceeds limit"
                         )
                         continue
-
                 ext = os.path.splitext(info.filename.lower())[1]
                 if ext in supported_exts:
                     safe_name = f"{uuid.uuid4().hex}_{os.path.basename(info.filename)}"
