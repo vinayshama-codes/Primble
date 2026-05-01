@@ -12,6 +12,10 @@ import { applyOverage }       from "./api/stripeApi";
 import UpgradeStageOverlay    from "./components/overlays/UpgradeStageOverlay";
 import Header                 from "./components/layout/Header";
 import LandingPage            from "./components/layout/LandingPage";
+import AboutPage              from "./components/pages/AboutPage";
+import PlatformPage           from "./components/pages/PlatformPage";
+import PricingPage            from "./components/pages/PricingPage";
+import AcordLicensePage       from "./components/pages/AcordLicensePage";
 import AuthModal              from "./components/auth/AuthModal";
 import CompleteProfileModal   from "./components/auth/CompleteProfileModal";
 import AcordModal             from "./components/form/AcordModal";
@@ -31,6 +35,28 @@ export default function App() {
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
       <AppContent />
     </GoogleOAuthProvider>
+  );
+}
+
+function MarketingFooter() {
+  return (
+    <footer className="footer">
+      <div><h4 className="footer-h4">About Us</h4><p className="footer-p">Acordly automates ACORD form processing for insurance brokers and underwriting teams.</p></div>
+      <div><h4 className="footer-h4">Contact Us</h4><p className="footer-p">support@acordly.ai</p></div>
+      <div>
+        <h4 className="footer-h4">Follow Us</h4>
+        <p className="footer-p">
+          <a href="https://twitter.com" target="_blank" rel="noopener noreferrer">Twitter</a>
+          <a href="https://linkedin.com" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+        </p>
+      </div>
+      <div>
+        <h4 className="footer-h4">Newsletter</h4>
+        <p className="footer-p">Product updates and insurance workflow insights.</p>
+        <input className="footer-input" placeholder="Email Address" />
+        <button className="footer-button">Sign Up</button>
+      </div>
+    </footer>
   );
 }
 
@@ -57,6 +83,7 @@ function AppContent() {
   const [upgradeChecking,     setUpgradeChecking]     = useState(false);
   const [upgradeFailed,       setUpgradeFailed]       = useState(false);
   const [overageToast,        setOverageToast]        = useState(null);
+  const [marketingPage,       setMarketingPage]       = useState(null);
 
   useUpgradePolling(token, setUser, setUpgradeChecking, setUpgradeFailed);
   useBillingReturnPolling(token, setUser, setUpgradeChecking);
@@ -117,12 +144,19 @@ function AppContent() {
   };
 
   const handleGetStarted = () => {
+    setMarketingPage(null);
     if (user) {
       setShowModal(true);
       window.history.pushState({ acordly: true }, "");
     } else {
       setShowAuthModal(true);
     }
+  };
+
+  const handleNavigate = (page) => {
+    setMarketingPage(page);
+    setShowModal(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   useEffect(() => {
@@ -167,12 +201,14 @@ function AppContent() {
         setUpgradeFailed={setUpgradeFailed} setUpgradeChecking={setUpgradeChecking} setUser={setUser}
         onSignUp={() => { setAuthModalMode("signup"); setShowAuthModal(true); }}
         onLogIn={() => { setAuthModalMode("signin"); setShowAuthModal(true); }}
+        onNavigate={handleNavigate}
+        onHome={() => { setMarketingPage(null); setShowModal(false); }}
       />
       {headerError && (
         <div className="header-error-bar">⚠️ {headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
       )}
 
-      {/* Page content — switches between landing and app */}
+      {/* Page content — switches between landing, marketing pages, and app */}
       {showModal && user ? (
         <AcordModal
           onClose={() => { setShowModal(false); setResumeSessionId(null); }}
@@ -185,6 +221,14 @@ function AppContent() {
           billingPortalLoading={false}
           fullPage={false}
         />
+      ) : marketingPage === "about" ? (
+        <><AboutPage onGetStarted={handleGetStarted} onNavigate={handleNavigate} /><MarketingFooter /></>
+      ) : marketingPage === "platform" ? (
+        <><PlatformPage onGetStarted={handleGetStarted} onNavigate={handleNavigate} /><MarketingFooter /></>
+      ) : marketingPage === "pricing" ? (
+        <><PricingPage onGetStarted={handleGetStarted} onNavigate={handleNavigate} token={token} user={user} onError={(msg) => setHeaderError(msg)} /><MarketingFooter /></>
+      ) : marketingPage === "acord-license" ? (
+        <><AcordLicensePage /><MarketingFooter /></>
       ) : (
         <LandingPage user={user} onGetStarted={handleGetStarted} />
       )}

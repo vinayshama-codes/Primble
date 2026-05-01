@@ -25,6 +25,7 @@ export default function Header({
   onSignatureClick, onUpgradeClick, onLogout, onHome, onSignUp, onLogIn,
   openBillingPortal, upgradeChecking, upgradeFailed,
   setUpgradeFailed, setUpgradeChecking, setUser,
+  onNavigate,
 }) {
   const [showPlanModal, setShowPlanModal] = useState(false);
   const planBtnRef = useRef(null);
@@ -40,10 +41,10 @@ export default function Header({
       <div className="header-left">
         <div className="logo" onClick={() => onHome ? onHome() : (window.location.href = "/")} style={{ cursor: "pointer" }}>acordly</div>
         <nav className="nav">
-          <a href="#about">About</a>
-          <a href="#platform">Platform</a>
-          <a href="#pricing">Pricing</a>
-          <a href="#acord">ACORD®</a>
+          <a onClick={() => onNavigate && onNavigate("about")} style={{ cursor: "pointer" }}>About</a>
+          <a onClick={() => onNavigate && onNavigate("platform")} style={{ cursor: "pointer" }}>Platform</a>
+          <a onClick={() => onNavigate && onNavigate("pricing")} style={{ cursor: "pointer" }}>Pricing</a>
+          <a onClick={() => onNavigate && onNavigate("acord-license")} style={{ cursor: "pointer" }}>ACORD License</a>
         </nav>
       </div>
 
@@ -144,9 +145,9 @@ export default function Header({
           <LogoutButton onLogout={onLogout} />
         </div>
       ) : (
-        <div className="user-menu" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button onClick={onSignUp} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "#0f172a", padding: "10px 18px" }}>Sign up</button>
-          <button onClick={onLogIn} style={{ background: "#e6007a", border: "none", cursor: "pointer", fontSize: 16, fontWeight: 600, color: "#fff", padding: "10px 26px", borderRadius: 999 }}>Log in</button>
+        <div className="user-menu" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={onLogIn} style={{ background: "none", border: "1.5px solid #e0e0e0", cursor: "pointer", fontSize: 15, fontWeight: 600, color: "#0f172a", padding: "9px 22px", borderRadius: 999, transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = "#e6007a"; e.currentTarget.style.color = "#e6007a"; }} onMouseLeave={e => { e.currentTarget.style.borderColor = "#e0e0e0"; e.currentTarget.style.color = "#0f172a"; }}>Log in</button>
+          <button onClick={onSignUp} style={{ background: "#e6007a", border: "none", cursor: "pointer", fontSize: 15, fontWeight: 600, color: "#fff", padding: "10px 26px", borderRadius: 999, boxShadow: "0 4px 14px rgba(230,0,122,0.3)", transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.transform = "translateY(-1px)"; }} onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.transform = "none"; }}>Get started</button>
         </div>
       )}
     </header>

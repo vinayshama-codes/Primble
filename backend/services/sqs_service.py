@@ -1276,7 +1276,7 @@ def calculate_sqs(
 
 # ── Narrative generation ──────────────────────────────────────────────────────
 
-def generate_sqs_narrative(
+async def generate_sqs_narrative(
     sqs_result: dict,
     delta_this_session: int,
     resolved_recs: List[str],
@@ -1286,14 +1286,14 @@ def generate_sqs_narrative(
     Generate narrative prose explaining SQS score.
     Called at download only. Uses llama-3.3-70b-versatile.
     """
+    score = sqs_result.get("sqs_score") or sqs_result.get("package_sqs_score")
+    tier  = sqs_result.get("tier")
     try:
         from config.settings import groq_chat
-        
-        breakdown = sqs_result.get("breakdown", {})
+
+        breakdown    = sqs_result.get("breakdown", {})
         risk_drivers = sqs_result.get("risk_drivers", [])
-        score = sqs_result.get("sqs_score") or sqs_result.get("package_sqs_score")
-        tier = sqs_result.get("tier")
-        
+
         prompt = f"""Summarize this insurance submission quality in one concise paragraph (60-80 words). Be direct and professional.
 
 Score: {score}/100 ({tier}) | Change this session: {'+' if delta_this_session >= 0 else ''}{delta_this_session} pts
@@ -1302,12 +1302,12 @@ Resolved: {', '.join(resolved_recs) if resolved_recs else 'none'} | Ignored: {',
 
 One paragraph only. State the score tier, the main gap, and the single most impactful next action."""
 
-        raw = groq_chat(
+        raw = await groq_chat(
             "llama-3.3-70b-versatile",
             [{"role": "user", "content": prompt}]
         )
         return raw.strip()
-        
+
     except Exception as ex:
         logger.error(f"generate_sqs_narrative failed: {ex}")
         return f"SQS Score: {score}/100 ({tier}). Session improvement: {'+' if delta_this_session >= 0 else ''}{delta_this_session} points."

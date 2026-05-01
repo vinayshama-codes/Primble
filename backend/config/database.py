@@ -1,8 +1,12 @@
+import contextlib
 import json
 import logging
 import os
+import time
 
 import asyncpg
+import psycopg2
+from psycopg2 import pool as pg_pool
 
 from config.settings import DATABASE_URL
 
@@ -258,3 +262,41 @@ async def init_db() -> None:
             pass
 
         logger.info("PostgreSQL database initialized (asyncpg)")
+
+
+# ── Sync psycopg2 pool — used by standalone scripts (migrate.py, create_tables.py) ──
+_SYNC_POOL_MIN = int(os.getenv("DB_POOL_MIN", "1"))
+_SYNC_POOL_MAX = int(os.getenv("DB_POOL_MAX", "5"))
+_RETRY_ATTEMPTS = 3
+_RETRY_DELAY = 1.0
+
+_sync_pool: pg_pool.ThreadedConnectionPool = None
+
+
+def _get_sync_pool() -> pg_pool.ThreadedConnectionPool:
+    global _sync_pool
+    if _sync_pool is None:
+        _sync_pool = pg_pool.ThreadedConnectionPool(_SYNC_POOL_MIN, _SYNC_POOL_MAX, DATABASE_URL)
+    return _sync_pool
+
+
+@contextlib.contextmanager
+def get_db_cursor():
+    p = _get_sync_pool()
+    conn = None
+    for attempt in range(1, _RETRY_ATTEMPTS + 1):
+        try:
+            conn = p.getconn()
+            break
+        except Exception:
+            if attempt == _RETRY_ATTEMPTS:
+                raise
+            time.sleep(_RETRY_DELAY)
+    try:
+        cur = conn.cursor()
+        try:
+            yield conn, cur
+        finally:
+            cur.close()
+    finally:
+        p.putconn(conn)

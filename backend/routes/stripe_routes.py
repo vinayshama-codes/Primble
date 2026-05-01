@@ -295,14 +295,16 @@ async def stripe_webhook(request: Request):
             async with get_pool().acquire() as conn:
                 if new_plan and new_plan in PLANS and status == "active":
                     cfg = PLANS[new_plan].get(new_cycle) or PLANS[new_plan]["monthly"]
+                    now = datetime.now(timezone.utc).isoformat()
                     exec_status = await conn.execute(
                         """UPDATE users SET subscription_tier=$1, billing_cycle=$2,
-                            packages_limit=$3, overage_rate=$4
-                            WHERE stripe_subscription_id=$5 AND subscription_tier != $6""",
-                        new_plan, new_cycle, cfg["packages"], cfg["overage_rate"], sub_id, new_plan,
+                            packages_limit=$3, overage_rate=$4, packages_used=0,
+                            billing_period_start=$5
+                            WHERE stripe_subscription_id=$6 AND subscription_tier != $7""",
+                        new_plan, new_cycle, cfg["packages"], cfg["overage_rate"], now, sub_id, new_plan,
                     )
                     if int(exec_status.split()[-1]):
-                        logger.info(f"subscription.updated: synced plan={new_plan} for sub {sub_id}")
+                        logger.info(f"subscription.updated: synced plan={new_plan}, reset packages_used=0 for sub {sub_id}")
                 if cancel_at_period_end:
                     await conn.execute(
                         "UPDATE users SET payment_status='canceling'"
@@ -368,12 +370,12 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
                     await conn.execute(
                         """UPDATE users SET subscription_tier=$1, stripe_subscription_id=$2,
                             stripe_customer_id=$3, packages_limit=$4, billing_cycle=$5,
-                            billing_period_start=$6, overage_rate=$7,
+                            billing_period_start=$6, overage_rate=$7, packages_used=0,
                             payment_status='ok', payment_failed_at=NULL WHERE id=$8""",
                         plan, sub_id, customer.id, cfg["packages"], cycle,
                         now, cfg["overage_rate"], user_id,
                     )
-                logger.info(f"verify-upgrade synced user {user_id} to plan={plan} sub={sub_id}")
+                logger.info(f"verify-upgrade synced user {user_id} to plan={plan} sub={sub_id}, reset packages_used=0")
                 return {"subscription_tier": plan, "upgraded": True, "reason": "stripe_verified"}
 
         if current_user.get("subscription_tier") not in ("free", None):
@@ -402,13 +404,15 @@ async def create_overage_checkout(
         raise HTTPException(500, "Stripe not configured")
 
     tier = current_user.get("subscription_tier", "free")
-    overage_rate_cents  = int(current_user.get("overage_rate") or (150 if tier == "essentials" else 125))
+    _default_rate = 175 if tier == "essentials" else (150 if tier == "professional" else 125)
+    overage_rate_cents  = int(current_user.get("overage_rate") or _default_rate)
     overage_rate_dollars = overage_rate_cents / 100
     qty        = max(1, min(req.quantity, 10000))
-    tier_label = "Essentials" if tier == "essentials" else "Professional"
+    tier_label = {"essentials": "Essentials", "professional": "Professional", "business": "Business"}.get(tier, tier.title())
+    unit_label = "score" if tier == "essentials" else "package"
     description = (
-        f"Acordly {tier_label} — {qty} additional ACORD packages "
-        f"@ ${overage_rate_dollars:.2f}/pkg"
+        f"Acordly {tier_label} — {qty} additional ACORD {unit_label}s "
+        f"@ ${overage_rate_dollars:.2f}/{unit_label}"
     )
 
     try:
@@ -421,7 +425,7 @@ async def create_overage_checkout(
                     "currency": "usd",
                     "unit_amount": overage_rate_cents,
                     "product_data": {
-                        "name": f"Acordly Extra Packages ({tier_label})",
+                        "name": f"Acordly Extra {unit_label.title()}s ({tier_label})",
                         "description": description,
                     },
                 },

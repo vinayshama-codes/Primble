@@ -11,7 +11,10 @@ _style.textContent = `
     font-weight: 600; padding: 4px 10px; border-radius: 6px;
     border: 1px solid #fca5a5;
   }
-  .upgrade-modal-wide { max-width: 860px !important; width: 92vw !important; }
+  .upgrade-modal-wide { max-width: 1160px !important; width: 96vw !important; }
+  .upgrade-plan-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; align-items: start; }
+  @media (max-width: 900px) { .upgrade-plan-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .upgrade-plan-grid { grid-template-columns: 1fr; } }
   @keyframes spin { to { transform: rotate(360deg); } }
   .payment-status-banner { padding:10px 16px; border-radius:8px; font-size:13px; font-weight:500; margin-bottom:10px; }
   .payment-status-banner a { color:inherit; font-weight:700; text-decoration:underline; }

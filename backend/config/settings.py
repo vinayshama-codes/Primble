@@ -52,21 +52,21 @@ STRIPE_CURRENCY    = "usd"
 STRIPE_YEARLY_AMOUNT = 30000
 
 PLANS = {
-    "lite": {
-        "monthly": {"amount": 4900,  "interval": "month", "packages": 0, "overage_rate": 0},
-        "annual":  {"amount": 39900, "interval": "year",  "packages": 0, "overage_rate": 0},
-    },
     "essentials": {
-        "monthly": {"amount": 12900,  "interval": "month", "packages": 100,  "overage_rate": 150},
-        "annual":  {"amount": 118800, "interval": "year",  "packages": 1200, "overage_rate": 150},
+        "monthly": {"amount": 5900,   "interval": "month", "packages": 50,   "overage_rate": 175},
+        "annual":  {"amount": 47400,  "interval": "year",  "packages": 600,  "overage_rate": 175},
     },
     "professional": {
+        "monthly": {"amount": 12900,  "interval": "month", "packages": 100,  "overage_rate": 150},
+        "annual":  {"amount": 95400,  "interval": "year",  "packages": 1200, "overage_rate": 150},
+    },
+    "business": {
         "monthly": {"amount": 44900,  "interval": "month", "packages": 400,  "overage_rate": 125},
-        "annual":  {"amount": 478800, "interval": "year",  "packages": 4800, "overage_rate": 125},
+        "annual":  {"amount": 399000, "interval": "year",  "packages": 4800, "overage_rate": 125},
     },
     "enterprise": {
-        "monthly": {"amount": 119900, "interval": "month", "packages": 0, "overage_rate": 0},
-        "annual":  {"amount": 119900, "interval": "month", "packages": 0, "overage_rate": 0},
+        "monthly": {"amount": 0, "interval": "month", "packages": 0, "overage_rate": 0},
+        "annual":  {"amount": 0, "interval": "year",  "packages": 0, "overage_rate": 0},
     },
 }
 

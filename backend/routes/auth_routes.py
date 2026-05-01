@@ -363,15 +363,19 @@ async def get_me(current_user: dict = Depends(get_current_user)):
                 async with get_pool().acquire() as conn:
                     if stripe_plan and stripe_plan in _PLANS and stripe_plan != sub:
                         cfg = _PLANS[stripe_plan].get(stripe_cycle) or _PLANS[stripe_plan]["monthly"]
+                        from datetime import datetime, timezone
+                        now = datetime.now(timezone.utc).isoformat()
                         await conn.execute(
                             """UPDATE users SET stripe_subscription_id=$1, subscription_tier=$2,
                                billing_cycle=$3, packages_limit=$4, overage_rate=$5,
-                               payment_status='ok', payment_failed_at=NULL WHERE id=$6""",
+                               packages_used=0, billing_period_start=$6,
+                               payment_status='ok', payment_failed_at=NULL WHERE id=$7""",
                             real_sub_id, stripe_plan, stripe_cycle,
-                            cfg["packages"], cfg["overage_rate"], current_user["id"],
+                            cfg["packages"], cfg["overage_rate"], now, current_user["id"],
                         )
                         sub        = stripe_plan
                         pkgs_limit = cfg["packages"]
+                        pkgs_used  = 0
                     else:
                         await conn.execute(
                             "UPDATE users SET stripe_subscription_id=$1 WHERE id=$2",

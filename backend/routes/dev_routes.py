@@ -27,26 +27,6 @@ def _require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
 
 
-# ASYNC-SAFE
-@router.post("/api/acord/confirm-license")
-async def confirm_acord_license(
-    request: Request,
-    current_user: dict = Depends(get_current_user),
-):
-    now = datetime.now(timezone.utc).isoformat()
-    async with get_pool().acquire() as conn:
-        await conn.execute(
-            "UPDATE users SET acord_license_confirmed=1, acord_license_confirmed_at=$1 WHERE id=$2",
-            now, current_user["id"],
-        )
-
-    await write_audit_log(
-        user={**current_user, "acord_license_confirmed": 1},
-        action="license_confirmed",
-        ip_address=request.client.host if request.client else None,
-    )
-    return {"success": True, "acord_license_confirmed": True}
-
 
 # ASYNC-SAFE
 @router.get("/api/acord/audit-log")

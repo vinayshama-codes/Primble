@@ -35,11 +35,11 @@ class ProductLine(Enum):
 # Add new tiers here and nowhere else.
 _TIER_MAP: dict[str, ProductLine] = {
     # Current tiers
-    "lite":         ProductLine.CLARITY,
     "free":         ProductLine.CLARITY,
-    # Assembly tiers (current + future names)
+    # Assembly tiers
     "essentials":   ProductLine.ASSEMBLY,
     "professional": ProductLine.ASSEMBLY,
+    "business":     ProductLine.ASSEMBLY,
     "enterprise":   ProductLine.ASSEMBLY,
     # Future Clarity product line
     "clarity":      ProductLine.CLARITY,

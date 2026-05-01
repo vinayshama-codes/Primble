@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../../config/constants";
 
 const TIER_LABELS = {
-  lite: "Lite",
   essentials: "Essentials",
   professional: "Professional",
+  business: "Business",
   enterprise: "Enterprise",
   free: "Free",
 };
@@ -21,8 +21,7 @@ export default function PlanModal({ user, token, onClose, onChangePlan, anchorRe
   const limit      = user?.packages_limit ?? 0;
   const tierLabel  = TIER_LABELS[tier] || tier;
   const isFree     = tier === "free";
-  const isLite     = tier === "lite";
-  const noPackages = isFree || isLite || limit === 0;
+  const noPackages = isFree || limit === 0;
   const pct        = !noPackages ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const barColor   = pct >= 90 ? "#ef4444" : pct >= 70 ? "#f59e0b" : "#10b981";
 
@@ -75,7 +74,7 @@ export default function PlanModal({ user, token, onClose, onChangePlan, anchorRe
       {!noPackages && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Packages Used</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>{tier === "essentials" ? "Scores Used" : "Packages Used"}</span>
             <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>{used} / {limit}</span>
           </div>
           <div style={{ background: "#f1f5f9", borderRadius: 999, height: 6, overflow: "hidden" }}>
@@ -87,11 +86,6 @@ export default function PlanModal({ user, token, onClose, onChangePlan, anchorRe
         </div>
       )}
 
-      {noPackages && !isFree && (
-        <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>
-          Lite plan includes SQS analysis, client questionnaire, and cover sheet.
-        </div>
-      )}
 
       <div style={{ height: 1, background: "#f1f5f9", margin: "4px 0 16px" }} />
 

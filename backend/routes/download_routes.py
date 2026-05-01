@@ -21,6 +21,26 @@ from services import s3_service
 router = APIRouter(tags=["downloads"])
 logger = logging.getLogger(__name__)
 
+
+# ASYNC-SAFE
+@router.post("/api/acord/confirm-license")
+async def confirm_acord_license(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    now = datetime.now(timezone.utc).isoformat()
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET acord_license_confirmed=1, acord_license_confirmed_at=$1 WHERE id=$2",
+            now, current_user["id"],
+        )
+    await write_audit_log(
+        user={**current_user, "acord_license_confirmed": 1},
+        action="license_confirmed",
+        ip_address=request.client.host if request.client else None,
+    )
+    return {"success": True, "acord_license_confirmed": True}
+
 _COVER_CACHE: dict = {}
 
 _DEDUP_WINDOW_SECONDS = 300
@@ -92,13 +112,11 @@ async def download_pdf(
 
     if fresh.get("payment_status") == "suspended":
         return JSONResponse({"success": False, "payment_locked": True, "message": "Account suspended."}, status_code=403)
-    if sub == "lite":
-        return JSONResponse({"success": False, "message": "ACORD form downloads are not included in the Lite plan."}, status_code=403)
     if sub == "free" and used >= 3:
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
 
     pkg_eval = None
-    if sub in ("essentials", "professional"):
+    if sub in ("essentials", "professional", "business"):
         pkg_eval = await evaluate_package_limit(fresh)
 
     proc_session = await get_processing_session(session_id)
@@ -137,7 +155,7 @@ async def download_pdf(
                 await conn.execute(
                     "UPDATE users SET downloads_used = downloads_used + 1 WHERE id = $1", fresh["id"]
                 )
-            elif sub in ("essentials", "professional") and pkg_eval:
+            elif sub in ("essentials", "professional", "business") and pkg_eval:
                 await conn.execute(
                     "UPDATE users SET packages_used = packages_used + 1 WHERE id = $1", fresh["id"]
                 )
@@ -191,13 +209,11 @@ async def download_all(
 
     if fresh.get("payment_status") == "suspended":
         return JSONResponse({"success": False, "payment_locked": True, "message": "Account suspended."}, status_code=403)
-    if sub == "lite":
-        return JSONResponse({"success": False, "message": "ACORD form downloads are not included in the Lite plan."}, status_code=403)
     if sub == "free" and used >= 3:
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
 
     pkg_eval = None
-    if sub in ("essentials", "professional"):
+    if sub in ("essentials", "professional", "business"):
         pkg_eval = await evaluate_package_limit(fresh)
 
     proc_session = await get_processing_session(session_id)
@@ -245,7 +261,7 @@ async def download_all(
                 await conn.execute(
                     "UPDATE users SET downloads_used = downloads_used + 1 WHERE id = $1", fresh["id"]
                 )
-            elif sub in ("essentials", "professional") and pkg_eval:
+            elif sub in ("essentials", "professional", "business") and pkg_eval:
                 await conn.execute(
                     "UPDATE users SET packages_used = packages_used + 1 WHERE id = $1", fresh["id"]
                 )
@@ -288,8 +304,8 @@ async def download_all(
 
 @router.get("/api/lite/analyze/{session_id}")
 async def lite_analyze(session_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user.get("subscription_tier") != "lite":
-        raise HTTPException(403, "This endpoint is for Lite plan users only.")
+    if current_user.get("subscription_tier") == "free":
+        raise HTTPException(403, "Upgrade required to access submission scoring.")
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
@@ -310,8 +326,8 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
 
 @router.get("/api/lite/cover-sheet/{session_id}")
 async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_current_user)):
-    if current_user.get("subscription_tier") != "lite":
-        raise HTTPException(403, "This endpoint is for Lite plan users only.")
+    if current_user.get("subscription_tier") == "free":
+        raise HTTPException(403, "Upgrade required to access cover sheet generation.")
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")

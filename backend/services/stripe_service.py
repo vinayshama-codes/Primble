@@ -66,10 +66,11 @@ async def evaluate_package_limit(fresh: dict) -> dict:
     sub                = fresh.get("subscription_tier", "free") or "free"
     pkgs_used          = int(fresh.get("packages_used", 0) or 0)
     pkgs_limit         = int(fresh.get("packages_limit", 0) or 0)
-    overage_rate_cents = int(fresh.get("overage_rate") or (150 if sub == "essentials" else 125))
+    _default_rate = 175 if sub == "essentials" else (150 if sub == "professional" else 125)
+    overage_rate_cents = int(fresh.get("overage_rate") or _default_rate)
 
     if pkgs_limit == 0:
-        pkgs_limit = 100 if sub == "essentials" else 400
+        pkgs_limit = 50 if sub == "essentials" else (100 if sub == "professional" else 400)
         async with get_pool().acquire() as conn:
             await conn.execute(
                 "UPDATE users SET packages_limit=$1 WHERE id=$2",

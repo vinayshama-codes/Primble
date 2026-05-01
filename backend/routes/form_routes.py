@@ -54,13 +54,22 @@ async def upload_declaration(
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT payment_status FROM users WHERE id = $1", current_user["id"]
+            "SELECT payment_status, subscription_tier, downloads_used FROM users WHERE id = $1",
+            current_user["id"],
         )
     if row:
-        ps = dict(row).get("payment_status", "ok") or "ok"
+        r = dict(row)
+        ps = r.get("payment_status", "ok") or "ok"
         if ps == "suspended":   raise HTTPException(403, "Account suspended due to non-payment.")
         if ps == "archived":    raise HTTPException(403, "Account archived. Contact support@acordly.ai.")
         if ps == "soft_locked": raise HTTPException(403, "Account disabled. Please update your billing.")
+        if r.get("subscription_tier", "free") == "free" and int(r.get("downloads_used", 0) or 0) >= 3:
+            from fastapi.responses import JSONResponse as _JSONResponse
+            return _JSONResponse(
+                {"success": False, "upgrade_required": True,
+                 "message": "You've used all 3 free submissions. Upgrade to continue."},
+                status_code=403,
+            )
 
     uploaded_paths: list = []
     all_paths: list      = []
@@ -269,8 +278,10 @@ async def upload_declaration(
 # ASYNC-SAFE
 @router.post("/api/select-forms-bulk")
 async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = Depends(get_current_user)):
-    if current_user.get("subscription_tier") == "lite":
-        raise HTTPException(403, "Form generation is not included in the Lite plan.")
+    if current_user.get("subscription_tier") == "free":
+        used = int(current_user.get("downloads_used", 0) or 0)
+        if used >= 3:
+            raise HTTPException(403, "Upgrade required to access form generation.")
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
@@ -391,9 +402,11 @@ async def select_form(req: FormSelectionRequest, current_user: dict = Depends(ge
 
 @router.post("/api/lite/generate-internal/{session_id}")
 async def lite_generate_internal(session_id: str, current_user: dict = Depends(get_current_user)):
-    """Silently generate forms for Lite users to power ARQ and SQS — forms are never exposed or downloadable."""
-    if current_user.get("subscription_tier") != "lite":
-        raise HTTPException(403, "This endpoint is for Lite plan users only.")
+    """Silently generate forms for scoring/ARQ — forms are never exposed or downloadable."""
+    if current_user.get("subscription_tier") == "free":
+        used = int(current_user.get("downloads_used", 0) or 0)
+        if used >= 3:
+            raise HTTPException(403, "Upgrade required.")
 
     session = await get_processing_session(session_id)
     if session.get("user_id") != str(current_user["id"]):
