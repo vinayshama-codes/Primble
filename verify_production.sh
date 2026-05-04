@@ -52,7 +52,32 @@ echo "--- INFRASTRUCTURE ---"
 grep -q "ThreadedConnectionPool\|SimpleConnectionPool" backend/config/database.py 2>/dev/null && check_pass "DB connection pooling exists" || check_fail "No connection pooling"
 grep -q "pg_try_advisory_lock" backend/services/scheduler_service.py 2>/dev/null && check_pass "Scheduler advisory lock exists" || check_fail "No scheduler lock — double cron fire on 2+ replicas"
 [ -f backend/services/s3_service.py ] && check_pass "S3 service file exists" || check_fail "S3 service MISSING"
-grep -q "AWS_S3_BUCKET" backend/.env 2>/dev/null && check_pass "S3 ACTIVE (env set)" || check_warn "S3 env vars not set — files on local disk"
+REQUIRED_VARS=(
+  "DATABASE_URL"
+  "STRIPE_SECRET_KEY"
+  "STRIPE_WEBHOOK_SECRET"
+  "SECRET_KEY"
+  "REDIS_URL"
+  "AWS_S3_BUCKET"
+  "AWS_ACCESS_KEY_ID"
+  "AWS_SECRET_ACCESS_KEY"
+  "GOOGLE_CLIENT_ID"
+  "GOOGLE_CLIENT_SECRET"
+  "ALLOWED_ORIGINS"
+)
+
+MISSING=()
+for var in "${REQUIRED_VARS[@]}"; do
+  val=$(grep "^${var}=" backend/.env 2>/dev/null | cut -d'=' -f2-)
+  if [ -z "$val" ]; then
+    MISSING+=("$var")
+    echo "ERROR: Missing required env var: ${var}"
+    exit 1
+  fi
+done
+
+echo "All required env vars present."
+check_pass "All required env vars set"
 [ -f backend/utils/rate_limiter.py ] && check_pass "Rate limiter module exists" || check_fail "Rate limiter MISSING"
 [ -f backend/utils/json_logging.py ] && check_pass "Structured logging module exists" || check_warn "Structured logging MISSING"
 grep -q "trace_id\|request_id" backend/main.py 2>/dev/null && check_pass "Trace ID middleware exists" || check_warn "Trace ID MISSING"

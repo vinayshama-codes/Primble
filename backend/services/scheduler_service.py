@@ -203,10 +203,11 @@ def start_scheduler():
             return
         logger.info("Scheduler: acquired advisory lock — this process owns the cron jobs")
     except Exception as ex:
-        logger.warning(
+        logger.error(
             f"Scheduler: advisory lock check failed ({ex}) — "
-            "starting scheduler anyway (verify only one worker is running)"
+            "scheduler will NOT start. Fix the database connection and restart."
         )
+        return
 
     scheduler.add_job(run_daily_payment_lifecycle, "cron", hour=9,  minute=0)
     scheduler.add_job(run_arq_auto_reminders,      "cron", hour=10, minute=0)

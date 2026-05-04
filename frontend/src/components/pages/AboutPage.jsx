@@ -24,11 +24,6 @@ export default function AboutPage({ onGetStarted, onNavigate }) {
         <p className="mkt-hero-p">
           Built for brokers, independent agents, and underwriting teams who spend hours re-keying data that already exists in documents they've already received.
         </p>
-        <div className="mkt-hero-ctas">
-          <button className="btn-primary" style={{ padding: "18px 48px", fontSize: 17 }} onClick={() => onNavigate("pricing")}>
-            View plans
-          </button>
-        </div>
       </section>
 
 

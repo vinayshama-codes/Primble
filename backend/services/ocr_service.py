@@ -7,13 +7,20 @@ from typing import List, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
 import pdfplumber
+from circuitbreaker import CircuitBreaker
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from config.settings import UPLOAD_DIR, SUPPORTED_IMG, OCR_PROVIDER
 from utils.text_cleaner import clean_text
 
 logger = logging.getLogger(__name__)
 
-# Shared executor for all blocking OCR/PDF operations
-_OCR_EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
+# Shared executor for all blocking OCR/PDF operations (module-level, not per-call)
+_OCR_MAX_WORKERS = (os.cpu_count() or 2) * 2
+_OCR_EXECUTOR = ThreadPoolExecutor(max_workers=_OCR_MAX_WORKERS)
+
+# Circuit breakers for external OCR providers
+_textract_cb = CircuitBreaker(failure_threshold=3, recovery_timeout=60, name="textract")
+_vision_cb   = CircuitBreaker(failure_threshold=3, recovery_timeout=60, name="google_vision")
 
 # ---------------------------------------------------------------------------
 # OCR confidence thresholds
@@ -110,58 +117,98 @@ def _ocr_easyocr(img_path: str) -> Tuple[str, List[str], int]:
         return "", [], 0
 
 
-def _ocr_google_vision(img_path: str) -> Tuple[str, List[str], int]:
-    try:
-        from google.cloud import vision as gvision
-        c = gvision.ImageAnnotatorClient()
-        with open(img_path, "rb") as f:
-            content = f.read()
-        image    = gvision.Image(content=content)
-        response = c.document_text_detection(image=image)
-        full_text = response.full_text_annotation.text.strip()
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(min=1, max=10),
+    retry=retry_if_exception_type(Exception),
+    reraise=True,
+)
+def _ocr_google_vision_attempt(img_path: str) -> Tuple[str, List[str], int]:
+    """Single attempt — called by _ocr_google_vision which owns the CB and error boundary."""
+    from google.cloud import vision as gvision
+    c = gvision.ImageAnnotatorClient()
+    with open(img_path, "rb") as f:
+        content = f.read()
+    image    = gvision.Image(content=content)
+    response = c.document_text_detection(image=image)
+    full_text = response.full_text_annotation.text.strip()
 
-        low_conf: List[str] = []
-        total = 0
-        for page in response.full_text_annotation.pages:
-            for block in page.blocks:
-                for para in block.paragraphs:
-                    for word in para.words:
-                        total    += 1
-                        word_text = "".join(s.text for s in word.symbols)
-                        penalty   = _numeric_correction_score(word_text)
-                        adj_conf  = max(0.0, word.confidence - penalty)
-                        if adj_conf < OCR_CONFIDENCE_THRESHOLD:
-                            low_conf.append(_normalize_token(word_text))
-        return full_text, low_conf, total
+    low_conf: List[str] = []
+    total = 0
+    for page in response.full_text_annotation.pages:
+        for block in page.blocks:
+            for para in block.paragraphs:
+                for word in para.words:
+                    total    += 1
+                    word_text = "".join(s.text for s in word.symbols)
+                    penalty   = _numeric_correction_score(word_text)
+                    adj_conf  = max(0.0, word.confidence - penalty)
+                    if adj_conf < OCR_CONFIDENCE_THRESHOLD:
+                        low_conf.append(_normalize_token(word_text))
+    return full_text, low_conf, total
+
+
+def _ocr_google_vision(img_path: str) -> Tuple[str, List[str], int]:
+    if _vision_cb.opened:
+        logger.warning(f"ocr_service: Google Vision circuit OPEN — skipping OCR for {img_path}")
+        return "", [], 0
+    try:
+        # call() records success/failure on the circuit breaker automatically
+        return _vision_cb.call(_ocr_google_vision_attempt, img_path)
     except Exception as ex:
         logger.error(f"Google Vision error on {img_path}: {ex}")
         return "", [], 0
 
 
-def _ocr_aws_textract(img_path: str) -> Tuple[str, List[str], int]:
-    try:
+_textract_client = None
+
+
+def _get_textract_client():
+    global _textract_client
+    if _textract_client is None:
         import boto3
-        c = boto3.client(
+        _textract_client = boto3.client(
             "textract",
             region_name=os.getenv("AWS_REGION", "us-east-1"),
             config=boto3.session.Config(connect_timeout=30, read_timeout=30),
         )
-        with open(img_path, "rb") as f:
-            content = f.read()
-        response  = c.detect_document_text(Document={"Bytes": content})
-        blocks    = response["Blocks"]
-        full_text = "\n".join(b["Text"] for b in blocks if b["BlockType"] == "LINE").strip()
+    return _textract_client
 
-        low_conf: List[str] = []
-        word_blocks = [b for b in blocks if b["BlockType"] == "WORD"]
-        total       = len(word_blocks)
-        for b in word_blocks:
-            word_text = b["Text"]
-            penalty   = _numeric_correction_score(word_text)
-            adj_conf  = max(0.0, b.get("Confidence", 100.0) / 100.0 - penalty)
-            if adj_conf < OCR_CONFIDENCE_THRESHOLD:
-                low_conf.append(_normalize_token(word_text))
-        return full_text, low_conf, total
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(min=1, max=10),
+    retry=retry_if_exception_type(Exception),
+    reraise=True,
+)
+def _ocr_aws_textract_attempt(img_path: str) -> Tuple[str, List[str], int]:
+    """Single attempt — called by _ocr_aws_textract which owns the CB and error boundary."""
+    c = _get_textract_client()
+    with open(img_path, "rb") as f:
+        content = f.read()
+    response  = c.detect_document_text(Document={"Bytes": content})
+    blocks    = response["Blocks"]
+    full_text = "\n".join(b["Text"] for b in blocks if b["BlockType"] == "LINE").strip()
+
+    low_conf: List[str] = []
+    word_blocks = [b for b in blocks if b["BlockType"] == "WORD"]
+    total       = len(word_blocks)
+    for b in word_blocks:
+        word_text = b["Text"]
+        penalty   = _numeric_correction_score(word_text)
+        adj_conf  = max(0.0, b.get("Confidence", 100.0) / 100.0 - penalty)
+        if adj_conf < OCR_CONFIDENCE_THRESHOLD:
+            low_conf.append(_normalize_token(word_text))
+    return full_text, low_conf, total
+
+
+def _ocr_aws_textract(img_path: str) -> Tuple[str, List[str], int]:
+    if _textract_cb.opened:
+        logger.warning(f"ocr_service: Textract circuit OPEN — skipping OCR for {img_path}")
+        return "", [], 0
+    try:
+        # call() records success/failure on the circuit breaker automatically
+        return _textract_cb.call(_ocr_aws_textract_attempt, img_path)
     except Exception as ex:
         logger.error(f"AWS Textract error on {img_path}: {ex}")
         return "", [], 0
@@ -188,6 +235,13 @@ async def ocr_image_file(img_path: str) -> Tuple[str, List[str]]:
     Runs blocking OCR in a thread pool executor.
     """
     loop = asyncio.get_running_loop()
+    # Queue-depth monitoring: warn when all worker threads are busy
+    active = len([t for t in _OCR_EXECUTOR._threads if t.is_alive()])
+    if active >= _OCR_MAX_WORKERS:
+        logger.warning(
+            "ocr_service: all %d OCR executor threads busy — request will queue",
+            _OCR_MAX_WORKERS,
+        )
     full_text, low_conf, total = await loop.run_in_executor(
         _OCR_EXECUTOR, _run_ocr_provider, img_path
     )

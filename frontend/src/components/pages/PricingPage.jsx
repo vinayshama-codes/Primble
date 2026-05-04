@@ -42,7 +42,8 @@ export default function PricingPage({ onGetStarted, token, user, onError }) {
     try {
       const res  = await fetch(`${API_BASE}/api/stripe/create-checkout`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan: planId, billing_cycle: annual ? "annual" : "monthly" }),
       });
       const data = await res.json();

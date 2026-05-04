@@ -19,7 +19,9 @@ backend/__pycache__/
 # User-uploaded and generated PDF files — never commit real document data
 backend/storage/
 backend/acordly.db
-
+backend/acordly_audit.db
+backend/acordly_local.db
+backend/*.db
 # Node
 node_modules/
 frontend/dist/

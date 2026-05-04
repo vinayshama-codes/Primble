@@ -88,7 +88,7 @@ export default function PDFJsViewer({
     pdfUrlRef.current = pdfUrl;
     setLoadError(false); setLoadingStage("loading");
     const url  = `${pdfUrl}?_r=${Date.now()}`;
-    const task = window.pdfjsLib.getDocument({ url, httpHeaders: { Authorization: `Bearer ${token}` } });
+    const task = window.pdfjsLib.getDocument({ url, withCredentials: true });
     task.promise
       .then(doc => { setPdfDoc(doc); setTotalPages(doc.numPages); })
       .catch(err => {
@@ -146,7 +146,7 @@ export default function PDFJsViewer({
 
   // ── fetchFields (used by handleRefresh) ────────────────────────────────
   const fetchFields = () =>
-    fetch(`${API_BASE}/api/fields/${sessionId}/${formId}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/fields/${sessionId}/${formId}`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data?.success) return;
@@ -183,7 +183,7 @@ export default function PDFJsViewer({
   useEffect(() => {
     if (!sessionId || !formId || !token) return;
     const controller = new AbortController();
-    fetch(`${API_BASE}/api/fields/${sessionId}/${formId}`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
+    fetch(`${API_BASE}/api/fields/${sessionId}/${formId}`, { credentials: "include", signal: controller.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data?.success) return;
@@ -349,11 +349,11 @@ export default function PDFJsViewer({
   const handleApplySignature = async () => {
     setShowSignPrompt(null); setApplyingSign(true); setApplySigStage("applying");
     try {
-      const res = await fetch(`${API_BASE}/api/apply-signature/${sessionId}/${formId}`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/apply-signature/${sessionId}/${formId}`, { method: "POST", credentials: "include" });
       if (res.ok) {
         setApplySigStage("rendering");
         const freshUrl = `${pdfUrlRef.current || pdfUrl}?_sig=${Date.now()}`;
-        const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, httpHeaders: { Authorization: `Bearer ${token}` } }).promise;
+        const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, withCredentials: true }).promise;
         const page     = await newDoc.getPage(pageNum);
         const avail    = containerRef.current ? containerRef.current.clientWidth - 48 : 720;
         const scale    = Math.min(2.2, Math.max(1.0, avail / page.getViewport({ scale: 1 }).width));
@@ -392,7 +392,8 @@ export default function PDFJsViewer({
           const clearedSigFields = Array.from(clearedSigFieldsRef.current);
           const res = await fetch(`${API_BASE}/api/update-pdf`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ session_id: sessionId, field_updates: { ...allValues, __form_id__: formId, __signed__: isSignedLocal ? "1" : "0", __cleared_sig_fields__: JSON.stringify(clearedSigFields) } }),
           });
           if (res.ok) {
@@ -412,7 +413,7 @@ export default function PDFJsViewer({
 
   const _loadPdfInBackground = (currentValues) => {
     if (!pdfjsReady) return;
-    window.pdfjsLib.getDocument({ url: `${pdfUrlRef.current || pdfUrl}?_r=${Date.now()}`, httpHeaders: { Authorization: `Bearer ${token}` } }).promise
+    window.pdfjsLib.getDocument({ url: `${pdfUrlRef.current || pdfUrl}?_r=${Date.now()}`, withCredentials: true }).promise
       .then(async newDoc => {
         try {
           const page    = await newDoc.getPage(pageNum);

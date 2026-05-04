@@ -1,6 +1,8 @@
+import asyncio
 import logging
 import os
 import uuid
+import zipfile
 from fastapi import Request
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, File, Response
@@ -9,6 +11,7 @@ from typing import List
 
 from config.database import get_pool
 from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING
+from utils.crypto import decrypt_field
 from utils.json_logging import get_trace_id
 from services.job_queue import get_job_queue, JOB_TYPE_EXTRACTION, JOB_TYPE_FORM_GENERATION, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED
 from models.schemas import BulkFormSelectionRequest, FormSelectionRequest, PDFUpdateRequest
@@ -16,6 +19,7 @@ from repositories.session_repository import (
     get_processing_session, new_processing_session, upd_processing_session,
 )
 from services.auth_service import get_current_user
+from services.extraction_pipeline import run_extraction_pipeline
 from services.extraction_service import extract_facts_long, identify_doc_type, merge_facts, select_primary_truth
 from services.form_service import (
     filter_available_forms, load_all_forms, match_forms, process_single_form,
@@ -73,7 +77,7 @@ async def upload_declaration(
 
     uploaded_paths: list = []
     all_paths: list      = []
-    _sem_acquired: bool  = False
+    _sem_token           = False
     _job_id              = None
     _async_mode          = False
     try:
@@ -95,24 +99,44 @@ async def upload_declaration(
             scan_file_bytes(content, f.filename or "upload")
             safe_name = f"{uuid.uuid4().hex}_{os.path.basename(f.filename or 'upload')}"
             path = os.path.join(UPLOAD_DIR, safe_name)
-            with open(path, "wb") as fp:
-                fp.write(content)
+            await asyncio.get_event_loop().run_in_executor(
+                None, lambda p=path, c=content: open(p, "wb").write(c)
+            )
             uploaded_paths.append(path)
             if ext == ".zip":
-                all_paths.extend(extract_zip(path))
+                try:
+                    with zipfile.ZipFile(path, "r") as zf:
+                        for info in zf.infolist():
+                            inner_ext = os.path.splitext(info.filename.lower())[1]
+                            if inner_ext not in ({".pdf"} | set(SUPPORTED_IMG)):
+                                continue
+                            inner_data = zf.read(info.filename)
+                            inner_mime_ok, inner_mime_err = validate_file_mime(inner_data, inner_ext)
+                            if not inner_mime_ok:
+                                logger.warning(f"ZIP inner file failed MIME validation, skipping: {info.filename} — {inner_mime_err}")
+                                continue
+                            scan_file_bytes(inner_data, info.filename)
+                            safe_inner = f"{uuid.uuid4().hex}_{os.path.basename(info.filename)}"
+                            inner_path = os.path.join(UPLOAD_DIR, safe_inner)
+                            await asyncio.get_event_loop().run_in_executor(
+                                None, lambda p=inner_path, d=inner_data: open(p, "wb").write(d)
+                            )
+                            all_paths.append(inner_path)
+                except zipfile.BadZipFile:
+                    raise HTTPException(400, f"File '{f.filename}' is not a valid ZIP archive.")
             elif ext == ".pdf" or ext in SUPPORTED_IMG:
                 all_paths.append(path)
 
         if not all_paths:
             raise HTTPException(400, "No supported files found")
 
-        if not await try_acquire_heavy():
+        _sem_token = await try_acquire_heavy()
+        if not _sem_token:
             raise HTTPException(
                 429,
                 "Server busy — too many concurrent requests. Please retry in 30 seconds.",
                 headers={"Retry-After": "30"},
             )
-        _sem_acquired = True
 
         if ENABLE_ASYNC_PROCESSING:
             from services.s3_service import upload_source_file, is_configured as _s3_ok
@@ -126,9 +150,12 @@ async def upload_declaration(
             for path in all_paths:
                 fname = os.path.basename(path)
                 try:
-                    with open(path, "rb") as fh:
-                        data = fh.read()
-                    key = upload_source_file(data, fname, _upload_id)
+                    data = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda p=path: open(p, "rb").read()
+                    )
+                    key = await asyncio.get_event_loop().run_in_executor(
+                        None, upload_source_file, data, fname, _upload_id
+                    )
                     if key is None:
                         raise HTTPException(503, "Failed to upload files to S3 for async processing.")
                     s3_keys.append(key)
@@ -138,6 +165,9 @@ async def upload_declaration(
                     raise HTTPException(503, "Failed to stage files for async processing.")
 
             _queue       = get_job_queue()
+            _in_flight = await _queue.count_user_active_jobs(current_user["id"])
+            if _in_flight >= 5:
+                raise HTTPException(429, "Too many jobs in progress. Please wait.")
             _job_payload = {
                 "s3_keys": s3_keys,
                 "user_id": str(current_user["id"]),
@@ -149,7 +179,10 @@ async def upload_declaration(
                 content={"job_id": _job_id, "session_id": None, "poll_url": f"/api/jobs/{_job_id}/status"},
             )
 
-        _queue       = get_job_queue()
+        _queue = get_job_queue()
+        _in_flight = await _queue.count_user_active_jobs(current_user["id"])
+        if _in_flight >= 5:
+            raise HTTPException(429, "Too many jobs in progress. Please wait.")
         _job_payload = {
             "file_paths": all_paths,
             "user_id":    str(current_user["id"]),
@@ -157,29 +190,26 @@ async def upload_declaration(
         _job_id = await _queue.enqueue(JOB_TYPE_EXTRACTION, _job_payload, str(current_user["id"]))
         await _queue.update_status(_job_id, STATUS_PROCESSING, progress_message="Extracting text from documents...")
 
-        processed_docs = []
-        all_low_conf:  list = []
-        for path in all_paths:
-            text, low_conf = await extract_text(path)
-            if len(text) < 30:
-                continue
-            all_low_conf  += low_conf
-            doc_type       = identify_doc_type(text)
-            extracted      = await extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
-            processed_docs.append({
-                "filename": os.path.basename(path), "path": path, "doc_type": doc_type,
-                "text": text, "facts": extracted.get("facts", {}), "flags": extracted.get("flags", {}),
-                "low_confidence_tokens": low_conf,
-                "truncation_warning": extracted.get("truncation_warning"),
-            })
-
-        if not processed_docs:
+        try:
+            pipeline_result = await run_extraction_pipeline(all_paths, current_user["id"])
+        except ValueError:
             raise HTTPException(400, "No readable text found in uploaded files")
 
-        primary              = select_primary_truth(processed_docs)
-        merged_facts, mflags = merge_facts(processed_docs, primary)
-        mflags["_doc_type"]  = primary.get("doc_type", "unknown")
-        tier1_ok, tier1_missing = check_tier1(merged_facts, mflags)
+        processed_docs     = pipeline_result["processed_docs"]
+        primary            = pipeline_result["primary"]
+        merged_facts       = pipeline_result["merged_facts"]
+        mflags             = pipeline_result["mflags"]
+        tier1_ok           = pipeline_result["tier1_ok"]
+        tier1_missing      = pipeline_result["tier1_missing"]
+        tier2_score        = pipeline_result["tier2_score"]
+        tier2_missing      = pipeline_result["tier2_missing"]
+        hard_stops         = pipeline_result["hard_stops"]
+        soft_stops         = pipeline_result["soft_stops"]
+        doc_conflicts      = pipeline_result["doc_conflicts"]
+        recommendations    = pipeline_result["recommendations"]
+        extra_forms_scored = pipeline_result["extra_forms_scored"]
+        unique_low_conf    = pipeline_result["unique_low_conf"]
+        sid                = pipeline_result["session_id"]
 
         if not tier1_ok:
             if _job_id:
@@ -187,43 +217,6 @@ async def upload_declaration(
             return JSONResponse({"success": False, "gate": "tier1_fail",
                                   "message": "Submission missing required fields",
                                   "missing_fields": tier1_missing, "flags": mflags})
-
-        tier2_score, tier2_missing = check_tier2(merged_facts)
-        hard_stops, soft_stops     = evaluate_stops(merged_facts, mflags)
-
-        consistency_issues = check_doc_consistency(processed_docs)
-        doc_conflicts = []
-        if consistency_issues:
-            logger.warning(f"Doc consistency issues: {consistency_issues}")
-            for issue in consistency_issues:
-                if issue.startswith("[hard_stop]"):
-                    rest = issue[len("[hard_stop]"):].strip()
-                    code_part, _, msg = rest.partition(" ")
-                    code = code_part.split("=", 1)[1] if "=" in code_part else "conflict"
-                    doc_conflicts.append({"code": code, "message": msg, "hard_stop": True})
-                    hard_stops = list(hard_stops) + [msg]
-                else:
-                    hard_stops = list(hard_stops) + [issue]
-
-        all_forms       = load_all_forms()
-        available_forms = filter_available_forms(all_forms)
-        combined_ocr_text = " ".join(d.get("text", "") for d in processed_docs)
-        recommendations   = match_forms(merged_facts, mflags, available_forms, text=combined_ocr_text)
-
-        triggered_ids      = {r["form_id"] for r in recommendations}
-        extra_forms_scored = score_extra_forms(merged_facts, triggered_ids, available_forms)
-
-        unique_low_conf = list(dict.fromkeys(all_low_conf))
-
-        sid = await new_processing_session({
-            "user_id": current_user["id"], "docs": processed_docs,
-            "primary_doc": primary["filename"], "facts": merged_facts, "flags": mflags,
-            "tier2_score": tier2_score, "tier2_missing": tier2_missing,
-            "hard_stops": hard_stops, "soft_stops": soft_stops,
-            "all_forms": available_forms, "recommendations": recommendations,
-            "selected_form_ids": [], "generated_forms": {},
-            "low_confidence_tokens": unique_low_conf,
-        })
 
         if _job_id:
             await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": sid})
@@ -259,8 +252,8 @@ async def upload_declaration(
                 pass
         raise HTTPException(500, "Processing failed. Please try again.")
     finally:
-        if _sem_acquired:
-            release_heavy()
+        if _sem_token:
+            release_heavy(_sem_token)
         if not _async_mode:
             for _p in set(uploaded_paths) | set(all_paths):
                 try:
@@ -296,7 +289,12 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
 
-    _queue      = get_job_queue()
+    check_upload_rate_limit(str(current_user["id"]))
+
+    _queue = get_job_queue()
+    _in_flight = await _queue.count_user_active_jobs(current_user["id"])
+    if _in_flight >= 5:
+        raise HTTPException(429, "Too many jobs in progress. Please wait.")
     _fg_payload = {
         "session_id": req.session_id,
         "form_ids":   req.form_ids,
@@ -311,88 +309,105 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             content={"job_id": _job_id, "session_id": req.session_id, "poll_url": f"/api/jobs/{_job_id}/status"},
         )
 
+    _sem_token = await try_acquire_heavy()
+    if not _sem_token:
+        raise HTTPException(
+            429,
+            "Server busy — too many concurrent requests. Please retry in 30 seconds.",
+            headers={"Retry-After": "30"},
+        )
     results     = {}
     combined_ids = req.form_ids
 
-    for form_id in req.form_ids:
-        form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
-        if not form_meta:
-            continue
-        tpl = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
-        if not os.path.exists(tpl):
-            continue
-        try:
-            result = process_single_form(form_meta, session)
-            results[form_id] = result
-        except Exception as ex:
-            logger.error(f"Error processing {form_id}: {ex}")
-
-    if not results:
-        await _queue.update_status(_job_id, STATUS_FAILED, error="No forms could be generated")
-        raise HTTPException(400, "No forms could be generated")
-
-    cross_issues_raw     = cross_validate(session["facts"], session["flags"], combined_ids)
-    seen_msgs            = set()
-    cross_issues_deduped = []
-    for issue in cross_issues_raw:
-        msg = issue.get("message", "")
-        if msg not in seen_msgs:
-            seen_msgs.add(msg)
-            cross_issues_deduped.append(issue)
-
-    await upd_processing_session(req.session_id, {
-        "selected_form_ids": combined_ids, "generated_forms": results,
-        "active_form_id": combined_ids[0] if combined_ids else None,
-        "cross_issues_last": cross_issues_deduped,
-    })
-
-    summary = {}
-    for fid, r in results.items():
-        summary[fid] = {"form_id": r["form_id"], "form_name": r["form_name"], "form": r["form"],
-                         "sqs": r["sqs"], "fields_mapped": sum(1 for v in r["mapped"].values() if v is not None),
-                         "schema_size": len(r["schema"])}
-
-    sqs_results_list = [r["sqs"] for r in results.values() if r.get("sqs")]
     try:
-        package_sqs = calculate_package_sqs(
-            facts=session["facts"],
-            flags=session["flags"],
-            form_results=sqs_results_list,
-            cross_issues=cross_issues_deduped,
-            hard_stops=session.get("hard_stops", []),
-            soft_stops=session.get("soft_stops", []),
-            session_data=session,
-            session_id=req.session_id,
-            user_id=str(current_user["id"]),
-            calculation_stage="form_generated",
-        )
-        logger.info(f"package_sqs calculated: score={package_sqs.get('package_sqs_score')}, tier={package_sqs.get('tier')}")
-    except Exception as _pkg_ex:
-        logger.error(f"calculate_package_sqs failed: {_pkg_ex}", exc_info=True)
-        package_sqs = None
-
-    for fid, r in results.items():
-        sqs_data = r.get("sqs")
-        if sqs_data and sqs_data.get("recommendations"):
+        loop = asyncio.get_event_loop()
+        for form_id in req.form_ids:
+            form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
+            if not form_meta:
+                continue
+            tpl = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
+            if not os.path.exists(tpl):
+                continue
             try:
-                await log_recommendations_presented(
-                    session_id=req.session_id,
-                    user_id=str(current_user["id"]),
-                    sqs_result=sqs_data,
-                    model_version=SQS_MODEL_VERSION,
-                )
-            except Exception as _audit_ex:
-                logger.warning(f"Audit log failed for {fid}: {_audit_ex}")
+                result = await loop.run_in_executor(None, process_single_form, form_meta, session)
+                results[form_id] = result
+            except Exception as ex:
+                logger.error(f"Error processing {form_id}: {ex}")
 
-    await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": req.session_id, "form_ids": combined_ids})
+        if not results:
+            await _queue.update_status(_job_id, STATUS_FAILED, error="No forms could be generated")
+            raise HTTPException(400, "No forms could be generated")
 
-    return JSONResponse({
-        "success": True,
-        "generated": summary,
-        "form_ids": combined_ids,
-        "cross_issues": cross_issues_deduped,
-        "package_sqs": package_sqs,
-    })
+        cross_issues_raw     = cross_validate(session["facts"], session["flags"], combined_ids)
+        seen_msgs            = set()
+        cross_issues_deduped = []
+        for issue in cross_issues_raw:
+            msg = issue.get("message", "")
+            if msg not in seen_msgs:
+                seen_msgs.add(msg)
+                cross_issues_deduped.append(issue)
+
+        await upd_processing_session(req.session_id, {
+            "selected_form_ids": combined_ids, "generated_forms": results,
+            "active_form_id": combined_ids[0] if combined_ids else None,
+            "cross_issues_last": cross_issues_deduped,
+        })
+
+        summary = {}
+        for fid, r in results.items():
+            summary[fid] = {"form_id": r["form_id"], "form_name": r["form_name"], "form": r["form"],
+                             "sqs": r["sqs"], "fields_mapped": sum(1 for v in r["mapped"].values() if v is not None),
+                             "schema_size": len(r["schema"])}
+
+        sqs_results_list = [r["sqs"] for r in results.values() if r.get("sqs")]
+        try:
+            package_sqs = calculate_package_sqs(
+                facts=session["facts"],
+                flags=session["flags"],
+                form_results=sqs_results_list,
+                cross_issues=cross_issues_deduped,
+                hard_stops=session.get("hard_stops", []),
+                soft_stops=session.get("soft_stops", []),
+                session_data=session,
+                session_id=req.session_id,
+                user_id=str(current_user["id"]),
+                calculation_stage="form_generated",
+            )
+            logger.info(f"package_sqs calculated: score={package_sqs.get('package_sqs_score')}, tier={package_sqs.get('tier')}")
+        except Exception as _pkg_ex:
+            logger.error(f"calculate_package_sqs failed: {_pkg_ex}", exc_info=True)
+            package_sqs = None
+
+        for fid, r in results.items():
+            sqs_data = r.get("sqs")
+            if sqs_data and sqs_data.get("recommendations"):
+                try:
+                    await log_recommendations_presented(
+                        session_id=req.session_id,
+                        user_id=str(current_user["id"]),
+                        sqs_result=sqs_data,
+                        model_version=SQS_MODEL_VERSION,
+                    )
+                except Exception as _audit_ex:
+                    logger.warning(f"Audit log failed for {fid}: {_audit_ex}")
+
+        await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": req.session_id, "form_ids": combined_ids})
+
+        return JSONResponse({
+            "success": True,
+            "generated": summary,
+            "form_ids": combined_ids,
+            "cross_issues": cross_issues_deduped,
+            "package_sqs": package_sqs,
+        })
+    except HTTPException:
+        raise
+    except Exception as ex:
+        logger.error(f"select_forms_bulk error [trace={get_trace_id()}]: {ex}", exc_info=True)
+        raise HTTPException(500, "Form generation failed. Please try again.")
+    finally:
+        if _sem_token:
+            release_heavy(_sem_token)
 
 
 @router.post("/api/select-form")
@@ -418,6 +433,7 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         raise HTTPException(400, "No recommended forms found in session.")
 
     results = {}
+    loop = asyncio.get_event_loop()
     for form_id in form_ids:
         form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
         if not form_meta:
@@ -426,7 +442,7 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         if not os.path.exists(tpl):
             continue
         try:
-            result = process_single_form(form_meta, session)
+            result = await loop.run_in_executor(None, process_single_form, form_meta, session)
             results[form_id] = result
         except Exception as ex:
             logger.error(f"Lite internal generation error for {form_id}: {ex}")
@@ -476,8 +492,9 @@ async def get_form_fields(
     tpl = os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
     if not os.path.exists(tpl):
         raise HTTPException(404, "Template not found")
-    fields      = extract_form_fields_with_positions(tpl)
-    page_dims   = get_page_dims_pikepdf(tpl)
+    _loop   = asyncio.get_event_loop()
+    fields    = await _loop.run_in_executor(None, extract_form_fields_with_positions, tpl)
+    page_dims = await _loop.run_in_executor(None, get_page_dims_pikepdf, tpl)
     field_state = r.get("field_state") or r.get("mapped", {})
     confidence  = r.get("confidence", {})
     client_filled = set(r.get("client_filled_fields", []))
@@ -530,7 +547,9 @@ async def get_pdf(
     generated = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form {form_id} not generated")
-    pdf_bytes = regenerate_pdf_for_form(proc_session, form_id)
+    pdf_bytes = await asyncio.get_event_loop().run_in_executor(
+        None, regenerate_pdf_for_form, proc_session, form_id
+    )
     return Response(
         content=pdf_bytes, media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename={form_id}_preview.pdf",
@@ -559,110 +578,130 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
     if not form_id or form_id not in generated:
         raise HTTPException(400, "No active form to update")
 
-    r             = generated[form_id]
-    current_state = r.get("field_state", dict(r.get("mapped", {})))
-    prev_state    = dict(current_state)
-    current_state.update(req.field_updates)
-    confidence = r.get("confidence", {})
-    for k, v in req.field_updates.items():
-        val = str(v).strip() if v is not None else ""
-        if val and val not in ("null", "None"):
-            confidence[k] = "filled"
-        elif confidence.get(k) == "filled":
-            confidence[k] = "low_confidence"
+    _sem_token = await try_acquire_heavy()
+    if not _sem_token:
+        raise HTTPException(
+            429,
+            "Server busy — too many concurrent requests. Please retry in 30 seconds.",
+            headers={"Retry-After": "30"},
+        )
 
-    from services.pdf_service import _ACORD_FIELD_RULES
-    updated_facts = dict(session["facts"])
-    for pdf_field, new_val in req.field_updates.items():
-        val_str = str(new_val).strip() if new_val is not None else ""
-        for pattern, fact_key in _ACORD_FIELD_RULES:
-            if fact_key and not fact_key.startswith("_") and pattern in pdf_field:
-                updated_facts[fact_key] = val_str if val_str not in ("", "null", "None") else None
-                break
+    try:
+        r             = generated[form_id]
+        current_state = r.get("field_state", dict(r.get("mapped", {})))
+        prev_state    = dict(current_state)
+        current_state.update(req.field_updates)
+        confidence = r.get("confidence", {})
+        for k, v in req.field_updates.items():
+            val = str(v).strip() if v is not None else ""
+            if val and val not in ("null", "None"):
+                confidence[k] = "filled"
+            elif confidence.get(k) == "filled":
+                confidence[k] = "low_confidence"
 
-    sqs = calculate_sqs(
-        facts=updated_facts, flags=session["flags"],
-        mapped_data=current_state, form_schema=r.get("schema", {}),
-        selected_form_ids=session.get("selected_form_ids", []),
-        hard_stops=session.get("hard_stops", []), soft_stops=session.get("soft_stops", []),
-        tier2_score=session.get("tier2_score", 50),
-    )
+        from services.pdf_service import _ACORD_FIELD_RULES
+        updated_facts = dict(session["facts"])
+        for pdf_field, new_val in req.field_updates.items():
+            val_str = str(new_val).strip() if new_val is not None else ""
+            for pattern, fact_key in _ACORD_FIELD_RULES:
+                if fact_key and not fact_key.startswith("_") and pattern in pdf_field:
+                    updated_facts[fact_key] = val_str if val_str not in ("", "null", "None") else None
+                    break
 
-    was_signed      = bool(r.get("signature_applied")) and len(cleared_sig_fields) == 0
-    new_pdf_bytes   = None
-    new_sig_applied = False
+        sqs = calculate_sqs(
+            facts=updated_facts, flags=session["flags"],
+            mapped_data=current_state, form_schema=r.get("schema", {}),
+            selected_form_ids=session.get("selected_form_ids", []),
+            hard_stops=session.get("hard_stops", []), soft_stops=session.get("soft_stops", []),
+            tier2_score=session.get("tier2_score", 50),
+        )
 
-    tpl = os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
-    if os.path.exists(tpl):
-        new_pdf_bytes = fill_pdf(tpl, current_state, confidence)
-        if was_signed:
-            async with get_pool().acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT signature_data FROM users WHERE id = $1", current_user["id"]
+        was_signed      = bool(r.get("signature_applied")) and len(cleared_sig_fields) == 0
+        new_pdf_bytes   = None
+        new_sig_applied = False
+
+        tpl = os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
+        _pdf_loop = asyncio.get_event_loop()
+        if os.path.exists(tpl):
+            new_pdf_bytes = await _pdf_loop.run_in_executor(None, fill_pdf, tpl, current_state, confidence)
+            if was_signed:
+                async with get_pool().acquire() as conn:
+                    row = await conn.fetchrow(
+                        "SELECT signature_data FROM users WHERE id = $1", current_user["id"]
+                    )
+                sig = decrypt_field(dict(row).get("signature_data")) if row else None
+                if sig:
+                    from services.pdf_service import inject_signature_into_pdf
+                    field_data_for_sig = dict(current_state)
+                    for fn in list(field_data_for_sig.keys()):
+                        if _is_signature_field(fn) and fn not in cleared_sig_fields:
+                            field_data_for_sig[fn] = ""
+                            confidence[fn] = "filled"
+                    try:
+                        new_pdf_bytes   = await _pdf_loop.run_in_executor(
+                            None, inject_signature_into_pdf, tpl, field_data_for_sig, confidence, sig
+                        )
+                        new_sig_applied = True
+                    except Exception as ex:
+                        logger.error(f"update_pdf: signature re-injection failed: {ex}")
+
+        cache_hash = hashlib.md5(new_pdf_bytes).hexdigest() if new_pdf_bytes else None
+
+        for field_name, new_val in req.field_updates.items():
+            prev_val = prev_state.get(field_name)
+            new_str  = str(new_val).strip() if new_val is not None else ""
+            prev_str = str(prev_val).strip() if prev_val is not None else ""
+            if new_str == prev_str:
+                continue
+            try:
+                await log_field_change(
+                    session_id=req.session_id,
+                    user_id=str(current_user["id"]),
+                    form_id=form_id,
+                    field_name=field_name,
+                    fact_key=field_name,
+                    source="producer",
+                    previous_value=prev_str or None,
+                    new_value=new_str,
+                    confidence="filled" if new_str else None,
+                    model_version=SQS_MODEL_VERSION,
                 )
-            sig = dict(row).get("signature_data") if row else None
-            if sig:
-                from services.pdf_service import inject_signature_into_pdf
-                field_data_for_sig = dict(current_state)
-                for fn in list(field_data_for_sig.keys()):
-                    if _is_signature_field(fn) and fn not in cleared_sig_fields:
-                        field_data_for_sig[fn] = ""
-                        confidence[fn] = "filled"
-                try:
-                    new_pdf_bytes   = inject_signature_into_pdf(tpl, field_data_for_sig, confidence, sig)
-                    new_sig_applied = True
-                except Exception as ex:
-                    logger.error(f"update_pdf: signature re-injection failed: {ex}")
+            except Exception as _fe:
+                logger.warning(f"field_source_audit log failed for {field_name}: {_fe}")
 
-    cache_hash = hashlib.md5(new_pdf_bytes).hexdigest() if new_pdf_bytes else None
+        old_rec_ids = {
+            r2.get("rec_id") for r2 in (r.get("sqs") or {}).get("recommendations", [])
+            if isinstance(r2, dict) and r2.get("rec_id")
+        }
+        new_rec_ids = {
+            r2.get("rec_id") for r2 in sqs.get("recommendations", [])
+            if isinstance(r2, dict) and r2.get("rec_id")
+        }
+        for resolved_rec_id in old_rec_ids - new_rec_ids:
+            try:
+                await mark_recommendation_resolved(
+                    session_id=req.session_id,
+                    rec_id=resolved_rec_id,
+                    sqs_score_at_action=sqs.get("sqs_score") or 0,
+                    model_version=SQS_MODEL_VERSION,
+                )
+            except Exception as _re:
+                logger.warning(f"mark_recommendation_resolved failed for {resolved_rec_id}: {_re}")
 
-    for field_name, new_val in req.field_updates.items():
-        prev_val = prev_state.get(field_name)
-        new_str  = str(new_val).strip() if new_val is not None else ""
-        prev_str = str(prev_val).strip() if prev_val is not None else ""
-        if new_str == prev_str:
-            continue
-        try:
-            await log_field_change(
-                session_id=req.session_id,
-                user_id=str(current_user["id"]),
-                form_id=form_id,
-                field_name=field_name,
-                fact_key=field_name,
-                source="producer",
-                previous_value=prev_str or None,
-                new_value=new_str,
-                confidence="filled" if new_str else None,
-                model_version=SQS_MODEL_VERSION,
-            )
-        except Exception as _fe:
-            logger.warning(f"field_source_audit log failed for {field_name}: {_fe}")
-
-    old_rec_ids = {
-        r2.get("rec_id") for r2 in (r.get("sqs") or {}).get("recommendations", [])
-        if isinstance(r2, dict) and r2.get("rec_id")
-    }
-    new_rec_ids = {
-        r2.get("rec_id") for r2 in sqs.get("recommendations", [])
-        if isinstance(r2, dict) and r2.get("rec_id")
-    }
-    for resolved_rec_id in old_rec_ids - new_rec_ids:
-        try:
-            await mark_recommendation_resolved(
-                session_id=req.session_id,
-                rec_id=resolved_rec_id,
-                sqs_score_at_action=sqs.get("sqs_score") or 0,
-                model_version=SQS_MODEL_VERSION,
-            )
-        except Exception as _re:
-            logger.warning(f"mark_recommendation_resolved failed for {resolved_rec_id}: {_re}")
-
-    generated[form_id].update({
-        "field_state": current_state, "confidence": confidence, "sqs": sqs,
-        "_pdf_cache_hash": cache_hash, "pdf_bytes": new_pdf_bytes, "signature_applied": new_sig_applied,
-    })
-    await upd_processing_session(req.session_id, {"generated_forms": generated, "facts": updated_facts})
-    return JSONResponse({"success": True, "sqs": sqs})
+        generated[form_id].update({
+            "field_state": current_state, "confidence": confidence, "sqs": sqs,
+            "_pdf_cache_hash": cache_hash, "pdf_bytes": new_pdf_bytes, "signature_applied": new_sig_applied,
+        })
+        await upd_processing_session(req.session_id, {"generated_forms": generated, "facts": updated_facts})
+        return JSONResponse({"success": True, "sqs": sqs})
+    except HTTPException:
+        raise
+    except Exception as ex:
+        logger.error(f"update_pdf error [trace={get_trace_id()}]: {ex}", exc_info=True)
+        raise HTTPException(500, "PDF update failed. Please try again.")
+    finally:
+        if _sem_token:
+            release_heavy(_sem_token)
 
 
 @router.get("/api/session/{session_id}")

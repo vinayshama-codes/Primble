@@ -4,6 +4,7 @@ import os
 
 import httpx
 import stripe
+from circuitbreaker import CircuitBreaker
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 DATABASE_URL          = os.getenv("DATABASE_URL", "")
+SECRET_KEY            = os.getenv("SECRET_KEY", "")
 GOOGLE_CLIENT_ID      = os.getenv("GOOGLE_CLIENT_ID", "")
 FRONTEND_URL          = os.getenv("FRONTEND_URL", "http://localhost:5173")
 REDIS_URL             = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -18,6 +20,7 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_BILLING_PORTAL_URL = os.getenv("STRIPE_BILLING_PORTAL_URL", "https://billing.stripe.com/p/login/")
 OCR_PROVIDER              = os.getenv("OCR_PROVIDER", "easyocr").lower()
 ENABLE_ASYNC_PROCESSING   = os.getenv("ENABLE_ASYNC_PROCESSING", "false").lower() == "true"
+SESSION_TTL_H             = int(os.getenv("SESSION_TTL_H", "8"))  # session lifetime in hours
 
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "")
 _env         = os.getenv("ENVIRONMENT", "development").lower()
@@ -82,7 +85,31 @@ SUPPORTED_IMG = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(FORMS_SCHEMAS_DIR, exist_ok=True)
 
+_REQUIRED_PRODUCTION_SECRETS = {
+    "DATABASE_URL":           DATABASE_URL,
+    "SECRET_KEY":             SECRET_KEY,
+    "STRIPE_SECRET_KEY":      os.getenv("STRIPE_SECRET_KEY", ""),
+    "STRIPE_WEBHOOK_SECRET":  STRIPE_WEBHOOK_SECRET,
+    "GOOGLE_CLIENT_ID":       GOOGLE_CLIENT_ID,
+}
+
+
+def validate_production_config() -> None:
+    """Raise RuntimeError listing every missing required secret. Call at app startup."""
+    if _env != "production":
+        return
+    missing = [k for k, v in _REQUIRED_PRODUCTION_SECRETS.items() if not v]
+    if missing:
+        raise RuntimeError(
+            "Missing required environment variables for production: "
+            + ", ".join(missing)
+        )
+
+
 _LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
+
+# Circuit breakers for external LLM/AI services
+_groq_cb = CircuitBreaker(failure_threshold=3, recovery_timeout=60, name="groq")
 
 
 # ASYNC-SAFE
@@ -96,11 +123,16 @@ async def groq_chat(
     """
     Async provider-dispatching LLM wrapper. Controlled by LLM_PROVIDER env var.
     All retry waits use asyncio.sleep — never blocks the event loop.
+    Circuit-broken for Groq; falls back to empty string when open.
     """
     if _LLM_PROVIDER == "claude":
         return await _claude_chat(model, messages, temperature, max_tokens, _retries)
     if _LLM_PROVIDER == "openai":
         return await _openai_chat(model, messages, temperature, max_tokens, _retries)
+    # Groq path — guarded by circuit breaker
+    if _groq_cb.opened:
+        logger.warning("groq_chat: circuit breaker OPEN — returning empty fallback")
+        return ""
     return await _groq_chat(model, messages, temperature, max_tokens, _retries)
 
 
@@ -115,7 +147,10 @@ async def _groq_chat(
     last_ex = None
     for attempt in range(_retries + 1):
         try:
-            r = await _groq_async.chat.completions.create(
+            # call_async records success (via reset()) or failure (via __call_failed())
+            # on the circuit breaker depending on whether an exception is raised.
+            r = await _groq_cb.call_async(
+                _groq_async.chat.completions.create,
                 model=model,
                 messages=messages,
                 temperature=temperature,

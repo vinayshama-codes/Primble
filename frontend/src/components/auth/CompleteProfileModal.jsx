@@ -16,7 +16,8 @@ export default function CompleteProfileModal({ token, user, onComplete }) {
     try {
       const res  = await fetch(`${API_BASE}/api/auth/complete-profile`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ organization_name: orgName.trim(), acord_disclaimer_accepted: true }),
       });
       const data = await res.json();

@@ -2,6 +2,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 
 import asyncpg
@@ -12,8 +13,14 @@ from config.settings import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 
-_POOL_MIN = int(os.getenv("DB_POOL_MIN", "1"))
+_SAFE_IDENT = re.compile(r'^[a-z_][a-z0-9_]*$')
+_SAFE_DEF = re.compile(r'^[A-Z ]+(\(\d+\))?( DEFAULT [a-zA-Z0-9\']+)?( NOT NULL)?$')
+
+_POOL_MIN = int(os.getenv("DB_POOL_MIN", "2"))
 _POOL_MAX = int(os.getenv("DB_POOL_MAX", "10"))
+# Allow up to this many connections during bursts; surplus idle ones are
+# recycled after DB_POOL_MAX_INACTIVE_LIFETIME seconds (default 300 s).
+_POOL_MAX_INACTIVE_LIFETIME = float(os.getenv("DB_POOL_MAX_INACTIVE_LIFETIME", "300"))
 
 _pool: asyncpg.Pool = None
 
@@ -42,6 +49,7 @@ async def create_pool() -> None:
         min_size=_POOL_MIN,
         max_size=_POOL_MAX,
         command_timeout=60,
+        max_inactive_connection_lifetime=_POOL_MAX_INACTIVE_LIFETIME,
         init=_init_conn,
     )
     logger.info(f"asyncpg pool created (min={_POOL_MIN}, max={_POOL_MAX})")
@@ -116,6 +124,8 @@ async def init_db() -> None:
             ("overage_packages_pending",     "INTEGER DEFAULT 0"),
             ("overage_packages_invoiced",    "INTEGER DEFAULT 0"),
         ]:
+            if not (_SAFE_IDENT.match(col) and _SAFE_DEF.match(definition)):
+                raise ValueError(f"Unsafe DDL identifier blocked: {col!r} {definition!r}")
             try:
                 await conn.execute(
                     f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {definition}"
@@ -231,6 +241,8 @@ async def init_db() -> None:
             ("reminder_count",   "INTEGER DEFAULT 0"),
             ("last_reminder_at", "TEXT"),
         ]:
+            if not (_SAFE_IDENT.match(col) and _SAFE_DEF.match(definition)):
+                raise ValueError(f"Unsafe DDL identifier blocked: {col!r} {definition!r}")
             try:
                 await conn.execute(
                     f"ALTER TABLE arq_sessions ADD COLUMN IF NOT EXISTS {col} {definition}"
@@ -248,6 +260,10 @@ async def init_db() -> None:
 
         for stmt in [
             "ALTER TABLE session_pdf_bytes ADD COLUMN IF NOT EXISTS s3_key TEXT",
+            "ALTER TABLE processing_sessions ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_used_at TEXT",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ip_address TEXT",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent TEXT",
         ]:
             try:
                 await conn.execute(stmt)
@@ -261,12 +277,22 @@ async def init_db() -> None:
         except Exception:
             pass
 
+        for idx_stmt in [
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ps_user_updated ON processing_sessions(user_id, updated_at DESC)",
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_token ON sessions(token)",
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)",
+        ]:
+            try:
+                await conn.execute(idx_stmt)
+            except Exception:
+                pass
+
         logger.info("PostgreSQL database initialized (asyncpg)")
 
 
 # ── Sync psycopg2 pool — used by standalone scripts (migrate.py, create_tables.py) ──
-_SYNC_POOL_MIN = int(os.getenv("DB_POOL_MIN", "1"))
-_SYNC_POOL_MAX = int(os.getenv("DB_POOL_MAX", "5"))
+_SYNC_POOL_MIN = int(os.getenv("DB_POOL_MIN", "2"))
+_SYNC_POOL_MAX = int(os.getenv("DB_POOL_MAX", "10"))
 _RETRY_ATTEMPTS = 3
 _RETRY_DELAY = 1.0
 

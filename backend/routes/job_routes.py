@@ -16,11 +16,8 @@ async def get_job_status(
     current_user: dict = Depends(get_current_user),
 ):
     job = await get_job_queue().get_status(job_id)
-    if job is None:
+    if job is None or str(job["user_id"]) != str(current_user["id"]):
         raise HTTPException(status_code=404, detail="Job not found")
-
-    if str(job["user_id"]) != str(current_user["id"]):
-        raise HTTPException(status_code=403, detail="Not authorized")
 
     return JSONResponse({
         "job_id": job["job_id"],

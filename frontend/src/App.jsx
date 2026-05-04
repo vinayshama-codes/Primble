@@ -22,19 +22,22 @@ import AcordModal             from "./components/form/AcordModal";
 import UpgradeModal           from "./components/billing/UpgradeModal";
 import SignatureModal         from "./components/signature/SignatureModal";
 import ClientQuestionnaire    from "./components/arq/ClientQuestionnaire";
+import ErrorBoundary          from "./components/layout/ErrorBoundary";
 
 export default function App() {
   const path = window.location.pathname;
 
   const qMatch = path.match(/^\/(?:client-)?questionnaire\/([^/]+)$/);
   if (qMatch) {
-    return <ClientQuestionnaire token={qMatch[1]} />;
+    return <ErrorBoundary><ClientQuestionnaire token={qMatch[1]} /></ErrorBoundary>;
   }
 
   return (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <AppContent />
-    </GoogleOAuthProvider>
+    <ErrorBoundary>
+      <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+        <AppContent />
+      </GoogleOAuthProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -85,7 +88,28 @@ function AppContent() {
   const [overageToast,        setOverageToast]        = useState(null);
   const [marketingPage,       setMarketingPage]       = useState(null);
 
-  useUpgradePolling(token, setUser, setUpgradeChecking, setUpgradeFailed);
+  // Parse Stripe redirect params once at mount; clear them from the URL immediately
+  // so the hook is driven by confirmed Stripe redirects only, not arbitrary URL visits.
+  const [stripeRedirect] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const upgraded = params.get("upgraded") === "true";
+    if (!upgraded) return null;
+    window.history.replaceState({}, "", "/");
+    return {
+      shouldPoll:      true,
+      expectedPlan:    params.get("plan") || null,
+      stripeSessionId: params.get("session_id") || null,
+    };
+  });
+
+  useUpgradePolling(
+    stripeRedirect?.shouldPoll ?? false,
+    setUser,
+    setUpgradeChecking,
+    setUpgradeFailed,
+    stripeRedirect?.expectedPlan ?? null,
+    stripeRedirect?.stripeSessionId ?? null,
+  );
   useBillingReturnPolling(token, setUser, setUpgradeChecking);
 
   useEffect(() => {
@@ -114,10 +138,10 @@ function AppContent() {
     window.history.replaceState({}, "", "/");
     localStorage.removeItem("acordly_overage_session");
     localStorage.removeItem("acordly_prev_limit");
-    if (!token || !stripeSessionId) return;
-    applyOverage(token, stripeSessionId, parseInt(qty) || 1)
+    if (!stripeSessionId) return;
+    applyOverage(stripeSessionId, parseInt(qty) || 1)
       .then(({ data }) => {
-        fetch(`${API_BASE}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+        fetch(`${API_BASE}/api/auth/me`, { credentials: "include" })
           .then(r => r.ok ? r.json() : null).then(me => { if (me) setUser(me); });
         const applied = data.credited || data.already_applied;
         setOverageToast(applied
@@ -136,7 +160,7 @@ function AppContent() {
   const openBillingPortal = async () => {
     setUpgradeChecking(true);
     try {
-      const res  = await fetch(`${API_BASE}/api/stripe/create-portal-session`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      const res  = await fetch(`${API_BASE}/api/stripe/create-portal-session`, { method: "POST", credentials: "include" });
       const data = await res.json();
       if (data.url) { window.location.href = data.url; }
       else { setUpgradeChecking(false); setHeaderError(data.detail || "Could not open billing portal."); }
@@ -237,8 +261,8 @@ function AppContent() {
         <AuthModal
           initialMode={authModalMode}
           onClose={() => setShowAuthModal(false)}
-          onSuccess={(tok, usr, profileIncomplete) => {
-            login(tok, usr);
+          onSuccess={(usr, profileIncomplete) => {
+            login(usr);
             setShowAuthModal(false);
             setSigningIn(true);
             setTimeout(() => {

@@ -41,7 +41,7 @@ export default function PlanModal({ user, token, onClose, onChangePlan, anchorRe
     setCanceling(true); setCancelError("");
     try {
       const res  = await fetch(`${API_BASE}/api/stripe/cancel-subscription`, {
-        method: "POST", headers: { Authorization: `Bearer ${token}` },
+        method: "POST", credentials: "include",
       });
       const data = await res.json();
       if (!res.ok) { setCancelError(data.detail || data.message || "Failed to cancel."); return; }

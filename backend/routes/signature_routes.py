@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import logging
 import os
@@ -10,6 +11,7 @@ from models.schemas import SaveSignatureRequest
 from repositories.session_repository import get_processing_session, upd_processing_session
 from services.auth_service import get_current_user
 from services.pdf_service import _is_signature_field, inject_signature_into_pdf
+from utils.crypto import decrypt_field, encrypt_field
 
 router = APIRouter(tags=["signature"])
 logger = logging.getLogger(__name__)
@@ -29,7 +31,7 @@ async def save_signature(
     async with get_pool().acquire() as conn:
         await conn.execute(
             "UPDATE users SET signature_data = $1 WHERE id = $2",
-            sig, current_user["id"],
+            encrypt_field(sig), current_user["id"],
         )
 
     action = "cleared" if sig is None else "saved"
@@ -45,7 +47,7 @@ async def get_signature(current_user: dict = Depends(get_current_user)):
             current_user["id"],
         )
     sig = dict(row).get("signature_data") if row else None
-    return {"success": True, "signature_data": sig}
+    return {"success": True, "signature_data": decrypt_field(sig)}
 
 
 @router.post("/api/apply-signature/{session_id}/{form_id}")
@@ -63,11 +65,11 @@ async def apply_signature(
     if not row:
         raise HTTPException(404, "User not found")
 
-    sig = dict(row).get("signature_data")
+    sig = decrypt_field(dict(row).get("signature_data"))
     if not sig:
         raise HTTPException(400, "No signature saved. Please set up your signature first.")
 
-    proc_session = await get_processing_session(session_id)
+    proc_session = await get_processing_session(session_id, include_pdf=True)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
     generated = proc_session.get("generated_forms", {})
@@ -90,7 +92,9 @@ async def apply_signature(
             confidence[field_name] = "filled"
 
     try:
-        signed_pdf = inject_signature_into_pdf(tpl, field_data, confidence, sig)
+        signed_pdf = await asyncio.get_event_loop().run_in_executor(
+            None, inject_signature_into_pdf, tpl, field_data, confidence, sig
+        )
     except Exception as ex:
         logger.error(f"apply-signature error form={form_id}: {ex}", exc_info=True)
         raise HTTPException(500, "Signature processing failed. Please try again.")

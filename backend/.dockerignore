@@ -18,10 +18,14 @@ env/
 ENV/
 
 # Test / dev artifacts
+tests/
+test_*.py
 .pytest_cache/
 .coverage
 htmlcov/
 *.log
+requirements-dev.txt
+scripts/
 
 # Local job storage and user-uploaded / generated documents — never bake into image
 tmp/

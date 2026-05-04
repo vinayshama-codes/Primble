@@ -93,6 +93,31 @@ class JobRepository(JobQueue):
             )
 
     # ASYNC-SAFE
+    async def count_user_active_jobs(self, user_id: str) -> int:
+        async with get_pool().acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) FROM jobs WHERE user_id = $1 AND status IN ('pending', 'processing')",
+                str(user_id),
+            )
+        return int(row[0]) if row else 0
+
+    # ASYNC-SAFE
+    async def claim_job_if_pending(self, job_id: str) -> bool:
+        """Atomically claim a job by transitioning pending→processing.
+
+        Returns True only if this worker performed the update (i.e. the row
+        was still 'pending'). Any other worker that races will find the status
+        already changed and get False.
+        """
+        now = _now_iso()
+        async with get_pool().acquire() as conn:
+            result = await conn.execute(
+                "UPDATE jobs SET status='processing', updated_at=$1 WHERE job_id=$2 AND status='pending'",
+                now, job_id,
+            )
+        return result == "UPDATE 1"
+
+    # ASYNC-SAFE
     async def list_pending(self, limit: int = 10) -> List[dict]:
         """Atomically claim pending jobs (SELECT ... FOR UPDATE SKIP LOCKED)."""
         now = _now_iso()

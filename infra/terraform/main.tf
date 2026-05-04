@@ -138,9 +138,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "documents" {
 
 # ── SQS — job queue + Dead Letter Queue ──────────────────────────────────────
 
+resource "aws_kms_key" "sqs" {
+  description             = "KMS key for SQS queue encryption"
+  deletion_window_in_days = 14
+  enable_key_rotation     = true
+  tags                    = local.tags
+}
+
 resource "aws_sqs_queue" "dlq" {
   name                       = "${local.prefix}-jobs-dlq"
   message_retention_seconds  = 1209600 # 14 days
+  kms_master_key_id          = aws_kms_key.sqs.id
   tags                       = local.tags
 }
 
@@ -149,6 +157,7 @@ resource "aws_sqs_queue" "jobs" {
   visibility_timeout_seconds = 300
   message_retention_seconds  = 86400 # 1 day
   receive_wait_time_seconds  = 20    # long-polling
+  kms_master_key_id          = aws_kms_key.sqs.id
 
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.dlq.arn
@@ -256,7 +265,7 @@ resource "aws_ecs_task_definition" "api" {
     secrets = [
       { name = "DATABASE_URL",           valueFrom = aws_secretsmanager_secret.database_url.arn },
       { name = "SECRET_KEY",             valueFrom = aws_secretsmanager_secret.secret_key.arn },
-      { name = "STRIPE_API_KEY",         valueFrom = aws_secretsmanager_secret.stripe_api_key.arn },
+      { name = "STRIPE_SECRET_KEY",       valueFrom = aws_secretsmanager_secret.stripe_api_key.arn },
       { name = "GOOGLE_CLIENT_ID",       valueFrom = aws_secretsmanager_secret.google_client_id.arn },
       { name = "GOOGLE_CLIENT_SECRET",   valueFrom = aws_secretsmanager_secret.google_client_secret.arn },
       { name = "GROQ_API_KEY",           valueFrom = aws_secretsmanager_secret.groq_api_key.arn },
@@ -441,7 +450,15 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
     Statement = [{
       Effect   = "Allow"
       Action   = ["secretsmanager:GetSecretValue"]
-      Resource = "*"
+      Resource = [
+        aws_secretsmanager_secret.database_url.arn,
+        aws_secretsmanager_secret.secret_key.arn,
+        aws_secretsmanager_secret.stripe_api_key.arn,
+        aws_secretsmanager_secret.google_client_id.arn,
+        aws_secretsmanager_secret.google_client_secret.arn,
+        aws_secretsmanager_secret.groq_api_key.arn,
+        aws_secretsmanager_secret.sentry_dsn.arn,
+      ]
     }]
   })
 }
@@ -477,8 +494,18 @@ resource "aws_iam_role_policy" "ecs_task_app" {
       },
       {
         Effect   = "Allow"
-        Action   = ["textract:*"]
+        Action   = [
+          "textract:DetectDocumentText",
+          "textract:AnalyzeDocument",
+          "textract:StartDocumentTextDetection",
+          "textract:GetDocumentTextDetection",
+          "textract:StartDocumentAnalysis",
+          "textract:GetDocumentAnalysis",
+        ]
         Resource = "*"
+        Condition = {
+          StringEquals = { "aws:RequestedRegion" = var.aws_region }
+        }
       }
     ]
   })

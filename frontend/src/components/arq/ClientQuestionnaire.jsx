@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '../../config/constants';
 
+const HTTP_UNPROCESSABLE = 422;
+
 // Validation helpers
 const EMAIL_RE   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE   = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/;
@@ -184,7 +186,7 @@ export default function ClientQuestionnaire({ token }) {
       const data = await res.json();
       if (res.ok && data.success) {
         setSubmitted(true);
-      } else if (res.status === Estatuas && data.field_errors) {
+      } else if (res.status === HTTP_UNPROCESSABLE && data.field_errors) {
         setFieldErrors(data.field_errors);
         setError('Please fix the highlighted fields and resubmit.');
         const first = Object.keys(data.field_errors)[0];
@@ -192,8 +194,8 @@ export default function ClientQuestionnaire({ token }) {
       } else {
         setError(data.message || 'Failed to submit answers. Please try again.');
       }
-    } catch {
-      setError('Network error. Please try again.');
+    } catch (err) {
+      setError(err?.message ? `Submission failed: ${err.message}` : 'Network error. Please try again.');
     } finally {
       setSubmitting(false);
     }

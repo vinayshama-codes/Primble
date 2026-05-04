@@ -105,87 +105,27 @@ async def _process_extraction_job(job: dict, queue) -> None:
     s3_keys_to_delete = [k for _, k in source_pairs if k]
 
     try:
-        from services.ocr_service import extract_text
-        from services.extraction_service import (
-            extract_facts_long, identify_doc_type, merge_facts, select_primary_truth,
-        )
-        from services.form_service import (
-            filter_available_forms, load_all_forms, match_forms, score_extra_forms,
-        )
-        from services.sqs_service import (
-            check_tier1, check_tier2, evaluate_stops, check_doc_consistency,
-        )
-        from repositories.session_repository import new_processing_session
+        from services.extraction_pipeline import run_extraction_pipeline
 
-        processed_docs = []
-        all_low_conf: list = []
-        for path in local_paths:
-            try:
-                text, low_conf = extract_text(path)
-            except Exception as ex:
-                logger.warning("Job %s: OCR failed for %s: %s", job_id, path, ex)
-                continue
-            if len(text) < 30:
-                continue
-            all_low_conf += low_conf
-            doc_type  = identify_doc_type(text)
-            extracted = extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
-            processed_docs.append({
-                "filename":              os.path.basename(path),
-                "path":                  path,
-                "doc_type":              doc_type,
-                "text":                  text,
-                "facts":                 extracted.get("facts", {}),
-                "flags":                 extracted.get("flags", {}),
-                "low_confidence_tokens": low_conf,
-                "truncation_warning":    extracted.get("truncation_warning"),
-            })
+        await queue.update_status(job_id, "processing", progress_message="Matching ACORD forms…")
 
-        if not processed_docs:
+        try:
+            result = await run_extraction_pipeline(local_paths, user_id)
+        except ValueError:
             await queue.update_status(job_id, "failed", error="no_readable_text")
             logger.error("Job %s: no readable text", job_id)
             return
 
-        await queue.update_status(job_id, "processing", progress_message="Matching ACORD forms…")
-
-        primary              = select_primary_truth(processed_docs)
-        merged_facts, mflags = merge_facts(processed_docs, primary)
-        mflags["_doc_type"]  = primary.get("doc_type", "unknown")
-        tier1_ok, tier1_missing = check_tier1(merged_facts, mflags)
-
-        if not tier1_ok:
+        if not result["tier1_ok"]:
             await queue.update_status(
                 job_id, "failed",
                 error="tier1_validation_failed",
-                result={"missing_fields": tier1_missing, "gate": "tier1_fail"},
+                result={"missing_fields": result["tier1_missing"], "gate": "tier1_fail"},
             )
             return
 
-        tier2_score, tier2_missing = check_tier2(merged_facts)
-        hard_stops, soft_stops     = evaluate_stops(merged_facts, mflags)
-        for issue in check_doc_consistency(processed_docs):
-            hard_stops = list(hard_stops) + [issue]
-
-        all_forms       = load_all_forms()
-        available_forms = filter_available_forms(all_forms)
-        combined_text   = " ".join(d.get("text", "") for d in processed_docs)
-        recommendations = match_forms(merged_facts, mflags, available_forms, text=combined_text)
-        triggered_ids   = {r["form_id"] for r in recommendations}
-        extra_scored    = score_extra_forms(merged_facts, triggered_ids, available_forms)
-        unique_low_conf = list(dict.fromkeys(all_low_conf))
-
-        sid = new_processing_session({
-            "user_id": user_id, "docs": processed_docs,
-            "primary_doc": primary["filename"], "facts": merged_facts, "flags": mflags,
-            "tier2_score": tier2_score, "tier2_missing": tier2_missing,
-            "hard_stops": hard_stops, "soft_stops": soft_stops,
-            "all_forms": available_forms, "recommendations": recommendations,
-            "selected_form_ids": [], "generated_forms": {},
-            "low_confidence_tokens": unique_low_conf,
-        })
-
-        await queue.update_status(job_id, "completed", result={"session_id": sid})
-        logger.info("Job %s (extraction) completed: session_id=%s", job_id, sid)
+        await queue.update_status(job_id, "completed", result={"session_id": result["session_id"]})
+        logger.info("Job %s (extraction) completed: session_id=%s", job_id, result["session_id"])
 
     except Exception as ex:
         err = _sanitize_error(ex)
@@ -238,7 +178,7 @@ async def _process_form_generation_job(job: dict, queue) -> None:
         from services.audit_service import log_recommendations_presented
         import os as _os
 
-        session = get_processing_session(session_id)
+        session = await get_processing_session(session_id)
         if not session:
             await queue.update_status(job_id, "failed", error="session_not_found")
             return
@@ -271,7 +211,7 @@ async def _process_form_generation_job(job: dict, queue) -> None:
                 seen_msgs.add(msg)
                 cross_issues_deduped.append(issue)
 
-        upd_processing_session(session_id, {
+        await upd_processing_session(session_id, {
             "selected_form_ids": form_ids,
             "generated_forms":   results,
             "active_form_id":    form_ids[0] if form_ids else None,
@@ -283,7 +223,7 @@ async def _process_form_generation_job(job: dict, queue) -> None:
             sqs_data = r.get("sqs")
             if sqs_data and sqs_data.get("recommendations"):
                 try:
-                    log_recommendations_presented(
+                    await log_recommendations_presented(
                         session_id=session_id,
                         user_id=user_id,
                         sqs_result=sqs_data,
@@ -308,6 +248,18 @@ async def _process_form_generation_job(job: dict, queue) -> None:
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
+
+async def _dispatch_with_semaphore(job: dict, queue) -> None:
+    from utils.concurrency import try_acquire_heavy, release_heavy
+    acquired = await try_acquire_heavy()
+    if not acquired:
+        logger.warning("Heavy semaphore full, delaying job %s", job["job_id"])
+        return
+    try:
+        await _dispatch_job(job, queue)
+    finally:
+        release_heavy(acquired)
+
 
 async def _dispatch_job(job: dict, queue) -> None:
     job_type = job.get("job_type", "")
@@ -347,20 +299,22 @@ async def _run_sqs_loop(queue) -> None:
                     queue.delete_message(msg["ReceiptHandle"])
                     continue
 
-                # Idempotency: check DB status before processing
+                # Verify the job record exists before attempting to claim it.
                 job = await queue.get_status(job_id)
                 if not job:
                     logger.warning("Job %s not in DB — deleting SQS message", job_id)
                     queue.delete_message(msg["ReceiptHandle"])
                     continue
-                if job["status"] != "pending":
-                    # Already claimed or completed — ack and skip to avoid duplicate work.
-                    # A 'processing' status means another worker is actively running it.
+
+                # Atomic claim: UPDATE … WHERE status='pending'. Only one worker
+                # wins the race; all others get False and skip without duplicate work.
+                claimed = await queue.claim_job_if_pending(job_id)
+                if not claimed:
                     queue.delete_message(msg["ReceiptHandle"])
                     continue
 
                 receipts[job_id] = msg["ReceiptHandle"]
-                tasks.append(_dispatch_job(job, queue))
+                tasks.append(_dispatch_with_semaphore(job, queue))
             except Exception as ex:
                 logger.warning("Failed to parse SQS message: %s", ex)
 
@@ -390,7 +344,7 @@ async def _run_poll_loop(queue, once: bool = False) -> None:
 
         if pending:
             logger.info("Dispatching %d pending job(s)", len(pending))
-            await asyncio.gather(*[_dispatch_job(j, queue) for j in pending], return_exceptions=True)
+            await asyncio.gather(*[_dispatch_with_semaphore(j, queue) for j in pending], return_exceptions=True)
         else:
             logger.debug("No pending jobs")
 

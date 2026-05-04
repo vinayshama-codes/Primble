@@ -1,31 +1,95 @@
+import hashlib
+import secrets
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, Request, Header, HTTPException
+from fastapi import APIRouter, Depends, Request, Header, Cookie, HTTPException
 from fastapi.responses import JSONResponse
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
 from config.database import get_pool
-from config.settings import GOOGLE_CLIENT_ID
+from config.settings import GOOGLE_CLIENT_ID, SESSION_TTL_H as _SESSION_TTL_H
 from models.schemas import (
     SignupRequest, LoginRequest, VerifyEmailRequest,
     GoogleAuthRequest, CompleteProfileRequest,
 )
 from services.auth_service import (
     hash_password, verify_password, create_session_token, get_current_user,
+    revoke_token, rotate_session, revoke_all_sessions,
 )
 from services.email_service import send_verification_email, _send_generic_email
 from utils.helpers import generate_verification_code
 from utils.validators import validate_work_email, validate_password
-from utils.rate_limiter import check_auth_rate_limit
+from utils.rate_limiter import check_auth_rate_limit, get_client_ip, _redis as _rate_limiter_redis
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
 
+import os as _os
+_IS_PRODUCTION  = _os.getenv("ENVIRONMENT", "development").lower() == "production"
+_COOKIE_SECURE  = _IS_PRODUCTION          # False on localhost (http), True on prod (https)
+_COOKIE_SAMESITE = "lax"
+
+_NONCE_TTL = 300  # seconds
+
+# In-process nonce store used when Redis is unavailable.
+# Maps nonce -> (fingerprint, expires_at_monotonic)
+_nonce_store: dict = {}
+
+def _nonce_fingerprint(request: Request) -> str:
+    ip = request.client.host if request.client else "unknown"
+    ua = request.headers.get("user-agent", "")
+    return hashlib.sha256(f"{ip}:{ua}".encode()).hexdigest()
+
+
+def _nonce_set(nonce: str, fingerprint: str) -> None:
+    if _rate_limiter_redis is not None:
+        try:
+            _rate_limiter_redis.setex(f"oauth_nonce:{nonce}", _NONCE_TTL, fingerprint)
+            return
+        except Exception:
+            pass
+    import time
+    _nonce_store[nonce] = (fingerprint, time.monotonic() + _NONCE_TTL)
+
+
+def _nonce_pop(nonce: str):
+    """Return stored fingerprint and remove the nonce atomically. Returns None if not found."""
+    if _rate_limiter_redis is not None:
+        try:
+            return _rate_limiter_redis.getdel(f"oauth_nonce:{nonce}")
+        except Exception:
+            pass
+    import time
+    entry = _nonce_store.pop(nonce, None)
+    if entry is None:
+        return None
+    fingerprint, expires_at = entry
+    if time.monotonic() > expires_at:
+        return None
+    return fingerprint
+
+
+def _set_session_cookie(response: JSONResponse, token: str) -> None:
+    response.set_cookie(
+        key="acordly_session",
+        value=token,
+        httponly=True,
+        secure=_COOKIE_SECURE,
+        samesite=_COOKIE_SAMESITE,
+        max_age=_SESSION_TTL_H * 3600,
+        path="/",
+    )
+
+
+def _clear_session_cookie(response: JSONResponse) -> None:
+    response.delete_cookie(key="acordly_session", path="/")
+
 
 @router.post("/signup")
-async def signup(req: SignupRequest):
+async def signup(req: SignupRequest, request: Request):
+    check_auth_rate_limit(req.email.lower())
     if not req.acord_disclaimer_accepted:
         raise HTTPException(400, "You must accept the ACORD disclaimer to create an account.")
     ok_email, email_msg = validate_work_email(req.email)
@@ -75,7 +139,8 @@ async def signup(req: SignupRequest):
 
 
 @router.post("/verify-email")
-async def verify_email(req: VerifyEmailRequest):
+async def verify_email(req: VerifyEmailRequest, request: Request):
+    check_auth_rate_limit(req.email.lower())
     async with get_pool().acquire() as conn:
         existing = await conn.fetchrow("SELECT id, email_verified FROM users WHERE email = $1", req.email)
         if existing and int(dict(existing).get("email_verified", 0) or 0):
@@ -113,9 +178,13 @@ async def verify_email(req: VerifyEmailRequest):
         except Exception:
             raise HTTPException(500, "Account creation failed. Please try again.")
 
-    token = await create_session_token(user_id)
-    return {
-        "success": True, "token": token,
+    token = await create_session_token(
+        user_id,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+    resp  = JSONResponse({
+        "success": True,
         "user": {
             "id": user_id, "email": pending["email"],
             "full_name": pending.get("full_name", ""),
@@ -123,7 +192,9 @@ async def verify_email(req: VerifyEmailRequest):
             "subscription_tier": "free", "downloads_remaining": 3,
             "acord_license_confirmed": False,
         },
-    }
+    })
+    _set_session_cookie(resp, token)
+    return resp
 
 
 @router.post("/resend-verification")
@@ -153,7 +224,7 @@ async def resend_verification(request: Request):
 
 
 @router.post("/login")
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
     check_auth_rate_limit(req.email.lower())
 
     async with get_pool().acquire() as conn:
@@ -174,28 +245,33 @@ async def login(req: LoginRequest):
             datetime.now(timezone.utc).isoformat(), user["id"],
         )
 
-    token = await create_session_token(user["id"])
+    token = await create_session_token(
+        user["id"],
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
     sub   = user.get("subscription_tier", "free") or "free"
     used  = int(user.get("downloads_used", 0) or 0)
-    return {
-        "success": True, "token": token,
+    resp  = JSONResponse({
+        "success": True,
         "user": {
             "id": user["id"], "email": user["email"],
             "full_name": user.get("full_name", ""),
             "subscription_tier": sub,
             "downloads_remaining": 3 - used if sub == "free" else -1,
         },
-    }
+    })
+    _set_session_cookie(resp, token)
+    return resp
 
 
 @router.post("/forgot-password")
 async def forgot_password(request: Request):
     body  = await request.json()
     email = (body.get("email") or "").strip().lower()
-    if email:
-        check_auth_rate_limit(email)
     if not email:
         raise HTTPException(400, "Email required")
+    check_auth_rate_limit(email)
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
@@ -231,6 +307,7 @@ async def reset_password(request: Request):
     new_pass = body.get("new_password") or ""
     if not email or not code or not new_pass:
         raise HTTPException(400, "email, code, and new_password are required")
+    check_auth_rate_limit(email)
     valid_pw, pw_msg = validate_password(new_pass)
     if not valid_pw:
         raise HTTPException(400, pw_msg)
@@ -256,12 +333,33 @@ async def reset_password(request: Request):
             hash_password(new_pass), email,
         )
 
+    await revoke_all_sessions(user["id"])
     return {"success": True, "message": "Password updated successfully."}
 
 
+@router.get("/google/nonce")
+async def google_nonce(request: Request):
+    """Issue a one-time nonce the frontend must include as the OAuth state parameter."""
+    check_auth_rate_limit(get_client_ip(request))
+    nonce = secrets.token_urlsafe(32)
+    _nonce_set(nonce, _nonce_fingerprint(request))
+    return {"nonce": nonce}
+
+
 @router.post("/google")
-async def google_auth(req: GoogleAuthRequest):
+async def google_auth(req: GoogleAuthRequest, request: Request):
+    check_auth_rate_limit(get_client_ip(request))
     try:
+        # Validate state/nonce sent by the frontend
+        nonce = getattr(req, "nonce", None)
+        if not nonce:
+            raise HTTPException(400, "Invalid or missing OAuth state/nonce")
+        stored_fp = _nonce_pop(nonce)
+        if stored_fp is None:
+            raise HTTPException(400, "Invalid or missing OAuth state/nonce")
+        if stored_fp != _nonce_fingerprint(request):
+            raise HTTPException(400, "OAuth nonce fingerprint mismatch")
+
         cid    = GOOGLE_CLIENT_ID
         idinfo = id_token.verify_oauth2_token(req.credential, google_requests.Request(), cid, clock_skew_in_seconds=10)
         if idinfo.get("iss") not in ["accounts.google.com", "https://accounts.google.com"]:
@@ -301,14 +399,18 @@ async def google_auth(req: GoogleAuthRequest):
                 datetime.now(timezone.utc).isoformat(), user["id"],
             )
 
-        token              = await create_session_token(user["id"])
+        token              = await create_session_token(
+            user["id"],
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
         sub                = user.get("subscription_tier", "free") or "free"
         used               = int(user.get("downloads_used", 0) or 0)
         org_name           = user.get("organization_name") or ""
         disclaimer         = int(user.get("acord_disclaimer_accepted", 0) or 0)
         profile_incomplete = not org_name.strip() or not disclaimer
-        return {
-            "success": True, "token": token, "profile_incomplete": profile_incomplete,
+        resp = JSONResponse({
+            "success": True, "profile_incomplete": profile_incomplete,
             "user": {
                 "id": user["id"], "email": user["email"],
                 "full_name": user.get("full_name", ""),
@@ -317,7 +419,9 @@ async def google_auth(req: GoogleAuthRequest):
                 "acord_license_confirmed": bool(int(user.get("acord_license_confirmed", 0) or 0)),
                 "acord_disclaimer_accepted": bool(disclaimer),
             },
-        }
+        })
+        _set_session_cookie(resp, token)
+        return resp
     except HTTPException:
         raise
     except Exception:
@@ -325,7 +429,12 @@ async def google_auth(req: GoogleAuthRequest):
 
 
 @router.post("/complete-profile")
-async def complete_profile(req: CompleteProfileRequest, current_user: dict = Depends(get_current_user)):
+async def complete_profile(
+    req: CompleteProfileRequest,
+    request: Request,
+    acordly_session: str = Cookie(None),
+    current_user: dict = Depends(get_current_user),
+):
     if not req.acord_disclaimer_accepted:
         raise HTTPException(400, "You must accept the ACORD disclaimer.")
     if not req.organization_name or not req.organization_name.strip():
@@ -336,7 +445,16 @@ async def complete_profile(req: CompleteProfileRequest, current_user: dict = Dep
             "UPDATE users SET organization_name=$1, acord_disclaimer_accepted=1, acord_disclaimer_accepted_at=$2 WHERE id=$3",
             req.organization_name.strip(), now, current_user["id"],
         )
-    return {"success": True, "message": "Profile updated."}
+
+    resp = JSONResponse({"success": True, "message": "Profile updated."})
+    if acordly_session:
+        new_token = await rotate_session(
+            acordly_session,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        _set_session_cookie(resp, new_token)
+    return resp
 
 
 @router.get("/me")
@@ -405,9 +523,15 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/logout")
-async def logout(authorization: str = Header(None)):
-    if authorization and authorization.startswith("Bearer "):
+async def logout(
+    authorization: str = Header(None),
+    acordly_session: str = Cookie(None),
+):
+    token = acordly_session
+    if not token and authorization and authorization.startswith("Bearer "):
         token = authorization.replace("Bearer ", "")
-        async with get_pool().acquire() as conn:
-            await conn.execute("DELETE FROM sessions WHERE token = $1", token)
-    return {"success": True}
+    if token:
+        await revoke_token(token)
+    resp = JSONResponse({"success": True})
+    _clear_session_cookie(resp)
+    return resp

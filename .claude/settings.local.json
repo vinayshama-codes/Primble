@@ -5,7 +5,17 @@
       "Bash(awk '{print $9, $5}')",
       "PowerShell(& \"C:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\\\\backend\\\\venv\\\\Scripts\\\\pip.exe\" install asyncpg)",
       "Read(//tmp/**)",
-      "Bash(awk '{print $NF}')"
+      "Bash(awk '{print $NF}')",
+      "Bash(python -c \"import ast, sys; ast.parse\\(open\\('c:/Users/lenovo/Desktop/ACORD-PY-VERSION2/backend/routes/form_routes.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(pip show *)",
+      "Bash(pip install *)",
+      "Bash(python -c \"from circuitbreaker import CircuitBreaker; cb = CircuitBreaker\\(failure_threshold=3, recovery_timeout=60, name='test'\\); print\\('state attr:', cb.current_state\\); print\\('methods:', [m for m in dir\\(cb\\) if not m.startswith\\('__'\\)]\\)\")",
+      "Bash(python -c \"from circuitbreaker import CircuitBreaker; cb = CircuitBreaker\\(failure_threshold=3, recovery_timeout=60, name='test'\\); print\\([m for m in dir\\(cb\\) if not m.startswith\\('__'\\)]\\)\")",
+      "Bash(pip freeze *)",
+      "Bash(pip index *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend"
     ]
   }
 }

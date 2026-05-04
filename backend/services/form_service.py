@@ -10,6 +10,7 @@ from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_INDEX
 from services.extraction_service import _fv, _is_empty
 from services.pdf_service import extract_form_schema, map_facts_to_form, fill_pdf
 from services.sqs_service import cross_validate, calculate_sqs
+from utils.validators import run_field_validations
 
 logger = logging.getLogger(__name__)
 
@@ -504,6 +505,19 @@ def process_single_form(form_meta: dict, session: dict) -> dict:
     tpl              = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
     schema           = extract_form_schema(tpl, form_id=form_meta["form_id"])
     mapped, confidence = map_facts_to_form(session["facts"], schema, form_id=form_meta["form_id"])
+
+    hard_stops, soft_stops = run_field_validations(mapped)
+    if hard_stops:
+        logger.warning(
+            "Field validation hard stops for form %s (flagged for review): %s",
+            form_meta["form_id"], hard_stops,
+        )
+    if soft_stops:
+        logger.info(
+            "Field validation soft stops for form %s: %s",
+            form_meta["form_id"], soft_stops,
+        )
+
     selected_ids     = session.get("selected_form_ids", []) + [form_meta["form_id"]]
     cross            = cross_validate(session["facts"], session["flags"], selected_ids)
     sqs              = calculate_sqs(

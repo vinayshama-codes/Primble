@@ -32,6 +32,28 @@ def _require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
 
 
+@router.get("/dlq-inspect")
+def dlq_inspect(
+    limit: int = 10,
+    _: dict = Depends(_require_admin),
+):
+    """Peek at failed jobs sitting in the dead-letter queue.
+
+    Returns up to `limit` messages (max 10 per SQS API constraint).
+    Only available when JOB_QUEUE_BACKEND=sqs and SQS_DLQ_URL is set.
+    Messages are NOT consumed — they remain in the DLQ.
+    """
+    from services.job_queue import get_job_queue
+    queue = get_job_queue()
+    if not hasattr(queue, "inspect_dlq"):
+        return JSONResponse(
+            status_code=200,
+            content={"messages": [], "note": "DLQ inspection is only available for the SQS backend"},
+        )
+    messages = queue.inspect_dlq(max_messages=min(limit, 10))
+    return JSONResponse({"messages": messages, "count": len(messages)})
+
+
 @router.get("/forms-status")
 def forms_status(_: dict = Depends(_require_admin)):
     """

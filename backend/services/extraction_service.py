@@ -335,25 +335,35 @@ def _cache_key(text: str, model: str, ctx_hash: str, lct_hash: str) -> str:
     return hashlib.md5(payload.encode(), usedforsecurity=False).hexdigest()
 
 
+_REDIS_CACHE_TTL = 3600  # Redis L2 TTL — shorter than LRU to bound cross-worker staleness
+
+
 def _cache_get(key: str) -> Optional[dict]:
+    # L1: check in-process LRU first (fastest, no network)
+    hit = _lru_get(key)
+    if hit is not None:
+        return hit
+    # L2: check Redis (shared across workers)
     if _redis is not None:
         try:
             raw = _redis.get(f"extract:{key}")
             if raw:
-                return json.loads(raw)
+                value = json.loads(raw)
+                _lru_set(key, value)  # promote into L1
+                return value
         except Exception as ex:
-            logger.warning(f"Redis get failed, in-process fallback: {ex}")
-    return _lru_get(key)
+            logger.warning(f"Redis get failed: {ex}")
+    return None
 
 
 def _cache_set(key: str, value: dict) -> None:
+    # Write to both L1 and L2 so all workers share the result immediately
+    _lru_set(key, value)
     if _redis is not None:
         try:
-            _redis.setex(f"extract:{key}", _CACHE_TTL, json.dumps(value))
-            return
+            _redis.setex(f"extract:{key}", _REDIS_CACHE_TTL, json.dumps(value))
         except Exception as ex:
             logger.warning(f"Redis set failed, in-process only: {ex}")
-    _lru_set(key, value)
 
 
 # ── Document-type identification ──────────────────────────────────────────────

@@ -36,10 +36,10 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
       ? { email, password, full_name: fullName, organization_name: orgName.trim(), acord_disclaimer_accepted: disclaimerChecked }
       : { email, password };
     try {
-      const res  = await fetch(`${API_BASE}${endpoint}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const res  = await fetch(`${API_BASE}${endpoint}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json();
       if (res.status === 202 && data.requires_verification) { setLoading(false); setNeedsVerify(true); }
-      else if (res.ok && data.token) { setTransitioning(true); onSuccess(data.token, data.user); }
+      else if (res.ok && data.success) { setTransitioning(true); onSuccess(data.user); }
       else if (data.requires_verification) { setLoading(false); setNeedsVerify(true); }
       else { setLoading(false); setError(data.detail || data.message || "Authentication failed"); }
     } catch { setLoading(false); setError("Network error. Please try again."); }
@@ -50,9 +50,9 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
     setError("");
     setLoading(true);
     try {
-      const res  = await fetch(`${API_BASE}/api/auth/verify-email`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code: verifyCode }) });
+      const res  = await fetch(`${API_BASE}/api/auth/verify-email`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code: verifyCode }) });
       const data = await res.json();
-      if (res.ok && data.token) { setTransitioning(true); onSuccess(data.token, data.user); }
+      if (res.ok && data.success) { setTransitioning(true); onSuccess(data.user); }
       else { setLoading(false); setError(data.detail || "Invalid code"); }
     } catch { setLoading(false); setError("Network error."); }
   };
@@ -83,9 +83,12 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
   const handleGoogleSuccess = async (credentialResponse) => {
     setLoading(true);
     try {
-      const res  = await fetch(`${API_BASE}/api/auth/google`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential: credentialResponse.credential }) });
+      const nonceRes = await fetch(`${API_BASE}/api/auth/google/nonce`, { credentials: "include" });
+      if (!nonceRes.ok) { setLoading(false); setError("Failed to initialize Google login. Please try again."); return; }
+      const { nonce } = await nonceRes.json();
+      const res  = await fetch(`${API_BASE}/api/auth/google`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential: credentialResponse.credential, nonce }) });
       const data = await res.json();
-      if (res.ok && data.token) { setTransitioning(true); onSuccess(data.token, data.user, data.profile_incomplete === true); }
+      if (res.ok && data.success) { setTransitioning(true); onSuccess(data.user, data.profile_incomplete === true); }
       else { setLoading(false); setError(data.detail || data.message || "Google authentication failed"); }
     } catch { setLoading(false); setError("Network error. Please try again."); }
   };

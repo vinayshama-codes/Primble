@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import io
 import logging
@@ -17,6 +18,8 @@ from services.pdf_service import regenerate_pdf_for_form
 from services.stripe_service import evaluate_package_limit, create_overage_invoice_item
 from services.sqs_service import calculate_sqs
 from services import s3_service
+from utils.crypto import decrypt_field
+from utils.rate_limiter import check_download_rate_limit
 
 router = APIRouter(tags=["downloads"])
 logger = logging.getLogger(__name__)
@@ -104,6 +107,7 @@ async def download_pdf(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
+    check_download_rate_limit(current_user["id"])
     fresh = await _refresh_user(current_user["id"])
     if not fresh:
         raise HTTPException(401, "User not found")
@@ -119,34 +123,54 @@ async def download_pdf(
     if sub in ("essentials", "professional", "business"):
         pkg_eval = await evaluate_package_limit(fresh)
 
-    proc_session = await get_processing_session(session_id)
+    proc_session = await get_processing_session(session_id, include_pdf=True)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
     generated      = proc_session.get("generated_forms", {})
     form_name      = generated.get(form_id, {}).get("form_name", form_id)
-    user_signature = fresh.get("signature_data") or None
-    pdf_bytes      = regenerate_pdf_for_form(proc_session, form_id, force=True, user_signature=user_signature)
-    s3_service.upload_pdf(session_id, form_id, pdf_bytes)
+    user_signature = decrypt_field(fresh.get("signature_data")) or None
     facts       = proc_session.get("facts", {})
     flags       = proc_session.get("flags", {})
     org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
     sqs_results = {form_id: generated[form_id].get("sqs", {})} if form_id in generated else {}
 
     _ck = _cover_cache_key(facts, [form_id], sqs_results, flags)
-    ai_content = _COVER_CACHE.get(_ck)
-    if ai_content is None:
-        ai_content = generate_ai_cover_narrative(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=[form_id], org_name=org_name, user=fresh)
+    _loop = asyncio.get_event_loop()
+
+    # Parallelize PDF regeneration and AI narrative (independent of each other)
+    _cached_ai = _COVER_CACHE.get(_ck)
+    if _cached_ai is not None:
+        logger.debug(f"cover narrative cache hit {_ck[:8]}")
+        pdf_bytes, ai_content = await asyncio.gather(
+            _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature),
+            asyncio.coroutine(lambda: _cached_ai)() if False else asyncio.sleep(0, result=_cached_ai),
+        )
+    else:
+        pdf_bytes, ai_content = await asyncio.gather(
+            _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature),
+            _loop.run_in_executor(None, generate_ai_cover_narrative, facts, flags, sqs_results, [form_id], org_name, fresh),
+        )
         _COVER_CACHE[_ck] = ai_content
         logger.debug(f"cover narrative cached for key {_ck[:8]}")
-    else:
-        logger.debug(f"cover narrative cache hit {_ck[:8]}")
-    cover_pdf = build_cover_page_pdf(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=[form_id], org_name=org_name, narrative=ai_content["narrative"], ai_block=ai_content["ai_block"], sqs_reasoning=ai_content.get("sqs_reasoning", ""), user=fresh)
 
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("00_Acordly_Cover_Page.pdf", cover_pdf)
-        zf.writestr(f"{form_id}_FILLED.pdf", pdf_bytes)
-    zip_buf.seek(0)
+    # S3 upload fire-and-forget (don't block the response on it)
+    _loop.run_in_executor(None, s3_service.upload_pdf, session_id, form_id, pdf_bytes)
+
+    cover_pdf = await _loop.run_in_executor(
+        None, build_cover_page_pdf,
+        facts, flags, sqs_results, [form_id], org_name,
+        ai_content["narrative"], ai_content["ai_block"], ai_content.get("sqs_reasoning", ""), fresh,
+    )
+
+    def _build_zip():
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("00_Acordly_Cover_Page.pdf", cover_pdf)
+            zf.writestr(f"{form_id}_FILLED.pdf", pdf_bytes)
+        buf.seek(0)
+        return buf
+
+    zip_buf = await _loop.run_in_executor(None, _build_zip)
 
     _ids_hash = hashlib.md5(form_id.encode()).hexdigest()[:8]
     if _acquire_download_lock(fresh["id"], session_id, _ids_hash):
@@ -201,6 +225,7 @@ async def download_all(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
+    check_download_rate_limit(current_user["id"])
     fresh = await _refresh_user(current_user["id"])
     if not fresh:
         raise HTTPException(401, "User not found")
@@ -216,14 +241,14 @@ async def download_all(
     if sub in ("essentials", "professional", "business"):
         pkg_eval = await evaluate_package_limit(fresh)
 
-    proc_session = await get_processing_session(session_id)
+    proc_session = await get_processing_session(session_id, include_pdf=True)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
     generated = proc_session.get("generated_forms", {})
     if not generated:
         raise HTTPException(400, "No forms generated yet")
 
-    user_signature = fresh.get("signature_data") or None
+    user_signature = decrypt_field(fresh.get("signature_data")) or None
     acord_pdfs = {}
     for fid in generated.keys():
         try:

@@ -113,6 +113,7 @@ class VerifyEmailRequest(BaseModel):
 
 class GoogleAuthRequest(BaseModel):
     credential: str
+    nonce: str
 
 
 class FormSelectionRequest(BaseModel):

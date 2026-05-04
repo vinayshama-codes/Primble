@@ -224,12 +224,11 @@ def _send_generic_email(
         from_addr = os.getenv("EMAIL_FROM", "noreply@acordly.ai")
 
     if provider == "resend":
-        try:
+        def _do_resend():
             import urllib.request
             api_key = os.getenv("RESEND_API_KEY", "")
             if not api_key:
-                logger.error("RESEND_API_KEY not set")
-                return False
+                raise ValueError("RESEND_API_KEY not set")
             payload = json.dumps({"from": from_addr, "to": [to_email], "subject": subject, "html": body_html, "text": body_txt}).encode()
             req = urllib.request.Request(
                 "https://api.resend.com/emails", data=payload,
@@ -237,16 +236,20 @@ def _send_generic_email(
             )
             with urllib.request.urlopen(req, timeout=10):
                 return True
+        try:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(_do_resend).result(timeout=15)
         except Exception as ex:
             logger.error(f"Resend email failed: {ex}")
             return False
 
     elif provider == "sendgrid":
-        try:
+        def _do_sendgrid():
             import urllib.request
             api_key = os.getenv("SENDGRID_API_KEY", "")
             if not api_key:
-                return False
+                raise ValueError("SENDGRID_API_KEY not set")
             payload = json.dumps({
                 "personalizations": [{"to": [{"email": to_email}]}],
                 "from": {"email": from_addr},
@@ -259,6 +262,10 @@ def _send_generic_email(
             )
             with urllib.request.urlopen(req, timeout=10):
                 return True
+        try:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(_do_sendgrid).result(timeout=15)
         except Exception as ex:
             logger.error(f"SendGrid email failed: {ex}")
             return False

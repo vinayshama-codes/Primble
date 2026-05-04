@@ -8,7 +8,7 @@ export function useSignature(token, user) {
   const [savedSignature, setSavedSignature] = useState(null);
 
   useEffect(() => {
-    if (!token || !user) return;
+    if (!user) return;
     const cached = sessionStorage.getItem("acordly_signature");
     if (cached) setSavedSignature(cached);
     getSignature(token)

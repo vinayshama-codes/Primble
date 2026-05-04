@@ -86,7 +86,8 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
     try {
       const res  = await fetch(`${API_BASE}/api/auth/save-signature`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ signature_data: base64 }),
       });
       const data = await res.json();
@@ -106,7 +107,8 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
     try {
       const res = await fetch(`${API_BASE}/api/auth/save-signature`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ signature_data: null }),
       });
       if (res.ok) {

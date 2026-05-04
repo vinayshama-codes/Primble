@@ -1,7 +1,10 @@
+import asyncio
 import logging
 import os
+import signal
 import uuid as _uuid
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -25,7 +28,7 @@ if _SENTRY_DSN:
     )
 
 from config.database import create_pool, close_pool, get_pool, init_db
-from config.settings import ALLOWED_ORIGINS, MAX_UPLOAD_SIZE_BYTES  # noqa: F401
+from config.settings import ALLOWED_ORIGINS, MAX_UPLOAD_SIZE_BYTES, validate_production_config  # noqa: F401
 from services.scheduler_service import start_scheduler, stop_scheduler
 from utils.json_logging import JsonFormatter, set_trace_id
 from routes.auth_routes import router as auth_router
@@ -51,7 +54,64 @@ logging.root.handlers = [_json_handler]
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="API", version="12.4.0")
+# ---------------------------------------------------------------------------
+# In-flight request tracking for graceful shutdown
+# ---------------------------------------------------------------------------
+_in_flight: int = 0
+_in_flight_lock = asyncio.Lock()
+_in_flight_zero = asyncio.Event()
+_in_flight_zero.set()  # starts at zero — event is set
+_shutting_down: bool = False
+
+
+async def _increment_in_flight() -> None:
+    global _in_flight
+    async with _in_flight_lock:
+        _in_flight += 1
+        _in_flight_zero.clear()
+
+
+async def _decrement_in_flight() -> None:
+    global _in_flight
+    async with _in_flight_lock:
+        _in_flight = max(0, _in_flight - 1)
+        if _in_flight == 0:
+            _in_flight_zero.set()
+
+
+async def drain_in_flight_requests() -> None:
+    """Wait until all in-flight requests finish (or until the caller times out)."""
+    if _in_flight == 0:
+        return
+    logger.info("Graceful shutdown: waiting for %d in-flight request(s)…", _in_flight)
+    await _in_flight_zero.wait()
+    logger.info("Graceful shutdown: all in-flight requests completed")
+
+
+app = FastAPI(
+    title="API",
+    version="12.4.0",
+    docs_url=None if _IS_PROD else "/docs",
+    redoc_url=None if _IS_PROD else "/redoc",
+    openapi_url=None if _IS_PROD else "/openapi.json",
+)
+
+
+class InFlightMiddleware(BaseHTTPMiddleware):
+    """Track in-flight requests and reject new ones once shutdown is signalled."""
+
+    async def dispatch(self, request: Request, call_next):
+        if _shutting_down:
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "Server is shutting down"},
+                headers={"Retry-After": "10"},
+            )
+        await _increment_in_flight()
+        try:
+            return await call_next(request)
+        finally:
+            await _decrement_in_flight()
 
 
 class TraceIDMiddleware(BaseHTTPMiddleware):
@@ -90,6 +150,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TraceIDMiddleware)
+app.add_middleware(InFlightMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -115,15 +176,44 @@ if _DEV_ROUTES_ENABLED:
     logger.warning("DEV_ROUTES_ENABLED=true — dev/test routes are mounted. Never enable in production.")
 
 
+_WEB_CONCURRENCY = int(os.getenv("WEB_CONCURRENCY", "1"))
+
+
+def _check_redis_reachable() -> bool:
+    """Return True if REDIS_URL is set and Redis responds to PING."""
+    from config.settings import REDIS_URL as _REDIS_URL
+    if not _REDIS_URL:
+        return False
+    try:
+        import redis as _redis_lib
+        r = _redis_lib.from_url(_REDIS_URL, socket_connect_timeout=2, socket_timeout=2)
+        r.ping()
+        return True
+    except Exception as _e:
+        logger.warning(f"startup: Redis ping failed: {_e}")
+        return False
+
+
 @app.on_event("startup")
 async def startup():
-    if _IS_PROD and _JOB_QUEUE_BACKEND in ("local_file", "memory"):
-        raise RuntimeError(
-            f"JOB_QUEUE_BACKEND='{_JOB_QUEUE_BACKEND}' is not allowed in production. "
-            "Use JOB_QUEUE_BACKEND=db or JOB_QUEUE_BACKEND=sqs."
-        )
+    validate_production_config()
+
+    from services.job_queue import validate_queue_backend_for_environment
+    validate_queue_backend_for_environment()
     if _IS_PROD and _DEV_ROUTES_ENABLED:
         raise RuntimeError("DEV_ROUTES_ENABLED=true is not allowed in production.")
+
+    # Multi-worker Redis check — rate limiter already raises at import time,
+    # but we also verify here to catch any edge cases and log clearly.
+    if _WEB_CONCURRENCY > 1:
+        if not _check_redis_reachable():
+            raise RuntimeError(
+                f"WEB_CONCURRENCY={_WEB_CONCURRENCY} requires Redis. "
+                "Set REDIS_URL to a reachable Redis instance before starting multiple workers."
+            )
+        logger.info(f"startup: Redis reachable — distributed state active (WEB_CONCURRENCY={_WEB_CONCURRENCY})")
+    else:
+        logger.info("startup: WEB_CONCURRENCY=1 — in-process fallbacks are safe")
 
     # Initialize asyncpg connection pool
     await create_pool()
@@ -142,6 +232,13 @@ async def startup():
     except Exception as _e:
         logger.warning(f"Audit table init failed (non-fatal): {_e}")
 
+    # Encrypt any plaintext signature_data rows (idempotent — safe to run every boot)
+    try:
+        from scripts.encrypt_signature_data import run_migration
+        await run_migration()
+    except Exception as _e:
+        logger.warning(f"signature_data migration failed (non-fatal): {_e}")
+
     if _SCHEDULER_ENABLED:
         start_scheduler()
     else:
@@ -153,10 +250,33 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    global _shutting_down
+    _shutting_down = True
+    logger.info("Shutdown signal received — stopping new request acceptance")
+
+    try:
+        await asyncio.wait_for(drain_in_flight_requests(), timeout=30)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Graceful shutdown timed out after 30s with %d request(s) still in-flight",
+            _in_flight,
+        )
+
     if _SCHEDULER_ENABLED:
         stop_scheduler()
     await close_pool()
     logger.info("Database pool closed")
+
+
+def _handle_sigterm(signum, frame) -> None:
+    """SIGTERM handler: signal the app to begin graceful shutdown."""
+    logger.info("SIGTERM received — initiating graceful shutdown")
+    # Raise SystemExit so uvicorn's lifespan triggers the shutdown event
+    raise SystemExit(0)
+
+
+# Register SIGTERM handler so cloud/container orchestrators trigger graceful drain
+signal.signal(signal.SIGTERM, _handle_sigterm)
 
 
 @app.get("/")
@@ -170,6 +290,6 @@ async def health():
         async with get_pool().acquire() as conn:
             await conn.execute("SELECT 1")
         return {"status": "healthy"}
-    except Exception:
+    except Exception as e:
         logger.exception("Health check failed")
-        return {"status": "error"}
+        return JSONResponse(status_code=503, content={"status": "error", "detail": str(e)})

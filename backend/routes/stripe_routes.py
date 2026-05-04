@@ -12,6 +12,7 @@ from models.schemas import ApplyOverageRequest, CheckoutRequest, OverageCheckout
 from services.auth_service import get_current_user
 from services.email_service import _send_payment_failed_email
 from services.stripe_service import evaluate_package_limit, get_or_create_stripe_customer
+from utils.rate_limiter import check_verify_upgrade_rate_limit
 
 router = APIRouter(prefix="/api/stripe", tags=["stripe"])
 logger = logging.getLogger(__name__)
@@ -37,8 +38,8 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
         try:
             existing = stripe.Subscription.list(customer=customer_id, status="active", limit=5)
             for sub in existing.auto_paging_iter():
-                stripe.Subscription.cancel(getattr(sub, "id"))
-                logger.info(f"Cancelled old subscription {getattr(sub, 'id')} before plan change for customer {customer_id}")
+                stripe.Subscription.modify(getattr(sub, "id"), cancel_at_period_end=True)
+                logger.info(f"Set cancel_at_period_end=True for old subscription {getattr(sub, 'id')} before plan change for customer {customer_id}")
         except Exception as e:
             logger.warning(f"Could not cancel old subscriptions: {e}")
 
@@ -92,18 +93,6 @@ async def stripe_webhook(request: Request):
     event_type = event["type"]
     logger.info(f"Stripe webhook: {event_type} ({event_id})")
 
-    if event_id:
-        now_str = datetime.now(timezone.utc).isoformat()
-        async with get_pool().acquire() as conn:
-            status = await conn.execute(
-                "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
-                " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
-                event_id, event_type, now_str,
-            )
-        if int(status.split()[-1]) == 0:
-            logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
-            return {"received": True}
-
     # ASYNC-SAFE
     async def _resolve_user(obj):
         uid = obj.get("client_reference_id")
@@ -130,17 +119,28 @@ async def stripe_webhook(request: Request):
             sid = obj.get("id", "")
             if uid and qty > 0 and sid:
                 async with get_pool().acquire() as conn:
-                    existing = await conn.fetchrow(
-                        "SELECT stripe_session_id FROM applied_overage_sessions WHERE stripe_session_id = $1", sid
-                    )
-                    if not existing:
-                        now = datetime.now(timezone.utc).isoformat()
-                        await conn.execute(
-                            "UPDATE users SET packages_limit = packages_limit + $1 WHERE id = $2", qty, uid
+                    async with conn.transaction():
+                        if event_id:
+                            now_str = datetime.now(timezone.utc).isoformat()
+                            idempotency_status = await conn.execute(
+                                "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                                " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                                event_id, event_type, now_str,
+                            )
+                            if int(idempotency_status.split()[-1]) == 0:
+                                logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
+                                return {"received": True}
+                        existing = await conn.fetchrow(
+                            "SELECT stripe_session_id FROM applied_overage_sessions WHERE stripe_session_id = $1", sid
                         )
-                        await conn.execute(
-                            "INSERT INTO applied_overage_sessions VALUES ($1,$2,$3,$4)", sid, str(uid), qty, now
-                        )
+                        if not existing:
+                            now = datetime.now(timezone.utc).isoformat()
+                            await conn.execute(
+                                "UPDATE users SET packages_limit = packages_limit + $1 WHERE id = $2", qty, uid
+                            )
+                            await conn.execute(
+                                "INSERT INTO applied_overage_sessions VALUES ($1,$2,$3,$4)", sid, str(uid), qty, now
+                            )
             return {"received": True}
 
         if obj.get("mode") != "setup":
@@ -156,18 +156,29 @@ async def stripe_webhook(request: Request):
                 now = datetime.now(timezone.utc).isoformat()
                 stripe_customer = obj.get("customer")
                 async with get_pool().acquire() as conn:
-                    if stripe_customer:
+                    async with conn.transaction():
+                        if event_id:
+                            now_str = datetime.now(timezone.utc).isoformat()
+                            idempotency_status = await conn.execute(
+                                "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                                " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                                event_id, event_type, now_str,
+                            )
+                            if int(idempotency_status.split()[-1]) == 0:
+                                logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
+                                return {"received": True}
+                        if stripe_customer:
+                            await conn.execute(
+                                "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
+                                stripe_customer, user_id,
+                            )
                         await conn.execute(
-                            "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
-                            stripe_customer, user_id,
+                            """UPDATE users SET subscription_tier=$1, stripe_subscription_id=$2,
+                                packages_limit=$3, packages_used=0, billing_cycle=$4, billing_period_start=$5,
+                                overage_rate=$6, payment_status='ok', payment_failed_at=NULL,
+                                overage_packages_pending=0, overage_packages_invoiced=0 WHERE id=$7""",
+                            plan, sub_id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id,
                         )
-                    await conn.execute(
-                        """UPDATE users SET subscription_tier=$1, stripe_subscription_id=$2,
-                            packages_limit=$3, packages_used=0, billing_cycle=$4, billing_period_start=$5,
-                            overage_rate=$6, payment_status='ok', payment_failed_at=NULL,
-                            overage_packages_pending=0, overage_packages_invoiced=0 WHERE id=$7""",
-                        plan, sub_id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id,
-                    )
 
         customer_id = obj.get("customer")
         if customer_id:
@@ -225,13 +236,24 @@ async def stripe_webhook(request: Request):
         if sub_id:
             now = datetime.now(timezone.utc).isoformat()
             async with get_pool().acquire() as conn:
-                await conn.execute(
-                    """UPDATE users SET packages_used=0, billing_period_start=$1,
-                        payment_status='ok', payment_failed_at=NULL,
-                        overage_packages_pending=0, overage_packages_invoiced=0
-                        WHERE stripe_subscription_id=$2""",
-                    now, sub_id,
-                )
+                async with conn.transaction():
+                    if event_id:
+                        now_str = datetime.now(timezone.utc).isoformat()
+                        idempotency_status = await conn.execute(
+                            "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                            " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                            event_id, event_type, now_str,
+                        )
+                        if int(idempotency_status.split()[-1]) == 0:
+                            logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
+                            return {"received": True}
+                    await conn.execute(
+                        """UPDATE users SET packages_used=0, billing_period_start=$1,
+                            payment_status='ok', payment_failed_at=NULL,
+                            overage_packages_pending=0, overage_packages_invoiced=0
+                            WHERE stripe_subscription_id=$2""",
+                        now, sub_id,
+                    )
 
     elif event["type"] == "invoice.payment_failed":
         obj = json.loads(str(event["data"]["object"]))
@@ -242,16 +264,27 @@ async def stripe_webhook(request: Request):
         if sub_id:
             now = datetime.now(timezone.utc).isoformat()
             async with get_pool().acquire() as conn:
-                await conn.execute(
-                    "UPDATE users SET payment_status='failed',"
-                    " payment_failed_at=COALESCE(payment_failed_at,$1)"
-                    " WHERE stripe_subscription_id=$2",
-                    now, sub_id,
-                )
-                row = await conn.fetchrow(
-                    "SELECT email, full_name, payment_failed_at FROM users WHERE stripe_subscription_id = $1",
-                    sub_id,
-                )
+                async with conn.transaction():
+                    if event_id:
+                        now_str = datetime.now(timezone.utc).isoformat()
+                        idempotency_status = await conn.execute(
+                            "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                            " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                            event_id, event_type, now_str,
+                        )
+                        if int(idempotency_status.split()[-1]) == 0:
+                            logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
+                            return {"received": True}
+                    await conn.execute(
+                        "UPDATE users SET payment_status='failed',"
+                        " payment_failed_at=COALESCE(payment_failed_at,$1)"
+                        " WHERE stripe_subscription_id=$2",
+                        now, sub_id,
+                    )
+                    row = await conn.fetchrow(
+                        "SELECT email, full_name, payment_failed_at FROM users WHERE stripe_subscription_id = $1",
+                        sub_id,
+                    )
             if row:
                 row = dict(row)
                 failed_at_val = row.get("payment_failed_at")
@@ -271,13 +304,24 @@ async def stripe_webhook(request: Request):
         sub_id = json.loads(str(event["data"]["object"])).get("id")
         if sub_id:
             async with get_pool().acquire() as conn:
-                await conn.execute(
-                    "UPDATE users SET subscription_tier='free', packages_limit=0, packages_used=0,"
-                    " payment_status='ok', payment_failed_at=NULL, stripe_subscription_id=NULL,"
-                    " overage_packages_pending=0, overage_packages_invoiced=0"
-                    " WHERE stripe_subscription_id=$1",
-                    sub_id,
-                )
+                async with conn.transaction():
+                    if event_id:
+                        now_str = datetime.now(timezone.utc).isoformat()
+                        idempotency_status = await conn.execute(
+                            "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                            " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                            event_id, event_type, now_str,
+                        )
+                        if int(idempotency_status.split()[-1]) == 0:
+                            logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
+                            return {"received": True}
+                    await conn.execute(
+                        "UPDATE users SET subscription_tier='free', packages_limit=0, packages_used=0,"
+                        " payment_status='ok', payment_failed_at=NULL, stripe_subscription_id=NULL,"
+                        " overage_packages_pending=0, overage_packages_invoiced=0"
+                        " WHERE stripe_subscription_id=$1",
+                        sub_id,
+                    )
             logger.info(f"Subscription deleted: user downgraded to free for sub {sub_id}")
 
     elif event["type"] == "customer.subscription.updated":
@@ -293,31 +337,42 @@ async def stripe_webhook(request: Request):
         ) or "monthly"
         if sub_id:
             async with get_pool().acquire() as conn:
-                if new_plan and new_plan in PLANS and status == "active":
-                    cfg = PLANS[new_plan].get(new_cycle) or PLANS[new_plan]["monthly"]
-                    now = datetime.now(timezone.utc).isoformat()
-                    exec_status = await conn.execute(
-                        """UPDATE users SET subscription_tier=$1, billing_cycle=$2,
-                            packages_limit=$3, overage_rate=$4, packages_used=0,
-                            billing_period_start=$5
-                            WHERE stripe_subscription_id=$6 AND subscription_tier != $7""",
-                        new_plan, new_cycle, cfg["packages"], cfg["overage_rate"], now, sub_id, new_plan,
-                    )
-                    if int(exec_status.split()[-1]):
-                        logger.info(f"subscription.updated: synced plan={new_plan}, reset packages_used=0 for sub {sub_id}")
-                if cancel_at_period_end:
-                    await conn.execute(
-                        "UPDATE users SET payment_status='canceling'"
-                        " WHERE stripe_subscription_id=$1"
-                        " AND payment_status NOT IN ('failed','soft_locked','suspended','archived')",
-                        sub_id,
-                    )
-                elif status == "active" and not cancel_at_period_end:
-                    await conn.execute(
-                        "UPDATE users SET payment_status='ok', payment_failed_at=NULL"
-                        " WHERE stripe_subscription_id=$1 AND payment_status='canceling'",
-                        sub_id,
-                    )
+                async with conn.transaction():
+                    if event_id:
+                        now_str = datetime.now(timezone.utc).isoformat()
+                        idempotency_status = await conn.execute(
+                            "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                            " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                            event_id, event_type, now_str,
+                        )
+                        if int(idempotency_status.split()[-1]) == 0:
+                            logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
+                            return {"received": True}
+                    if new_plan and new_plan in PLANS and status == "active":
+                        cfg = PLANS[new_plan].get(new_cycle) or PLANS[new_plan]["monthly"]
+                        now = datetime.now(timezone.utc).isoformat()
+                        exec_status = await conn.execute(
+                            """UPDATE users SET subscription_tier=$1, billing_cycle=$2,
+                                packages_limit=$3, overage_rate=$4, packages_used=0,
+                                billing_period_start=$5
+                                WHERE stripe_subscription_id=$6 AND subscription_tier != $7""",
+                            new_plan, new_cycle, cfg["packages"], cfg["overage_rate"], now, sub_id, new_plan,
+                        )
+                        if int(exec_status.split()[-1]):
+                            logger.info(f"subscription.updated: synced plan={new_plan}, reset packages_used=0 for sub {sub_id}")
+                    if cancel_at_period_end:
+                        await conn.execute(
+                            "UPDATE users SET payment_status='canceling'"
+                            " WHERE stripe_subscription_id=$1"
+                            " AND payment_status NOT IN ('failed','soft_locked','suspended','archived')",
+                            sub_id,
+                        )
+                    elif status == "active" and not cancel_at_period_end:
+                        await conn.execute(
+                            "UPDATE users SET payment_status='ok', payment_failed_at=NULL"
+                            " WHERE stripe_subscription_id=$1 AND payment_status='canceling'",
+                            sub_id,
+                        )
 
     return {"received": True}
 
@@ -326,6 +381,7 @@ async def stripe_webhook(request: Request):
 @router.post("/verify-upgrade")
 async def verify_upgrade(current_user: dict = Depends(get_current_user)):
     from fastapi import HTTPException
+    check_verify_upgrade_rate_limit(str(current_user["id"]))
     user_email  = current_user.get("email")
     user_id     = current_user.get("id")
     customer_id = current_user.get("stripe_customer_id")
@@ -370,7 +426,7 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
                     await conn.execute(
                         """UPDATE users SET subscription_tier=$1, stripe_subscription_id=$2,
                             stripe_customer_id=$3, packages_limit=$4, billing_cycle=$5,
-                            billing_period_start=$6, overage_rate=$7, packages_used=0,
+                            billing_period_start=$6, overage_rate=$7,
                             payment_status='ok', payment_failed_at=NULL WHERE id=$8""",
                         plan, sub_id, customer.id, cfg["packages"], cycle,
                         now, cfg["overage_rate"], user_id,

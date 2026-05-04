@@ -104,6 +104,14 @@ class JobQueue(ABC):
         """
         return []
 
+    async def count_user_active_jobs(self, user_id: str) -> int:
+        """Return the number of pending/processing jobs for this user.
+
+        Default implementation scans list_pending — subclasses with DB access
+        should override with a targeted query for accuracy.
+        """
+        return 0
+
 
 # ---------------------------------------------------------------------------
 # InMemoryJobQueue
@@ -158,6 +166,12 @@ class InMemoryJobQueue(JobQueue):
             if j["status"] == STATUS_PENDING
         ][:limit]
 
+    async def count_user_active_jobs(self, user_id: str) -> int:
+        return sum(
+            1 for j in self._jobs.values()
+            if j["user_id"] == str(user_id) and j["status"] in (STATUS_PENDING, STATUS_PROCESSING)
+        )
+
 
 # ---------------------------------------------------------------------------
 # LocalFileJobQueue
@@ -176,7 +190,7 @@ class LocalFileJobQueue(JobQueue):
 
     def __init__(self, jobs_dir: str = _JOBS_DIR) -> None:
         self._dir = jobs_dir
-        os.makedirs(self._dir, exist_ok=True)
+        os.makedirs(self._dir, mode=0o700, exist_ok=True)
 
     def _path(self, job_id: str) -> str:
         # job_id is a UUID; no path traversal risk
@@ -190,7 +204,8 @@ class LocalFileJobQueue(JobQueue):
         session_id: Optional[str] = None,
     ) -> str:
         job = _build_job(job_type, payload, user_id, session_id)
-        with open(self._path(job["job_id"]), "w", encoding="utf-8") as fh:
+        fd = os.open(self._path(job["job_id"]), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(job, fh, default=str)
         return job["job_id"]
 
@@ -228,8 +243,26 @@ class LocalFileJobQueue(JobQueue):
             job["error_message"] = error
         if progress_message is not None:
             job["progress_message"] = progress_message
-        with open(path, "w", encoding="utf-8") as fh:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(job, fh, default=str)
+
+    async def count_user_active_jobs(self, user_id: str) -> int:
+        count = 0
+        try:
+            for name in os.listdir(self._dir):
+                if not name.endswith(".json"):
+                    continue
+                try:
+                    with open(os.path.join(self._dir, name), encoding="utf-8") as fh:
+                        job = json.load(fh)
+                    if job.get("user_id") == str(user_id) and job.get("status") in (STATUS_PENDING, STATUS_PROCESSING):
+                        count += 1
+                except (OSError, json.JSONDecodeError):
+                    continue
+        except OSError:
+            pass
+        return count
 
     async def list_pending(self, limit: int = 10) -> List[dict]:
         pending = []
@@ -255,6 +288,9 @@ class LocalFileJobQueue(JobQueue):
 # SqsJobQueue
 # ---------------------------------------------------------------------------
 
+_DLQ_MAX_RECEIVE_COUNT = 3  # Move to DLQ after this many receive attempts
+
+
 class SqsJobQueue(JobQueue):
     """AWS SQS-backed job queue with PostgreSQL status tracking.
 
@@ -262,8 +298,11 @@ class SqsJobQueue(JobQueue):
     can poll /api/jobs/<id>/status without reading SQS.
 
     Required env vars:
-      SQS_QUEUE_URL — full HTTPS URL of the SQS queue
-      AWS_REGION    — AWS region (default: us-east-1)
+      SQS_QUEUE_URL     — full HTTPS URL of the SQS queue
+      SQS_DLQ_URL       — full HTTPS URL of the dead-letter queue (optional;
+                          if set, messages that fail _DLQ_MAX_RECEIVE_COUNT
+                          times are moved here instead of re-queued)
+      AWS_REGION        — AWS region (default: us-east-1)
     """
 
     def __init__(self) -> None:
@@ -273,6 +312,7 @@ class SqsJobQueue(JobQueue):
             raise ValueError(
                 "SQS_QUEUE_URL env var is required for JOB_QUEUE_BACKEND=sqs"
             )
+        self._dlq_url = os.getenv("SQS_DLQ_URL", "").strip()
         self._sqs = boto3.client(
             "sqs",
             region_name=os.getenv("AWS_REGION", "us-east-1"),
@@ -280,7 +320,10 @@ class SqsJobQueue(JobQueue):
         # Status tracking lives in PostgreSQL via JobRepository.
         from repositories.job_repository import JobRepository
         self._db = JobRepository()
-        logger.info("SqsJobQueue initialised: queue=%s", self._queue_url)
+        if self._dlq_url:
+            logger.info("SqsJobQueue initialised: queue=%s dlq=%s", self._queue_url, self._dlq_url)
+        else:
+            logger.info("SqsJobQueue initialised: queue=%s (no DLQ configured)", self._queue_url)
 
     async def enqueue(
         self,
@@ -325,14 +368,56 @@ class SqsJobQueue(JobQueue):
         await self._db.update_status(job_id, status, result, error, progress_message)
 
     def receive_messages(self, max_messages: int = 1, wait_seconds: int = 20) -> list:
-        """Long-poll SQS for messages. Used by worker.py."""
+        """Long-poll SQS for messages. Used by worker.py.
+
+        Messages that have been received >= _DLQ_MAX_RECEIVE_COUNT times are
+        automatically routed to the DLQ (if configured) and excluded from the
+        returned list so the worker never processes them.
+        """
         resp = self._sqs.receive_message(
             QueueUrl=self._queue_url,
             MaxNumberOfMessages=max_messages,
             WaitTimeSeconds=wait_seconds,
             MessageAttributeNames=["All"],
+            AttributeNames=["ApproximateReceiveCount"],
         )
-        return resp.get("Messages", [])
+        messages = resp.get("Messages", [])
+        if not self._dlq_url:
+            return messages
+
+        clean: list = []
+        for msg in messages:
+            receive_count = int(msg.get("Attributes", {}).get("ApproximateReceiveCount", "1"))
+            if receive_count >= _DLQ_MAX_RECEIVE_COUNT:
+                self._route_to_dlq(msg)
+            else:
+                clean.append(msg)
+        return clean
+
+    def _route_to_dlq(self, msg: dict) -> None:
+        """Forward a poisoned message to the DLQ and delete it from the source queue."""
+        try:
+            self._sqs.send_message(
+                QueueUrl=self._dlq_url,
+                MessageBody=msg["Body"],
+                MessageAttributes=msg.get("MessageAttributes", {}),
+            )
+            logger.warning(
+                "SqsJobQueue: message moved to DLQ after %s receive attempts: %s",
+                msg.get("Attributes", {}).get("ApproximateReceiveCount", "?"),
+                msg.get("MessageId", "unknown"),
+            )
+        except Exception as ex:
+            logger.error("SqsJobQueue: failed to route message to DLQ: %s", ex)
+        finally:
+            # Always delete from source to avoid infinite re-delivery
+            try:
+                self._sqs.delete_message(
+                    QueueUrl=self._queue_url,
+                    ReceiptHandle=msg["ReceiptHandle"],
+                )
+            except Exception as ex:
+                logger.error("SqsJobQueue: failed to delete DLQ-routed message from source: %s", ex)
 
     def delete_message(self, receipt_handle: str) -> None:
         """Delete a processed message from SQS."""
@@ -341,6 +426,41 @@ class SqsJobQueue(JobQueue):
             ReceiptHandle=receipt_handle,
         )
 
+    def inspect_dlq(self, max_messages: int = 10) -> list:
+        """Peek at up to max_messages in the DLQ without consuming them.
+
+        Returns an empty list if no DLQ is configured or on error.
+        Used by the /api/admin/dlq-inspect endpoint.
+        """
+        if not self._dlq_url:
+            return []
+        try:
+            resp = self._sqs.receive_message(
+                QueueUrl=self._dlq_url,
+                MaxNumberOfMessages=min(max_messages, 10),
+                WaitTimeSeconds=0,
+                MessageAttributeNames=["All"],
+                AttributeNames=["All"],
+                VisibilityTimeout=0,  # peek only — message stays visible immediately
+            )
+            messages = resp.get("Messages", [])
+            result = []
+            for msg in messages:
+                try:
+                    body = json.loads(msg["Body"])
+                except (ValueError, KeyError):
+                    body = msg.get("Body", "")
+                result.append({
+                    "message_id":       msg.get("MessageId"),
+                    "receive_count":    msg.get("Attributes", {}).get("ApproximateReceiveCount"),
+                    "sent_at":          msg.get("Attributes", {}).get("ApproximateFirstReceiveTimestamp"),
+                    "body":             body,
+                })
+            return result
+        except Exception as ex:
+            logger.error("SqsJobQueue: inspect_dlq failed: %s", ex)
+            return []
+
 
 # ---------------------------------------------------------------------------
 # Factory
@@ -348,6 +468,19 @@ class SqsJobQueue(JobQueue):
 
 _BACKEND: str = os.getenv("JOB_QUEUE_BACKEND", "local_file").lower()
 _instance: Optional[JobQueue] = None
+
+
+_NON_DISTRIBUTED_BACKENDS = {"local_file", "memory"}
+
+
+def validate_queue_backend_for_environment() -> None:
+    """Raise RuntimeError if a non-distributed backend is used in production."""
+    _env = os.getenv("ENVIRONMENT", "development").lower()
+    if _env == "production" and _BACKEND in _NON_DISTRIBUTED_BACKENDS:
+        raise RuntimeError(
+            f"JOB_QUEUE_BACKEND='{_BACKEND}' is not allowed in production. "
+            "Use JOB_QUEUE_BACKEND=db or JOB_QUEUE_BACKEND=sqs."
+        )
 
 
 def get_job_queue() -> JobQueue:
@@ -360,6 +493,7 @@ def get_job_queue() -> JobQueue:
     """
     global _instance
     if _instance is None:
+        validate_queue_backend_for_environment()
         if _BACKEND == "local_file":
             _instance = LocalFileJobQueue()
         elif _BACKEND == "memory":

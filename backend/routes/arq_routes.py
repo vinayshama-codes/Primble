@@ -25,7 +25,7 @@ from services.arq_service import (
 )
 from services.auth_service import get_current_user
 from services.email_service import send_arq_email, send_arq_submitted_notification
-from utils.rate_limiter import check_arq_public_rate_limit, check_arq_submit_rate_limit, check_arq_chat_rate_limit
+from utils.rate_limiter import check_arq_public_rate_limit, check_arq_submit_rate_limit, check_arq_chat_rate_limit, get_client_ip
 
 router = APIRouter(prefix="/api/arq", tags=["arq"])
 logger = logging.getLogger(__name__)
@@ -152,7 +152,7 @@ async def send_arq(
 
 @router.get("/client-view/{token}")
 async def client_view(token: str, request: Request):
-    client_ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "unknown")).split(",")[0].strip()
+    client_ip = get_client_ip(request)
     check_arq_public_rate_limit(client_ip)
 
     if not token or len(token) > 128 or not re.match(r"^[a-f0-9\-]+$", token):
@@ -213,7 +213,7 @@ async def client_view(token: str, request: Request):
 
 @router.post("/submit/{token}")
 async def submit_arq(token: str, request: Request):
-    client_ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "unknown")).split(",")[0].strip()
+    client_ip = get_client_ip(request)
     check_arq_submit_rate_limit(client_ip)
 
     if not token or len(token) > 128:
@@ -285,7 +285,7 @@ async def submit_arq(token: str, request: Request):
 async def arq_chat(token: str, request: Request):
     from config.settings import groq_chat
 
-    client_ip = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "unknown")).split(",")[0].strip()
+    client_ip = get_client_ip(request)
     check_arq_chat_rate_limit(client_ip)
 
     if not token or len(token) > 128 or not re.match(r"^[a-f0-9\-]+$", token):

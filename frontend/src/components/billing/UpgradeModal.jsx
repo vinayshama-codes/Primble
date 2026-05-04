@@ -27,7 +27,8 @@ export default function UpgradeModal({ token, user, onClose, onError }) {
     try {
       const res  = await fetch(`${API_BASE}/api/stripe/create-checkout`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan: planId, billing_cycle: billing }),
       });
       const data = await res.json();

@@ -70,11 +70,11 @@ export default function Header({
                 onClick={() => {
                   setUpgradeFailed(false);
                   setUpgradeChecking(true);
-                  fetch(`${API_BASE}/api/stripe/verify-upgrade`, { method: "POST", headers: { Authorization: `Bearer ${token}` } })
+                  fetch(`${API_BASE}/api/stripe/verify-upgrade`, { method: "POST", credentials: "include" })
                     .then((r) => (r.ok ? r.json() : null))
                     .then((data) => {
                       if (data && data.subscription_tier && data.subscription_tier !== "free") {
-                        fetch(`${API_BASE}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+                        fetch(`${API_BASE}/api/auth/me`, { credentials: "include" })
                           .then((r) => (r.ok ? r.json() : null))
                           .then((me) => { if (me) setUser(me); });
                         setUpgradeChecking(false);

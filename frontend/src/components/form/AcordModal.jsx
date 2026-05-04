@@ -1,4 +1,4 @@
-//AcordModal.jsx
+﻿//AcordModal.jsx
 import { useState, useEffect, useRef } from "react";
 import { API_BASE } from "../../config/constants";
 import { gradeColor, barColor } from "../../utils/formatters";
@@ -90,7 +90,8 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
     try {
       const res = await fetch(`${API_BASE}/api/arq/send`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: sessionId,
           client_email: sanitizeEmail(clientEmail),
@@ -180,7 +181,7 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
   const [reminding, setReminding] = useState(null);
   const handleRemind = async (arq_id) => {
     setReminding(arq_id);
-    try { await fetch(`${API_BASE}/api/arq/remind/${arq_id}`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }); onRefresh(); } catch (_) {}
+    try { await fetch(`${API_BASE}/api/arq/remind/${arq_id}`, { method: "POST", credentials: "include" }); onRefresh(); } catch (_) {}
     setReminding(null);
   };
   const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
@@ -341,20 +342,21 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
 function DashboardStep({ token, onResume, onNewPackage }) {
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/sessions`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/sessions`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.success) setSessions(d.sessions || []); })
-      .catch(() => {})
+      .then(d => { if (d?.success) setSessions(d.sessions || []); else setLoadError("Could not load your sessions. Please refresh."); })
+      .catch(() => setLoadError("Network error loading sessions. Please refresh."))
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   const handleDelete = async sid => {
     setSessions(prev => prev.filter(s => s.session_id !== sid));
     setDeleteTarget(null);
-    try { await fetch(`${API_BASE}/api/sessions/${sid}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }); } catch (_) {}
+    try { await fetch(`${API_BASE}/api/sessions/${sid}`, { method: "DELETE", credentials: "include" }); } catch (_) {}
   };
 
   const fmtDate = iso => {
@@ -382,6 +384,12 @@ function DashboardStep({ token, onResume, onNewPackage }) {
   return (
     <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 0 48px" }}>
       {deleteTarget && <DeleteConfirmModal onConfirm={() => handleDelete(deleteTarget)} onCancel={() => setDeleteTarget(null)} />}
+
+      {loadError && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "12px 16px", marginBottom: 20, color: "#dc2626", fontSize: 13 }}>
+          ⚠️ {loadError}
+        </div>
+      )}
 
       {/* ── Header ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
@@ -511,7 +519,7 @@ function DashboardStep({ token, onResume, onNewPackage }) {
                           </span>
                         )}
                         {s.form_ids?.slice(0, 4).map(fid => (
-                          <span key={fid} style={{ fontSize: 11, color: "#64748b", background: "#f1f5f9", border: "1px solid #e8edf5", borderRadius: 5, padding: "2px 7px", fontWeight: 500 }}>{fid}</span>
+                          <span key={fid} style={{ fontSize: 11, color: "#64748b", background: "#f1f5f9", border: "1px solid #e8edf5", borderRadius: 5, padding: "2px 7px", fontWeight: 500 }}>{fid.replace(/_/g, " ")}</span>
                         ))}
                         {(s.form_ids?.length || 0) > 4 && <span style={{ fontSize: 11, color: "#94a3b8" }}>+{s.form_ids.length - 4}</span>}
                         {s.lines?.length > 0 && (
@@ -627,7 +635,7 @@ export default function AcordModal({
 
   useEffect(() => {
     if (step !== "lite" || !sessionId || !token) return;
-    fetch(`${API_BASE}/api/lite/generate-internal/${sessionId}`, { method: "POST", headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/lite/generate-internal/${sessionId}`, { method: "POST", credentials: "include" })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.success) setLiteSqsData(d); })
       .catch(() => {});
@@ -636,7 +644,7 @@ export default function AcordModal({
   useEffect(() => {
     if (!resumeSessionId) return;
     setLoading(true); setProcessingStage("Restoring your session...");
-    fetch(`${API_BASE}/api/session/${resumeSessionId}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/session/${resumeSessionId}`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
@@ -646,7 +654,7 @@ export default function AcordModal({
           setPdfLoading(readyMap); setStep("editor");
         } else { setStep("dashboard"); setSessionId(null); }
       })
-      .catch(() => { setStep("dashboard"); setSessionId(null); })
+      .catch(() => { setError("Could not restore session. Please try again."); setStep("dashboard"); setSessionId(null); })
       .finally(() => { setLoading(false); setProcessingStage(""); });
   }, [resumeSessionId]); // eslint-disable-line
 
@@ -670,12 +678,12 @@ export default function AcordModal({
 
   const refreshArqData = async () => {
     if (!sessionId || !token) return [];
-    fetch(`${API_BASE}/api/arq/list/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/arq/list/${sessionId}`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null).then(d => { if (d?.success) setArqSessions(d.arq_sessions || []); }).catch(() => {});
-    fetch(`${API_BASE}/api/arq/notifications`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/arq/notifications`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null).then(d => { if (d?.notifications) setArqNotifCount(d.notifications.filter(n => !n.read_status).length); }).catch(() => {});
     try {
-      const r = await fetch(`${API_BASE}/api/arq/client-filled/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const r = await fetch(`${API_BASE}/api/arq/client-filled/${sessionId}`, { credentials: "include" });
       const d = r.ok ? await r.json() : null;
       const fields = d?.client_filled_fields || [];
       setClientFilledFields(fields); return fields;
@@ -686,7 +694,7 @@ export default function AcordModal({
     if (!sessionId) return;
     setArqLoadingQ(true);
     try {
-      const res = await fetch(`${API_BASE}/api/arq/generate/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/arq/generate/${sessionId}`, { credentials: "include" });
       const data = await res.json();
       if (res.ok && data.success) { setArqQuestions(data.questions || []); setShowARQModal(true); }
       else setError(data.detail || "Failed to generate questions.");
@@ -727,7 +735,7 @@ export default function AcordModal({
 
   const handleResumeSession = sid => {
     setLoading(true); setProcessingStage("Restoring session…"); setSessionId(sid);
-    fetch(`${API_BASE}/api/session/${sid}`, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`${API_BASE}/api/session/${sid}`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
@@ -737,7 +745,7 @@ export default function AcordModal({
           setPdfLoading(readyMap); setStep("editor");
         } else { setStep("upload"); setSessionId(null); }
       })
-      .catch(() => { setStep("upload"); setSessionId(null); })
+      .catch(() => { setError("Could not load session. Please try again."); setStep("upload"); setSessionId(null); })
       .finally(() => { setLoading(false); setProcessingStage(""); });
   };
 
@@ -745,7 +753,7 @@ export default function AcordModal({
     if (!formId || !sessionId) return;
     setEpicLoading(true); setEpicSuccess(false);
     try {
-      const res = await fetch(`${API_BASE}/api/send-to-epic/${sessionId}/${formId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/send-to-epic/${sessionId}/${formId}`, { credentials: "include" });
       const data = await res.json();
       if (res.ok && data.success) { setEpicSuccess(true); setTimeout(() => setEpicSuccess(false), 3500); }
       else setError(data.detail || "Failed to send to EPIC.");
@@ -762,7 +770,7 @@ export default function AcordModal({
     if (!acordLicenseChecked) return;
     setAcordModalLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/acord/confirm-license`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/acord/confirm-license`, { method: "POST", credentials: "include" });
       if (res.ok) { onUserUpdate({ ...user, acord_license_confirmed: true }); setShowAcordModal(false); if (acordModalAction) acordModalAction(); }
       else setError("License confirmation failed. Please try again.");
     } catch { setError("Network error during license confirmation."); }
@@ -772,7 +780,7 @@ export default function AcordModal({
   const _doDownloadOne = async formId => {
     setLoading(true); setShowDownloadOverlay(true);
     try {
-      const res = await fetch(`${API_BASE}/api/download-pdf/${sessionId}/${formId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/download-pdf/${sessionId}/${formId}`, { credentials: "include" });
       if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.payment_locked) { setError("Account payment overdue."); return; } if (d.upgrade_required) { onShowUpgrade(); return; } setError(d.message || "Download blocked"); return; }
       if (!res.ok) { setError("Download failed"); return; }
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
@@ -789,7 +797,7 @@ export default function AcordModal({
   const _doDownloadAll = async () => {
     setLoading(true); setShowDownloadOverlay(true);
     try {
-      const res = await fetch(`${API_BASE}/api/download-all/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/download-all/${sessionId}`, { credentials: "include" });
       if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.payment_locked) { setError("Account payment overdue."); return; } if (d.upgrade_required) { onShowUpgrade(); return; } setError(d.message || "Download blocked"); return; }
       if (!res.ok) { setError("Download failed"); return; }
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
@@ -804,7 +812,7 @@ export default function AcordModal({
   };
 
   const refreshUser = async () => {
-    const res = await fetch(`${API_BASE}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(`${API_BASE}/api/auth/me`, { credentials: "include" });
     if (res.ok) { const data = await res.json(); onUserUpdate(data); }
   };
 
@@ -813,7 +821,7 @@ export default function AcordModal({
     setLoading(true); setError(null); setShowUploadOverlay(true);
     const fd = new FormData(); files.forEach(f => fd.append("files", f));
     try {
-      const res = await fetch(`${API_BASE}/api/upload-declaration`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+      const res = await fetch(`${API_BASE}/api/upload-declaration`, { method: "POST", credentials: "include", body: fd });
       const data = await res.json();
       if (res.status === 401) { setError("Session expired. Please sign in again."); setTimeout(() => { localStorage.removeItem("acordly_token"); window.location.reload(); }, 2000); return; }
       if (res.status === 403) { if (data.upgrade_required) { onShowUpgrade(); return; } const msg = data.detail || data.message || "Access blocked."; if (msg.includes("suspended")) setError("Your account is suspended."); else if (msg.includes("archived")) setError("Account archived. Contact support."); else if (msg.includes("soft_locked") || msg.includes("locked")) setError("Account Disabled — please update billing."); else setError(msg); return; }
@@ -833,7 +841,7 @@ export default function AcordModal({
     if (!ids.length) { setError("Select at least one form"); return; }
     setLoading(true); setError(null); setShowGenerateOverlay(true);
     try {
-      const res = await fetch(`${API_BASE}/api/select-forms-bulk`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ session_id: sessionId, form_ids: ids }) });
+      const res = await fetch(`${API_BASE}/api/select-forms-bulk`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, form_ids: ids }) });
       const data = await res.json();
       if (res.status === 403) {
         const msg = data.detail || data.message || "";
@@ -903,7 +911,8 @@ export default function AcordModal({
     }
     fetch(`${API_BASE}/api/audit/dismiss`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         session_id: sessionId,
         rec_id: id,
@@ -922,8 +931,8 @@ export default function AcordModal({
     setDownloadPreflightLoading(true);
     try {
       const [recsRes, narrativeRes] = await Promise.allSettled([
-        fetch(`${API_BASE}/api/audit/open/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_BASE}/api/sqs/narrative/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE}/api/audit/open/${sessionId}`, { credentials: "include" }),
+        fetch(`${API_BASE}/api/sqs/narrative/${sessionId}`, { credentials: "include" }),
       ]);
       const recsData = recsRes.status === "fulfilled" && recsRes.value.ok ? await recsRes.value.json() : null;
       const openRecs = recsData?.open_recommendations || [];
@@ -942,7 +951,8 @@ export default function AcordModal({
     // Fire audit log in background — don't block the download
     fetch(`${API_BASE}/api/audit/download-anyway`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, override_reason: preflightOverrideReason.trim() }),
     }).catch(() => {});
     if (preflightCallback) preflightCallback();
@@ -954,7 +964,7 @@ export default function AcordModal({
   const handleLiteCoverSheet = async () => {
     setLiteCoverLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/lite/cover-sheet/${sessionId}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/lite/cover-sheet/${sessionId}`, { credentials: "include" });
       if (!res.ok) { setError("Failed to generate cover sheet."); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
