@@ -87,6 +87,7 @@ function AppContent() {
   const [upgradeFailed,       setUpgradeFailed]       = useState(false);
   const [overageToast,        setOverageToast]        = useState(null);
   const [marketingPage,       setMarketingPage]       = useState(null);
+  const [portalRedirecting,   setPortalRedirecting]   = useState(false);
 
   // Parse Stripe redirect params once at mount; clear them from the URL immediately
   // so the hook is driven by confirmed Stripe redirects only, not arbitrary URL visits.
@@ -158,13 +159,13 @@ function AppContent() {
   }, []); // eslint-disable-line
 
   const openBillingPortal = async () => {
-    setUpgradeChecking(true);
+    setPortalRedirecting(true);
     try {
       const res  = await fetch(`${API_BASE}/api/stripe/create-portal-session`, { method: "POST", credentials: "include" });
       const data = await res.json();
       if (data.url) { window.location.href = data.url; }
-      else { setUpgradeChecking(false); setHeaderError(data.detail || "Could not open billing portal."); }
-    } catch { setUpgradeChecking(false); setHeaderError("Network error. Please try again."); }
+      else { setPortalRedirecting(false); setHeaderError(data.detail || "Could not open billing portal."); }
+    } catch { setPortalRedirecting(false); setHeaderError("Network error. Please try again."); }
   };
 
   const handleGetStarted = (planId, billingCycle) => {
@@ -191,7 +192,7 @@ function AppContent() {
     if (!planId) return false;
     sessionStorage.removeItem("acordly_pending_plan");
     sessionStorage.removeItem("acordly_pending_billing_cycle");
-    setUpgradeChecking(true);
+    setPortalRedirecting(true);
     try {
       const res  = await fetch(`${API_BASE}/api/stripe/create-checkout`, {
         method: "POST", credentials: "include",
@@ -203,10 +204,10 @@ function AppContent() {
         window.location.href = data.checkout_url;
         return true;
       }
-      setUpgradeChecking(false);
+      setPortalRedirecting(false);
       setHeaderError(data.detail || "Failed to start checkout. Please try again.");
     } catch {
-      setUpgradeChecking(false);
+      setPortalRedirecting(false);
       setHeaderError("Network error. Please try again.");
     }
     return false;
@@ -235,6 +236,13 @@ function AppContent() {
       )}
 
       {upgradeChecking && <UpgradeStageOverlay />}
+
+      {portalRedirecting && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(255,255,255,0.97)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+          <div className="loading-spinner" style={{ width: 40, height: 40, marginBottom: 16 }} />
+          <p style={{ color: "#64748b", fontSize: 15, fontWeight: 500 }}>Redirecting to Stripe…</p>
+        </div>
+      )}
 
       {resumeLoading && (
         <div style={{ position: "fixed", inset: 0, background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
@@ -285,7 +293,7 @@ function AppContent() {
       ) : marketingPage === "platform" ? (
         <><PlatformPage onGetStarted={handleGetStarted} onNavigate={handleNavigate} /><MarketingFooter /></>
       ) : marketingPage === "pricing" ? (
-        <><PricingPage onGetStarted={handleGetStarted} onNavigate={handleNavigate} token={token} user={user} onError={(msg) => setHeaderError(msg)} /><MarketingFooter /></>
+        <><PricingPage onGetStarted={handleGetStarted} onNavigate={handleNavigate} token={token} user={user} onError={(msg) => setHeaderError(msg)} openBillingPortal={openBillingPortal} /><MarketingFooter /></>
       ) : marketingPage === "acord-license" ? (
         <><AcordLicensePage /><MarketingFooter /></>
       ) : (
@@ -328,6 +336,7 @@ function AppContent() {
         <UpgradeModal token={token} user={user}
           onClose={() => setShowUpgradeModal(false)}
           onError={(msg) => { setShowUpgradeModal(false); setHeaderError(msg); }}
+          openBillingPortal={openBillingPortal}
         />
       )}
 

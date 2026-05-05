@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 @router.post("/create-checkout")
 async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get_current_user)):
     from fastapi import HTTPException
+    if not stripe.api_key:
+        raise HTTPException(500, "Stripe is not configured. Contact support.")
+
     plan = req.plan.lower()
     cycle = req.billing_cycle.lower()
     if plan == "enterprise":
@@ -34,14 +37,6 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
     plan_label = f"Acordly {plan.title()} — {'Annual' if cycle == 'annual' else 'Monthly'}"
 
     customer_id = current_user.get("stripe_customer_id")
-    if customer_id:
-        try:
-            existing = stripe.Subscription.list(customer=customer_id, status="active", limit=5)
-            for sub in existing.auto_paging_iter():
-                stripe.Subscription.modify(getattr(sub, "id"), cancel_at_period_end=True)
-                logger.info(f"Set cancel_at_period_end=True for old subscription {getattr(sub, 'id')} before plan change for customer {customer_id}")
-        except Exception as e:
-            logger.warning(f"Could not cancel old subscriptions: {e}")
 
     try:
         checkout_kwargs = dict(
@@ -51,7 +46,7 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
                 "unit_amount": plan_cfg["amount"],
                 "recurring": {"interval": plan_cfg["interval"]}}, "quantity": 1}],
             mode="subscription",
-            success_url=f"{FRONTEND_URL}?upgraded=true&plan={plan}",
+            success_url=f"{FRONTEND_URL}?upgraded=true&plan={plan}&session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{FRONTEND_URL}?upgraded=false",
             client_reference_id=str(current_user["id"]),
             metadata={"plan": plan, "billing_cycle": cycle, "user_id": str(current_user["id"])},
@@ -66,6 +61,11 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
 
         session = stripe.checkout.Session.create(**checkout_kwargs)
         return {"checkout_url": session.url}
+    except stripe.error.AuthenticationError:
+        raise HTTPException(500, "Stripe API key is invalid. Contact support.")
+    except stripe.error.StripeError as e:
+        logger.error(f"Stripe checkout error: {e}")
+        raise HTTPException(500, str(e.user_message or e) or "Payment processing failed.")
     except Exception as e:
         logger.error(f"Stripe checkout error: {e}")
         raise HTTPException(500, "Payment processing failed. Please try again.")
@@ -179,6 +179,18 @@ async def stripe_webhook(request: Request):
                                 overage_packages_pending=0, overage_packages_invoiced=0 WHERE id=$7""",
                             plan, sub_id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id,
                         )
+                # Cancel all other active subscriptions for this customer
+                if stripe_customer and sub_id:
+                    try:
+                        for st in ("active", "past_due", "trialing"):
+                            old_subs = stripe.Subscription.list(customer=stripe_customer, status=st, limit=10)
+                            for old_sub in old_subs.auto_paging_iter():
+                                old_id = getattr(old_sub, "id", None)
+                                if old_id and old_id != sub_id:
+                                    stripe.Subscription.cancel(old_id)
+                                    logger.info(f"Canceled old subscription {old_id} after new plan {plan} activated")
+                    except Exception as ce:
+                        logger.warning(f"Could not cancel old subscriptions: {ce}")
 
         customer_id = obj.get("customer")
         if customer_id:
@@ -669,14 +681,21 @@ async def create_portal_session(user: dict = Depends(get_current_user)):
                         existing_cfg["packages"], existing_cfg["overage_rate"], user["id"],
                     )
                 logger.info(f"Restored subscription {existing_sub.id} for user {user['id']} from Stripe")
-                setup_session = stripe.checkout.Session.create(
-                    customer=customer.id,
-                    payment_method_types=["card"],
-                    mode="setup",
-                    success_url=f"{FRONTEND_URL}?billing_updated=true",
-                    cancel_url=FRONTEND_URL,
-                )
-                return {"url": setup_session.url}
+                try:
+                    portal_session = stripe.billing_portal.Session.create(
+                        customer=customer.id,
+                        return_url=f"{FRONTEND_URL}?billing_updated=true",
+                    )
+                    return {"url": portal_session.url}
+                except stripe.error.InvalidRequestError:
+                    setup_session = stripe.checkout.Session.create(
+                        customer=customer.id,
+                        payment_method_types=["card"],
+                        mode="setup",
+                        success_url=f"{FRONTEND_URL}?billing_updated=true",
+                        cancel_url=FRONTEND_URL,
+                    )
+                    return {"url": setup_session.url}
 
             checkout = stripe.checkout.Session.create(
                 customer=customer.id,
@@ -708,14 +727,26 @@ async def create_portal_session(user: dict = Depends(get_current_user)):
             raise HTTPException(500, "Could not open billing. Please contact support.")
 
     try:
-        session = stripe.checkout.Session.create(
+        session = stripe.billing_portal.Session.create(
             customer=user["stripe_customer_id"],
-            payment_method_types=["card"],
-            mode="setup",
-            success_url=f"{FRONTEND_URL}?billing_updated=true",
-            cancel_url=FRONTEND_URL,
+            return_url=f"{FRONTEND_URL}?billing_updated=true",
         )
         return {"url": session.url}
+    except stripe.error.InvalidRequestError as ex:
+        # Portal not configured in Stripe dashboard — fall back to setup-mode checkout
+        logger.warning(f"Billing portal not configured, falling back to setup session: {ex}")
+        try:
+            setup_session = stripe.checkout.Session.create(
+                customer=user["stripe_customer_id"],
+                payment_method_types=["card"],
+                mode="setup",
+                success_url=f"{FRONTEND_URL}?billing_updated=true",
+                cancel_url=FRONTEND_URL,
+            )
+            return {"url": setup_session.url}
+        except Exception as inner_ex:
+            logger.error(f"Setup session fallback failed: {inner_ex}")
+            raise HTTPException(500, "Could not open billing portal.")
     except Exception as ex:
         logger.error(f"Portal session failed: {ex}")
         raise HTTPException(500, "Could not open billing portal.")

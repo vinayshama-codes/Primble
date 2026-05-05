@@ -14,9 +14,17 @@ const CrossIcon = () => (
   </svg>
 );
 
-export default function UpgradeModal({ token, user, onClose, onError }) {
+export default function UpgradeModal({ token, user, onClose, onError, openBillingPortal }) {
   const [billing, setBilling]         = useState("annual");
   const [loadingPlan, setLoadingPlan] = useState(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+
+  const handleManageBilling = async () => {
+    if (!openBillingPortal) return;
+    setPortalLoading(true);
+    try { await openBillingPortal(); }
+    finally { setPortalLoading(false); }
+  };
 
   const handleSelect = async (planId) => {
     if (planId === "enterprise") {
@@ -60,6 +68,18 @@ export default function UpgradeModal({ token, user, onClose, onError }) {
             {user?.subscription_tier === "free" && user?.downloads_remaining <= 0 && (
               <p style={{ fontSize: 15, color: "var(--text-secondary)", marginBottom: 0 }}>
                 You've used all your free submissions. Upgrade to continue.
+              </p>
+            )}
+            {user?.subscription_tier && user.subscription_tier !== "free" && openBillingPortal && (
+              <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 0 }}>
+                Need to update your payment method?{" "}
+                <button
+                  onClick={handleManageBilling}
+                  disabled={portalLoading || anyLoading}
+                  style={{ background: "none", border: "none", padding: 0, color: "var(--primary)", fontWeight: 600, cursor: "pointer", fontSize: 13, textDecoration: "underline" }}
+                >
+                  {portalLoading ? "Opening…" : "Manage billing"}
+                </button>
               </p>
             )}
           </div>
