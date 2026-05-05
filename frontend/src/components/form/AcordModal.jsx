@@ -1115,7 +1115,7 @@ export default function AcordModal({
           const rd = sqs?.routing_decision;
           const rs = routingStyle[rd] || { bg: "#f1f5f9", color: "#475569", border: "#e2e8f0" };
           return (
-            <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 4px" }}>
+            <div style={{ maxWidth: 960, margin: "0 auto", padding: "0 16px" }}>
 
               {/* ── Page header ── */}
               <div style={{ marginBottom: 28 }}>
@@ -1127,7 +1127,7 @@ export default function AcordModal({
               </div>
 
               {/* ── SQS hero card ── */}
-              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 20, padding: "28px 32px", marginBottom: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
+              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 20, padding: "28px 36px", marginBottom: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
                 {!sqs ? (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 0", gap: 14 }}>
                     <span style={{ width: 40, height: 40, border: "3px solid #e2e8f0", borderTopColor: "#e6007a", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
@@ -1177,71 +1177,85 @@ export default function AcordModal({
                       </div>
                     </div>
 
-                    {/* Stops */}
+                    {/* Stops — side by side on desktop, stacked on mobile */}
                     {(liteSqsData?.hard_stops?.length > 0 || liteSqsData?.soft_stops?.length > 0) && (
-                      <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-                        {liteSqsData?.hard_stops?.length > 0 && (
-                          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px" }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 5 }}>🚫 Hard Stops — Must Resolve Before Submission</div>
-                            {liteSqsData.hard_stops.map((s, i) => <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "1px 0" }}>• {s}</div>)}
-                          </div>
-                        )}
-                        {liteSqsData?.soft_stops?.length > 0 && (
-                          <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 14px" }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 5 }}>⚠️ Warnings — Will Cap Your Score</div>
-                            {liteSqsData.soft_stops.map((s, i) => <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "1px 0" }}>• {s}</div>)}
-                          </div>
-                        )}
+                      <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 16 }}>
+                        <div className="lite-stops-grid">
+                          {liteSqsData?.hard_stops?.length > 0 && (
+                            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px" }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>🚫 Hard Stops — Must Resolve Before Submission</div>
+                              {liteSqsData.hard_stops.map((s, i) => (
+                                <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0", display: "flex", gap: 6 }}>
+                                  <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {liteSqsData?.soft_stops?.length > 0 && (
+                            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px" }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 7 }}>⚠️ Warnings — Will Cap Your Score</div>
+                              {liteSqsData.soft_stops.map((s, i) => (
+                                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0", display: "flex", gap: 6 }}>
+                                  <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* ── Action buttons ── */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 24 }}>
+              {/* ── Action cards ── */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24 }}>
 
                 {/* Send to Client (ARQ) */}
-                <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 16, padding: "22px 22px 18px", display: "flex", flexDirection: "column", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+                <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 16, padding: "22px 24px 20px", display: "flex", flexDirection: "column", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
                   <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e6007a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Send to Client</div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.5, flex: 1 }}>Client-in-the-Loop™ — send a targeted questionnaire to fill gaps and improve your score.</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.55, flex: 1 }}>Client-in-the-Loop™ — send a targeted questionnaire to fill gaps and improve your score.</div>
                   <button onClick={handleOpenARQ} disabled={arqLoadingQ}
-                    style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: arqLoadingQ ? "#e2e8f0" : "#e6007a", color: arqLoadingQ ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s" }}
-                    onMouseEnter={e => { if (!arqLoadingQ) e.currentTarget.style.background = "#c00066"; }}
-                    onMouseLeave={e => { if (!arqLoadingQ) e.currentTarget.style.background = "#e6007a"; }}>
+                    style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: arqLoadingQ ? "#e2e8f0" : "#e6007a", color: arqLoadingQ ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: arqLoadingQ ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
+                    onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
+                    onMouseLeave={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
                     {arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client (ARQ)"}
                   </button>
                   <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
                 </div>
 
                 {/* Cover Summary */}
-                <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 16, padding: "22px 22px 18px", display: "flex", flexDirection: "column", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(15,23,42,0.06)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 16, padding: "22px 24px 20px", display: "flex", flexDirection: "column", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e6007a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Cover Summary</div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.5, flex: 1 }}>AI-generated SQS narrative cover sheet — submittable with any platform, ready to download.</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.55, flex: 1 }}>AI-generated SQS narrative cover sheet — submittable with any platform, ready to download.</div>
                   <button onClick={handleLiteCoverSheet} disabled={liteCoverLoading}
-                    style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: liteCoverLoading ? "#e2e8f0" : "#0f172a", color: liteCoverLoading ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: liteCoverLoading ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s" }}
-                    onMouseEnter={e => { if (!liteCoverLoading) e.currentTarget.style.background = "#1e293b"; }}
-                    onMouseLeave={e => { if (!liteCoverLoading) e.currentTarget.style.background = "#0f172a"; }}>
+                    style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: liteCoverLoading ? "#e2e8f0" : "#e6007a", color: liteCoverLoading ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: liteCoverLoading ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: liteCoverLoading ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
+                    onMouseEnter={e => { if (!liteCoverLoading) { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
+                    onMouseLeave={e => { if (!liteCoverLoading) { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
                     {liteCoverLoading ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Generating…</> : "Cover Summary"}
                   </button>
                 </div>
               </div>
 
               {/* ── Footer nav ── */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 4 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 4, gap: 12 }}>
                 <button onClick={() => { resetToUpload(); }}
-                  style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 18px", fontSize: 13, color: "#64748b", cursor: "pointer", fontFamily: "inherit" }}>
+                  style={{ padding: "10px 22px", borderRadius: 10, border: "1.5px solid #e2e8f0", background: "#fff", color: "#475569", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(0,0,0,0.07)", transition: "box-shadow 0.15s, transform 0.15s, border-color 0.15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)"; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
+                  onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.07)"; e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "#e2e8f0"; }}>
                   ← New Submission
                 </button>
                 <button onClick={onShowUpgrade}
-                  style={{ background: "none", border: "none", color: "#e6007a", fontWeight: 700, cursor: "pointer", padding: 0, fontSize: 13, fontFamily: "inherit" }}>
-                  Unlock Full Forms — Upgrade →
+                  style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: "rgba(230,0,122,0.07)", color: "#e6007a", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(230,0,122,0.10)", transition: "box-shadow 0.15s, transform 0.15s, background 0.15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(230,0,122,0.13)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.18)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(230,0,122,0.07)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(230,0,122,0.10)"; e.currentTarget.style.transform = "none"; }}>
+                  Unlock Full Forms
                 </button>
               </div>
             </div>

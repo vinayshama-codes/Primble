@@ -3242,6 +3242,13 @@ body {
   border-radius: var(--radius-full);
   white-space: nowrap;
 }
+.mkt-plan-badge-current {
+  background: #0f172a;
+}
+.mkt-plan-current {
+  border-color: #0f172a;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.1);
+}
 .mkt-plan-name {
   font-size: 16px;
   font-weight: 700;
@@ -3664,4 +3671,17 @@ body {
   .mkt-process-strip { grid-template-columns: 1fr; }
   .mkt-hero-cards { flex-direction: column; align-items: center; }
   .mkt-hero-card { min-width: 200px; width: 100%; max-width: 280px; }
+}
+
+/* ── Essentials lite view: stops side-by-side ── */
+.lite-stops-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .lite-stops-grid {
+    grid-template-columns: 1fr;
+  }
 }

@@ -17,11 +17,7 @@ export const PLANS = [
       "Coversheet & submittable narrative",
       "Unlimited users",
     ],
-    missing: [
-      "ACORD form generation",
-      "Form downloads",
-      "Guided form completion",
-    ],
+    missing: [],
   },
   {
     id: "professional",

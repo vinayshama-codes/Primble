@@ -2,6 +2,8 @@ import { useState } from "react";
 import { API_BASE } from "../../config/constants";
 import { PLANS } from "../billing/plans";
 
+const PLAN_ORDER = ["essentials", "professional", "business", "enterprise"];
+
 const BILLING_STATES = [
   {
     title: "Payment failed (soft lock)",
@@ -25,15 +27,34 @@ export default function PricingPage({ onGetStarted, token, user, onError }) {
   const [annual, setAnnual]           = useState(false);
   const [loadingPlan, setLoadingPlan] = useState(null);
 
+  const currentTier = user?.subscription_tier || "free";
+  const currentIdx  = PLAN_ORDER.indexOf(currentTier);
+
+  const getPlanState = (planId) => {
+    if (planId === currentTier) return "current";
+    const planIdx = PLAN_ORDER.indexOf(planId);
+    if (currentIdx === -1 || planIdx === -1) return "upgrade";
+    return planIdx > currentIdx ? "upgrade" : "downgrade";
+  };
+
+  const getCtaLabel = (plan) => {
+    if (!token) return plan.id === "enterprise" ? "Contact sales" : "Get started";
+    const state = getPlanState(plan.id);
+    if (state === "current") return "Current plan";
+    if (plan.id === "enterprise") return "Contact sales";
+    return state === "upgrade" ? "Upgrade" : "Downgrade";
+  };
+
   const handleSelect = async (planId) => {
     if (planId === "enterprise") {
       window.location.href = "mailto:sales@acordly.ai?subject=Enterprise Plan Inquiry";
       return;
     }
     if (!token) {
-      onGetStarted();
+      onGetStarted(planId, annual ? "annual" : "monthly");
       return;
     }
+    if (planId === currentTier) return;
     setLoadingPlan(planId);
     try {
       const res  = await fetch(`${API_BASE}/api/stripe/create-checkout`, {
@@ -96,9 +117,17 @@ export default function PricingPage({ onGetStarted, token, user, onError }) {
               const isLoading = loadingPlan === plan.id;
               const price     = plan.monthlyPrice !== null ? (annual ? plan.annualPrice : plan.monthlyPrice) : null;
 
+              const planState  = getPlanState(plan.id);
+              const ctaLabel   = getCtaLabel(plan);
+              const isCurrent  = token && planState === "current";
+              const isDisabled = anyLoading || isCurrent;
+
               return (
-                <div key={plan.id} className={`mkt-plan-card ${plan.featured ? "mkt-plan-featured" : ""}`}>
-                  {plan.badge && <div className="mkt-plan-badge">{plan.badge}</div>}
+                <div key={plan.id} className={`mkt-plan-card ${plan.featured ? "mkt-plan-featured" : ""} ${isCurrent ? "mkt-plan-current" : ""}`}>
+                  {isCurrent
+                    ? <div className="mkt-plan-badge mkt-plan-badge-current">Your plan</div>
+                    : plan.badge && <div className="mkt-plan-badge">{plan.badge}</div>
+                  }
                   <div className="mkt-plan-name">{plan.name}</div>
 
                   {price !== null ? (
@@ -122,17 +151,21 @@ export default function PricingPage({ onGetStarted, token, user, onError }) {
                   <button
                     className={plan.featured ? "btn-primary mkt-plan-cta" : "mkt-plan-cta mkt-plan-cta-outline"}
                     onClick={() => handleSelect(plan.id)}
-                    disabled={anyLoading}
-                    style={{ opacity: anyLoading && !isLoading ? 0.5 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-                    onMouseEnter={e => { if (!plan.featured) { e.currentTarget.style.background = "var(--primary)"; e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = "var(--primary)"; e.currentTarget.style.boxShadow = "0 4px 14px rgba(230,0,122,0.3)"; }}}
-                    onMouseLeave={e => { if (!plan.featured) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-primary)"; e.currentTarget.style.borderColor = "var(--light-gray)"; e.currentTarget.style.boxShadow = "none"; }}}
+                    disabled={isDisabled}
+                    style={{
+                      opacity: (anyLoading && !isLoading) || isCurrent ? 0.6 : 1,
+                      cursor: isCurrent ? "default" : "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    }}
+                    onMouseEnter={e => { if (!plan.featured && !isCurrent) { e.currentTarget.style.background = "var(--primary)"; e.currentTarget.style.color = "#fff"; e.currentTarget.style.borderColor = "var(--primary)"; e.currentTarget.style.boxShadow = "0 4px 14px rgba(230,0,122,0.3)"; }}}
+                    onMouseLeave={e => { if (!plan.featured && !isCurrent) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-primary)"; e.currentTarget.style.borderColor = "var(--light-gray)"; e.currentTarget.style.boxShadow = "none"; }}}
                   >
                     {isLoading ? (
                       <>
                         <span style={{ width: 13, height: 13, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
                         Opening cart…
                       </>
-                    ) : plan.cta}
+                    ) : ctaLabel}
                   </button>
 
                   <div className="mkt-plan-divider" />

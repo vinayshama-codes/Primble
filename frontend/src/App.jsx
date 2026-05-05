@@ -167,14 +167,49 @@ function AppContent() {
     } catch { setUpgradeChecking(false); setHeaderError("Network error. Please try again."); }
   };
 
-  const handleGetStarted = () => {
+  const handleGetStarted = (planId, billingCycle) => {
+    if (planId) {
+      sessionStorage.setItem("acordly_pending_plan", planId);
+      sessionStorage.setItem("acordly_pending_billing_cycle", billingCycle || "monthly");
+    }
     setMarketingPage(null);
     if (user) {
-      setShowModal(true);
-      window.history.pushState({ acordly: true }, "");
+      if (planId) {
+        triggerPendingCheckout();
+      } else {
+        setShowModal(true);
+        window.history.pushState({ acordly: true }, "");
+      }
     } else {
       setShowAuthModal(true);
     }
+  };
+
+  const triggerPendingCheckout = async () => {
+    const planId       = sessionStorage.getItem("acordly_pending_plan");
+    const billingCycle = sessionStorage.getItem("acordly_pending_billing_cycle") || "monthly";
+    if (!planId) return false;
+    sessionStorage.removeItem("acordly_pending_plan");
+    sessionStorage.removeItem("acordly_pending_billing_cycle");
+    setUpgradeChecking(true);
+    try {
+      const res  = await fetch(`${API_BASE}/api/stripe/create-checkout`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: planId, billing_cycle: billingCycle }),
+      });
+      const data = await res.json();
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+        return true;
+      }
+      setUpgradeChecking(false);
+      setHeaderError(data.detail || "Failed to start checkout. Please try again.");
+    } catch {
+      setUpgradeChecking(false);
+      setHeaderError("Network error. Please try again.");
+    }
+    return false;
   };
 
   const handleNavigate = (page) => {
@@ -265,13 +300,15 @@ function AppContent() {
             login(usr);
             setShowAuthModal(false);
             setSigningIn(true);
-            setTimeout(() => {
+            setTimeout(async () => {
               setSigningIn(false);
               const pendingResume = sessionStorage.getItem("acordly_resume_after_login");
               sessionStorage.removeItem("acordly_resume_after_login");
-              if (profileIncomplete)    { setShowCompleteProfile(true); }
-              else if (pendingResume)   { setResumeSessionId(pendingResume); setShowModal(true); }
-              else                      { setShowModal(true); }
+              const hasPendingPlan = !!sessionStorage.getItem("acordly_pending_plan");
+              if (profileIncomplete)       { setShowCompleteProfile(true); }
+              else if (hasPendingPlan)     { await triggerPendingCheckout(); }
+              else if (pendingResume)      { setResumeSessionId(pendingResume); setShowModal(true); }
+              else                         { setShowModal(true); }
             }, 80);
           }}
         />
@@ -279,7 +316,11 @@ function AppContent() {
 
       {showCompleteProfile && user && (
         <CompleteProfileModal token={token} user={user}
-          onComplete={(u) => { setUser(u); setShowCompleteProfile(false); setShowModal(true); }}
+          onComplete={async (u) => {
+            setUser(u); setShowCompleteProfile(false);
+            const hasPendingPlan = !!sessionStorage.getItem("acordly_pending_plan");
+            if (hasPendingPlan) { await triggerPendingCheckout(); } else { setShowModal(true); }
+          }}
         />
       )}
 
