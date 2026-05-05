@@ -119,7 +119,7 @@ def validate_date_range(eff: str, exp: str) -> Tuple[bool, str]:
     d_e = _parse_date(eff)
     d_x = _parse_date(exp)
     if d_e and d_x and d_e >= d_x:
-        return False, "Effective date is on or after expiration date — policy period is invalid"
+        return False, "Effective date is on or after expiration date - policy period is invalid"
     return True, ""
 
 

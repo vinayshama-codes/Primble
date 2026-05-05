@@ -174,7 +174,7 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         }
         missing_min = [k.replace("_", " ") for k, v in min_cope.items() if not v]
         if missing_min:
-            hard.append("Property Minimum Viable COPE incomplete — missing: " + ", ".join(missing_min))
+            hard.append("Property Minimum Viable COPE incomplete - missing: " + ", ".join(missing_min))
         else:
             carrier_cope = {k: bool(_fv(facts, k)) for k in [
                 "year_built", "roof_year", "sprinkler_system",

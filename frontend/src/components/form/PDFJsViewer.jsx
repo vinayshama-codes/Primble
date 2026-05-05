@@ -29,6 +29,7 @@ export default function PDFJsViewer({
   const pageDimsRef            = useRef([]);
   const manuallyRenderedRef    = useRef({ doc: null, pageNum: -1 });
   const editModeRef            = useRef(false);
+  const isSignedLocalRef       = useRef(isSigned);
   const clientFilledRef        = useRef([]);
   const renderScaleRef         = useRef(1);
 
@@ -54,6 +55,7 @@ export default function PDFJsViewer({
 
   useEffect(() => { clientFilledRef.current = clientFilledFields; }, [clientFilledFields]);
   useEffect(() => { editModeRef.current = editMode; }, [editMode]);
+  useEffect(() => { isSignedLocalRef.current = isSignedLocal; }, [isSignedLocal]);
   useEffect(() => { setIsSignedLocal(isSigned); }, [formId]); // eslint-disable-line
 
   // Load PDF.js
@@ -181,7 +183,7 @@ export default function PDFJsViewer({
 
   // ── Initial fields fetch on mount ──────────────────────────────────────
   useEffect(() => {
-    if (!sessionId || !formId || !token) return;
+    if (!sessionId || !formId) return;
     const controller = new AbortController();
     fetch(`${API_BASE}/api/fields/${sessionId}/${formId}`, { credentials: "include", signal: controller.signal })
       .then(r => r.ok ? r.json() : null)
@@ -217,7 +219,7 @@ export default function PDFJsViewer({
       })
       .catch(err => { if (err?.name !== "AbortError") console.error("Fields fetch error:", err); });
     return () => controller.abort();
-  }, [sessionId, formId, token]); // eslint-disable-line
+  }, [sessionId, formId]); // eslint-disable-line
 
   const updateHighlightCounts = (fieldList, confLabels, clientFilled, vals) => {
     let pink = 0, yellow = 0, green = 0;
@@ -309,8 +311,8 @@ export default function PDFJsViewer({
         wrap.appendChild(cb);
       } else if (isSigF) {
         const thisCleared  = clearedSigFieldsRef.current.has(field.name);
-        const showClearBtn = curEdit && isSignedLocal && !thisCleared;
-        const showTextInp  = curEdit && (!isSignedLocal || thisCleared);
+        const showClearBtn = curEdit && isSignedLocalRef.current && !thisCleared;
+        const showTextInp  = curEdit && (!isSignedLocalRef.current || thisCleared);
         if (showClearBtn) {
           const btn = document.createElement("button");
           btn.title = "Remove stamped signature"; btn.textContent = "✕";
@@ -536,7 +538,7 @@ export default function PDFJsViewer({
         ) : (
           <div style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2 }}>
             <canvas ref={canvasRef} style={{ display: "block" }} />
-            <div ref={overlayRef} style={{ position: "absolute", top: 0, left: 0, pointerEvents: editMode ? "all" : "none" }} />
+            <div ref={overlayRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 1, pointerEvents: editMode ? "all" : "none" }} />
             {saveStatus === "saving" && (
               <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.65)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, borderRadius: 2, backdropFilter: "blur(2px)", zIndex: 100 }}>
                 <div style={{ width: 32, height: 32, border: "3px solid rgba(255,255,255,0.2)", borderTopColor: "#f59e0b", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />

@@ -38,6 +38,22 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
 
     customer_id = current_user.get("stripe_customer_id")
 
+    # If this customer already has active subscriptions (i.e. a plan change, not first signup),
+    # cancel them now before creating the new checkout. This prevents accumulating multiple active
+    # subs when the user switches plans. Safe to do here because only existing subscribers reach
+    # this path with a customer_id — brand-new users have no subs to lose.
+    if customer_id:
+        try:
+            for st in ("active", "past_due", "trialing"):
+                existing = stripe.Subscription.list(customer=customer_id, status=st, limit=10)
+                for sub in existing.auto_paging_iter():
+                    sid = getattr(sub, "id", None)
+                    if sid:
+                        stripe.Subscription.cancel(sid)
+                        logger.info(f"Pre-checkout: canceled subscription {sid} for customer {customer_id} before plan change to {plan}")
+        except stripe.error.StripeError as e:
+            logger.warning(f"Pre-checkout subscription cleanup failed: {e}")
+
     try:
         checkout_kwargs = dict(
             payment_method_types=["card"],
@@ -151,10 +167,25 @@ async def stripe_webhook(request: Request):
                     sub_id = _subs.data[0].id
             plan = metadata.get("plan", "essentials")
             cycle = metadata.get("billing_cycle", "monthly")
+            stripe_customer = obj.get("customer")
+            # Always cancel all other active subscriptions the moment a new one is confirmed,
+            # regardless of whether metadata is complete. Runs before DB update so the
+            # customer never accumulates stale subs (Stripe enforces a 3-sub limit on test clocks).
+            if stripe_customer and sub_id:
+                try:
+                    for st in ("active", "past_due", "trialing"):
+                        old_subs = stripe.Subscription.list(customer=stripe_customer, status=st, limit=10)
+                        for old_sub in old_subs.auto_paging_iter():
+                            old_id = getattr(old_sub, "id", None)
+                            if old_id and old_id != sub_id:
+                                stripe.Subscription.cancel(old_id)
+                                logger.info(f"Canceled old subscription {old_id} after new plan {plan} activated")
+                except Exception as ce:
+                    logger.warning(f"Could not cancel old subscriptions: {ce}")
+
             if user_id and plan in PLANS and cycle in PLANS[plan] and sub_id:
                 cfg = PLANS[plan][cycle]
                 now = datetime.now(timezone.utc).isoformat()
-                stripe_customer = obj.get("customer")
                 async with get_pool().acquire() as conn:
                     async with conn.transaction():
                         if event_id:
@@ -179,18 +210,6 @@ async def stripe_webhook(request: Request):
                                 overage_packages_pending=0, overage_packages_invoiced=0 WHERE id=$7""",
                             plan, sub_id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id,
                         )
-                # Cancel all other active subscriptions for this customer
-                if stripe_customer and sub_id:
-                    try:
-                        for st in ("active", "past_due", "trialing"):
-                            old_subs = stripe.Subscription.list(customer=stripe_customer, status=st, limit=10)
-                            for old_sub in old_subs.auto_paging_iter():
-                                old_id = getattr(old_sub, "id", None)
-                                if old_id and old_id != sub_id:
-                                    stripe.Subscription.cancel(old_id)
-                                    logger.info(f"Canceled old subscription {old_id} after new plan {plan} activated")
-                    except Exception as ce:
-                        logger.warning(f"Could not cancel old subscriptions: {ce}")
 
         customer_id = obj.get("customer")
         if customer_id:
@@ -313,28 +332,44 @@ async def stripe_webhook(request: Request):
                     _send_payment_failed_email(row["email"], row.get("full_name", ""), day=1)
 
     elif event["type"] == "customer.subscription.deleted":
-        sub_id = json.loads(str(event["data"]["object"])).get("id")
+        obj = json.loads(str(event["data"]["object"]))
+        sub_id = obj.get("id")
+        customer_id = obj.get("customer")
         if sub_id:
-            async with get_pool().acquire() as conn:
-                async with conn.transaction():
-                    if event_id:
-                        now_str = datetime.now(timezone.utc).isoformat()
-                        idempotency_status = await conn.execute(
-                            "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
-                            " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
-                            event_id, event_type, now_str,
+            # Before downgrading, check if the customer has another active subscription.
+            # This prevents a race condition where cancelling old subs (during a plan change)
+            # fires deleted events that downgrade the user before the new sub is written to DB.
+            has_active_sub = False
+            if customer_id:
+                try:
+                    active = stripe.Subscription.list(customer=customer_id, status="active", limit=1)
+                    has_active_sub = bool(active.data)
+                except Exception as e:
+                    logger.warning(f"Could not check active subs for customer {customer_id}: {e}")
+
+            if has_active_sub:
+                logger.info(f"Subscription {sub_id} deleted but customer {customer_id} has another active sub — skipping downgrade")
+            else:
+                async with get_pool().acquire() as conn:
+                    async with conn.transaction():
+                        if event_id:
+                            now_str = datetime.now(timezone.utc).isoformat()
+                            idempotency_status = await conn.execute(
+                                "INSERT INTO processed_webhook_events (event_id, event_type, processed_at)"
+                                " VALUES ($1,$2,$3) ON CONFLICT (event_id) DO NOTHING",
+                                event_id, event_type, now_str,
+                            )
+                            if int(idempotency_status.split()[-1]) == 0:
+                                logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
+                                return {"received": True}
+                        await conn.execute(
+                            "UPDATE users SET subscription_tier='free', packages_limit=0, packages_used=0,"
+                            " payment_status='ok', payment_failed_at=NULL, stripe_subscription_id=NULL,"
+                            " overage_packages_pending=0, overage_packages_invoiced=0"
+                            " WHERE stripe_subscription_id=$1",
+                            sub_id,
                         )
-                        if int(idempotency_status.split()[-1]) == 0:
-                            logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
-                            return {"received": True}
-                    await conn.execute(
-                        "UPDATE users SET subscription_tier='free', packages_limit=0, packages_used=0,"
-                        " payment_status='ok', payment_failed_at=NULL, stripe_subscription_id=NULL,"
-                        " overage_packages_pending=0, overage_packages_invoiced=0"
-                        " WHERE stripe_subscription_id=$1",
-                        sub_id,
-                    )
-            logger.info(f"Subscription deleted: user downgraded to free for sub {sub_id}")
+                logger.info(f"Subscription deleted: user downgraded to free for sub {sub_id}")
 
     elif event["type"] == "customer.subscription.updated":
         obj = json.loads(str(event["data"]["object"]))

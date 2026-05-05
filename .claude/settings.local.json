@@ -23,7 +23,9 @@
       "WebFetch(domain:www.acord.org)",
       "WebSearch",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\" -Recurse -Force)",
-      "Bash(Format-Table FullName)"
+      "Bash(Format-Table FullName)",
+      "Read(//c/Users/lenovo/Desktop/**)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\" -Name -Recurse)"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend"

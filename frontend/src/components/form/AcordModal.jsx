@@ -1109,7 +1109,7 @@ export default function AcordModal({
           const routingStyle = {
             auto_quote: { bg: "#dcfce7", color: "#166534", border: "#86efac" },
             review:     { bg: "#fef9c3", color: "#854d0e", border: "#fde047" },
-            full_review:{ bg: "#ffedd5", color: "#9a3412", border: "#fdba74" },
+            full_review:{ bg: "#fef2f2", color: "#991b1b", border: "#fecaca" },
             hold:       { bg: "#fee2e2", color: "#991b1b", border: "#fca5a5" },
           };
           const rd = sqs?.routing_decision;
@@ -1119,7 +1119,7 @@ export default function AcordModal({
 
               {/* ── Page header ── */}
               <div style={{ marginBottom: 28 }}>
-                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10, fontWeight: 700, color: "#e6007a", letterSpacing: "0.08em", textTransform: "uppercase", background: "rgba(230,0,122,0.07)", padding: "3px 10px", borderRadius: 20, marginBottom: 10 }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: "#e6007a", letterSpacing: "0.08em", textTransform: "uppercase", background: "rgba(230,0,122,0.07)", padding: "3px 10px", borderRadius: 20, marginBottom: 10 }}>
                   Essentials
                 </div>
                 <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: "0 0 6px", letterSpacing: "-0.3px" }}>Submission Analysis</h2>
@@ -1136,7 +1136,7 @@ export default function AcordModal({
                   </div>
                 ) : (
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 20 }}>Submission Quality Score</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 20 }}>Submission Quality Score</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 28, marginBottom: 20, flexWrap: "wrap" }}>
 
                       {/* Score circle */}
@@ -1183,7 +1183,7 @@ export default function AcordModal({
                         <div className="lite-stops-grid">
                           {liteSqsData?.hard_stops?.length > 0 && (
                             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px" }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>🚫 Hard Stops — Must Resolve Before Submission</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Hard Stops — Must Resolve Before Submission</div>
                               {liteSqsData.hard_stops.map((s, i) => (
                                 <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0", display: "flex", gap: 6 }}>
                                   <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
@@ -1192,10 +1192,10 @@ export default function AcordModal({
                             </div>
                           )}
                           {liteSqsData?.soft_stops?.length > 0 && (
-                            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px" }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 7 }}>⚠️ Warnings — Will Cap Your Score</div>
+                            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px" }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Warnings — Will Cap Your Score</div>
                               {liteSqsData.soft_stops.map((s, i) => (
-                                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0", display: "flex", gap: 6 }}>
+                                <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0", display: "flex", gap: 6 }}>
                                   <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
                                 </div>
                               ))}
@@ -1246,15 +1246,15 @@ export default function AcordModal({
               {/* ── Footer nav ── */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 4, gap: 12 }}>
                 <button onClick={() => { resetToUpload(); }}
-                  style={{ padding: "10px 22px", borderRadius: 10, border: "1.5px solid #e2e8f0", background: "#fff", color: "#475569", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(0,0,0,0.07)", transition: "box-shadow 0.15s, transform 0.15s, border-color 0.15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)"; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
-                  onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.07)"; e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "#e2e8f0"; }}>
+                  style={{ padding: "10px 22px", borderRadius: 10, border: "1.5px solid #fecaca", background: "#fef2f2", color: "#991b1b", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(0,0,0,0.07)", transition: "box-shadow 0.15s, transform 0.15s, border-color 0.15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)"; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.borderColor = "#fca5a5"; }}
+                  onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.07)"; e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "#fecaca"; }}>
                   ← New Submission
                 </button>
                 <button onClick={onShowUpgrade}
-                  style={{ padding: "10px 22px", borderRadius: 10, border: "none", background: "rgba(230,0,122,0.07)", color: "#e6007a", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(230,0,122,0.10)", transition: "box-shadow 0.15s, transform 0.15s, background 0.15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(230,0,122,0.13)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.18)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(230,0,122,0.07)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(230,0,122,0.10)"; e.currentTarget.style.transform = "none"; }}>
+                  style={{ padding: "10px 22px", borderRadius: 10, border: "1.5px solid #fecaca", background: "#fef2f2", color: "#991b1b", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", boxShadow: "0 2px 8px rgba(0,0,0,0.07)", transition: "box-shadow 0.15s, transform 0.15s, background 0.15s, border-color 0.15s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "#fee2e2"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)"; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.borderColor = "#fca5a5"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#fef2f2"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.07)"; e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "#fecaca"; }}>
                   Unlock Full Forms
                 </button>
               </div>
@@ -1289,7 +1289,7 @@ export default function AcordModal({
             <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 4px" }}>
               {/* Header */}
               <div style={{ textAlign: "center", marginBottom: 28 }}>
-                <div style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: "#e6007a", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10, padding: "3px 10px", background: "rgba(230,0,122,0.07)", borderRadius: 20 }}>New Submission</div>
+                <div style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: "#991b1b", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10, padding: "3px 10px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 20 }}>New Submission</div>
                 <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: "0 0 6px", letterSpacing: "-0.3px" }}>Upload Documents</h2>
                 <p style={{ fontSize: 13.5, color: "#64748b", margin: 0, lineHeight: 1.5 }}>Dec pages, loss runs, schedules, quotes — PDFs, images, or ZIP archives</p>
               </div>
@@ -1434,11 +1434,11 @@ export default function AcordModal({
         {step === "recommendations" && (
           <div className="modal-step modal-step-wide">
             <div className="step-header">
-              <h2 className="step-title">Select Forms to Generate</h2>
+              <h2 className="step-title" style={{ color: "#1e293b" }}>Select Forms to Generate</h2>
               <p className="step-subtitle">All recommended forms are pre-selected. Uncheck any you don't need, then generate all at once.</p>
             </div>
             <div className="doc-summary">
-              <div className="doc-summary-title">📂 Documents Processed</div>
+              <div className="doc-summary-title">DOCUMENTS PROCESSED</div>
               <div className="doc-chips">
                 {docSummary.map((d, i) => (
                   <div key={i} className={`doc-chip ${d.is_primary ? "doc-primary" : ""}`}>
@@ -1449,8 +1449,22 @@ export default function AcordModal({
                 ))}
               </div>
             </div>
-            {hardStops.length > 0 && <div className="stops-banner stops-hard"><div className="stops-title">🚫 Hard Stops — Must Fix Before Submission</div>{hardStops.map((s, i) => <div key={i} className="stop-item stop-item-hard">✗ {s}</div>)}</div>}
-            {softStops.length > 0 && <div className="stops-banner stops-soft"><div className="stops-title">⚠️ Warnings — Will Cap Your SQS Score</div>{softStops.map((s, i) => <div key={i} className="stop-item stop-item-soft">⚠ {s}</div>)}</div>}
+            {(hardStops.length > 0 || softStops.length > 0) && (
+              <div className="stops-row">
+                {hardStops.length > 0 && (
+                  <div className="stops-banner stops-hard">
+                    <div className="stops-title">Hard Stops - Must Fix Before Submission</div>
+                    {hardStops.map((s, i) => <div key={i} className="stop-item stop-item-hard">- {s}</div>)}
+                  </div>
+                )}
+                {softStops.length > 0 && (
+                  <div className="stops-banner stops-soft">
+                    <div className="stops-title">Warnings - Will Cap Your SQS Score</div>
+                    {softStops.map((s, i) => <div key={i} className="stop-item stop-item-soft">- {s}</div>)}
+                  </div>
+                )}
+              </div>
+            )}
             {tier2Score !== null && (
               <div className="tier2-bar">
                 <div className="tier2-header"><span className="tier2-label">Underwriting Readiness</span><span className="tier2-score" style={{ color: barColor(tier2Score) }}>{tier2Score}%</span></div>
@@ -1483,7 +1497,6 @@ export default function AcordModal({
                         </div>
                       </div>
                     </label>
-                    <button className="btn-icon-only" onClick={() => toggleForm(rec.form_id)}>{checkedFormIds.has(rec.form_id) ? "✓" : "+"}</button>
                   </div>
                 );
               })}
@@ -1530,7 +1543,7 @@ export default function AcordModal({
               </div>
             )}
             <button className="btn btn-modal-primary btn-block btn-large" onClick={handleGenerateAll} disabled={loading || checkedFormIds.size === 0}>
-              <span className="btn-icon">⚡</span>{loading ? "Generating..." : `Generate ${checkedFormIds.size} Form${checkedFormIds.size !== 1 ? "s" : ""} Now`}
+{loading ? "Generating..." : `Generate ${checkedFormIds.size} Form${checkedFormIds.size !== 1 ? "s" : ""} Now`}
             </button>
           </div>
         )}
@@ -1623,7 +1636,7 @@ export default function AcordModal({
 
                     {/* ── Routing decision ── */}
                     {activeSqs.routing_decision && (
-                      <div style={{ padding: "5px 9px", borderRadius: 7, fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, background: { auto_quote: "#dcfce7", review: "#fef9c3", full_review: "#ffedd5", hold: "#fee2e2" }[activeSqs.routing_decision] || "#f1f5f9", color: { auto_quote: "#166534", review: "#854d0e", full_review: "#9a3412", hold: "#991b1b" }[activeSqs.routing_decision] || "#374151", border: `1px solid ${{ auto_quote: "#86efac", review: "#fde047", full_review: "#fdba74", hold: "#fca5a5" }[activeSqs.routing_decision] || "#e2e8f0"}` }}>
+                      <div style={{ padding: "5px 9px", borderRadius: 7, fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, background: { auto_quote: "#dcfce7", review: "#fef9c3", full_review: "#fef2f2", hold: "#fee2e2" }[activeSqs.routing_decision] || "#f1f5f9", color: { auto_quote: "#166534", review: "#854d0e", full_review: "#991b1b", hold: "#991b1b" }[activeSqs.routing_decision] || "#374151", border: `1px solid ${{ auto_quote: "#86efac", review: "#fde047", full_review: "#fecaca", hold: "#fca5a5" }[activeSqs.routing_decision] || "#e2e8f0"}` }}>
                         {{ auto_quote: "✅ Auto-Route to Quoting", review: "🔍 Light Review", full_review: "📋 Full Underwriter Review", hold: "🚫 Hold — Remediation Required" }[activeSqs.routing_decision]}
                       </div>
                     )}
