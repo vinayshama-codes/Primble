@@ -118,9 +118,11 @@ async def download_pdf(
         return JSONResponse({"success": False, "payment_locked": True, "message": "Account suspended."}, status_code=403)
     if sub == "free" and used >= 3:
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
+    if sub == "essentials":
+        return JSONResponse({"success": False, "upgrade_required": True, "message": "Form downloads are not included in the Essentials tier."}, status_code=403)
 
     pkg_eval = None
-    if sub in ("essentials", "professional", "business"):
+    if sub in ("professional", "business"):
         pkg_eval = await evaluate_package_limit(fresh)
 
     proc_session = await get_processing_session(session_id, include_pdf=True)
@@ -179,7 +181,7 @@ async def download_pdf(
                 await conn.execute(
                     "UPDATE users SET downloads_used = downloads_used + 1 WHERE id = $1", fresh["id"]
                 )
-            elif sub in ("essentials", "professional", "business") and pkg_eval:
+            elif sub in ("professional", "business") and pkg_eval:
                 await conn.execute(
                     "UPDATE users SET packages_used = packages_used + 1 WHERE id = $1", fresh["id"]
                 )
@@ -236,9 +238,11 @@ async def download_all(
         return JSONResponse({"success": False, "payment_locked": True, "message": "Account suspended."}, status_code=403)
     if sub == "free" and used >= 3:
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
+    if sub == "essentials":
+        return JSONResponse({"success": False, "upgrade_required": True, "message": "Form downloads are not included in the Essentials tier."}, status_code=403)
 
     pkg_eval = None
-    if sub in ("essentials", "professional", "business"):
+    if sub in ("professional", "business"):
         pkg_eval = await evaluate_package_limit(fresh)
 
     proc_session = await get_processing_session(session_id, include_pdf=True)
@@ -286,7 +290,7 @@ async def download_all(
                 await conn.execute(
                     "UPDATE users SET downloads_used = downloads_used + 1 WHERE id = $1", fresh["id"]
                 )
-            elif sub in ("essentials", "professional", "business") and pkg_eval:
+            elif sub in ("professional", "business") and pkg_eval:
                 await conn.execute(
                     "UPDATE users SET packages_used = packages_used + 1 WHERE id = $1", fresh["id"]
                 )

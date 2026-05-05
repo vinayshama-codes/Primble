@@ -276,6 +276,9 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         if used >= 3:
             raise HTTPException(403, "Upgrade required to access form generation.")
 
+    if current_user.get("subscription_tier") == "essentials":
+        raise HTTPException(403, "Form generation is not included in the Essentials tier. Use lite analysis instead.")
+
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             "SELECT payment_status FROM users WHERE id = $1", current_user["id"]
@@ -710,10 +713,45 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
     generated = proc_session.get("generated_forms", {})
+    # Omit the full `form` field data — it can be megabytes and is not needed to
+    # restore the editor shell. The PDF viewer fetches form data lazily per-form.
     summary   = {fid: {"form_id": r.get("form_id", fid), "form_name": r.get("form_name", fid),
-                        "form": r.get("form", {}), "sqs": r.get("sqs", {})} for fid, r in generated.items()}
+                        "sqs": r.get("sqs", {})} for fid, r in generated.items()}
     return JSONResponse({"session_id": session_id, "generated_forms": summary,
                          "cross_issues": proc_session.get("cross_issues_last", [])})
+
+
+@router.get("/api/sessions/stats")
+async def session_stats(current_user: dict = Depends(get_current_user)):
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*)::int                                          AS total_packages,
+                (
+                    SELECT COUNT(*)::int
+                    FROM processing_sessions ps2,
+                         jsonb_each(COALESCE(ps2.data->'generated_forms', '{}'::jsonb)) gf
+                    WHERE ps2.user_id = $1
+                )                                                      AS total_forms,
+                (
+                    SELECT ROUND(AVG((sqs_obj->>'sqs_score')::numeric))::int
+                    FROM processing_sessions ps3,
+                         jsonb_each(COALESCE(ps3.data->'generated_forms', '{}'::jsonb)) gf,
+                         LATERAL (SELECT gf.value->'sqs' AS sqs_obj) sq
+                    WHERE ps3.user_id = $1
+                      AND (gf.value->'sqs'->>'sqs_score') IS NOT NULL
+                )                                                      AS avg_sqs_score
+            FROM processing_sessions
+            WHERE user_id = $1
+            """,
+            str(current_user["id"]),
+        )
+    return JSONResponse({
+        "total_packages": row["total_packages"] or 0,
+        "total_forms":    row["total_forms"] or 0,
+        "avg_sqs_score":  row["avg_sqs_score"],
+    })
 
 
 @router.get("/api/sessions")

@@ -120,14 +120,14 @@ function AppContent() {
   }, []); // eslint-disable-line
 
   useEffect(() => {
-    if (!token || !user) return;
+    if (!user) return;
     const sid = sessionStorage.getItem("acordly_resume_after_login");
     if (!sid) { setResumeLoading(false); return; }
     sessionStorage.removeItem("acordly_resume_after_login");
     setResumeSessionId(sid);
     setResumeLoading(false);
     setShowModal(true);
-  }, [token, user]);
+  }, [user]);
 
   useEffect(() => {
     const params          = new URLSearchParams(window.location.search);

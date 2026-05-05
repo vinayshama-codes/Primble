@@ -11,13 +11,17 @@ export const PLANS = [
     cta: "Upgrade",
     features: [
       "50 scores / month",
-      "Submission Quality Scoring",
+      "Submission Quality Scoring (SQS)",
       "Cross-form validation",
-      "Client-in-the-Loop remediation",
+      "Client-in-the-Loop™ remediation",
       "Coversheet & submittable narrative",
       "Unlimited users",
     ],
-    missing: [],
+    missing: [
+      "ACORD form generation",
+      "Form downloads",
+      "Guided form completion",
+    ],
   },
   {
     id: "professional",

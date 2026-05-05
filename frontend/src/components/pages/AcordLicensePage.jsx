@@ -7,7 +7,7 @@ const FAQ_DATA = [
   },
   {
     q: "What does the license actually permit?",
-    a: "It grants the right to use ACORD form templates for insurance transaction purposes — populating, generating, and submitting completed forms. It does not permit redistribution of blank templates or use of ACORD branding outside the form context.",
+    a: "It grants the right to use ACORD form templates for insurance transaction purposes - populating, generating, and submitting completed forms. It does not permit redistribution of blank templates or use of ACORD branding outside the form context.",
   },
   {
     q: "Can I use Acordly without an ACORD license?",
@@ -45,7 +45,7 @@ export default function AcordLicensePage() {
 
       {/* HERO */}
       <section className="mkt-hero mkt-hero-compact">
-        <div className="mkt-hero-eyebrow">ACORD License</div>
+        <div className="mkt-hero-eyebrow" style={{ fontSize: "1rem" }}>ACORD License</div>
         <h1 className="mkt-hero-h1">
           This is a legal requirement.<br />
           <span className="mkt-hero-accent">Not a product feature.</span>
@@ -74,7 +74,6 @@ export default function AcordLicensePage() {
 
             {/* Left: IP rights */}
             <div>
-              <div className="mkt-eyebrow" style={{ marginBottom: 12 }}>What it is</div>
               <h2 className="mkt-section-h2" style={{ marginBottom: 32 }}>ACORD intellectual property rights</h2>
               <div className="mkt-license-explainer">
                 <div className="mkt-license-point">
@@ -92,7 +91,7 @@ export default function AcordLicensePage() {
                   </div>
                   <div>
                     <div className="mkt-license-point-title">Using, reproducing, or distributing requires a license</div>
-                    <div className="mkt-license-point-desc">Populating, generating, or submitting ACORD forms — including through software like Acordly — requires your organization to hold a valid license agreement with ACORD. This is true regardless of the tool you use to fill the forms.</div>
+                    <div className="mkt-license-point-desc">Populating, generating, or submitting ACORD forms - including through software like Acordly - requires your organization to hold a valid license agreement with ACORD. This is true regardless of the tool you use to fill the forms.</div>
                   </div>
                 </div>
                 <div className="mkt-license-point">
@@ -109,7 +108,6 @@ export default function AcordLicensePage() {
 
             {/* Right: FAQ */}
             <div>
-              <div className="mkt-eyebrow" style={{ marginBottom: 12 }}>Common questions</div>
               <h2 className="mkt-section-h2" style={{ marginBottom: 32 }}>License FAQ</h2>
               <div className="mkt-license-faq">
                 {FAQ_DATA.map((item, i) => (
@@ -143,7 +141,6 @@ export default function AcordLicensePage() {
 
             {/* Left: Gate steps */}
             <div>
-              <div className="mkt-eyebrow" style={{ marginBottom: 12 }}>How it works in-app</div>
               <h2 className="mkt-section-h2" style={{ marginBottom: 8 }}>The license confirmation gate</h2>
               <p className="mkt-section-sub" style={{ textAlign: "left", margin: "0 0 32px" }}>Three steps from account setup to ACORD form access.</p>
               <div className="mkt-gate-steps">
@@ -164,7 +161,6 @@ export default function AcordLicensePage() {
 
             {/* Right: External link block */}
             <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", height: "100%" }}>
-              <div className="mkt-eyebrow" style={{ marginBottom: 12 }}>Get licensed</div>
               <h2 className="mkt-section-h2" style={{ marginBottom: 24 }}>Obtain your ACORD license</h2>
               <div className="mkt-license-link-block" style={{ margin: 0 }}>
                 <div className="mkt-license-link-icon">
@@ -176,7 +172,7 @@ export default function AcordLicensePage() {
                   <div className="mkt-license-link-title">Get your ACORD license directly from ACORD</div>
                   <div className="mkt-license-link-desc">Visit the official ACORD forms licensing page to understand requirements and begin the licensing process for your organization.</div>
                   <a
-                    href="https://www.acord.org/standards-architecture/acord-forms/forms-licensing"
+                    href="https://www.acord.org/forms-pages/forms-participation-programs"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="mkt-license-ext-btn"

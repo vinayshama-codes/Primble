@@ -233,7 +233,7 @@ export default function PDFJsViewer({
   };
 
   const handleRefresh = async () => {
-    if (!sessionId || !formId || !token) return;
+    if (!sessionId || !formId) return;
     setLoadingStage("loading");
     try {
       if (onRefreshFields) {

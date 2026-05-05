@@ -52,7 +52,7 @@ export default function PlanModal({ user, token, onClose, onChangePlan, anchorRe
 
   return (
     <div ref={modalRef} style={{
-      position: "absolute", top: 60, right: 0, zIndex: 1000,
+      position: "absolute", top: 0, right: 0, zIndex: 1000,
       background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12,
       boxShadow: "0 8px 32px rgba(15,23,42,0.12)", padding: "20px 22px",
       minWidth: 280, maxWidth: 320,

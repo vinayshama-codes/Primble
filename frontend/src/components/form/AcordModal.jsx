@@ -341,22 +341,42 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
 // ── Dashboard Step ─────────────────────────────────────────────────────────
 function DashboardStep({ token, onResume, onNewPackage }) {
   const [sessions, setSessions] = useState([]);
+  const [stats, setStats] = useState({ total_packages: 0, total_forms: 0, avg_sqs_score: null });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  useEffect(() => {
-    fetch(`${API_BASE}/api/sessions`, { credentials: "include" })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.success) setSessions(d.sessions || []); else setLoadError("Could not load your sessions. Please refresh."); })
-      .catch(() => setLoadError("Network error loading sessions. Please refresh."))
-      .finally(() => setLoading(false));
-  }, []);
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [sessData, statsData] = await Promise.all([
+        fetch(`${API_BASE}/api/sessions`, { credentials: "include" }).then(r => r.ok ? r.json() : null),
+        fetch(`${API_BASE}/api/sessions/stats`, { credentials: "include" }).then(r => r.ok ? r.json() : null),
+      ]);
+      if (sessData?.success) setSessions(sessData.sessions || []); else setLoadError("Could not load your sessions. Please refresh.");
+      if (statsData) setStats({ total_packages: statsData.total_packages ?? 0, total_forms: statsData.total_forms ?? 0, avg_sqs_score: statsData.avg_sqs_score ?? null });
+    } catch {
+      setLoadError("Network error loading sessions. Please refresh.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchDashboardData(); }, []);
 
   const handleDelete = async sid => {
-    setSessions(prev => prev.filter(s => s.session_id !== sid));
     setDeleteTarget(null);
-    try { await fetch(`${API_BASE}/api/sessions/${sid}`, { method: "DELETE", credentials: "include" }); } catch (_) {}
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/sessions/${sid}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error("Delete failed");
+    } catch {
+      setLoading(false);
+      setLoadError("Failed to delete session. Please try again.");
+      return;
+    }
+    await fetchDashboardData();
   };
 
   const fmtDate = iso => {
@@ -377,188 +397,171 @@ function DashboardStep({ token, onResume, onNewPackage }) {
   const sqsBg     = v => v >= 75 ? "rgba(16,185,129,0.1)" : v >= 50 ? "rgba(245,158,11,0.1)" : "rgba(239,68,68,0.1)";
   const sqsGrade  = v => v >= 90 ? "A" : v >= 75 ? "B" : v >= 60 ? "C" : v >= 50 ? "D" : "F";
 
-  const totalForms = sessions.reduce((acc, s) => acc + (s.form_ids?.length || 0), 0);
-  const allScores  = sessions.map(s => avgSqs(s.sqs)).filter(n => n != null);
-  const globalAvg  = allScores.length ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length) : null;
+  const totalForms = stats.total_forms;
+  const globalAvg  = stats.avg_sqs_score;
+
+  const tips = [
+    "Upload source documents as PDFs — Acordly pre-fills ACORD fields automatically.",
+    "Generate multiple ACORD forms from a single submission in one pass.",
+    "Add e-signatures directly inside the form editor before downloading.",
+    "Download completed packages as a single merged PDF.",
+  ];
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 0 48px" }}>
+    <>
+    {loading && (
+      <div className="loading-overlay">
+        <div className="loading-spinner" />
+        <p className="loading-text">Loading sessions…</p>
+      </div>
+    )}
+    <div className="dashboard-shell">
       {deleteTarget && <DeleteConfirmModal onConfirm={() => handleDelete(deleteTarget)} onCancel={() => setDeleteTarget(null)} />}
 
       {loadError && (
-        <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "12px 16px", marginBottom: 20, color: "#dc2626", fontSize: 13 }}>
-          ⚠️ {loadError}
+        <div className="db-error-banner">
+          {loadError}
         </div>
       )}
 
       {/* ── Header ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24 }}>
+      <div className="db-header">
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
-            <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#e6007a", boxShadow: "0 0 0 3px rgba(230,0,122,0.15)" }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", letterSpacing: "0.08em", textTransform: "uppercase" }}>Submissions</span>
-          </div>
-          <h2 style={{ fontSize: 28, fontWeight: 800, color: "#0f172a", margin: 0, lineHeight: 1.15, letterSpacing: "-0.02em" }}>Recent Packages</h2>
-          <p style={{ fontSize: 14, color: "#64748b", marginTop: 6 }}>Pick up where you left off or start a new submission.</p>
+          <div className="db-header-eyebrow">Submissions</div>
+          <h2 className="db-header-title">Recent Packages</h2>
+          <p className="db-header-sub">Pick up where you left off or start a new submission.</p>
         </div>
-        <button onClick={onNewPackage}
-          style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 22px", background: "linear-gradient(135deg,#e6007a,#c4006a)", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 16px rgba(230,0,122,0.35)", whiteSpace: "nowrap", letterSpacing: "-0.01em", transition: "all 0.2s" }}
-          onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 8px 24px rgba(230,0,122,0.45)"; }}
-          onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35)"; }}>
-          <span style={{ fontSize: 18, lineHeight: 1 }}>+</span> New Package
-        </button>
+        <button onClick={onNewPackage} className="db-primary-btn">+ Upload New Package</button>
       </div>
 
-      {/* ── Stats strip (only when sessions exist) ── */}
-      {!loading && sessions.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 28 }}>
-          {[
-            { icon: "🗂️", value: sessions.length, label: "Total Packages", color: "#e6007a", bgColor: "rgba(230,0,122,0.07)" },
-            { icon: globalAvg != null ? sqsGrade(globalAvg) : "—", value: globalAvg != null ? `${globalAvg}` : "—", sublabel: "/100", label: "Avg SQS Score", color: globalAvg != null ? sqsColor(globalAvg) : "#94a3b8", bgColor: globalAvg != null ? sqsBg(globalAvg) : "#f1f5f9", iconIsText: true },
-            { icon: "📋", value: totalForms, label: "Forms Generated", color: "#4f7cff", bgColor: "rgba(79,124,255,0.08)" },
-          ].map((stat, i) => (
-            <div key={i} style={{ background: "#fff", border: "1px solid #e8edf5", borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.03)" }}>
-              <div style={{ width: 38, height: 38, borderRadius: 10, background: stat.bgColor, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                {stat.iconIsText
-                  ? <span style={{ fontSize: 15, fontWeight: 800, color: stat.color }}>{stat.icon}</span>
-                  : <span style={{ fontSize: 17 }}>{stat.icon}</span>}
-              </div>
-              <div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: stat.color, lineHeight: 1 }}>
-                  {stat.value}{stat.sublabel && <span style={{ fontSize: 11, fontWeight: 500, color: "#94a3b8" }}>{stat.sublabel}</span>}
-                </div>
-                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 3 }}>{stat.label}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* ── Two-column body ── */}
+      <div className="dashboard-body">
 
-      {loading ? (
-        /* ── Skeleton cards ── */
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {[1, 2, 3].map(i => (
-            <div key={i} style={{ background: "#fff", borderRadius: 14, border: "1px solid #e8edf5", display: "flex", alignItems: "stretch", overflow: "hidden", opacity: 1 - (i - 1) * 0.22 }}>
-              <div style={{ width: 4, background: "#f1f5f9" }} />
-              <div style={{ flex: 1, padding: "18px 20px", display: "flex", alignItems: "center", gap: 14 }}>
-                <div style={{ width: 44, height: 44, borderRadius: 12, background: "#f1f5f9", animation: "pulse 1.5s ease-in-out infinite", flexShrink: 0 }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ height: 13, width: `${72 - i * 8}%`, background: "#f1f5f9", borderRadius: 5, marginBottom: 9, animation: "pulse 1.5s ease-in-out infinite" }} />
-                  <div style={{ height: 10, width: "40%", background: "#f1f5f9", borderRadius: 5, animation: "pulse 1.5s ease-in-out infinite" }} />
-                </div>
-                <div style={{ width: 52, height: 52, borderRadius: "50%", background: "#f1f5f9", animation: "pulse 1.5s ease-in-out infinite", flexShrink: 0 }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : sessions.length === 0 ? (
-        /* ── Empty state ── */
-        <div style={{ textAlign: "center", padding: "56px 24px 64px", background: "#fff", borderRadius: 20, border: "1.5px dashed #e2e8f0", position: "relative", overflow: "hidden" }}>
-          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg,#e6007a,#4f7cff,#10b981)", borderRadius: "20px 20px 0 0" }} />
-          <div style={{ width: 72, height: 72, borderRadius: 20, background: "linear-gradient(135deg,rgba(230,0,122,0.1),rgba(79,124,255,0.1))", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, margin: "0 auto 20px", border: "1px solid rgba(230,0,122,0.12)" }}>📂</div>
-          <p style={{ fontSize: 19, fontWeight: 800, color: "#0f172a", marginBottom: 8, letterSpacing: "-0.02em" }}>No packages yet</p>
-          <p style={{ fontSize: 14, color: "#64748b", lineHeight: 1.65, maxWidth: 330, margin: "0 auto 32px" }}>Upload your first submission documents — Acordly will extract data and fill ACORD forms automatically.</p>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 28, flexWrap: "wrap" }}>
-            {[["📄", "Upload docs"], ["⚡", "AI extracts data"], ["✅", "Download forms"]].map(([icon, label], i, arr) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 9, padding: "7px 14px" }}>
-                  <span style={{ fontSize: 14 }}>{icon}</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "#475569" }}>{label}</span>
-                </div>
-                {i < arr.length - 1 && <span style={{ color: "#d1d5db", fontSize: 13, fontWeight: 600 }}>→</span>}
-              </div>
-            ))}
-          </div>
-          <button onClick={onNewPackage}
-            style={{ padding: "12px 30px", background: "linear-gradient(135deg,#e6007a,#c4006a)", color: "#fff", border: "none", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 16px rgba(230,0,122,0.35)", transition: "all 0.2s" }}
-            onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.boxShadow = "0 8px 24px rgba(230,0,122,0.45)"; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35)"; }}>
-            + Start First Package
-          </button>
-        </div>
-      ) : (
-        /* ── Session list ── */
-        <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 10, paddingLeft: 2 }}>
-            {sessions.length} Package{sessions.length !== 1 ? "s" : ""}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {sessions.map(s => {
-              const avg   = avgSqs(s.sqs);
-              const color = avg != null ? sqsColor(avg)  : "#94a3b8";
-              const bg    = avg != null ? sqsBg(avg)     : "rgba(148,163,184,0.08)";
-              const grade = avg != null ? sqsGrade(avg)  : null;
-              const formCount = s.form_ids?.length || 0;
-              return (
-                <div key={s.session_id} className="session-card"
-                  onClick={() => onResume(s.session_id)}
-                  style={{ background: "#fff", border: "1px solid #e8edf5", borderRadius: 14, cursor: "pointer", display: "flex", alignItems: "stretch", transition: "all 0.18s", position: "relative", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", overflow: "hidden" }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#e6007a"; e.currentTarget.style.boxShadow = "0 4px 24px rgba(230,0,122,0.12)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#e8edf5"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.05)"; e.currentTarget.style.transform = "none"; }}>
-
-                  {/* Left score-coloured accent bar */}
-                  <div style={{ width: 4, background: color, borderRadius: "14px 0 0 14px", flexShrink: 0, transition: "background 0.2s" }} />
-
-                  {/* Card body */}
-                  <div style={{ flex: 1, padding: "15px 18px", display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-
-                    {/* Icon */}
-                    <div style={{ width: 44, height: 44, borderRadius: 12, background: `linear-gradient(135deg,${color}1a,${color}09)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0, border: `1px solid ${color}22` }}>
-                      📄
-                    </div>
-
-                    {/* Text */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", letterSpacing: "-0.01em" }}>
-                        {s.applicant || "Unnamed Package"}
-                      </div>
-                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
-                        {formCount > 0 && (
-                          <span style={{ fontSize: 11, fontWeight: 600, color: "#4f7cff", background: "rgba(79,124,255,0.08)", border: "1px solid rgba(79,124,255,0.18)", borderRadius: 6, padding: "2px 8px" }}>
-                            {formCount} form{formCount !== 1 ? "s" : ""}
-                          </span>
-                        )}
-                        {s.form_ids?.slice(0, 4).map(fid => (
-                          <span key={fid} style={{ fontSize: 11, color: "#64748b", background: "#f1f5f9", border: "1px solid #e8edf5", borderRadius: 5, padding: "2px 7px", fontWeight: 500 }}>{fid.replace(/_/g, " ")}</span>
-                        ))}
-                        {(s.form_ids?.length || 0) > 4 && <span style={{ fontSize: 11, color: "#94a3b8" }}>+{s.form_ids.length - 4}</span>}
-                        {s.lines?.length > 0 && (
-                          <span style={{ fontSize: 11, color: "#94a3b8" }}>· {s.lines.slice(0, 2).join(", ")}{s.lines.length > 2 ? ` +${s.lines.length - 2}` : ""}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Date */}
-                    <div style={{ flexShrink: 0, textAlign: "right", marginRight: 6 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b" }}>{fmtDate(s.updated_at)}</div>
-                    </div>
-
-                    {/* SQS circle badge */}
-                    <div style={{ width: 52, height: 52, borderRadius: "50%", background: bg, border: `2px solid ${color}44`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      {avg != null ? (
-                        <>
-                          <span style={{ fontSize: 14, fontWeight: 800, color, lineHeight: 1 }}>{avg}</span>
-                          <span style={{ fontSize: 9, fontWeight: 700, color, opacity: 0.75, marginTop: 1 }}>{grade}</span>
-                        </>
-                      ) : (
-                        <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 600, textAlign: "center", lineHeight: 1.3 }}>SQS{"\n"}—</span>
-                      )}
-                    </div>
-
-                    {/* Chevron */}
-                    <div style={{ color: "#cbd5e1", flexShrink: 0, display: "flex", alignItems: "center" }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                    </div>
-
-                    <button className="session-delete-btn" onClick={e => { e.stopPropagation(); setDeleteTarget(s.session_id); }} title="Delete session" style={{ position: "absolute", top: 10, right: 10 }}>✕</button>
+        {/* ── Main: package list ── */}
+        <div className="dashboard-main">
+          {loading ? null : sessions.length === 0 ? (
+            <div className="db-empty-state">
+              <div className="db-empty-topbar" />
+              <p className="db-empty-title">No packages yet</p>
+              <p className="db-empty-desc">Upload your first submission documents — Acordly will extract data and fill ACORD forms automatically.</p>
+              <div className="db-empty-steps">
+                {[["Upload docs", "AI extracts data", "Download forms"]].flat().map((label, i, arr) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <div className="db-empty-step-pill">{label}</div>
+                    {i < arr.length - 1 && <span className="db-empty-step-arrow">→</span>}
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                ))}
+              </div>
+              <button onClick={onNewPackage} className="db-primary-btn">
+                Start First Package
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              <div className="db-list-count">
+                {sessions.length} Package{sessions.length !== 1 ? "s" : ""}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {sessions.map(s => {
+                  const avg   = avgSqs(s.sqs);
+                  const color = avg != null ? sqsColor(avg) : "#94a3b8";
+                  const bg    = avg != null ? sqsBg(avg)    : "rgba(148,163,184,0.08)";
+                  const grade = avg != null ? sqsGrade(avg) : null;
+                  const formCount = s.form_ids?.length || 0;
+                  return (
+                    <div key={s.session_id} className="session-card"
+                      onClick={() => onResume(s.session_id)}
+                      style={{ background: "#fff", border: "1.5px solid #e0e0e0", borderRadius: 18, cursor: "pointer", display: "flex", alignItems: "stretch", transition: "all 0.18s", position: "relative", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", overflow: "hidden" }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#e6007a"; e.currentTarget.style.boxShadow = "0 8px 32px rgba(230,0,122,0.12)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = "#e0e0e0"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)"; e.currentTarget.style.transform = "none"; }}>
+
+                      <div style={{ width: 4, background: "#e6007a", flexShrink: 0 }} />
+
+                      <div style={{ flex: 1, padding: "18px 22px", display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
+
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 15, color: "#0b0b0b", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {s.applicant || "Unnamed Package"}
+                          </div>
+                          <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                            {formCount > 0 && (
+                              <span className="db-badge db-badge-pink">
+                                {formCount} form{formCount !== 1 ? "s" : ""}
+                              </span>
+                            )}
+                            {s.form_ids?.slice(0, 4).map(fid => (
+                              <span key={fid} className="db-badge db-badge-gray">{fid.replace(/_/g, " ")}</span>
+                            ))}
+                            {(s.form_ids?.length || 0) > 4 && <span style={{ fontSize: 11, color: "#b5b5b5" }}>+{s.form_ids.length - 4}</span>}
+                            {s.lines?.length > 0 && (
+                              <span style={{ fontSize: 11, color: "#b5b5b5" }}>· {s.lines.slice(0, 2).join(", ")}{s.lines.length > 2 ? ` +${s.lines.length - 2}` : ""}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{ flexShrink: 0, textAlign: "right", marginRight: 4 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#6a6a6a" }}>{fmtDate(s.updated_at)}</div>
+                        </div>
+
+                        <div style={{ width: 54, height: 54, borderRadius: "50%", background: avg != null ? "rgba(230,0,122,0.08)" : "rgba(148,163,184,0.08)", border: `2px solid ${avg != null ? "#e6007a55" : "#94a3b855"}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          {avg != null ? (
+                            <>
+                              <span style={{ fontSize: 15, fontWeight: 800, color: "#e6007a", lineHeight: 1 }}>{avg}</span>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: "#e6007a", opacity: 0.8, marginTop: 1 }}>{grade}</span>
+                            </>
+                          ) : (
+                            <span style={{ fontSize: 9, color: "#b5b5b5", fontWeight: 600, textAlign: "center", lineHeight: 1.3 }}>{"SQS\n—"}</span>
+                          )}
+                        </div>
+
+                        <div style={{ color: "#e0e0e0", flexShrink: 0, display: "flex", alignItems: "center" }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        </div>
+
+                        <button className="session-delete-btn" onClick={e => { e.stopPropagation(); setDeleteTarget(s.session_id); }} title="Delete session" style={{ position: "absolute", top: 10, right: 10 }}>✕</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+
+        {/* ── Right sidebar ── */}
+        <aside className="dashboard-sidebar">
+
+          {/* Key metrics card */}
+          <div className="db-sidebar-card">
+            <div className="db-sidebar-card-title">Overview</div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {[
+                { label: "Total Packages", value: loading ? "—" : stats.total_packages, border: true },
+                { label: "Forms Generated", value: loading ? "—" : totalForms, border: true },
+                { label: "Avg SQS Score",   value: loading ? "—" : (globalAvg != null ? `${globalAvg} / 100` : "—"), border: false },
+              ].map((item, i) => (
+                <div key={i} className="db-metric-row" style={{ borderBottom: item.border ? "1px solid #f0f0f0" : "none" }}>
+                  <span className="db-metric-label">{item.label}</span>
+                  <span className="db-metric-value" style={{ color: "#e6007a" }}>{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Tips card */}
+          <div className="db-sidebar-card">
+            <div className="db-sidebar-card-title">Tips</div>
+            <ol className="db-tips-list">
+              {tips.map((tip, i) => (
+                <li key={i} className="db-tip-item">{tip}</li>
+              ))}
+            </ol>
+          </div>
+
+        </aside>
+      </div>
     </div>
+    </>
   );
 }
 
@@ -620,6 +623,7 @@ export default function AcordModal({
   const [arqSessions, setArqSessions] = useState([]);
   const [arqNotifCount, setArqNotifCount] = useState(0);
   const [clientFilledFields, setClientFilledFields] = useState([]);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [liteSqsData, setLiteSqsData] = useState(null);
   const [liteCoverLoading, setLiteCoverLoading] = useState(false);
 
@@ -634,7 +638,7 @@ export default function AcordModal({
   const [downloadPreflightLoading, setDownloadPreflightLoading] = useState(false);
 
   useEffect(() => {
-    if (step !== "lite" || !sessionId || !token) return;
+    if (step !== "lite" || !sessionId) return;
     fetch(`${API_BASE}/api/lite/generate-internal/${sessionId}`, { method: "POST", credentials: "include" })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.success) setLiteSqsData(d); })
@@ -644,7 +648,9 @@ export default function AcordModal({
   useEffect(() => {
     if (!resumeSessionId) return;
     setLoading(true); setProcessingStage("Restoring your session...");
-    fetch(`${API_BASE}/api/session/${resumeSessionId}`, { credentials: "include" })
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    fetch(`${API_BASE}/api/session/${resumeSessionId}`, { credentials: "include", signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
@@ -655,7 +661,7 @@ export default function AcordModal({
         } else { setStep("dashboard"); setSessionId(null); }
       })
       .catch(() => { setError("Could not restore session. Please try again."); setStep("dashboard"); setSessionId(null); })
-      .finally(() => { setLoading(false); setProcessingStage(""); });
+      .finally(() => { clearTimeout(timer); setLoading(false); setProcessingStage(""); });
   }, [resumeSessionId]); // eslint-disable-line
 
   useEffect(() => {
@@ -672,12 +678,12 @@ export default function AcordModal({
   }, []);
 
   useEffect(() => {
-    if ((step !== "editor" && step !== "lite") || !sessionId || !token) return;
+    if ((step !== "editor" && step !== "lite") || !sessionId) return;
     refreshArqData();
   }, [step, sessionId]); // eslint-disable-line
 
   const refreshArqData = async () => {
-    if (!sessionId || !token) return [];
+    if (!sessionId) return [];
     fetch(`${API_BASE}/api/arq/list/${sessionId}`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null).then(d => { if (d?.success) setArqSessions(d.arq_sessions || []); }).catch(() => {});
     fetch(`${API_BASE}/api/arq/notifications`, { credentials: "include" })
@@ -735,18 +741,23 @@ export default function AcordModal({
 
   const handleResumeSession = sid => {
     setLoading(true); setProcessingStage("Restoring session…"); setSessionId(sid);
-    fetch(`${API_BASE}/api/session/${sid}`, { credentials: "include" })
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    fetch(`${API_BASE}/api/session/${sid}`, { credentials: "include", signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
+        const isEssentials = user?.subscription_tier === "essentials";
+        if (!isEssentials && data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
           setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
           setPdfLoading(readyMap); setStep("editor");
+        } else if (isEssentials && data?.session_id) {
+          setSessionId(sid); setStep("lite");
         } else { setStep("upload"); setSessionId(null); }
       })
       .catch(() => { setError("Could not load session. Please try again."); setStep("upload"); setSessionId(null); })
-      .finally(() => { setLoading(false); setProcessingStage(""); });
+      .finally(() => { clearTimeout(timer); setLoading(false); setProcessingStage(""); });
   };
 
   const handleSendToEpic = async formId => {
@@ -831,7 +842,7 @@ export default function AcordModal({
       setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
       setRecommendations(data.recommendations || []); setAllAvailableForms(data.all_available_forms || []);
       setCheckedFormIds(new Set((data.recommendations || []).map(r => r.form_id)));
-      setStep("recommendations");
+      setStep(user?.subscription_tier === "essentials" ? "lite" : "recommendations");
     } catch (e) { setError("Upload failed: " + e.message); }
     finally { setLoading(false); setShowUploadOverlay(false); }
   };
@@ -1092,78 +1103,146 @@ export default function AcordModal({
 
         {step === "lite" && (() => {
           const sqs = liteSqsData?.sqs;
-          const gradeColor = g => ({ A: "#10b981", B: "#22c55e", C: "#f59e0b", D: "#f97316", F: "#ef4444" }[g] || "#94a3b8");
+          const liteGradeColor = g => ({ A: "#10b981", B: "#22c55e", C: "#f59e0b", D: "#f97316", F: "#ef4444" }[g] || "#94a3b8");
+          const liteGradeBg = g => ({ A: "rgba(16,185,129,0.08)", B: "rgba(34,197,94,0.08)", C: "rgba(245,158,11,0.08)", D: "rgba(249,115,22,0.08)", F: "rgba(239,68,68,0.08)" }[g] || "rgba(148,163,184,0.08)");
+          const routingLabel = { auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Underwriter Review", hold: "Hold — Remediation Required" };
+          const routingStyle = {
+            auto_quote: { bg: "#dcfce7", color: "#166534", border: "#86efac" },
+            review:     { bg: "#fef9c3", color: "#854d0e", border: "#fde047" },
+            full_review:{ bg: "#ffedd5", color: "#9a3412", border: "#fdba74" },
+            hold:       { bg: "#fee2e2", color: "#991b1b", border: "#fca5a5" },
+          };
+          const rd = sqs?.routing_decision;
+          const rs = routingStyle[rd] || { bg: "#f1f5f9", color: "#475569", border: "#e2e8f0" };
           return (
-            <div style={{ maxWidth: 720, margin: "0 auto" }}>
-              <div style={{ marginBottom: 24 }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", marginBottom: 4 }}>Your Lite Analysis</div>
-                <div style={{ fontSize: 13, color: "#64748b" }}>Form generation is not included in the Lite plan. Use the tools below to complete your workflow.</div>
+            <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 4px" }}>
+
+              {/* ── Page header ── */}
+              <div style={{ marginBottom: 28 }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10, fontWeight: 700, color: "#e6007a", letterSpacing: "0.08em", textTransform: "uppercase", background: "rgba(230,0,122,0.07)", padding: "3px 10px", borderRadius: 20, marginBottom: 10 }}>
+                  Essentials
+                </div>
+                <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: "0 0 6px", letterSpacing: "-0.3px" }}>Submission Analysis</h2>
+                <p style={{ fontSize: 13.5, color: "#64748b", margin: 0 }}>Your SQS score is ready. Use the tools below to complete your workflow.</p>
               </div>
 
-              <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "20px 24px", marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 12 }}>SQS Analysis</div>
+              {/* ── SQS hero card ── */}
+              <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 20, padding: "28px 32px", marginBottom: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
                 {!sqs ? (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#94a3b8", fontSize: 13 }}>
-                    <span style={{ width: 14, height: 14, border: "2px solid #cbd5e1", borderTopColor: "#4f7cff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
-                    Analyzing submission…
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 0", gap: 14 }}>
+                    <span style={{ width: 40, height: 40, border: "3px solid #e2e8f0", borderTopColor: "#e6007a", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
+                    <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Scoring your submission…</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8" }}>This typically takes a few seconds</div>
                   </div>
                 ) : (
-                  <div style={{ display: "flex", alignItems: "center", gap: 20 }}>
-                    <div style={{ width: 64, height: 64, borderRadius: "50%", background: gradeColor(sqs.grade), display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <span style={{ fontSize: 22, fontWeight: 800, color: "#fff", lineHeight: 1 }}>{sqs.sqs_score ?? "—"}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>{sqs.grade}</span>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 2 }}>{sqs.tier} — {({ auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Underwriter Review", hold: "Hold — Remediation Required" })[sqs.routing_decision] || sqs.routing_decision}</div>
-                      {liteSqsData.soft_stops?.length > 0 && (
-                        <div style={{ marginTop: 8 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309", marginBottom: 4 }}>⚠️ Warnings</div>
-                          {liteSqsData.soft_stops.map((s, i) => <div key={i} style={{ fontSize: 12, color: "#64748b", padding: "1px 0" }}>• {s}</div>)}
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 20 }}>Submission Quality Score</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 28, marginBottom: 20, flexWrap: "wrap" }}>
+
+                      {/* Score circle */}
+                      <div style={{ position: "relative", flexShrink: 0 }}>
+                        <div style={{ width: 120, height: 120, borderRadius: "50%", background: liteGradeBg(sqs.grade), border: `3px solid ${liteGradeColor(sqs.grade)}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                          <span style={{ fontSize: 42, fontWeight: 900, color: liteGradeColor(sqs.grade), lineHeight: 1 }}>{sqs.sqs_score ?? "—"}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: liteGradeColor(sqs.grade), opacity: 0.75, marginTop: 2 }}>/100</span>
                         </div>
-                      )}
-                      {liteSqsData.hard_stops?.length > 0 && (
-                        <div style={{ marginTop: 8 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 4 }}>🚫 Hard Stops</div>
-                          {liteSqsData.hard_stops.map((s, i) => <div key={i} style={{ fontSize: 12, color: "#64748b", padding: "1px 0" }}>• {s}</div>)}
+                        <div style={{ position: "absolute", bottom: -4, right: -4, width: 32, height: 32, borderRadius: "50%", background: liteGradeColor(sqs.grade), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: "#fff", boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}>
+                          {sqs.grade}
                         </div>
-                      )}
+                      </div>
+
+                      {/* Score details */}
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>{sqs.tier || "Submission Scored"}</div>
+                        {rd && (
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 20, border: `1px solid ${rs.border}`, background: rs.bg, color: rs.color, fontSize: 12, fontWeight: 700, marginBottom: 12 }}>
+                            {{ auto_quote: "✅", review: "🔍", full_review: "📋", hold: "🚫" }[rd]} {routingLabel[rd] || rd}
+                          </div>
+                        )}
+                        {/* Breakdown pillars */}
+                        {sqs.breakdown && Object.keys(sqs.breakdown).length > 0 && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                            {Object.entries(sqs.breakdown).slice(0, 4).map(([key, val]) => (
+                              <div key={key}>
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 2 }}>
+                                  <span style={{ color: "#64748b" }}>{SQS_LABELS[key] || key}</span>
+                                  <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>
+                                </div>
+                                <div style={{ height: 4, background: "#f1f5f9", borderRadius: 2, overflow: "hidden" }}>
+                                  <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 2, transition: "width 0.6s ease" }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Stops */}
+                    {(liteSqsData?.hard_stops?.length > 0 || liteSqsData?.soft_stops?.length > 0) && (
+                      <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+                        {liteSqsData?.hard_stops?.length > 0 && (
+                          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px" }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 5 }}>🚫 Hard Stops — Must Resolve Before Submission</div>
+                            {liteSqsData.hard_stops.map((s, i) => <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "1px 0" }}>• {s}</div>)}
+                          </div>
+                        )}
+                        {liteSqsData?.soft_stops?.length > 0 && (
+                          <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 14px" }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 5 }}>⚠️ Warnings — Will Cap Your Score</div>
+                            {liteSqsData.soft_stops.map((s, i) => <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "1px 0" }}>• {s}</div>)}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "20px 20px" }}>
-                  <div style={{ fontSize: 18, marginBottom: 8 }}>📧</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>Client Questionnaire</div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>Generate and send a tailored questionnaire to your client to fill in missing information.</div>
+              {/* ── Action buttons ── */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 24 }}>
+
+                {/* Send to Client (ARQ) */}
+                <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 16, padding: "22px 22px 18px", display: "flex", flexDirection: "column", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e6007a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Send to Client</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.5, flex: 1 }}>Client-in-the-Loop™ — send a targeted questionnaire to fill gaps and improve your score.</div>
                   <button onClick={handleOpenARQ} disabled={arqLoadingQ}
-                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: arqLoadingQ ? 0.7 : 1 }}>
-                    {arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client"}
+                    style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: arqLoadingQ ? "#e2e8f0" : "#e6007a", color: arqLoadingQ ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s" }}
+                    onMouseEnter={e => { if (!arqLoadingQ) e.currentTarget.style.background = "#c00066"; }}
+                    onMouseLeave={e => { if (!arqLoadingQ) e.currentTarget.style.background = "#e6007a"; }}>
+                    {arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client (ARQ)"}
                   </button>
                   <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
                 </div>
 
-                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "20px 20px" }}>
-                  <div style={{ fontSize: 18, marginBottom: 8 }}>📄</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>Summary Cover Sheet</div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14 }}>Download your AI-generated SQS summary cover page for use with any platform.</div>
+                {/* Cover Summary */}
+                <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 16, padding: "22px 22px 18px", display: "flex", flexDirection: "column", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(15,23,42,0.06)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Cover Summary</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.5, flex: 1 }}>AI-generated SQS narrative cover sheet — submittable with any platform, ready to download.</div>
                   <button onClick={handleLiteCoverSheet} disabled={liteCoverLoading}
-                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #0f172a", background: "#0f172a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: liteCoverLoading ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: liteCoverLoading ? 0.7 : 1 }}>
-                    {liteCoverLoading ? <><span style={{ width: 11, height: 11, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Generating…</> : "Download Cover Sheet"}
+                    style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: liteCoverLoading ? "#e2e8f0" : "#0f172a", color: liteCoverLoading ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: liteCoverLoading ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s" }}
+                    onMouseEnter={e => { if (!liteCoverLoading) e.currentTarget.style.background = "#1e293b"; }}
+                    onMouseLeave={e => { if (!liteCoverLoading) e.currentTarget.style.background = "#0f172a"; }}>
+                    {liteCoverLoading ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Generating…</> : "Cover Summary"}
                   </button>
                 </div>
               </div>
 
-              <div style={{ textAlign: "center" }}>
-                <button onClick={() => { setStep("upload"); setSessionId(null); setFiles([]); setLiteSqsData(null); }}
-                  style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 20px", fontSize: 13, color: "#64748b", cursor: "pointer", fontFamily: "inherit" }}>
-                  ← Upload a new package
+              {/* ── Footer nav ── */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 4 }}>
+                <button onClick={() => { resetToUpload(); }}
+                  style={{ background: "none", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 18px", fontSize: 13, color: "#64748b", cursor: "pointer", fontFamily: "inherit" }}>
+                  ← New Submission
                 </button>
-                <div style={{ marginTop: 10, fontSize: 12, color: "#94a3b8" }}>
-                  Want full form generation?{" "}
-                  <button onClick={onShowUpgrade} style={{ background: "none", border: "none", color: "#e6007a", fontWeight: 700, cursor: "pointer", padding: 0, fontSize: 12, fontFamily: "inherit" }}>Upgrade your plan →</button>
-                </div>
+                <button onClick={onShowUpgrade}
+                  style={{ background: "none", border: "none", color: "#e6007a", fontWeight: 700, cursor: "pointer", padding: 0, fontSize: 13, fontFamily: "inherit" }}>
+                  Unlock Full Forms — Upgrade →
+                </button>
               </div>
             </div>
           );
@@ -1191,41 +1270,136 @@ export default function AcordModal({
           const ps = user?.payment_status;
           const uploadBlocked = ps === "soft_locked" || ps === "suspended" || ps === "archived";
           const blockMsg = ps === "archived" ? "Account archived — contact support to restore." : ps === "suspended" ? "Account suspended — restore billing to continue." : ps === "soft_locked" ? "Account Disabled — please update your billing." : null;
+          const activeBtn = files.length && !loading && !uploadBlocked;
           return (
-            <div style={{ maxWidth: 560, margin: "0 auto" }}>
-              <div style={{ textAlign: "center", marginBottom: 32 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>New Submission</div>
-                <h2 style={{ fontSize: 28, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>Upload Documents</h2>
-                <p style={{ fontSize: 14, color: "#64748b" }}>Dec pages, loss runs, schedules, quotes — PDFs, images, or ZIP archives</p>
+            <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 4px" }}>
+              {/* Header */}
+              <div style={{ textAlign: "center", marginBottom: 28 }}>
+                <div style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: "#e6007a", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10, padding: "3px 10px", background: "rgba(230,0,122,0.07)", borderRadius: 20 }}>New Submission</div>
+                <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: "0 0 6px", letterSpacing: "-0.3px" }}>Upload Documents</h2>
+                <p style={{ fontSize: 13.5, color: "#64748b", margin: 0, lineHeight: 1.5 }}>Dec pages, loss runs, schedules, quotes — PDFs, images, or ZIP archives</p>
               </div>
-              {uploadBlocked && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px", marginBottom: 20, fontSize: 13, color: "#dc2626", textAlign: "center" }}>{blockMsg}</div>}
-              <div ref={dropRef}
-                style={{ textAlign: "center", padding: dragging ? "52px 20px" : "48px 20px", border: `2px dashed ${dragging ? "#e6007a" : "#d1d5db"}`, borderRadius: 16, background: dragging ? "rgba(230,0,122,0.04)" : "#fafafa", transition: "all 0.2s", transform: dragging ? "scale(1.01)" : "none" }}>
-                <div style={{ fontSize: 40, marginBottom: 14, opacity: 0.7 }}>📁</div>
-                <input type="file" id="file-upload" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,application/pdf,application/zip,image/*" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ display: "none" }} />
-                <label htmlFor="file-upload" style={{ display: "block", fontSize: 15, color: "#475569", cursor: uploadBlocked ? "not-allowed" : "pointer" }}>
-                  Drag & drop or <span style={{ color: "#e6007a", textDecoration: "underline", fontWeight: 600 }}>browse files</span>
-                </label>
-                <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 6 }}>PDFs, Images (JPG, PNG, BMP, TIFF) and ZIP archives</p>
-              </div>
-              {files.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "16px 0", maxHeight: 180, overflowY: "auto" }}>
-                  {files.map((f, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", background: "rgba(230,0,122,0.04)", border: "1px solid rgba(230,0,122,0.15)", borderRadius: 8, fontSize: 13 }}>
-                      <span style={{ fontSize: 15, flexShrink: 0 }}>{f.name.endsWith(".zip") ? "📦" : f.type?.startsWith("image/") ? "🖼️" : "📄"}</span>
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#1e293b" }}>{f.name}</span>
-                      <button onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 15, padding: "0 2px" }}
-                        onMouseEnter={e => e.currentTarget.style.color = "#e6007a"}
-                        onMouseLeave={e => e.currentTarget.style.color = "#94a3b8"}>✕</button>
-                    </div>
-                  ))}
-                </div>
+
+              {/* Blocked banner */}
+              {uploadBlocked && (
+                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#dc2626", textAlign: "center" }}>{blockMsg}</div>
               )}
-              <button onClick={handleUpload} disabled={!files.length || loading || uploadBlocked}
-                style={{ width: "100%", marginTop: 16, padding: "13px 0", borderRadius: 10, border: "none", background: files.length && !loading && !uploadBlocked ? "#e6007a" : "#e2e8f0", color: files.length && !loading && !uploadBlocked ? "#fff" : "#94a3b8", fontSize: 15, fontWeight: 700, cursor: files.length && !loading && !uploadBlocked ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: files.length && !loading && !uploadBlocked ? "0 4px 14px rgba(230,0,122,0.3)" : "none" }}>
-                <span style={{ fontSize: 16 }}>🚀</span>
-                {loading ? "Analyzing..." : `Analyze ${files.length > 1 ? files.length + " Files" : "File"}`}
-              </button>
+
+              {/* Drop zone card */}
+              <div style={{
+                background: "#fff",
+                borderRadius: 20,
+                boxShadow: "0 2px 8px rgba(0,0,0,0.06), 0 8px 32px rgba(0,0,0,0.09), 0 0 0 1px rgba(0,0,0,0.04)",
+                overflow: "hidden",
+                padding: "8px",
+              }}>
+                {/* Drop target */}
+                <input type="file" id="file-upload" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,application/pdf,application/zip,image/*" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ display: "none" }} />
+                <label htmlFor="file-upload"
+                  ref={dropRef}
+                  style={{
+                    display: "block",
+                    position: "relative",
+                    padding: dragging ? "52px 32px" : "44px 32px",
+                    border: `2px dashed ${dragging ? "#e6007a" : "#e2e8f0"}`,
+                    borderRadius: 14,
+                    background: dragging ? "rgba(230,0,122,0.03)" : "#fafbfc",
+                    transition: "all 0.18s ease",
+                    cursor: uploadBlocked ? "not-allowed" : "pointer",
+                    textAlign: "center",
+                  }}
+                >
+                  {/* Upload icon — SVG, no emoji */}
+                  <div style={{ marginBottom: 16, display: "flex", justifyContent: "center" }}>
+                    <svg width="44" height="44" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ opacity: dragging ? 1 : 0.55, transition: "opacity 0.18s" }}>
+                      <rect width="44" height="44" rx="12" fill={dragging ? "rgba(230,0,122,0.1)" : "#f1f5f9"} />
+                      <path d="M22 28V18M22 18L18 22M22 18L26 22" stroke={dragging ? "#e6007a" : "#64748b"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M14 31h16" stroke={dragging ? "#e6007a" : "#64748b"} strokeWidth="2" strokeLinecap="round"/>
+                    </svg>
+                  </div>
+
+                  <p style={{ fontSize: 15, fontWeight: 600, color: "#1e293b", margin: "0 0 4px" }}>
+                    Drag & drop files
+                  </p>
+                  <p style={{ fontSize: 13.5, color: "#64748b", margin: "0 0 12px" }}>
+                    or <span style={{ color: "#e6007a", fontWeight: 600, textDecoration: "underline" }}>click to browse</span>
+                  </p>
+                  <p style={{ fontSize: 11.5, color: "#94a3b8", margin: 0, letterSpacing: "0.01em" }}>
+                    PDFs · Images (JPG, PNG, BMP, TIFF) · ZIP archives
+                  </p>
+                </label>
+
+                {/* File list */}
+                {files.length > 0 && (
+                  <div style={{ padding: "0 16px 16px", marginTop: -4 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 196, overflowY: "auto", paddingRight: 2 }}>
+                      {files.map((f, i) => {
+                        const isZip = f.name.toLowerCase().endsWith(".zip");
+                        const isImg = f.type?.startsWith("image/");
+                        const ext = f.name.split(".").pop()?.toUpperCase() || "FILE";
+                        return (
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: "#f8fafc", border: "1px solid #e9edf2", borderRadius: 9, fontSize: 13 }}>
+                            {/* Type badge */}
+                            <span style={{
+                              flexShrink: 0, width: 32, height: 32, borderRadius: 7,
+                              background: isZip ? "#fef3c7" : isImg ? "#ede9fe" : "#dbeafe",
+                              color: isZip ? "#92400e" : isImg ? "#6d28d9" : "#1d4ed8",
+                              fontSize: 9, fontWeight: 800, letterSpacing: "0.04em",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                            }}>{isZip ? "ZIP" : isImg ? ext : "PDF"}</span>
+                            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#1e293b", fontWeight: 500 }}>{f.name}</span>
+                            <span style={{ fontSize: 11, color: "#94a3b8", flexShrink: 0 }}>{(f.size / 1024).toFixed(0)} KB</span>
+                            <button
+                              onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "#cbd5e1", fontSize: 14, padding: "2px 4px", lineHeight: 1, borderRadius: 4, transition: "color 0.15s" }}
+                              onMouseEnter={e => e.currentTarget.style.color = "#e6007a"}
+                              onMouseLeave={e => e.currentTarget.style.color = "#cbd5e1"}
+                              title="Remove file"
+                            >✕</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* CTA */}
+                <div style={{ padding: "8px 8px 8px" }}>
+                  <button
+                    onClick={handleUpload}
+                    disabled={!files.length || loading || uploadBlocked}
+                    style={{
+                      width: "100%",
+                      padding: "13px 0",
+                      borderRadius: 12,
+                      border: "none",
+                      background: loading ? "#cc006e" : "#e6007a",
+                      color: "#fff",
+                      fontSize: 14.5,
+                      fontWeight: 700,
+                      cursor: activeBtn ? "pointer" : "not-allowed",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 10,
+                      boxShadow: "0 4px 18px rgba(230,0,122,0.32)",
+                      transition: "all 0.18s ease",
+                      letterSpacing: "0.01em",
+                      opacity: uploadBlocked ? 0.6 : 1,
+                    }}
+                    onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "#cc006e"; }}
+                    onMouseLeave={e => { if (!loading) e.currentTarget.style.background = "#e6007a"; }}
+                  >
+                    {loading && (
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}>
+                        <circle cx="8" cy="8" r="6" stroke="rgba(255,255,255,0.35)" strokeWidth="2.5"/>
+                        <path d="M8 2a6 6 0 0 1 6 6" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"/>
+                      </svg>
+                    )}
+                    {loading ? "Analyzing..." : files.length > 0 ? `Analyze ${files.length > 1 ? files.length + " Files" : "File"}` : "Analyze File"}
+                  </button>
+                </div>
+              </div>
             </div>
           );
         })()}
@@ -1560,39 +1734,88 @@ export default function AcordModal({
 
               <div style={{ height: 1, background: "#f1f5f9", margin: "0 14px" }} />
               <div style={{ padding: "12px 14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+
+                {/* Collapsible secondary actions — above Send to Client */}
+                <div style={{ borderRadius: 14, overflow: "hidden", border: actionsOpen ? "1.5px solid #f9a8d4" : "1.5px solid #fce7f3", boxShadow: actionsOpen ? "0 8px 28px rgba(230,0,122,0.18)" : "0 2px 8px rgba(230,0,122,0.08)", transition: "box-shadow 0.25s, border-color 0.25s" }}>
+                  {/* Toggle header — identical gradient to Send to Client */}
+                  <button
+                    onClick={() => setActionsOpen(o => !o)}
+                    style={{ width: "100%", padding: "11px 16px", background: "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "inherit", fontSize: 12, fontWeight: 700, color: "#fff", letterSpacing: "0.04em", transition: "background 0.2s, box-shadow 0.2s" }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ width: 22, height: 22, borderRadius: 6, background: "rgba(255,255,255,0.22)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>⚡</span>
+                      More Actions
+                    </span>
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)", transform: actionsOpen ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0 }}>
+                      <path d="M2.5 5L7 9.5L11.5 5" stroke="rgba(255,255,255,0.9)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+
+                  {/* Drawer */}
+                  {actionsOpen && (
+                    <div style={{ background: "#fff", borderTop: "1px solid #fce7f3", padding: "8px 8px 10px", display: "flex", flexDirection: "column", gap: 6, animation: "slideDown 0.18s ease-out" }}>
+
+                      {/* Send to EPIC */}
+                      <button onClick={() => handleSendToEpic(activeFormId)} disabled={!activeFormId || epicLoading}
+                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 10px", borderRadius: 9, border: "none", background: epicSuccess ? "rgba(34,197,94,0.12)" : "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", color: epicSuccess ? "#16a34a" : "#fff", fontSize: 12, fontWeight: 600, cursor: epicLoading ? "wait" : "pointer", fontFamily: "inherit", transition: "all 0.15s", opacity: (!activeFormId || epicLoading) ? 0.5 : 1, textAlign: "left", boxShadow: epicSuccess ? "none" : "0 2px 8px rgba(230,0,122,0.25)" }}
+                        onMouseEnter={e => { if (activeFormId && !epicLoading && !epicSuccess) { e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; } }}
+                        onMouseLeave={e => { if (!epicSuccess) { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; } }}>
+                        <span style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>
+                          {epicSuccess ? "✅" : "🔗"}
+                        </span>
+                        <span style={{ flex: 1 }}>{epicSuccess ? "Sent to EPIC" : epicLoading ? "Sending…" : "Send to EPIC"}</span>
+                        {epicLoading && <span style={{ width: 10, height: 10, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />}
+                      </button>
+
+                      {/* Download This Form */}
+                      <button onClick={() => handleDownloadOne(activeFormId)} disabled={!activeFormId}
+                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 10px", borderRadius: 9, border: "none", background: "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: activeFormId ? "pointer" : "not-allowed", opacity: activeFormId ? 1 : 0.5, fontFamily: "inherit", transition: "all 0.15s", textAlign: "left", boxShadow: "0 2px 8px rgba(230,0,122,0.25)" }}
+                        onMouseEnter={e => { if (activeFormId) e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; }}>
+                        <span style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>⬇</span>
+                        <span>Download This Form</span>
+                      </button>
+
+                      {/* Download All */}
+                      {formIdList.length > 1 && (
+                        <button onClick={handleDownloadAll}
+                          style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 10px", borderRadius: 9, border: "none", background: "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", textAlign: "left", boxShadow: "0 2px 8px rgba(230,0,122,0.25)" }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; }}>
+                          <span style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>📦</span>
+                          <span>Download All <span style={{ opacity: 0.75, fontSize: 11 }}>({formIdList.length} forms)</span></span>
+                        </button>
+                      )}
+
+                      {/* Dashboard */}
+                      <button onClick={goToDashboard}
+                        style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 10px", borderRadius: 9, border: "none", background: "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", textAlign: "left", boxShadow: "0 2px 8px rgba(230,0,122,0.25)" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; }}>
+                        <span style={{ width: 26, height: 26, borderRadius: 7, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0 }}>←</span>
+                        <span>Dashboard</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Primary CTA — Client-in-the-Loop™ */}
                 <button onClick={handleOpenARQ} disabled={arqLoadingQ}
-                  style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: arqLoadingQ ? 0.7 : 1 }}
-                  onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.border = "1px solid #c00066"; } }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.border = "1px solid #e6007a"; }}>
-                  {arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #4f7cff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : <>📧 Send to Client {arqNotifCount > 0 && <span style={{ background: "#fff", color: "#e6007a", borderRadius: 10, fontSize: 10, padding: "1px 6px", fontWeight: 700 }}>{arqNotifCount}</span>}</>}
+                  style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: arqLoadingQ ? 0.7 : 1, boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", letterSpacing: "0.02em", transition: "all 0.2s" }}
+                  onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}>
+                  {arqLoadingQ
+                    ? <><span style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</>
+                    : <>
+                        <span style={{ width: 22, height: 22, borderRadius: 6, background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>📧</span>
+                        Send to Client
+                        {arqNotifCount > 0 && <span style={{ background: "#fff", color: "#e6007a", borderRadius: 10, fontSize: 10, padding: "2px 7px", fontWeight: 800, marginLeft: 2 }}>{arqNotifCount}</span>}
+                      </>
+                  }
                 </button>
                 <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
-                <button onClick={() => handleSendToEpic(activeFormId)} disabled={!activeFormId || epicLoading}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", padding: "9px 14px", borderRadius: 8, border: epicSuccess ? "1px solid #22c55e" : "1px solid #e6007a", background: epicSuccess ? "rgba(34,197,94,0.08)" : "#e6007a", color: epicSuccess ? "#22c55e" : "#fff", fontSize: 13, fontWeight: 700, cursor: epicLoading ? "wait" : "pointer", fontFamily: "inherit", transition: "all 0.18s", opacity: (!activeFormId || epicLoading) ? 0.55 : 1 }}
-                  onMouseEnter={e => { if (activeFormId && !epicLoading && !epicSuccess) { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.border = "1px solid #c00066"; } }}
-                  onMouseLeave={e => { if (!epicSuccess) { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.border = "1px solid #e6007a"; } }}>
-                  {epicSuccess ? "✅ Sent to EPIC" : epicLoading ? <><span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Sending…</> : "🔗 Send to EPIC"}
-                </button>
-                <button onClick={() => handleDownloadOne(activeFormId)} disabled={!activeFormId}
-                  style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: activeFormId ? "pointer" : "not-allowed", opacity: activeFormId ? 1 : 0.5, boxShadow: "0 3px 10px rgba(230,0,122,0.25)", fontFamily: "inherit" }}
-                  onMouseEnter={e => { if (activeFormId) e.currentTarget.style.background = "#c00066"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; }}>
-                  ⬇ Download This Form
-                </button>
-                {formIdList.length > 1 && (
-                  <button onClick={handleDownloadAll}
-                    style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 3px 10px rgba(230,0,122,0.25)", fontFamily: "inherit" }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.border = "1px solid #c00066"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.border = "1px solid #e6007a"; }}>
-                    📦 Download All ({formIdList.length} forms)
-                  </button>
-                )}
-                <button onClick={goToDashboard}
-                  style={{ width: "100%", padding: "9px 14px", borderRadius: 8, border: "1px solid #e6007a", background: "#e6007a", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.border = "1px solid #c00066"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.border = "1px solid #e6007a"; }}>
-                  ← Dashboard
-                </button>
+
               </div>
             </div>
 
