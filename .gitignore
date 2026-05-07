@@ -12,6 +12,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Virtual environment
+venv311/
+
 # Temp / generated files
 backend/tmp/
 backend/__pycache__/
