@@ -26,7 +26,26 @@
       "Bash(Format-Table FullName)",
       "Read(//c/Users/lenovo/Desktop/**)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\" -Name -Recurse)",
-      "Bash(python migrate.py)"
+      "Bash(python migrate.py)",
+      "Bash(perl -ne 'if \\(/^\\(?:from|import\\)\\\\s+\\([a-zA-Z_][a-zA-Z0-9_.]*\\)/\\){$pkg=$1; $pkg=~s/\\\\..*//; print \"$pkg\\\\n\"} elsif \\(/^from\\\\s+\\\\./\\) {} elsif \\(/^import\\\\s+\\\\./\\){} else {print}')",
+      "Bash(xargs -0 grep -h \"^from\\\\|^import\")",
+      "Bash(sed 's/\\\\..*$//')",
+      "Bash(grep -v \"^$\")",
+      "Read(//c/c/Users/lenovo/Desktop/ACORD-PY-VERSION2/**)",
+      "Bash(sed 's/ import.*//')",
+      "Bash(sed 's/ as.*//')",
+      "Bash(sed 's/^from //')",
+      "Bash(sed 's/^import //')",
+      "Bash(sed 's/[,\\\\[].*$//')",
+      "Bash(grep -Ev \"^\\(logging|datetime|json|os|re|time|hashlib|hmac|uuid|base64|asyncio|functools|enum|dataclasses|copy|math|urllib|http|contextlib|tempfile|signal|sys|traceback|io|zipfile|pathlib|typing|collections|abc|ssl|socket|inspect|email|csv|secrets\\)$\")",
+      "Bash(sed 's/\\\\[.*//')",
+      "Bash(sed 's/==.*//')",
+      "Bash(sed 's/>=.*//')",
+      "Bash(sed 's/<=.*//')",
+      "Bash(grep -Ev \"^\\(os|sys|json|time|hashlib|hmac|uuid|base64|asyncio|math|urllib|http|tempfile|signal|traceback|zipfile|pathlib|typing|collections|abc|logging|ssl|socket|inspect|email|csv|secrets|random|threading|subprocess|struct|shutil|operator|types|warnings|io|dataclasses|functools\\)$\")",
+      "Bash(cat)",
+      "Bash(bash /tmp/check_imports.sh)",
+      "Bash(pip list *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend"
