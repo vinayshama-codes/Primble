@@ -28,7 +28,7 @@ from services.form_service import (
 from services.ocr_service import extract_text, extract_zip
 from services.pdf_service import (
     extract_form_fields_with_positions, get_page_dims_pikepdf, regenerate_pdf_for_form,
-    fill_pdf, _is_signature_field,
+    fill_pdf, _is_signature_field, _load_fieldmap,
 )
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
@@ -499,8 +499,26 @@ async def get_form_fields(
     fields    = await _loop.run_in_executor(None, extract_form_fields_with_positions, tpl)
     page_dims = await _loop.run_in_executor(None, get_page_dims_pikepdf, tpl)
     field_state = r.get("field_state") or r.get("mapped", {})
-    confidence  = r.get("confidence", {})
+    confidence  = dict(r.get("confidence", {}))
     client_filled = set(r.get("client_filled_fields", []))
+
+    # Correct stale "filled" labels for AI-mapped fields. Sessions processed before
+    # the __ai_mapped__ fix stored "filled" instead of "low_confidence" for LLM-mapped
+    # fields. Re-derive the correct label now so highlights appear without re-processing.
+    _, ai_set = await _loop.run_in_executor(None, _load_fieldmap, form_id)
+    needs_save = False
+    for field_name, conf_label in list(confidence.items()):
+        if conf_label == "filled" and field_name in ai_set:
+            val = field_state.get(field_name)
+            has_val = val is not None and str(val).strip() not in ("", "null", "None")
+            if has_val:
+                confidence[field_name] = "low_confidence"
+                needs_save = True
+
+    if needs_save:
+        generated[form_id]["confidence"] = confidence
+        await upd_processing_session(session_id, {"generated_forms": generated})
+
     for f in fields:
         name = f["name"]
         if name in field_state:
@@ -531,7 +549,7 @@ async def mark_client_filled(
     r = generated[form_id]
     confidence = r.get("confidence", {})
     for fn in field_names:
-        confidence[fn] = "filled"
+        confidence[fn] = "client_arq"
     r["confidence"]           = confidence
     r["client_filled_fields"] = list(set(r.get("client_filled_fields", []) + field_names))
     generated[form_id] = r
@@ -594,13 +612,29 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         current_state = r.get("field_state", dict(r.get("mapped", {})))
         prev_state    = dict(current_state)
         current_state.update(req.field_updates)
-        confidence = r.get("confidence", {})
+        confidence = dict(r.get("confidence", {}))
+
+        # Correct stale "filled" labels for AI-mapped fields before applying edits.
+        _, ai_set = _load_fieldmap(form_id)
+        for field_name, conf_label in list(confidence.items()):
+            if conf_label == "filled" and field_name in ai_set:
+                val = current_state.get(field_name)
+                has_val = val is not None and str(val).strip() not in ("", "null", "None")
+                if has_val:
+                    confidence[field_name] = "low_confidence"
+
         for k, v in req.field_updates.items():
             val = str(v).strip() if v is not None else ""
             if val and val not in ("null", "None"):
-                confidence[k] = "filled"
-            elif confidence.get(k) == "filled":
-                confidence[k] = "low_confidence"
+                # Only promote missing_required → filled when user fills the field.
+                # Leave low_confidence fields as-is so pink highlights persist —
+                # AI-guessed fields stay pink until explicitly reviewed/refreshed.
+                if confidence.get(k) == "missing_required":
+                    confidence[k] = "filled"
+            else:
+                # Field cleared — demote to low_confidence unless ARQ-filled
+                if confidence.get(k) not in ("client_arq", "missing_required"):
+                    confidence[k] = "low_confidence"
 
         from services.pdf_service import _ACORD_FIELD_RULES
         updated_facts = dict(session["facts"])
@@ -696,7 +730,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             "_pdf_cache_hash": cache_hash, "pdf_bytes": new_pdf_bytes, "signature_applied": new_sig_applied,
         })
         await upd_processing_session(req.session_id, {"generated_forms": generated, "facts": updated_facts})
-        return JSONResponse({"success": True, "sqs": sqs})
+        return JSONResponse({"success": True, "sqs": sqs, "confidence": confidence})
     except HTTPException:
         raise
     except Exception as ex:
@@ -816,6 +850,49 @@ async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depen
     })
 
     return JSONResponse({"success": True, "message": f"Exported to terminal ({form_id}). EPIC integration coming soon.", "form_id": form_id, "payload": epic_payload})
+
+
+@router.get("/api/send-to-vertafore/{session_id}/{form_id}")
+async def send_to_vertafore(session_id: str, form_id: str, current_user: dict = Depends(get_current_user)):
+    import json
+    from datetime import datetime, timezone
+    proc_session = await get_processing_session(session_id)
+    if proc_session.get("user_id") != current_user["id"]:
+        raise HTTPException(403, "Access denied")
+    generated = proc_session.get("generated_forms", {})
+    facts     = proc_session.get("facts", {})
+    org_name  = current_user.get("organization_name") or current_user.get("full_name") or "Unknown Org"
+    timestamp = datetime.now(timezone.utc).isoformat() + "Z"
+
+    def _build_payload(fid, r):
+        field_data = r.get("field_state") or r.get("mapped", {})
+        sqs        = r.get("sqs", {})
+        return {"form_id": fid, "form_name": r.get("form_name", fid),
+                "sqs": {"score": sqs.get("sqs_score"), "grade": sqs.get("grade"),
+                        "tier": sqs.get("tier"), "routing_decision": sqs.get("routing_decision"), "breakdown": sqs.get("breakdown", {})},
+                "fields": {k: v for k, v in field_data.items() if v is not None and str(v).strip() not in ("", "null", "None")}}
+
+    if form_id == "all":
+        payload = {"source": "acordly", "version": "12.3.1", "export_type": "bulk",
+                   "timestamp": timestamp, "session_id": session_id,
+                   "user_email": current_user.get("email"), "organization": org_name,
+                   "applicant": facts.get("applicant_name"), "forms": {fid: _build_payload(fid, r) for fid, r in generated.items()}}
+    elif form_id in generated:
+        payload = {"source": "acordly", "version": "12.3.1", "export_type": "single_form",
+                   "timestamp": timestamp, "session_id": session_id,
+                   "user_email": current_user.get("email"), "organization": org_name,
+                   "applicant": facts.get("applicant_name"), "effective_date": facts.get("effective_date"),
+                   "lines_of_business": facts.get("lines_of_business", []), **_build_payload(form_id, generated[form_id])}
+    else:
+        raise HTTPException(404, f"Form '{form_id}' not found")
+
+    logger.info(f"VERTAFORE EXPORT: form={form_id} session={session_id[:8]} user={current_user.get('email')}\n{json.dumps(payload, indent=2, default=str)}")
+
+    await upd_processing_session(session_id, {
+        "last_downloaded_at": datetime.now(timezone.utc).isoformat()
+    })
+
+    return JSONResponse({"success": True, "message": f"Exported to terminal ({form_id}). Vertafore integration coming soon.", "form_id": form_id, "payload": payload})
 
 
 # ---------------------------------------------------------------------------

@@ -25,7 +25,8 @@
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\" -Recurse -Force)",
       "Bash(Format-Table FullName)",
       "Read(//c/Users/lenovo/Desktop/**)",
-      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\" -Name -Recurse)"
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\" -Name -Recurse)",
+      "Bash(python migrate.py)"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend"

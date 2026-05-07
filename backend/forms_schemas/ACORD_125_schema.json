@@ -1,1 +1,2742 @@
-{}
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer. ",
+    "required": false
+  },
+  "Producer_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The mailing address line one of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The mailing address line two of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The mailing address city name of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The mailing address state or province code of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The mailing address postal code of the producer / agency. ",
+    "required": false
+  },
+  "Producer_ContactPerson_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the individual at the producer's establishment that is the primary contact. ",
+    "required": false
+  },
+  "Producer_ContactPerson_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The phone number of the individual at the producer's establishment that is the primary contact.  If applicable, include the area code and extension. ",
+    "required": false
+  },
+  "Producer_FaxNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The fax number of the producer / agency. ",
+    "required": false
+  },
+  "Producer_ContactPerson_EmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The e-mail address of the individual at the producer's establishment that is the primary contact. ",
+    "required": false
+  },
+  "Insurer_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the producer (e.g., agency or brokerage firm) by the insurer. ",
+    "required": false
+  },
+  "Insurer_SubProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned by the insurer to the sub-producer (e.g., individual) within a producer's office (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). ",
+    "required": false
+  },
+  "Insurer_ProductDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of an independently filed policy or program that may be optionally available from the insurance company.  It may also be used to name the subsidiary company in which the line of business will be placed. ",
+    "required": false
+  },
+  "Insurer_ProductCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The product code assigned by the insurer for the policy. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number. ",
+    "required": false
+  },
+  "Insurer_Underwriter_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The company underwriter (or other company staff person) that this form should be directed to. ",
+    "required": false
+  },
+  "Insurer_Underwriter_OfficeIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The company underwriting office that this application should be directed to. ",
+    "required": false
+  },
+  "Policy_Status_QuoteIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the response expected from the company is a quote. ",
+    "required": false
+  },
+  "Policy_Status_IssueIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the response expected from the company is an issued policy. ",
+    "required": false
+  },
+  "Policy_Status_RenewIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the response expected from the company is a renewed policy. ",
+    "required": false
+  },
+  "Policy_Status_BoundIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage has been bound. ",
+    "required": false
+  },
+  "Policy_Status_ChangeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is being submitted for a policy change. ",
+    "required": false
+  },
+  "Policy_Status_CancelIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is being submitted for cancellation. ",
+    "required": false
+  },
+  "Policy_Status_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the policy status becomes effective.  This date is used for policy statuses of bound, change, and cancel.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Policy_Status_EffectiveTime_A": {
+    "ft": "/Tx",
+    "tu": "Enter time: The time the policy status becomes effective.  The time is used for policy statuses of bound, change, and cancel. ",
+    "required": false
+  },
+  "Policy_Status_EffectiveTimeAMIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the effective time of the policy status is before 12:00 pm. ",
+    "required": false
+  },
+  "Policy_Status_EffectiveTimePMIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the effective time of the policy status is 12:00 pm or later. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_BoilerAndMachineryIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Boiler & Machinery line of business is being selected for coverage. ",
+    "required": false
+  },
+  "BoilerAndMachineryLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Boiler & Machinery line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_BusinessAutoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Business Auto line of business is being selected for coverage. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Commercial Vehicle (Business Auto) line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_BusinessOwnersIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Business Owners line of business is being selected for coverage. ",
+    "required": false
+  },
+  "BusinessOwnersLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total estimated premium amount for the business owners (BOP) line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_CommercialGeneralLiability_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Commercial General Liability line of business is being selected for coverage. ",
+    "required": false
+  },
+  "GeneralLiabilityLineOfBusiness_TotalPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total premium amount for the commercial general liability line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_CommercialInlandMarineIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Commercial Inland Marine line of business is being selected for coverage. ",
+    "required": false
+  },
+  "CommercialInlandMarineLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for commercial inland marine line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_CommercialProperty_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Commercial Property line of business is being selected for coverage. ",
+    "required": false
+  },
+  "CommercialPropertyLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Commercial Property line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_CrimeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Crime line of business is being selected for coverage. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Crime line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_CyberAndPrivacy_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Cyber and Privacy line of business is being selected for coverage. ",
+    "required": false
+  },
+  "CyberAndPrivacyLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Cyber and Privacy line of business ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_FiduciaryLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Fiduciary Liability line of business is being selected for coverage. ",
+    "required": false
+  },
+  "FiduciaryLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Fiduciary Liability line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_GarageAndDealersIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Garage and Dealers line of business is being selected for coverage. ",
+    "required": false
+  },
+  "GarageAndDealersLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Garage and Dealers line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_LiquorLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Liquor Liability line of business is being selected for coverage. ",
+    "required": false
+  },
+  "LiquorLiabilityLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Liquor Liability line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_MotorCarrierIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Motor Carrier line of business is being selected for coverage. ",
+    "required": false
+  },
+  "MotorCarrierLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for motor carrier line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_TruckersIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Truckers line of business is being selected for coverage. ",
+    "required": false
+  },
+  "TruckersLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Truckers line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_UmbrellaIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Umbrella line of business is being selected for coverage. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Commercial Umbrella line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_YachtIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Yacht line of business is being selected for coverage. ",
+    "required": false
+  },
+  "YachtLineOfBusiness_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount for the Yacht line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that lines of business other than those listed are being selected for coverage. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other line of business. ",
+    "required": false
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount the for the other line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that lines of business other than those listed are being selected for coverage. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other line of business. ",
+    "required": false
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount the for the other line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that lines of business other than those listed are being selected for coverage. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other line of business. ",
+    "required": false
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount the for the other line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that lines of business other than those listed are being selected for coverage. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other line of business. ",
+    "required": false
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount the for the other line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that lines of business other than those listed are being selected for coverage. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other line of business. ",
+    "required": false
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount the for the other line of business. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that lines of business other than those listed are being selected for coverage. ",
+    "required": false
+  },
+  "Policy_LineOfBusiness_OtherLineOfBusinessDescription_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other line of business. ",
+    "required": false
+  },
+  "Policy_SectionAttached_OtherPremiumAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount the for the other line of business. ",
+    "required": false
+  },
+  "Policy_SectionAttached_AccountsReceivableValuablePapersIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates an Accounts Receivable /  Valuable Papers section is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_AdditionalInterestScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates ACORD 45, Additional Interest Schedule is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_AdditionalPremisesScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates an Additional Premises Information Schedule is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_ApartmentBuildingSupplementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates an Apartment Building Supplement is attached. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_CondominiumAssociationByLawsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the condominium association bylaws are attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_ContractorsSupplementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Contractors Supplement is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_CoveragesScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a coverages schedule is attached. ",
+    "required": false
+  },
+  "Policy_SectionAttached_DealerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Dealers Section is attached to the application. ",
+    "required": false
+  },
+  "Policy_SectionAttached_DriverInformationScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Driver Information Schedule is attached to the application. ",
+    "required": false
+  },
+  "Policy_SectionAttached_ElectronicDataProcessingIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates an Electronic Data Processing Section is attached to this application. ",
+    "required": false
+  },
+  "Policy_SectionAttached_GlassAndSignIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Glass and Sign Section is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_HotelMotelSupplementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Hotel / Motel Supplement is attached to the application. ",
+    "required": false
+  },
+  "Policy_SectionAttached_InstallationBuildersRiskIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates an Installation / Builder's Risk Section is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_InternationalLiabilityExposureSupplementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates an International Liability Exposure Supplement is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_InternationalPropertyExposureSupplementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates an International Property Exposure Supplement is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_LossSummaryIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a loss summary report is attached to the application. ",
+    "required": false
+  },
+  "Policy_SectionAttached_OpenCargoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates an Open Cargo Section is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_PremiumPaymentSupplementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Premium Payment Supplement is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_ProfessionalLiabilitySupplementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Professional Liability Supplement is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_RestaurantTavernSupplementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Restaurant / Tavern Supplement is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_StatementOfValuesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Statement / Schedule of Values is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_StateSupplementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a state supplement is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_VacantBuildingSupplementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Vacant Building Supplement is attached to the application. ",
+    "required": false
+  },
+  "Policy_SectionAttached_VehicleScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a Vehicle Schedule is attached to the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there is an attachment other than those listed on the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of other attachment. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there is an attachment other than those listed on the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of other attachment. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there is an attachment other than those listed on the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of other attachment. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there is an attachment other than those listed on the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of other attachment. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there is an attachment other than those listed on the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherDescription_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of other attachment. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there is an attachment other than those listed on the application. ",
+    "required": false
+  },
+  "CommercialPolicy_Attachment_OtherDescription_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of other attachment. ",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  (MM/DD/YYYY)  As used here, this is the proposed effective date.",
+    "required": false
+  },
+  "Policy_ExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the terms and conditions of the policy will expire.  (MM/DD/YYYY)  As used here, this is the proposed expiration date.",
+    "required": false
+  },
+  "Policy_Payment_DirectBillIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is to be direct billed. ",
+    "required": false
+  },
+  "Policy_Payment_ProducerBillIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is to be producer / agency billed. ",
+    "required": false
+  },
+  "Policy_Payment_PaymentScheduleCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The payment plan for the policy (i.e., AN - Annual, MO - Monthly, QT - Quarterly, etc.). ",
+    "required": false
+  },
+  "Policy_PaymentMethod_MethodDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The method the policy will be paid. ",
+    "required": false
+  },
+  "Policy_Audit_FrequencyCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The audit term for policies that are subject to periodic audit.  If the audit period is known, enter the code; A - annual, S - semi-annual, Q - Quarterly, M - Monthly, O - Other. ",
+    "required": false
+  },
+  "Policy_Payment_DepositAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount of the premium received as a deposit. ",
+    "required": false
+  },
+  "Policy_Payment_MinimumPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The minimum premium amount for the policy. ",
+    "required": false
+  },
+  "Policy_Payment_EstimatedTotalAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total cost amount of the policy. ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address line one. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address line two. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address city name. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The named insured's mailing address state or province code. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The named insured's mailing address postal code. ",
+    "required": false
+  },
+  "NamedInsured_GeneralLiabilityCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code identifying the general liability nature of business for the insured. The source of this code list is the Insurance Services Office Commercial Lines Manual (CLM) or individual insurer rate manuals. ",
+    "required": false
+  },
+  "NamedInsured_SICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Classification code assigned to the business activity (if known).  This is the code which represents the nature of the employer's business which is contained in the Standard Industrial Classification Manual published by the Federal Office of Management and Budget. ",
+    "required": false
+  },
+  "NamedInsured_NAICSCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the business activity (if known). ",
+    "required": false
+  },
+  "NamedInsured_TaxIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier of the named insured. ",
+    "required": false
+  },
+  "NamedInsured_Primary_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The named insured's primary phone number. ",
+    "required": false
+  },
+  "NamedInsured_Primary_WebsiteAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The primary website address for the named insured. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_CorporationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_IndividualIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Individual\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_JointVentureIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Joint Venture\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Limited Liability Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_MemberManagerCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of members and managers for the limited liability corporation. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_NotForProfitIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Not For Profit Organization\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_PartnershipIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Partnership\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Subchapter S Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_TrustIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Trust\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is other than those listed on the form. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other legal entity. ",
+    "required": false
+  },
+  "NamedInsured_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_LineOne_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address line one. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_LineTwo_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address line two. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_CityName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address city name. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The named insured's mailing address state or province code. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_PostalCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The named insured's mailing address postal code. ",
+    "required": false
+  },
+  "NamedInsured_GeneralLiabilityCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code identifying the general liability nature of business for the insured. The source of this code list is the Insurance Services Office Commercial Lines Manual (CLM) or individual insurer rate manuals. ",
+    "required": false
+  },
+  "NamedInsured_SICCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Classification code assigned to the business activity (if known).  This is the code which represents the nature of the employer's business which is contained in the Standard Industrial Classification Manual published by the Federal Office of Management and Budget. ",
+    "required": false
+  },
+  "NamedInsured_NAICSCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the business activity (if known). ",
+    "required": false
+  },
+  "NamedInsured_TaxIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier of the named insured. ",
+    "required": false
+  },
+  "NamedInsured_Primary_PhoneNumber_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The named insured's primary phone number. ",
+    "required": false
+  },
+  "NamedInsured_Primary_WebsiteAddress_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The primary website address for the named insured. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_CorporationIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_IndividualIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Individual\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_JointVentureIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Joint Venture\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Limited Liability Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_MemberManagerCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of members and managers for the limited liability corporation. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_NotForProfitIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Not For Profit Organization\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_PartnershipIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Partnership\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Subchapter S Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_TrustIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Trust\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is other than those listed on the form. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other legal entity. ",
+    "required": false
+  },
+  "NamedInsured_FullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_LineOne_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address line one. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_LineTwo_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address line two. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_CityName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address city name. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The named insured's mailing address state or province code. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_PostalCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The named insured's mailing address postal code. ",
+    "required": false
+  },
+  "NamedInsured_GeneralLiabilityCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The code identifying the general liability nature of business for the insured. The source of this code list is the Insurance Services Office Commercial Lines Manual (CLM) or individual insurer rate manuals. ",
+    "required": false
+  },
+  "NamedInsured_SICCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Classification code assigned to the business activity (if known).  This is the code which represents the nature of the employer's business which is contained in the Standard Industrial Classification Manual published by the Federal Office of Management and Budget. ",
+    "required": false
+  },
+  "NamedInsured_NAICSCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the business activity (if known). ",
+    "required": false
+  },
+  "NamedInsured_TaxIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier of the named insured. ",
+    "required": false
+  },
+  "NamedInsured_Primary_PhoneNumber_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The named insured's primary phone number. ",
+    "required": false
+  },
+  "NamedInsured_Primary_WebsiteAddress_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The primary website address for the named insured. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_CorporationIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_IndividualIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Individual\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_JointVentureIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Joint Venture\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Limited Liability Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_MemberManagerCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of members and managers for the limited liability corporation. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_NotForProfitIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Not For Profit Organization\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_PartnershipIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Partnership\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Subchapter S Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_TrustIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Trust\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_OtherIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is other than those listed on the form. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_OtherDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other legal entity. ",
+    "required": false
+  },
+  "NamedInsured_Contact_ContactDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The type of contact being described (e.g. accounting, claims, etc.). ",
+    "required": false
+  },
+  "NamedInsured_Contact_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the contact. ",
+    "required": false
+  },
+  "NamedInsured_Contact_PrimaryPhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The primary phone number of the contact. ",
+    "required": false
+  },
+  "NamedInsured_Contact_PrimaryHomePhoneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's primary phone is a home phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_PrimaryBusinessPhoneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's primary phone is a business phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_PrimaryCellPhoneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's primary phone is a cell phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_SecondaryPhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The secondary phone number of the contact. ",
+    "required": false
+  },
+  "NamedInsured_Contact_SecondaryHomePhoneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's secondary phone number is a home phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_SecondaryBusinessPhoneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's secondary phone number is a business phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_SecondaryCellPhoneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's secondary phone number is a cell phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_PrimaryEmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The contact's primary e-mail address. ",
+    "required": false
+  },
+  "NamedInsured_Contact_SecondaryEmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The contact's secondary e-mail address. ",
+    "required": false
+  },
+  "NamedInsured_Contact_ContactDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The type of contact being described (e.g. accounting, claims, etc.). ",
+    "required": false
+  },
+  "NamedInsured_Contact_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the contact. ",
+    "required": false
+  },
+  "NamedInsured_Contact_PrimaryPhoneNumber_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The primary phone number of the contact. ",
+    "required": false
+  },
+  "NamedInsured_Contact_PrimaryHomePhoneIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's primary phone is a home phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_PrimaryBusinessPhoneIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's primary phone is a business phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_PrimaryCellPhoneIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's primary phone is a cell phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_SecondaryPhoneNumber_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The secondary phone number of the contact. ",
+    "required": false
+  },
+  "NamedInsured_Contact_SecondaryHomePhoneIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's secondary phone number is a home phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_SecondaryBusinessPhoneIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's secondary phone number is a business phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_SecondaryCellPhoneIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the contact's secondary phone number is a cell phone. ",
+    "required": false
+  },
+  "NamedInsured_Contact_PrimaryEmailAddress_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The contact's primary e-mail address. ",
+    "required": false
+  },
+  "NamedInsured_Contact_SecondaryEmailAddress_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The contact's secondary e-mail address. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Building_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The building number for the premises.  Used when more than one building exists at an individual location. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The second address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CountyName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The county of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is within the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is outside the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is not inside nor outside city limits.  For example, unincorporated. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the risk location if not inside nor outside the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OwnerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is as its owner. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_TenantIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is as its tenant. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is other than those listed. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the insured's interest in the building when it is other than those listed. ",
+    "required": false
+  },
+  "BusinessInformation_FullTimeEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees. ",
+    "required": false
+  },
+  "BusinessInformation_PartTimeEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees. ",
+    "required": false
+  },
+  "CommercialStructure_AnnualRevenueAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual revenue amount for this location. ",
+    "required": false
+  },
+  "BuildingOccupancy_OccupiedArea_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The area, in square feet, of the space in the building that is occupied by the named insured. ",
+    "required": false
+  },
+  "BuildingOccupancy_OpenToPublicArea_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The area, in square feet, of the building that is open to the public. ",
+    "required": false
+  },
+  "Construction_BuildingArea_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of square feet of the building at this location for which insurance is being requested. ",
+    "required": false
+  },
+  "BuildingOccupancy_OperationsDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of what business each applicant performs and the way it is conducted by premises.  Operations which may not be apparent in a general description of operations may be segmented by location (e.g., location #1 is a sales office in Paris, France, location #2 is a warehouse in Berlin, Germany).  Include number of leased and owned premises outside of the United States.  The section should be completed in enough detail to enable the underwriter to understand and classify each operation. Do not use the classification wording from the Commercial Lines Manual or Workers Compensation Manual. They do not provide adequate detail. Example: a manufacturer of pulley wheels used in sewing machines should be described as such and not as \"Metal Goods Mfg. N.O.C.\". ",
+    "required": false
+  },
+  "CommercialStructure_Question_ABBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response.  Indicates the response to the question, \"Any area leased to others?\". ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Building_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The building number for the premises.  Used when more than one building exists at an individual location. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineTwo_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The second address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CityName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CountyName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The county of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is within the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is outside the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is not inside nor outside city limits.  For example, unincorporated. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the risk location if not inside nor outside the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OwnerIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is as its owner. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_TenantIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is as its tenant. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is other than those listed. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the insured's interest in the building when it is other than those listed. ",
+    "required": false
+  },
+  "BusinessInformation_FullTimeEmployeeCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees. ",
+    "required": false
+  },
+  "BusinessInformation_PartTimeEmployeeCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees. ",
+    "required": false
+  },
+  "CommercialStructure_AnnualRevenueAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual revenue amount for this location. ",
+    "required": false
+  },
+  "BuildingOccupancy_OccupiedArea_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The area, in square feet, of the space in the building that is occupied by the named insured. ",
+    "required": false
+  },
+  "BuildingOccupancy_OpenToPublicArea_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The area, in square feet, of the building that is open to the public. ",
+    "required": false
+  },
+  "Construction_BuildingArea_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of square feet of the building at this location for which insurance is being requested. ",
+    "required": false
+  },
+  "BuildingOccupancy_OperationsDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of what business each applicant performs and the way it is conducted by premises.  Operations which may not be apparent in a general description of operations may be segmented by location (e.g., location #1 is a sales office in Paris, France, location #2 is a warehouse in Berlin, Germany).  Include number of leased and owned premises outside of the United States.  The section should be completed in enough detail to enable the underwriter to understand and classify each operation. Do not use the classification wording from the Commercial Lines Manual or Workers Compensation Manual. They do not provide adequate detail. Example: a manufacturer of pulley wheels used in sewing machines should be described as such and not as \"Metal Goods Mfg. N.O.C.\". ",
+    "required": false
+  },
+  "CommercialStructure_Question_ABBCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response.  Indicates the response to the question, \"Any area leased to others?\". ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Building_ProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The building number for the premises.  Used when more than one building exists at an individual location. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineTwo_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The second address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CityName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CountyName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The county of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is within the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is outside the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OtherIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is not inside nor outside city limits.  For example, unincorporated. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OtherDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the risk location if not inside nor outside the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OwnerIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is as its owner. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_TenantIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is as its tenant. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OtherIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is other than those listed. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OtherDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the insured's interest in the building when it is other than those listed. ",
+    "required": false
+  },
+  "BusinessInformation_FullTimeEmployeeCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees. ",
+    "required": false
+  },
+  "BusinessInformation_PartTimeEmployeeCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees. ",
+    "required": false
+  },
+  "CommercialStructure_AnnualRevenueAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual revenue amount for this location. ",
+    "required": false
+  },
+  "BuildingOccupancy_OccupiedArea_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The area, in square feet, of the space in the building that is occupied by the named insured. ",
+    "required": false
+  },
+  "BuildingOccupancy_OpenToPublicArea_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The area, in square feet, of the building that is open to the public. ",
+    "required": false
+  },
+  "Construction_BuildingArea_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of square feet of the building at this location for which insurance is being requested. ",
+    "required": false
+  },
+  "BuildingOccupancy_OperationsDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of what business each applicant performs and the way it is conducted by premises.  Operations which may not be apparent in a general description of operations may be segmented by location (e.g., location #1 is a sales office in Paris, France, location #2 is a warehouse in Berlin, Germany).  Include number of leased and owned premises outside of the United States.  The section should be completed in enough detail to enable the underwriter to understand and classify each operation. Do not use the classification wording from the Commercial Lines Manual or Workers Compensation Manual. They do not provide adequate detail. Example: a manufacturer of pulley wheels used in sewing machines should be described as such and not as \"Metal Goods Mfg. N.O.C.\". ",
+    "required": false
+  },
+  "CommercialStructure_Question_ABBCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response.  Indicates the response to the question, \"Any area leased to others?\". ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Building_ProducerIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The building number for the premises.  Used when more than one building exists at an individual location. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineTwo_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The second address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CityName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CountyName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The county of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_InsideCityLimitsIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is within the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is outside the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OtherIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the building is not inside nor outside city limits.  For example, unincorporated. ",
+    "required": false
+  },
+  "CommercialStructure_RiskLocation_OtherDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the risk location if not inside nor outside the city limits. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OwnerIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is as its owner. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_TenantIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is as its tenant. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OtherIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the named insured's interest in the building is other than those listed. ",
+    "required": false
+  },
+  "CommercialStructure_InsuredInterest_OtherDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the insured's interest in the building when it is other than those listed. ",
+    "required": false
+  },
+  "BusinessInformation_FullTimeEmployeeCount_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees. ",
+    "required": false
+  },
+  "BusinessInformation_PartTimeEmployeeCount_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees. ",
+    "required": false
+  },
+  "CommercialStructure_AnnualRevenueAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual revenue amount for this location. ",
+    "required": false
+  },
+  "BuildingOccupancy_OccupiedArea_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The area, in square feet, of the space in the building that is occupied by the named insured. ",
+    "required": false
+  },
+  "BuildingOccupancy_OpenToPublicArea_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The area, in square feet, of the building that is open to the public. ",
+    "required": false
+  },
+  "Construction_BuildingArea_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of square feet of the building at this location for which insurance is being requested. ",
+    "required": false
+  },
+  "BuildingOccupancy_OperationsDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of what business each applicant performs and the way it is conducted by premises.  Operations which may not be apparent in a general description of operations may be segmented by location (e.g., location #1 is a sales office in Paris, France, location #2 is a warehouse in Berlin, Germany).  Include number of leased and owned premises outside of the United States.  The section should be completed in enough detail to enable the underwriter to understand and classify each operation. Do not use the classification wording from the Commercial Lines Manual or Workers Compensation Manual. They do not provide adequate detail. Example: a manufacturer of pulley wheels used in sewing machines should be described as such and not as \"Metal Goods Mfg. N.O.C.\". ",
+    "required": false
+  },
+  "CommercialStructure_Question_ABBCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response.  Indicates the response to the question, \"Any area leased to others?\". ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_ApartmentsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is apartments. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_CondominiumsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is condominiums. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_ContractorIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is a contractor. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_InstitutionalIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is institutional. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_ManufacturingIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is manufacturing. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_OfficeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is an office. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_RestaurantIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is a restaurant. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_RetailIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is retail. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_ServiceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is service. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_WholesaleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is wholesale. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the nature of business is other than those listed. ",
+    "required": false
+  },
+  "BusinessInformation_BusinessType_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other nature / type of business. ",
+    "required": false
+  },
+  "NamedInsured_BusinessStartDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the applicant began in business.  This is important because it helps the underwriter determine the expertise and business success of the applicant. ",
+    "required": false
+  },
+  "CommercialPolicy_OperationsDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the operations of this risk or insured.  As used here, this is the description of primary operations.",
+    "required": false
+  },
+  "CommercialStructure_InstallationRepairWorkPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of total sales of a retail store or service operation attributed to installation, service or repair work. ",
+    "required": false
+  },
+  "CommercialStructure_InstallationRepairWorkOffPremisesPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of total sales of a retail store or service operation attributed to installation, service or repair work completed off premises. ",
+    "required": false
+  },
+  "CommercialPolicy_OperationsDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the operations of this risk or insured.  As used here, this is the description of operations for other named insureds.",
+    "required": false
+  },
+  "AdditionalInterest_Interest_AdditionalInsuredIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an additional insured. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_BreachOfWarrantyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a breach of warranty. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_CoOwnerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a co-owner. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_EmployeeAsLessorIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an employee as lessor. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LeasebackOwnerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a leaseback owner. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LendersLossPayableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lender's loss payable. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LienholderIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lien holder. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LossPayeeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a loss payee. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_MortgageeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a mortgagee. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OwnerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an owner. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_RegistrantIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a registrant. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_TrusteeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a trustee. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest is other than those listed. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_InterestReasonDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description for the interest in the item. ",
+    "required": false
+  },
+  "AdditionalInterest_InterestRank_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The ranking of 'this' additional interest when multiple additional interests are associated with the same item. ",
+    "required": false
+  },
+  "AdditionalInterest_CertificateRequiredIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the additional interest requires a Certificate of Insurance. ",
+    "required": false
+  },
+  "AdditionalInterest_PolicyRequiredIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest requires a copy of the policy. ",
+    "required": false
+  },
+  "AdditionalInterest_SendBillIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the bill should be sent to the additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line one. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line two. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address city name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address state or province code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address postal code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CountryCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's country code. ",
+    "required": false
+  },
+  "AdditionalInterest_AccountNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The loan number, account number or other controlling number that the additional interest may have assigned the insured. ",
+    "required": false
+  },
+  "AdditionalInterest_InterestEndDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the interest holder's interest terminates. ",
+    "required": false
+  },
+  "AdditionalInterest_LoanAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount of the loan. ",
+    "required": false
+  },
+  "AdditionalInterest_Primary_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The primary phone number of the additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Primary_FaxNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The primary fax number of the additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Primary_EmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The primary e-mail address for the additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_LocationProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_BuildingProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the building which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_VehicleProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the vehicle which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_BoatProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the boat which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_AirportIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The Federal Aviation Administration's designator for the airport (e.g. ORD - O'Hare International Airport). ",
+    "required": false
+  },
+  "AdditionalInterest_Item_AircraftProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the aircraft which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_ScheduledItemClassCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The description of the property class of the scheduled item (i.e. Jewelry, Furs, Contractors Equipment, etc.). ",
+    "required": false
+  },
+  "AdditionalInterest_Item_ScheduledItemProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the scheduled item which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_ItemDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the item of interest if needed to further clarify.  For a vehicle, list the make, model and VIN number.  For a scheduled item, list the description, such as three carat diamond in six point setting. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_AAICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is the applicant a subsidiary of another entity?\". ",
+    "required": false
+  },
+  "BusinessInformation_ParentOrganizationName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the parent organization. ",
+    "required": false
+  },
+  "Subsidiary_ParentSubsidiaryRelationshipDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the relationship between the parent company and the subsidiary. ",
+    "required": false
+  },
+  "Subsidiary_ParentOwnershipPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percent of ownership by the parent company. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_AAJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does the applicant have any subsidiaries?\". ",
+    "required": false
+  },
+  "Subsidiary_OrganizationName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the subsidiary of the company.  This may also include owned foundations or charitable trusts. ",
+    "required": false
+  },
+  "Subsidiary_ParentSubsidiaryRelationshipDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the relationship between the parent company and the subsidiary. ",
+    "required": false
+  },
+  "Subsidiary_ParentOwnershipPercent_B": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percent of ownership by the parent company. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_KAACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is a formal safety program in operation?\". ",
+    "required": false
+  },
+  "CommercialPolicy_FormalSafetyProgram_SafetyManualIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a safety manual is part of the formal safety program. ",
+    "required": false
+  },
+  "CommercialPolicy_FormalSafetyProgram_SafetyPositionIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a safety position is part of the formal safety program. ",
+    "required": false
+  },
+  "CommercialPolicy_FormalSafetyProgram_MonthlyMeetingsIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates monthly meetings are part of the formal safety program. ",
+    "required": false
+  },
+  "CommercialPolicy_FormalSafetyProgram_OSHAIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the formal safety program meets OSHA guidelines. ",
+    "required": false
+  },
+  "CommercialPolicy_FormalSafetyProgram_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there is a formal safety program other than those listed. ",
+    "required": false
+  },
+  "CommercialPolicy_FormalSafetyProgram_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the formal safety program. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_ABCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any exposure to flammables, explosives, chemicals?\". ",
+    "required": false
+  },
+  "CommercialPolicy_AnyExposureToFlammableExplosivesChemicalsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether there is any exposure to flammable, explosive or chemicals. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_AAHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any other insurance with this company?\". ",
+    "required": false
+  },
+  "OtherPolicy_LineOfBusinessCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The line of business of the other policy. ",
+    "required": false
+  },
+  "OtherPolicy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The other policy number exactly as it appears on the policy, including prefix and suffix symbols. ",
+    "required": false
+  },
+  "OtherPolicy_LineOfBusinessCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The line of business of the other policy. ",
+    "required": false
+  },
+  "OtherPolicy_PolicyNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The other policy number exactly as it appears on the policy, including prefix and suffix symbols. ",
+    "required": false
+  },
+  "OtherPolicy_LineOfBusinessCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The line of business of the other policy. ",
+    "required": false
+  },
+  "OtherPolicy_PolicyNumberIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The other policy number exactly as it appears on the policy, including prefix and suffix symbols. ",
+    "required": false
+  },
+  "OtherPolicy_LineOfBusinessCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The line of business of the other policy. ",
+    "required": false
+  },
+  "OtherPolicy_PolicyNumberIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The other policy number exactly as it appears on the policy, including prefix and suffix symbols. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_AACCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any policy or coverage declined, cancelled or non-renewed during the mandated number of years?\". As used here, not applicable in Missouri.",
+    "required": false
+  },
+  "CancelNonRenew_NonPaymentIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is being cancelled due to non-payment of premium. ",
+    "required": false
+  },
+  "CancelNonRenew_NonRenewalIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is being cancelled due to non-renewal. ",
+    "required": false
+  },
+  "CancelNonRenew_AgentNoLongerWritesForInsurerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is being cancelled because the agent is no longer writing business for the insurer. ",
+    "required": false
+  },
+  "CancelNonRenew_UnderwritingIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is being cancelled due to underwriting reasons. ",
+    "required": false
+  },
+  "CancelNonRenew_UnderwritingConditionCorrectedIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underwriting condition that caused the policy to not be written has been corrected. ",
+    "required": false
+  },
+  "CancelNonRenew_UnderwritingConditionCorrectedDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of how the underwriting condition that caused the policy to not be written has been corrected. ",
+    "required": false
+  },
+  "CancelNonRenew_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is being cancelled due to reasons other than those listed. ",
+    "required": false
+  },
+  "CancelNonRenew_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of why the policy is being cancelled or terminated. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_AADCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any past losses or claims relating to sexual abuse or molestation allegations, discrimination or negligent hiring?\". ",
+    "required": false
+  },
+  "CommercialPolicy_PastLossesClaimsRelatingSexualAbuseDiscriminationNegligentHiringExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any past losses or claims relating to sexual abuse or molestation allegations, discrimination or negligent hiring. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_KABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"During the mandated number of years, has any applicant been indicted for or convicted of any degree of the crime of fraud, bribery, arson or any other arson related crime in connection with this or any other property?\". ",
+    "required": false
+  },
+  "CommercialPolicy_PastFiveYearsAnyApplicantIndictedOrConvictedFraudBriberyArsonExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any applicant has been indicted or convicted of any degree of fraud, bribery or any arson related crime in connection with this or any other property within the mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_AAFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any uncorrected fire code violations?\". ",
+    "required": false
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_OccurrenceDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The occurrence date of any uncorrected fire code violations. ",
+    "required": false
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolationExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether there are any uncorrected fire code violations. ",
+    "required": false
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The resolution associated with any fire code violations. ",
+    "required": false
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The resolution date associated with the fire code violation. ",
+    "required": false
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_OccurrenceDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The occurrence date of any uncorrected fire code violations. ",
+    "required": false
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolationExplanation_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether there are any uncorrected fire code violations. ",
+    "required": false
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The resolution associated with any fire code violations. ",
+    "required": false
+  },
+  "CommercialPolicy_UncorrectedFireCodeViolation_ResolutionDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The resolution date associated with the fire code violation. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_KAKCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response.  Indicates the response to the question, \"Has applicant had a foreclosure, repossession, bankruptcy, or filed for bankruptcy during the past specified number of years?\".  The answer is \u201cYES\u201d if any applicant, and/or any entity to which any applicant is or has been associated (as an owner, partner, officer, director, member manager of limited liability company or other controlling interest), has or had a lien, foreclosure, repossession, bankruptcy or filed for bankruptcy during the past specified number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_OccurrenceDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The occurrence date associated with the applicant's foreclosure, repossession, bankruptcy or bankruptcy filing during the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcyExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant has had a foreclosure, repossession, bankruptcy or filed for bankruptcy during last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The resolution associated with any foreclosure, repossession or bankruptcy filings within the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The resolution date associated with any foreclosure, repossession or bankruptcy filings within the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_OccurrenceDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The occurrence date associated with the applicant's foreclosure, repossession, bankruptcy or bankruptcy filing during the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcyExplanation_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant has had a foreclosure, repossession, bankruptcy or filed for bankruptcy during last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The resolution associated with any foreclosure, repossession or bankruptcy filings within the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_ForeclosureRepossessionBankruptcy_ResolutionDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The resolution date associated with any foreclosure, repossession or bankruptcy filings within the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_KALCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response.  Indicates the response to the question, \"Has applicant had a judgment or lien during the past specified number of years?\".  The answer is \u201cYES\u201d if any applicant, and/or any entity to which any applicant is or has been associated (as an owner, partner, officer, director, member manager of limited liability company or other controlling interest), has or had a lien, foreclosure, repossession, bankruptcy or filed for bankruptcy during the past specified number of years.   ",
+    "required": false
+  },
+  "CommercialPolicy_JudgementOrLien_OccurrenceDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The occurrence date associated with the applicant's judgement or lien during the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_JudgementOrLienExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant has a judgement or lien during the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_JudgementOrLien_ResolutionDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The resolution associated with any judgement or lien during the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_JudgementOrLien_ResolutionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The resolution date associated with any judgement or lien during the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_JudgementOrLien_OccurrenceDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The occurrence date associated with the applicant's judgement or lien during the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_JudgementOrLienExplanation_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant has a judgement or lien during the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_JudgementOrLien_ResolutionDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The resolution associated with any judgement or lien during the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_JudgementOrLien_ResolutionDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The resolution date associated with any judgement or lien during the last mandated number of years. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_ABBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Has business been placed in a trust?\". ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name.  As used here, this is the name of the trust.",
+    "required": false
+  },
+  "CommercialPolicy_Question_KACCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any foreign operations, foreign products distributed in USA, or US products sold/distributed in foreign countries?\". ",
+    "required": false
+  },
+  "CommercialPolicy_Question_KAMCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does applicant have other business ventures for which coverage is not requested?\". ",
+    "required": false
+  },
+  "CommercialPolicy_ApplicantOtherBusinessVenturesCoverageNotRequestedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any other business ventures for which coverage is not requested. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_KANCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does applicant own / lease / operate any drones? ",
+    "required": false
+  },
+  "CommercialPolicy_ApplicantOwnLeaseOperateDronesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant owns, leases or operates any drones. ",
+    "required": false
+  },
+  "CommercialPolicy_Question_KAOCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does applicant hire others to operate drones?\" ",
+    "required": false
+  },
+  "CommercialPolicy_ApplicantHireOthersOperateDronesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant hires others to operate drones. ",
+    "required": false
+  },
+  "CommercialPolicy_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The commercial policy general remarks. ",
+    "required": false
+  },
+  "PriorCoverage_PolicyYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year for which you are providing information. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_InsurerFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous general liability insurer. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The general liability policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_TotalPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the general liability line of business. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior general liability policy. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_ExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous general liability coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_InsurerFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous automobile insurer. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The automobile policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_TotalPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the automobile line of business. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior automobile policy. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_ExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous automobile coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Property_InsurerFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous property insurer. ",
+    "required": false
+  },
+  "PriorCoverage_Property_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The policy number of the previous property coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Property_TotalPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the property line of business. ",
+    "required": false
+  },
+  "PriorCoverage_Property_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior property policy. ",
+    "required": false
+  },
+  "PriorCoverage_Property_ExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous property coverage. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_LineOfBusinessCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The line of business code used to identify the other prior coverage. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_InsurerFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous insurer for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The  policy number of the previous coverage for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_TotalPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for other lines of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior policy for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_ExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous  coverage for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_PolicyYear_B": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year for which you are providing information. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_InsurerFullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous general liability insurer. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The general liability policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_TotalPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the general liability line of business. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_EffectiveDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior general liability policy. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_ExpirationDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous general liability coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_InsurerFullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous automobile insurer. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_PolicyNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The automobile policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_TotalPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the automobile line of business. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_EffectiveDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior automobile policy. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_ExpirationDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous automobile coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Property_InsurerFullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous property insurer. ",
+    "required": false
+  },
+  "PriorCoverage_Property_PolicyNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The policy number of the previous property coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Property_TotalPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the property line of business. ",
+    "required": false
+  },
+  "PriorCoverage_Property_EffectiveDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior property policy. ",
+    "required": false
+  },
+  "PriorCoverage_Property_ExpirationDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous property coverage. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_InsurerFullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous insurer for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_PolicyNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The  policy number of the previous coverage for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_TotalPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for other lines of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_EffectiveDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior policy for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_ExpirationDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous  coverage for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_PolicyYear_C": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year for which you are providing information. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_InsurerFullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous general liability insurer. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_PolicyNumberIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The general liability policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_TotalPremiumAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the general liability line of business. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_EffectiveDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior general liability policy. ",
+    "required": false
+  },
+  "PriorCoverage_GeneralLiability_ExpirationDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous general liability coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_InsurerFullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous automobile insurer. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_PolicyNumberIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The automobile policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_TotalPremiumAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the automobile line of business. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_EffectiveDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior automobile policy. ",
+    "required": false
+  },
+  "PriorCoverage_Automobile_ExpirationDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous automobile coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Property_InsurerFullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous property insurer. ",
+    "required": false
+  },
+  "PriorCoverage_Property_PolicyNumberIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The policy number of the previous property coverage. ",
+    "required": false
+  },
+  "PriorCoverage_Property_TotalPremiumAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the property line of business. ",
+    "required": false
+  },
+  "PriorCoverage_Property_EffectiveDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior property policy. ",
+    "required": false
+  },
+  "PriorCoverage_Property_ExpirationDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous property coverage. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_InsurerFullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous insurer for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_PolicyNumberIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The  policy number of the previous coverage for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_TotalPremiumAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for other lines of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_EffectiveDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the prior policy for the other line of business. ",
+    "required": false
+  },
+  "PriorCoverage_OtherLine_ExpirationDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the previous  coverage for the other line of business. ",
+    "required": false
+  },
+  "LossHistory_NoPriorLossesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there are no prior losses or occurrences that may give rise to claims for the mandated number of years. ",
+    "required": false
+  },
+  "LossHistory_InformationYearCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of loss information required by the insurer.   ",
+    "required": false
+  },
+  "LossHistory_TotalAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on all losses to date. ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date when the accident or incident occurred that resulted in the filing of a claim.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_LineOfBusiness_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The line of business involved in the loss (e.g. Automobile Liability, Property, General Liability). ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: A brief description of the loss. ",
+    "required": false
+  },
+  "LossHistory_ClaimDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the claim was filed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date. ",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim. ",
+    "required": false
+  },
+  "LossHistory_ClaimStatus_SubrogationCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the claim is in subrogation. ",
+    "required": false
+  },
+  "LossHistory_ClaimStatus_OpenCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the claim is still open. ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date when the accident or incident occurred that resulted in the filing of a claim.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_LineOfBusiness_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The line of business involved in the loss (e.g. Automobile Liability, Property, General Liability). ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: A brief description of the loss. ",
+    "required": false
+  },
+  "LossHistory_ClaimDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the claim was filed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date. ",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim. ",
+    "required": false
+  },
+  "LossHistory_ClaimStatus_SubrogationCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the claim is in subrogation. ",
+    "required": false
+  },
+  "LossHistory_ClaimStatus_OpenCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the claim is still open. ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date when the accident or incident occurred that resulted in the filing of a claim.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_LineOfBusiness_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The line of business involved in the loss (e.g. Automobile Liability, Property, General Liability). ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: A brief description of the loss. ",
+    "required": false
+  },
+  "LossHistory_ClaimDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the claim was filed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date. ",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim. ",
+    "required": false
+  },
+  "LossHistory_ClaimStatus_SubrogationCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the claim is in subrogation. ",
+    "required": false
+  },
+  "LossHistory_ClaimStatus_OpenCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the claim is still open. ",
+    "required": false
+  },
+  "Policy_InformationPracticesNoticeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a copy of the Notice of Information Practices (ACORD 38 or state specific ACORD 38) has been given to the applicant.  State specific 38s are available for applicants in AZ, DE, KS, MN, ND, NY, OR, VA, and WV.  In addition, ACORD 38 contains CA and MA state specific language. ",
+    "required": false
+  },
+  "NamedInsured_Initials_A": {
+    "ft": "/Tx",
+    "tu": "Initial here: The named insured's initials. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the authorized representative of the producer, agency and/or broker that signed the form. ",
+    "required": false
+  },
+  "Producer_StateLicenseIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The State License Number of the producer. ",
+    "required": false
+  },
+  "NamedInsured_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_NationalIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number. ",
+    "required": false
+  }
+}

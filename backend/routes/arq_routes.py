@@ -20,6 +20,7 @@ from services.arq_service import (
     get_client_filled_fields,
     mark_arq_viewed,
     mark_notifications_read,
+    save_arq_draft,
     send_arq_reminder,
     submit_arq_answers,
 )
@@ -188,6 +189,14 @@ async def client_view(token: str, request: Request):
     except Exception as ex:
         logger.warning(f"client_view: could not fetch producer info: {ex}")
 
+    draft_answers = arq.get("draft_answers") or {}
+    if isinstance(draft_answers, str):
+        import json as _json
+        try:
+            draft_answers = _json.loads(draft_answers)
+        except Exception:
+            draft_answers = {}
+
     questions_for_client = [
         {
             "field_name":    q["field_name"],
@@ -204,11 +213,47 @@ async def client_view(token: str, request: Request):
         "success":        True,
         "client_name":    arq.get("client_name", ""),
         "questions":      questions_for_client,
+        "draft_answers":  draft_answers,
         "expires_at":     arq["expires_at"],
         "producer_name":  producer_name,
         "producer_email": producer_email,
         "producer_phone": producer_phone,
     })
+
+
+@router.patch("/draft/{token}")
+async def save_draft(token: str, request: Request):
+    client_ip = get_client_ip(request)
+    check_arq_public_rate_limit(client_ip)
+
+    if not token or len(token) > 128 or not re.match(r"^[a-f0-9\-]+$", token):
+        return JSONResponse({"success": False, "message": "Invalid token."}, status_code=400)
+
+    arq = await get_arq_by_token(token)
+    if not arq:
+        return JSONResponse({"success": False, "message": "Questionnaire not found."}, status_code=404)
+
+    now     = datetime.now(timezone.utc)
+    expires = datetime.fromisoformat(arq["expires_at"].replace("Z", "+00:00"))
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if now > expires:
+        return JSONResponse({"success": False, "message": "Link expired."}, status_code=410)
+    if arq["status"] == "submitted":
+        return JSONResponse({"success": True, "message": "Already submitted."})
+
+    body = await request.json()
+    raw_answers = body.get("answers", {})
+    if not isinstance(raw_answers, dict) or len(raw_answers) > 500:
+        return JSONResponse({"success": False, "message": "Invalid answers."}, status_code=400)
+
+    sanitized = {
+        _sanitize_str(k, 128): _sanitize_str(str(v), 500)
+        for k, v in raw_answers.items()
+    }
+
+    await save_arq_draft(token, sanitized)
+    return JSONResponse({"success": True})
 
 
 @router.post("/submit/{token}")

@@ -4,7 +4,7 @@ import io
 import logging
 import time
 import zipfile
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
 from datetime import datetime, timezone
@@ -105,6 +105,7 @@ async def download_pdf(
     session_id: str,
     form_id: str,
     request: Request,
+    include_cover: bool = Query(True),
     current_user: dict = Depends(get_current_user),
 ):
     check_download_rate_limit(current_user["id"])
@@ -139,38 +140,50 @@ async def download_pdf(
     _ck = _cover_cache_key(facts, [form_id], sqs_results, flags)
     _loop = asyncio.get_event_loop()
 
-    # Parallelize PDF regeneration and AI narrative (independent of each other)
-    _cached_ai = _COVER_CACHE.get(_ck)
-    if _cached_ai is not None:
-        logger.debug(f"cover narrative cache hit {_ck[:8]}")
-        pdf_bytes, ai_content = await asyncio.gather(
-            _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature),
-            asyncio.coroutine(lambda: _cached_ai)() if False else asyncio.sleep(0, result=_cached_ai),
+    if include_cover:
+        # Parallelize PDF regeneration and AI narrative (independent of each other)
+        _cached_ai = _COVER_CACHE.get(_ck)
+        if _cached_ai is not None:
+            logger.debug(f"cover narrative cache hit {_ck[:8]}")
+            pdf_bytes, ai_content = await asyncio.gather(
+                _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature),
+                asyncio.sleep(0, result=_cached_ai),
+            )
+        else:
+            pdf_bytes, ai_content = await asyncio.gather(
+                _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature),
+                _loop.run_in_executor(None, generate_ai_cover_narrative, facts, flags, sqs_results, [form_id], org_name, fresh),
+            )
+            _COVER_CACHE[_ck] = ai_content
+            logger.debug(f"cover narrative cached for key {_ck[:8]}")
+
+        # S3 upload fire-and-forget (don't block the response on it)
+        _loop.run_in_executor(None, s3_service.upload_pdf, session_id, form_id, pdf_bytes)
+
+        cover_pdf = await _loop.run_in_executor(
+            None, build_cover_page_pdf,
+            facts, flags, sqs_results, [form_id], org_name,
+            ai_content["narrative"], ai_content["ai_block"], ai_content.get("sqs_reasoning", ""), fresh,
         )
+
+        def _build_zip():
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("00_Acordly_Cover_Page.pdf", cover_pdf)
+                zf.writestr(f"{form_id}_FILLED.pdf", pdf_bytes)
+            buf.seek(0)
+            return buf
     else:
-        pdf_bytes, ai_content = await asyncio.gather(
-            _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature),
-            _loop.run_in_executor(None, generate_ai_cover_narrative, facts, flags, sqs_results, [form_id], org_name, fresh),
-        )
-        _COVER_CACHE[_ck] = ai_content
-        logger.debug(f"cover narrative cached for key {_ck[:8]}")
+        # No cover — just the filled form PDF
+        pdf_bytes = await _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature)
+        _loop.run_in_executor(None, s3_service.upload_pdf, session_id, form_id, pdf_bytes)
 
-    # S3 upload fire-and-forget (don't block the response on it)
-    _loop.run_in_executor(None, s3_service.upload_pdf, session_id, form_id, pdf_bytes)
-
-    cover_pdf = await _loop.run_in_executor(
-        None, build_cover_page_pdf,
-        facts, flags, sqs_results, [form_id], org_name,
-        ai_content["narrative"], ai_content["ai_block"], ai_content.get("sqs_reasoning", ""), fresh,
-    )
-
-    def _build_zip():
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("00_Acordly_Cover_Page.pdf", cover_pdf)
-            zf.writestr(f"{form_id}_FILLED.pdf", pdf_bytes)
-        buf.seek(0)
-        return buf
+        def _build_zip():
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(f"{form_id}_FILLED.pdf", pdf_bytes)
+            buf.seek(0)
+            return buf
 
     zip_buf = await _loop.run_in_executor(None, _build_zip)
 

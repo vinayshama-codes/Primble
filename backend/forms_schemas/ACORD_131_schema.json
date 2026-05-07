@@ -1,0 +1,1967 @@
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer / agency. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number. ",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "Policy_Status_NewIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the response expected from the company is a new issued policy. ",
+    "required": false
+  },
+  "Policy_Status_RenewIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the response expected from the company is a renewed policy. ",
+    "required": false
+  },
+  "Policy_PolicyType_UmbrellaIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the type of policy is umbrella. ",
+    "required": false
+  },
+  "Policy_PolicyType_ExcessIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the type of policy is excess. ",
+    "required": false
+  },
+  "ExcessUmbrella_OccurrenceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates \"coverage trigger\" is on an occurrence basis on an excess or umbrella liability policy. ",
+    "required": false
+  },
+  "ExcessUmbrella_ClaimsMadeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the \"coverage trigger\" is on a claims-made basis on an excess or umbrella liability policy. ",
+    "required": false
+  },
+  "ExcessUmbrella_VoluntaryIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the excess is voluntary. ",
+    "required": false
+  },
+  "ExcessUmbrella_Transactiontype_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the transaction type is other than those listed. ",
+    "required": false
+  },
+  "ExcessUmbrella_Transactiontype_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other transaction type. ",
+    "required": false
+  },
+  "PriorCoverage_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the previous coverage. ",
+    "required": false
+  },
+  "ExcessUmbrella_ProposedRetroactiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The retroactive date you are requesting for the policy being applied for. This is the proposed earliest date for which an occurrence could \"trigger\" coverage under a Claims Made policy. ",
+    "required": false
+  },
+  "ExcessUmbrella_CurrentRetroactiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The current retroactive date should be shown if the Umbrella is over a Claims Made primary policy. If the current retroactive date is different from the proposed retroactive date, an explanation must be provided. ",
+    "required": false
+  },
+  "ExcessUmbrella_Umbrella_EachOccurrenceAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The excess or umbrella liability each occurrence limit. ",
+    "required": false
+  },
+  "ExcessUmbrella_Umbrella_AggregateAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The excess or umbrella liability aggregate limit should be listed as whole dollar amount, as governed by the policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "ExcessUmbrella_OtherCoverageLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The excess or umbrella liability other coverage limit should be listed as a whole dollar amount, as governed by the policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "ExcessUmbrella_OtherCoverageDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the excess or umbrella liability policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "ExcessUmbrella_Umbrella_DeductibleOrRetentionAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The excess or umbrella liability deductible or retention amount. ",
+    "required": false
+  },
+  "ExcessUmbrella_FirstDollarDefenceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates that first dollar defense coverage is requested. ",
+    "required": false
+  },
+  "ExcessUmbrella_EmployeeBenefits_EachEmployeeLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The each employee limit for employee benefits coverage. ",
+    "required": false
+  },
+  "ExcessUmbrella_EmployeeBenefits_AggregateLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The aggregate limit for employee benefits coverage. ",
+    "required": false
+  },
+  "ExcessUmbrella_EmployeeBenefits_DeductibleOrRetentionAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The retention amount for employee benefits coverage. ",
+    "required": false
+  },
+  "ExcessUmbrella_EmployeeBenefits_RetroactiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The retroactive date for employee benefits coverage. ",
+    "required": false
+  },
+  "ExcessUmbrella_EmployeeBenefits_ProgramName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the benefit program. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Location_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the location.  For commercial policies, this may be a company name. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the commercial structure. ",
+    "required": false
+  },
+  "BusinessInformation_OperationsDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the operations of this risk.  A restatement of the products classification wording is often not sufficient (e.g., \"Metal Goods Manufacturing NOC\" could include anything from paper clips to bridge girders). ",
+    "required": false
+  },
+  "BusinessInformation_TotalPayrollAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual payroll of the business in whole dollars. ",
+    "required": false
+  },
+  "BusinessInformation_AnnualGrossReceiptsAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual gross sales or receipts. ",
+    "required": false
+  },
+  "BusinessInformation_ForeignGrossSalesAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual foreign gross sales. ",
+    "required": false
+  },
+  "BusinessInformation_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Location_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the location.  For commercial policies, this may be a company name. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CityName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the commercial structure. ",
+    "required": false
+  },
+  "BusinessInformation_OperationsDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the operations of this risk.  A restatement of the products classification wording is often not sufficient (e.g., \"Metal Goods Manufacturing NOC\" could include anything from paper clips to bridge girders). ",
+    "required": false
+  },
+  "BusinessInformation_TotalPayrollAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual payroll of the business in whole dollars. ",
+    "required": false
+  },
+  "BusinessInformation_AnnualGrossReceiptsAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual gross sales or receipts. ",
+    "required": false
+  },
+  "BusinessInformation_ForeignGrossSalesAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual foreign gross sales. ",
+    "required": false
+  },
+  "BusinessInformation_EmployeeCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Location_FullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the location.  For commercial policies, this may be a company name. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CityName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the commercial structure. ",
+    "required": false
+  },
+  "BusinessInformation_OperationsDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the operations of this risk.  A restatement of the products classification wording is often not sufficient (e.g., \"Metal Goods Manufacturing NOC\" could include anything from paper clips to bridge girders). ",
+    "required": false
+  },
+  "BusinessInformation_TotalPayrollAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual payroll of the business in whole dollars. ",
+    "required": false
+  },
+  "BusinessInformation_AnnualGrossReceiptsAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual gross sales or receipts. ",
+    "required": false
+  },
+  "BusinessInformation_ForeignGrossSalesAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual foreign gross sales. ",
+    "required": false
+  },
+  "BusinessInformation_EmployeeCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Location_FullName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the location.  For commercial policies, this may be a company name. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CityName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the commercial structure. ",
+    "required": false
+  },
+  "BusinessInformation_OperationsDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the operations of this risk.  A restatement of the products classification wording is often not sufficient (e.g., \"Metal Goods Manufacturing NOC\" could include anything from paper clips to bridge girders). ",
+    "required": false
+  },
+  "BusinessInformation_TotalPayrollAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual payroll of the business in whole dollars. ",
+    "required": false
+  },
+  "BusinessInformation_AnnualGrossReceiptsAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual gross sales or receipts. ",
+    "required": false
+  },
+  "BusinessInformation_ForeignGrossSalesAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual foreign gross sales. ",
+    "required": false
+  },
+  "BusinessInformation_EmployeeCount_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Location_FullName_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the location.  For commercial policies, this may be a company name. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CityName_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the commercial structure. ",
+    "required": false
+  },
+  "BusinessInformation_OperationsDescription_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the operations of this risk.  A restatement of the products classification wording is often not sufficient (e.g., \"Metal Goods Manufacturing NOC\" could include anything from paper clips to bridge girders). ",
+    "required": false
+  },
+  "BusinessInformation_TotalPayrollAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual payroll of the business in whole dollars. ",
+    "required": false
+  },
+  "BusinessInformation_AnnualGrossReceiptsAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual gross sales or receipts. ",
+    "required": false
+  },
+  "BusinessInformation_ForeignGrossSalesAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual foreign gross sales. ",
+    "required": false
+  },
+  "BusinessInformation_EmployeeCount_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Location_FullName_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the location.  For commercial policies, this may be a company name. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_LineOne_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first address line of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_CityName_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the commercial structure. ",
+    "required": false
+  },
+  "CommercialStructure_PhysicalAddress_PostalCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the commercial structure. ",
+    "required": false
+  },
+  "BusinessInformation_OperationsDescription_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the operations of this risk.  A restatement of the products classification wording is often not sufficient (e.g., \"Metal Goods Manufacturing NOC\" could include anything from paper clips to bridge girders). ",
+    "required": false
+  },
+  "BusinessInformation_TotalPayrollAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual payroll of the business in whole dollars. ",
+    "required": false
+  },
+  "BusinessInformation_AnnualGrossReceiptsAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual gross sales or receipts. ",
+    "required": false
+  },
+  "BusinessInformation_ForeignGrossSalesAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual foreign gross sales. ",
+    "required": false
+  },
+  "BusinessInformation_EmployeeCount_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees. ",
+    "required": false
+  },
+  "UnderlyingPolicy_Automobile_InsurerFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the insurer of the underlying automobile policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_Automobile_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the underlying automobile policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_Automobile_PolicyEffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the underlying automobile policy. (MM/DD/YYYY) ",
+    "required": false
+  },
+  "UnderlyingPolicy_Automobile_PolicyExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the underlying automobile policy. (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Vehicle_CombinedSingleLimit_EachAccidentAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle combined single limit liability each accident amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying automobile policy.",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_PerAccidentLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, bodily injury per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying automobile policy.",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_PerPersonLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, bodily injury per person limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying automobile policy.",
+    "required": false
+  },
+  "Vehicle_PropertyDamage_PerAccidentLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, property damage per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying automobile policy.",
+    "required": false
+  },
+  "UnderlyingPolicy_Automobile_CombinedSingleLimitPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The combined single limit premium on the underlying automobile policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_Automobile_BodilyInjuryPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The bodily injury premium amount on the underlying automobile policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_Automobile_PropertyDamageEachAccidentPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The property damage premium amount on the underlying automobile policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_Automobile_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The combined rating modification and experience modification debit or credit as they apply. ",
+    "required": false
+  },
+  "GeneralLiability_OccurrenceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, occurrence basis applies. As used here, this is on the underlying general liability policy.",
+    "required": false
+  },
+  "GeneralLiability_ClaimsMadeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the \"claims made\" option applies on the general liability policy. As used here, this is on the underlying general liability policy.",
+    "required": false
+  },
+  "UnderlyingPolicy_GeneralLiability_InsurerFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the insurer of the underlying general liability policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_GeneralLiability_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the underlying general liability policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_GeneralLiability_PolicyEffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the underlying general liability policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_GeneralLiability_PolicyExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the underlying general liability policy. ",
+    "required": false
+  },
+  "GeneralLiability_EachOccurrence_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, each occurrence limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying general liability policy.",
+    "required": false
+  },
+  "GeneralLiability_GeneralAggregate_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, general aggregate limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying general liability policy.",
+    "required": false
+  },
+  "GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, products and completed operations aggregate limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying general liability policy.",
+    "required": false
+  },
+  "GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, personal and advertising injury limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying general liability policy.",
+    "required": false
+  },
+  "GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, damage to rented premises each occurrence limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying general liability policy.",
+    "required": false
+  },
+  "GeneralLiability_MedicalExpense_EachPersonLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, medical expense each person limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying general liability policy.",
+    "required": false
+  },
+  "UnderlyingPolicy_GeneralLiability_PremisesOperationsPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premises operations premium amount on the underlying general liability policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_GeneralLiability_ProductsPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The products premium on the underlying general liability policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_GeneralLiability_OtherPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium associated with other coverages on the underlying general liability policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_GeneralLiability_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The combined rating modification and experience modification debit or credit as they apply. ",
+    "required": false
+  },
+  "UnderlyingPolicy_EmployersLiability_InsurerFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the insurer of the underlying employers liability policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_EmployersLiability_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the underlying employers liability policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_EmployersLiability_PolicyEffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the underlying employers liability policy. (MM/DD/YYYY) ",
+    "required": false
+  },
+  "UnderlyingPolicy_EmployersLiability_PolicyExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the underlying employers liability policy. (MM/DD/YYYY) ",
+    "required": false
+  },
+  "WorkersCompensationEmployersLiability_EmployersLiability_EachAccidentLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The workers compensation and employers liability policy, employers liability each accident limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying employers liability policy.",
+    "required": false
+  },
+  "WorkersCompensationEmployersLiability_EmployersLiability_DiseaseEachEmployeeLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The workers compensation and employers liability policy, employers liability disease each employee limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying employers liability policy.",
+    "required": false
+  },
+  "WorkersCompensationEmployersLiability_EmployersLiability_DiseasePolicyLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The workers compensation and employers liability policy, employers liability disease policy limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is on the underlying employers liability policy.",
+    "required": false
+  },
+  "UnderlyingPolicy_EmployersLiability_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount on the underlying employers liability policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_EmployersLiability_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The combined rating modification and experience modification debit or credit as they apply. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_PolicyTypeDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the underlying policy type. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_InsurerFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the insurer of the underlying policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the underlying policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_PolicyEffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the underlying policy. (MM/DD/YYYY) ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_PolicyExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the underlying policy. (MM/DD/YYYY) ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_CoverageDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the coverage. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_CombinedSingleLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The combined single or total limit on the underlying policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount on the underlying policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The combined rating modification and experience modification debit or credit as they apply. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_PolicyTypeDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the underlying policy type. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_InsurerFullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the insurer of the underlying policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_PolicyNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the underlying policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_PolicyEffectiveDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the underlying policy. (MM/DD/YYYY) ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_PolicyExpirationDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the underlying policy. (MM/DD/YYYY) ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_CoverageDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the coverage. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_CombinedSingleLimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The combined single or total limit on the underlying policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_PremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount on the underlying policy. ",
+    "required": false
+  },
+  "UnderlyingPolicy_OtherPolicy_ModificationFactor_B": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The combined rating modification and experience modification debit or credit as they apply. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ACBYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates defense costs are within aggregate limits. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ACCYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates defense costs a separate limit? ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ACDYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates defense costs are unlimited. ",
+    "required": false
+  },
+  "UnderlyingPolicy_GeneralLiability_FormEditionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The edition date of the underlying general liability coverage form.  Policy coverage may vary depending on the edition date of the policy paper. The underlying general liability coverage forms issued by Insurances Services Office (ISO) vary if they are based on the rules of \"86\" or the rules of \"88\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ACECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Has any product, work, accident, or location been excluded, uninsured or self insured from any previous coverage?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_AnyProductWorkAccidentlocationBeenExcludedUninsuredExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any product, work, accident or location has been excluded, uninsured or self-insured from any previous coverage. ",
+    "required": false
+  },
+  "GeneralLiability_ClaimsMade_RetroactiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The retroactive date if the policy was issued on a Claims Made basis and there was a retroactive date. ",
+    "required": false
+  },
+  "GeneralLiability_ClaimsMade_UninterruptedCoverageEntryDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The retroactive date shown on the applicant's first Claims Made policy.  If this is the first such policy, the date will be the same as the proposed retroactive date shown on the preceding field. If this is a renewal, it is the effective date of the first policy issued in the sequence of uninterrupted Claims Made policies. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ACFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"For Claims made, was \"tail\" coverage purchased for any previous primary or excess policy?\". ",
+    "required": false
+  },
+  "UnderlyingPolicy_GeneralLiability_TailCoverageEffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the tail coverage.  The proposed retroactive date for the policy being applied for should not be earlier than the effective date of the tail coverage. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_TailCoveragePurchasedAnyPreviousPrimaryOrExcessPolicyExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether tail coverage was purchased for any previous primary or excess policy. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_AnyAutoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy coverage any automobile (symbol 1). ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_GeneralLiabilityClaimsMadeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying general liability policy is a claims made policy. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_GeneralLiabilityOccurrenceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying general liability policy is an occurrence policy. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_AircraftLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes aircraft liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_AircraftLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for aircraft liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_AircraftPassengerLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes aircraft passenger liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_AircraftPassengerLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for aircraft passenger liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_AdditionalInterestsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes additional interests coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_AdditionalInterestsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for additional interests coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_CareCustodyControlIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes care, custody and control coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_CareCustodyControlIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for care, custody and control coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_EmployeeBenefitsLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes employee benefits liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_EmployeeBenefitsLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for employee benefits liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_ForeignLiabilityTravelIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes foreign liability/travel coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_ForeignLiabilityTravelIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for foreign liability/travel coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_GaragekeepersLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes garage keepers liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_GaragekeepersLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for garage keepers liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_IncidentalMedicalMalpracticeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes incidental medical malpractice coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_IncidentalMedicalMalpracticeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for incidental medical malpractice coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_LiquorLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes liquor liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_LiquorLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for liquor liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_PollutionLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes pollution liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_PollutionLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for pollution liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_ProfessionalLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes professional liability (errors and omissions) coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_ProfessionalLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for professional liability (errors and omissions) coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_VendorsLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes vendors liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_VendorsLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for vendors liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_WatercraftLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes watercraft liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_WatercraftLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for watercraft liability coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes a coverage not listed. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for the coverage described. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes a coverage not listed. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for the coverage described. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_OtherIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes a coverage not listed. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_OtherDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_OtherIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for the coverage described. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_OtherIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the underlying policy includes a coverage not listed. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Coverage_OtherDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the coverage. ",
+    "required": false
+  },
+  "UnderlyingCoverage_Exposure_OtherIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the limits are less than those shown on the underlying insurance section of the form causing an exposure to exists for the coverage described. ",
+    "required": false
+  },
+  "UnderlyingCoverage_InformationDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of underlying insurance coverage information including all restrictions (e.g. laser endorsements, discrimination, subrogation waivers) or extensions of coverage. ",
+    "required": false
+  },
+  "LossHistory_ClaimDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the claim was filed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_LineOfBusiness_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The line of business involved in the loss (e.g. Automobile Liability, Property, General Liability). ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: A brief description of the loss. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date. ",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim. ",
+    "required": false
+  },
+  "LossHistory_ClaimDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the claim was filed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_LineOfBusiness_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The line of business involved in the loss (e.g. Automobile Liability, Property, General Liability). ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: A brief description of the loss. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date. ",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim. ",
+    "required": false
+  },
+  "LossHistory_ClaimDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the claim was filed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_LineOfBusiness_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The line of business involved in the loss (e.g. Automobile Liability, Property, General Liability). ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: A brief description of the loss. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date. ",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim. ",
+    "required": false
+  },
+  "LossHistory_ClaimDate_D": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the claim was filed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_LineOfBusiness_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The line of business involved in the loss (e.g. Automobile Liability, Property, General Liability). ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: A brief description of the loss. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date. ",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim. ",
+    "required": false
+  },
+  "LossHistory_ClaimDate_E": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the claim was filed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_LineOfBusiness_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The line of business involved in the loss (e.g. Automobile Liability, Property, General Liability). ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDescription_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: A brief description of the loss. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date. ",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim. ",
+    "required": false
+  },
+  "LossHistory_ClaimDate_F": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the claim was filed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "LossHistory_LineOfBusiness_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The line of business involved in the loss (e.g. Automobile Liability, Property, General Liability). ",
+    "required": false
+  },
+  "LossHistory_OccurrenceDescription_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: A brief description of the loss. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date. ",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim. ",
+    "required": false
+  },
+  "LossHistory_NoPriorLossesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there are no prior losses or occurrences that may give rise to claims for the mandated number of years. As used here, also indicates there were no claims exceeding $10,000.",
+    "required": false
+  },
+  "CareCustodyAndControl_Location_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location if applicable to the ACORD 125. ",
+    "required": false
+  },
+  "CareCustodyAndControl_Property_RealIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the property in the care, custody and control of the insured is real property. ",
+    "required": false
+  },
+  "CareCustodyAndControl_Property_PersonalIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the property in the care, custody and control of the insured is personal property. ",
+    "required": false
+  },
+  "CareCustodyAndControl_Property_ValueAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The value of the entire building, not just the portion occupied, for real property or the value of the personal property. ",
+    "required": false
+  },
+  "CareCustodyAndControl_InsuredLiability_HeldHarmlessIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the insured is held harmless in the lease. ",
+    "required": false
+  },
+  "CareCustodyAndControl_InsuredLiability_HasSubrogationWaiverIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the insured has a waiver of subrogation. ",
+    "required": false
+  },
+  "CareCustodyAndControl_InsuredLiability_IsNamedInsuredOnFirePolicy_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the insured is a named insured on the fire policy. ",
+    "required": false
+  },
+  "CareCustodyAndControl_InsuredLiability_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the insured's liability for the described premises when other than those listed. ",
+    "required": false
+  },
+  "CareCustodyAndControl_Location_OccupiedArea_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total square footage of the premises occupied by the applicant. ",
+    "required": false
+  },
+  "CareCustodyAndControl_Property_PropertyDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the building occupancy or of the property held by the insured in his care, custody and control. ",
+    "required": false
+  },
+  "VehicleFleet_PrivatePassenger_OwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of owned private passenger vehicles. ",
+    "required": false
+  },
+  "VehicleFleet_PrivatePassenger_NonOwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of non-owned private passenger vehicles. ",
+    "required": false
+  },
+  "VehicleFleet_PrivatePassenger_LeasedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of leased private passenger vehicles. ",
+    "required": false
+  },
+  "VehicleFleet_PrivatePassenger_PropertyHauledDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of property hauled in private passenger vehicles. ",
+    "required": false
+  },
+  "VehicleFleet_PrivatePassenger_LocalRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of private passenger vehicles that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"local\".. ",
+    "required": false
+  },
+  "VehicleFleet_PrivatePassenger_IntermediateRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of private passenger vehicles that fall within the category of intermediate radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"intermediate\". ",
+    "required": false
+  },
+  "VehicleFleet_PrivatePassenger_LongDistanceRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of private passenger vehicles that fall within the category of long distance radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"long distance\". ",
+    "required": false
+  },
+  "VehicleFleet_LightWeightTruck_OwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of owned light weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_LightWeightTruck_NonOwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of non-owned light weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_LightWeightTruck_LeasedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of leased light weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_LightWeightTruck_PropertyHauledDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of property hauled in light weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_LightWeightTruck_LocalRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of light weight trucks that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"local\". ",
+    "required": false
+  },
+  "VehicleFleet_LightWeightTruck_IntermediateRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of light weight trucks that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"intermediate\". ",
+    "required": false
+  },
+  "VehicleFleet_LightWeightTruck_LongDistanceRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of light weight trucks that fall within the category of long distance radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"long distance\". ",
+    "required": false
+  },
+  "VehicleFleet_MediumWeightTruck_OwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of owned medium weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_MediumWeightTruck_NonOwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of non-owned medium weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_MediumWeightTruck_LeasedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of leased medium weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_MediumWeightTruck_PropertyHauledDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of property hauled in medium weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_MediumWeightTruck_LocalRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of medium weight trucks that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"local\". ",
+    "required": false
+  },
+  "VehicleFleet_MediumWeightTruck_IntermediateRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of medium weight trucks that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"intermediate\". ",
+    "required": false
+  },
+  "VehicleFleet_MediumWeightTruck_LongDistanceRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of medium weight trucks that fall within the category of long distance radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"long distance\". ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruck_OwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of owned heavy weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruck_NonOwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of non-owned heavy weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruck_LeasedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of leased heavy weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruck_PropertyHauledDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of property hauled in heavy weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruck_LocalRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of  heavy weight trucks that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"local\". ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruck_IntermediateRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of heavy weight trucks that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"intermediate\". ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruck_LongDistanceRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of  heavy weight trucks that fall within the category of long distance radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"long distance\". ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruck_OwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of owned extra heavy weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruck_NonOwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of non-owned extra heavy weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruck_LeasedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of leased extra heavy weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruck_PropertyHauledDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of property hauled in extra heavy weight trucks. ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruck_LocalRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of extra heavy weight trucks that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"local\". ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruck_IntermediateRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of extra heavy weight trucks. that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"intermediate\". ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruck_LongDistanceRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of extra heavy weight trucks that fall within the category of long distance radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"long distance\". ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruckTractor_OwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of owned heavy weight truck tractors. ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruckTractor_NonOwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of non-owned heavy weight truck tractors. ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruckTractor_LeasedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of leased heavy weight truck tractors. ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruckTractor_PropertyHauledDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of property hauled in heavy weight truck tractors. ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruckTractor_LocalRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of heavy weight truck tractors that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"local\". ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruckTractor_IntermediateRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of heavy weight truck tractors that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"intermediate\". ",
+    "required": false
+  },
+  "VehicleFleet_HeavyWeightTruckTractor_LongDistanceRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of heavy weight truck tractors that fall within the category of long distance radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"long distance\". ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruckTractor_OwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of owned extra heavy weight truck tractors. ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruckTractor_NonOwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of non-owned extra heavy weight truck tractors. ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruckTractor_LeasedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of leased extra heavy weight truck tractors. ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruckTractor_PropertyHauledDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of property hauled in extra heavy weight truck tractors. ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruckTractor_LocalRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of extra heavy weight truck tractors that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"local\". ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruckTractor_IntermediateRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of extra heavy weight truck tractors that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"intermediate\". ",
+    "required": false
+  },
+  "VehicleFleet_ExtraHeavyWeightTruckTractor_LongDistanceRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of extra heavy weight truck tractors that fall within the category of long distance radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"long distance\". ",
+    "required": false
+  },
+  "VehicleFleet_Bus_OwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of owned buses. ",
+    "required": false
+  },
+  "VehicleFleet_Bus_NonOwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of non-owned buses. ",
+    "required": false
+  },
+  "VehicleFleet_Bus_LeasedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of leased buses. ",
+    "required": false
+  },
+  "VehicleFleet_Bus_PropertyHauledDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of property hauled in buses. ",
+    "required": false
+  },
+  "VehicleFleet_Bus_LocalRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of buses that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"local\". ",
+    "required": false
+  },
+  "VehicleFleet_Bus_IntermediateRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of buses that fall within the category of local radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"intermediate\". ",
+    "required": false
+  },
+  "VehicleFleet_Bus_LongDistanceRadiusVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of buses that fall within the category of long distance radius/distance in accordance with a company's rating rules. The Insurance Services Office maintains the definition of \"long distance\". ",
+    "required": false
+  },
+  "AdvertisersLiability_MediaUsedCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The type of advertising media used (e.g. Print, Television, Radio, etc.) ",
+    "required": false
+  },
+  "AdvertisersLiability_AnnualCostAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual cost of the advertising media used. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_AABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Are services of an Advertising Agency used?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_ServicesOfAdvertisingAgencyUsedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any services from an advertising agency have been used. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_AACCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Any coverage provided under agency's policy?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_AnyCoverageProvidedUnderAgencyPolicyExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any coverage has been provided under the agency's policy. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_AADCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Does applicant own / lease / operate aircraft?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_ApplicantOwnLeaseOperateAircraftExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant owns / leases / operates aircraft. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_AAECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Are explosives, caustics, flammables or other dangerous cargo hauled?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_ExplosivesCausticsFlammablesOtherDangerousCargoHauledExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any explosives, caustics, flammable or other dangerous cargo is hauled. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_AAFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Are passengers carried for a fee?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_PassengersCarriedForFeeExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any passengers are carried for a fee. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_AAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Any units not insured by underlying policies?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_AnyUnitsNotInsuredUnderlyingPoliciesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any units are not insured by underlying policies. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_AAHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Are any vehicles leased or rented to others?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_AnyVehiclesLeasedRentedOthersExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any vehicles are leased or rented to others. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_AAICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Are hired and non-owned coverages provided?\" ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_HiredAndNonOwnedCoverageProvidedExplanation_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any hired and non-owned coverages are provided. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_AAJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Is bridge, dam or marine work performed?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_BridgeDamMarineWorkPerformedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any bridge, dam, or marine work is performed. ",
+    "required": false
+  },
+  "Contractors_WorkContractedDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of work performed by the insured.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "Contractors_AgreementDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the contractual agreement(s) pertaining to the work performed.   ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ABACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Does applicant own, rent or otherwise use cranes?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_ApplicantOwnRentUseCranesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant owns, rents or uses cranes. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ABBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Do subcontractors carry coverages or limits less than applicant?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_SubcontractorsCarryCoveragesLessThanApplicantExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether subcontractors carry coverages or limits less than applicant. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ABCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Is applicant self-insured in any state?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_ApplicantSelfInsuredAnyStateExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant is self-insured in any state. ",
+    "required": false
+  },
+  "ExcessUmbrella_EmployersLiability_JonesActIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the employee / self-insured is subject to the Jones Act. ",
+    "required": false
+  },
+  "ExcessUmbrella_EmployersLiability_FELAIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the employee / self-insured is subject to the Federal Employers Liability Act. ",
+    "required": false
+  },
+  "ExcessUmbrella_EmployersLiability_StopGapIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the employee / self-insured is subject to Stop Gap. ",
+    "required": false
+  },
+  "ExcessUmbrella_EmployersLiability_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the employee / self-insured is subject to regulations not listed. ",
+    "required": false
+  },
+  "ExcessUmbrella_EmployersLiability_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the regulations the employee / self-insured is subject to. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ABDCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Hospital or first aid facility maintained?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_HospitalOrFirstAidFacilityMaintainedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether a hospital or first aid facility is maintained. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ABECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Coverage provided for doctors/nurses?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_CoverageProvidedForDoctorsNursesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether coverages are provided for doctors / nurses. ",
+    "required": false
+  },
+  "ExcessUmbrella_MalpracticeLiability_DoctorCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of doctors. ",
+    "required": false
+  },
+  "ExcessUmbrella_MalpracticeLiability_NurseCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of nurses. ",
+    "required": false
+  },
+  "ExcessUmbrella_MalpracticeLiability_BedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of beds / bunks. ",
+    "required": false
+  },
+  "ExcessUmbrella_PollutionLiability_InsuredEnvironmentalProtectionAgencyIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The number assigned to the insured by the Environmental Protection Agency. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ABFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Do current or past products, or their components, contain hazardous materials that may require special disposal methods?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_CurrentOrPastProductsContainHazardousMaterialsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether current or past products, or their components, contain hazardous materials that may require special disposal methods. ",
+    "required": false
+  },
+  "ExcessUmbrella_PollutionLiability_GeneralLiabilityWithPollutionExclusionIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the insured carries a general liability policy with standard Insurance Services Office pollution exclusion coverage. ",
+    "required": false
+  },
+  "ExcessUmbrella_PollutionLiability_GeneralLiabilitySuddenAndAccidentalOnlyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the insured carries a general liability policy with standard sudden and accidental only coverage. ",
+    "required": false
+  },
+  "ExcessUmbrella_PollutionLiability_GeneralLiabilityWithPollutionCoverageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the insured carries a general liability policy with a pollution coverage endorsement. ",
+    "required": false
+  },
+  "ExcessUmbrella_PollutionLiability_SeparatePollutionCoverageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the insured carries separate pollution coverage. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ABGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Are missiles, engines, guidance systems, frames or any other product used/installed in aircraft?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_MissilesEnginesGuidanceSystemsUsedInAircraftExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether missiles, engines, guidance systems, frames or any other product is used/installed in an aircraft. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_KAQCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Any foreign operations, foreign products distributed in USA, or US products sold / distributed in foreign countries?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ABJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Any product liability loss in past specified number of years?\". ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_ProductliabilityLossPastThreeYearsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any product liability loss in the past three (3) years. ",
+    "required": false
+  },
+  "ExcessUmbrella_ProductLiability_GrossSalesAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The gross sales or receipts amount. ",
+    "required": false
+  },
+  "ExcessUmbrella_ProductLiability_GrossSalesAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The gross sales or receipts amount. ",
+    "required": false
+  },
+  "ExcessUmbrella_ProductLiability_GrossSalesAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The gross sales or receipts amount. ",
+    "required": false
+  },
+  "ExcessUmbrella_ProtectiveLiability_IndependentContractorDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of independent contractors.   ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_Question_ACACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Does applicant own or lease watercraft?\". ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_G": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "Watercraft_OwnedCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of watercraft owned. As used here, the number of watercraft owned of the same type.",
+    "required": false
+  },
+  "Watercraft_Length_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The length of the watercraft expressed in feet. ",
+    "required": false
+  },
+  "Watercraft_Horsepower_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The horsepower of the engine. There is a method for determining the maximum safe horsepower for a specific boat based on length and width. If the company employs this formula, it may be helpful to make note of the width in remarks. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_H": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "Watercraft_OwnedCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of watercraft owned. As used here, the number of watercraft owned of the same type.",
+    "required": false
+  },
+  "Watercraft_Length_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The length of the watercraft expressed in feet. ",
+    "required": false
+  },
+  "Watercraft_Horsepower_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The horsepower of the engine. There is a method for determining the maximum safe horsepower for a specific boat based on length and width. If the company employs this formula, it may be helpful to make note of the width in remarks. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_I": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "ExcessUmbrella_PropertyRating_StructureStoreyCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of stories, counting the ground floor as one, which this building has. ",
+    "required": false
+  },
+  "ExcessUmbrella_PropertyRating_ApartmentCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of separate living units in the structure. ",
+    "required": false
+  },
+  "ExcessUmbrella_PropertyRating_SwimmingPoolCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of swimming pools on the premises. ",
+    "required": false
+  },
+  "ExcessUmbrella_PropertyRating_DivingBoardCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of diving boards on the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_J": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "ExcessUmbrella_PropertyRating_StructureStoreyCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of stories, counting the ground floor as one, which this building has. ",
+    "required": false
+  },
+  "ExcessUmbrella_PropertyRating_ApartmentCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of separate living units in the structure. ",
+    "required": false
+  },
+  "ExcessUmbrella_PropertyRating_SwimmingPoolCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of swimming pools on the premises. ",
+    "required": false
+  },
+  "ExcessUmbrella_PropertyRating_DivingBoardCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of diving boards on the premises. ",
+    "required": false
+  },
+  "CommercialUmbrellaLineOfBusiness_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the commercial umbrella line of business.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "ExcessUmbrella_UninsuredMotorists_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for commercial umbrella / excess uninsured motorists coverage (if applicable in your states). ",
+    "required": false
+  },
+  "ExcessUmbrella_UnderinsuredMotorists_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for commercial umbrella / excess underinsured motorists coverage (if applicable in your state). ",
+    "required": false
+  },
+  "ExcessUmbrella_MedicalPayments_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for commercial umbrella / excess medical payments coverage (if applicable in your states). ",
+    "required": false
+  },
+  "NamedInsured_Initials_A": {
+    "ft": "/Tx",
+    "tu": "Initial here: The named insured's initials. As used here, applicable in Louisiana.",
+    "required": false
+  },
+  "NamedInsured_Initials_B": {
+    "ft": "/Tx",
+    "tu": "Initial here: The named insured's initials. As used here, applicable in Louisiana.",
+    "required": false
+  },
+  "NamedInsured_Initials_E": {
+    "ft": "/Tx",
+    "tu": "Initial here: The named insured's initials.  As used here, applicable in Montana.",
+    "required": false
+  },
+  "NamedInsured_Initials_C": {
+    "ft": "/Tx",
+    "tu": "Initial here: The named insured's initials. As used here, applicable in New Hampshire.",
+    "required": false
+  },
+  "NamedInsured_Initials_D": {
+    "ft": "/Tx",
+    "tu": "Initial here: The named insured's initials. As used here, applicable in New Hampshire.",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the authorized representative of the producer, agency and/or broker that signed the form. ",
+    "required": false
+  },
+  "Producer_StateLicenseIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The State License Number of the producer. As used here,  this is required in Florida.",
+    "required": false
+  },
+  "NamedInsured_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_NationalIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number. ",
+    "required": false
+  }
+}

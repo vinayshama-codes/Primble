@@ -1,0 +1,87 @@
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g. agency or brokerage). ",
+    "required": false
+  },
+  "Location_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "Form_CurrentPageNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The page number applicable to this page. ",
+    "required": false
+  },
+  "Form_TotalPageNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of pages applicable to this form (e.g., Page 1 of 4).  If only one page, indicate Page 1 of 1. ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer/agency. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols. If required for self-insurance, the self-insured license or contract number. ",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the NAIC. ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it/they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "NamedInsured_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it/they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "NamedInsured_FullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it/they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "NamedInsured_FullName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it/they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence. ",
+    "required": false
+  },
+  "AdditionalRemark_FormIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The form number to which this section is attached. ",
+    "required": false
+  },
+  "AdditionalRemark_FormName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the form to which this section is attached. ",
+    "required": false
+  },
+  "AdditionalRemark_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional remarks. ",
+    "required": false
+  }
+}

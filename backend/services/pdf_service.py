@@ -414,9 +414,6 @@ def extract_form_schema(path: str, form_id: str = "") -> dict:
 
 
 def _fill_and_highlight(arr, data: dict, confidence: dict, counter: list):
-    YELLOW = pikepdf.Array([pikepdf.Real(1.0), pikepdf.Real(1.0), pikepdf.Real(0.0)])
-    PINK   = pikepdf.Array([pikepdf.Real(1.0), pikepdf.Real(0.71), pikepdf.Real(0.76)])
-    WHITE  = pikepdf.Array([pikepdf.Real(1.0), pikepdf.Real(1.0), pikepdf.Real(1.0)])
     for item in arr:
         try:
             t    = item.get("/T", None)
@@ -424,22 +421,98 @@ def _fill_and_highlight(arr, data: dict, confidence: dict, counter: list):
             if t:
                 name = str(t)
                 val  = data.get(name)
-                conf = confidence.get(name, "low_confidence")
                 if val is not None and str(val).strip() not in ("", "null", "None"):
                     item["/V"] = pikepdf.String(str(val))
                     if "/AP" in item:
                         del item["/AP"]
                     counter[0] += 1
-                if conf == "filled":
-                    item["/MK"] = pikepdf.Dictionary(**{"/BG": WHITE})
-                elif conf == "missing_required":
-                    item["/MK"] = pikepdf.Dictionary(**{"/BG": YELLOW})
-                else:
-                    item["/MK"] = pikepdf.Dictionary(**{"/BG": PINK})
             if kids:
                 _fill_and_highlight(kids, data, confidence, counter)
         except Exception:
             pass
+
+
+def _collect_field_rects_for_highlight(pdf: pikepdf.Pdf, confidence: dict, data: dict) -> dict:
+    """Return {page_idx: [(x1,y1,x2,y2, color_rgb), ...]} for fields needing highlights."""
+    # color tuples: pink=low_confidence+has_value, yellow=missing_required, green=client_arq_filled
+    COLOR_PINK   = (1.00, 0.89, 0.89)   # rgba(254,226,226) — very light pink
+    COLOR_YELLOW = (1.00, 0.95, 0.78)   # rgba(254,243,199) — very light yellow
+    COLOR_GREEN  = (0.73, 0.97, 0.82)   # rgba(187,247,208) — very light green
+    page_rects: dict = {}
+    for page_idx, page in enumerate(pdf.pages):
+        raw_annots = page.get("/Annots")
+        if raw_annots is None:
+            continue
+        try:
+            annot_list = list(raw_annots)
+        except Exception:
+            continue
+        for annot_ref in annot_list:
+            try:
+                annot = annot_ref
+                if "/Widget" not in str(annot.get("/Subtype", "")):
+                    continue
+                t = annot.get("/T")
+                if t is None:
+                    parent = annot.get("/Parent")
+                    if parent:
+                        t = parent.get("/T")
+                if t is None:
+                    continue
+                name = str(t)
+                rect = annot.get("/Rect")
+                if rect is None:
+                    continue
+                x1, y1, x2, y2 = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
+                if x1 > x2: x1, x2 = x2, x1
+                if y1 > y2: y1, y2 = y2, y1
+                conf = confidence.get(name, "low_confidence")
+                val  = data.get(name)
+                has_val = val is not None and str(val).strip() not in ("", "null", "None")
+                if conf == "filled":
+                    color = None
+                elif conf == "client_arq":
+                    color = COLOR_GREEN
+                elif conf == "missing_required":
+                    color = COLOR_YELLOW
+                elif conf == "low_confidence" and has_val:
+                    color = COLOR_PINK
+                else:
+                    color = None
+                if color:
+                    page_rects.setdefault(page_idx, []).append((x1, y1, x2, y2, color))
+            except Exception:
+                pass
+    return page_rects
+
+
+def _draw_highlight_rects(pdf: pikepdf.Pdf, page_rects: dict) -> None:
+    """Paint semi-transparent filled rectangles on each page's content stream."""
+    for page_idx, rects in page_rects.items():
+        if not rects:
+            continue
+        page = pdf.pages[page_idx]
+        lines = ["q"]  # save graphics state
+        for (x1, y1, x2, y2, rgb) in rects:
+            r, g, b = rgb
+            w = x2 - x1
+            h = y2 - y1
+            if w <= 0 or h <= 0:
+                continue
+            lines.append(f"{r:.3f} {g:.3f} {b:.3f} rg")   # fill color
+            lines.append(f"{x1:.2f} {y1:.2f} {w:.2f} {h:.2f} re f")  # rect + fill
+        lines.append("Q")  # restore graphics state
+        overlay_bytes = ("\n".join(lines) + "\n").encode("latin-1")
+        overlay_stream = pikepdf.Stream(pdf, overlay_bytes)
+        existing = page.get("/Contents")
+        if existing is None:
+            page["/Contents"] = overlay_stream
+        elif isinstance(existing, pikepdf.Array):
+            # Already an array — prepend our overlay
+            page["/Contents"] = pikepdf.Array([overlay_stream] + list(existing))
+        else:
+            # Single stream — wrap both in an array (overlay drawn first, page content on top)
+            page["/Contents"] = pikepdf.Array([overlay_stream, existing])
 
 
 def fill_pdf(template_path: str, data: dict, confidence: Optional[dict] = None) -> bytes:
@@ -451,6 +524,12 @@ def fill_pdf(template_path: str, data: dict, confidence: Optional[dict] = None) 
             counter = [0]
             _fill_and_highlight(acro.get("/Fields", []), data, confidence or {}, counter)
             logger.info(f"fill_pdf: wrote {counter[0]} field values")
+        if confidence:
+            page_rects = _collect_field_rects_for_highlight(pdf, confidence, data or {})
+            if page_rects:
+                _draw_highlight_rects(pdf, page_rects)
+                total_hl = sum(len(v) for v in page_rects.values())
+                logger.info(f"fill_pdf: drew {total_hl} highlight rects across {len(page_rects)} pages")
         buf = io.BytesIO()
         pdf.save(buf)
         pdf.close()
@@ -462,28 +541,46 @@ def fill_pdf(template_path: str, data: dict, confidence: Optional[dict] = None) 
             return f.read()
 
 
-def _load_fieldmap(form_id: str) -> dict:
-    """Load persisted {field_name: fact_key} map for this form template, if it exists."""
+def _load_fieldmap(form_id: str) -> tuple:
+    """Load persisted {field_name: fact_key} map and AI-mapped field set.
+
+    Returns (fieldmap, ai_mapped_set) where ai_mapped_set contains field names
+    that were originally resolved by LLM (not deterministic rules). These retain
+    "low_confidence" status across runs so the UI keeps showing pink highlights.
+    """
     if not form_id:
-        return {}
+        return {}, set()
     path = os.path.join(FORMS_DB_DIR, f"ACORD_{form_id}_fieldmap.json")
     if not os.path.exists(path):
-        return {}
+        return {}, set()
     try:
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
+        # Legacy fieldmap without AI-mapping metadata — delete to force fresh
+        # LLM run so __ai_mapped__ gets populated and pink highlights work.
+        if "__ai_mapped__" not in data:
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+            return {}, set()
+        ai_set = set(data.pop("__ai_mapped__", []))
+        return data, ai_set
     except Exception:
-        return {}
+        return {}, set()
 
 
-def _save_fieldmap(form_id: str, fieldmap: dict):
-    """Persist {field_name: fact_key} map so future runs skip the LLM for known fields."""
+def _save_fieldmap(form_id: str, fieldmap: dict, ai_set: set = None):
+    """Persist field→fact_key map and AI-mapped field names."""
     if not form_id or not fieldmap:
         return
     path = os.path.join(FORMS_DB_DIR, f"ACORD_{form_id}_fieldmap.json")
     try:
+        data = dict(fieldmap)
+        if ai_set:
+            data["__ai_mapped__"] = sorted(ai_set)
         with open(path, "w") as f:
-            json.dump(fieldmap, f, indent=2)
+            json.dump(data, f, indent=2)
     except Exception as ex:
         logger.warning(f"Could not save fieldmap for {form_id}: {ex}")
 
@@ -572,9 +669,11 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
     else:
         _VALID_FACT_KEYS.update(facts.keys())
 
-    # Load persisted field→fact_key map built on previous runs for this form template.
-    cached_fieldmap = _load_fieldmap(form_id)
-    new_fieldmap    = dict(cached_fieldmap)
+    # Load persisted field→fact_key map and the set of fields that were originally
+    # AI-mapped. The ai_set persists across runs so those fields keep "low_confidence".
+    cached_fieldmap, cached_ai_set = _load_fieldmap(form_id)
+    new_fieldmap = dict(cached_fieldmap)
+    new_ai_set   = set(cached_ai_set)
 
     for field in schema.keys():
         if field in cached_fieldmap:
@@ -631,6 +730,8 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
                 fact_key = None
             new_fieldmap[field] = fact_key   # always cache, even None
             mapped[field]       = _apply_fact_key(fact_key, facts)
+            if fact_key is not None:
+                new_ai_set.add(field)         # persist that this field is AI-mapped
 
         # Fields in unmatched that the LLM didn't return → save as null so we skip next run.
         for field in unmatched_keys:
@@ -638,17 +739,23 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
                 new_fieldmap[field] = None
                 mapped.setdefault(field, None)
 
-        _save_fieldmap(form_id, new_fieldmap)
+        _save_fieldmap(form_id, new_fieldmap, new_ai_set)
 
     elif new_fieldmap != cached_fieldmap:
         # Deterministic pass added new entries — persist them even with no LLM batch.
-        _save_fieldmap(form_id, new_fieldmap)
+        _save_fieldmap(form_id, new_fieldmap, new_ai_set)
+
+    # On the very first run (no cached fieldmap) every filled field is unreviewed,
+    # so mark them all low_confidence so pink highlights appear immediately.
+    # On subsequent runs only truly AI-mapped fields stay pink; deterministic ones
+    # transition to "filled" once the fieldmap is established.
+    first_run = not cached_fieldmap
 
     for field, meta in schema.items():
         val       = mapped.get(field)
         has_value = val is not None and str(val).strip() not in ("", "null", "None")
         is_req    = meta.get("required", False) if isinstance(meta, dict) else False
-        was_ai    = field in unmatched and field in mapped and mapped[field] is not None
+        was_ai    = first_run or (field in unmatched) or (field in cached_ai_set)
         if has_value:
             confidence[field] = "low_confidence" if was_ai else "filled"
         elif is_req:

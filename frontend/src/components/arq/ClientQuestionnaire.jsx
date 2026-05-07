@@ -1,8 +1,6 @@
-//ClientQuestionnaire.jsx
-import { useState, useEffect, useRef } from 'react';
+// ClientQuestionnaire.jsx - Final version without restore prompt and error message
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE } from '../../config/constants';
-
-const HTTP_UNPROCESSABLE = 422;
 
 // Validation helpers
 const EMAIL_RE   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -23,16 +21,21 @@ export default function ClientQuestionnaire({ token }) {
   const [loading, setLoading]         = useState(true);
   const [error, setError]             = useState(null);
   const [questions, setQuestions]     = useState([]);
-  const [answers, setAnswers]         = useState({});
   const [submitting, setSubmitting]   = useState(false);
   const [submitted, setSubmitted]     = useState(false);
   const [expiresAt, setExpiresAt]     = useState(null);
   const [clientName, setClientName]   = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
-  // Producer contact info (optional)
+  const [answers, setAnswersState]    = useState({});
+
+  // Producer contact info
   const [producerEmail, setProducerEmail] = useState('');
   const [producerPhone, setProducerPhone] = useState('');
   const [producerName, setProducerName]   = useState('');
+
+  // Draft save state
+  const draftTimerRef    = useRef(null);
+  const pendingAnswersRef = useRef({});
 
   // Chat state
   const [chatOpen, setChatOpen]       = useState(false);
@@ -44,7 +47,38 @@ export default function ClientQuestionnaire({ token }) {
   const chatBottomRef                 = useRef(null);
   const chatInputRef                  = useRef(null);
 
-  const validateAnswers = () => {
+  // Server-side draft save (debounced 1s) — works across browsers, incognito, devices
+  const saveDraftToServer = useCallback((currentAnswers) => {
+    if (!token) return;
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    pendingAnswersRef.current = currentAnswers;
+    draftTimerRef.current = setTimeout(() => {
+      fetch(`${API_BASE}/api/arq/draft/${token}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers: pendingAnswersRef.current }),
+      }).catch(() => {}); // silent — draft save failures are non-critical
+    }, 1000);
+  }, [token]);
+
+  // Wrapper so the rest of the component calls setAnswers (same as before)
+  const setAnswers = useCallback((updates) => {
+    setAnswersState(prev => {
+      const next = typeof updates === 'function' ? updates(prev) : { ...prev, ...updates };
+      saveDraftToServer(next);
+      return next;
+    });
+  }, [saveDraftToServer]);
+
+  // Flush any pending draft save immediately (used on submit)
+  const flushDraft = useCallback(() => {
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+  }, []);
+
+  const validateAnswers = useCallback(() => {
     const errors = {};
     questions.forEach((q) => {
       const val = (answers[q.field_name] || '').trim();
@@ -65,7 +99,7 @@ export default function ClientQuestionnaire({ token }) {
       }
     });
     return errors;
-  };
+  }, [questions, answers]);
 
   const sendChatMessage = async () => {
     const msg = chatInput.trim();
@@ -109,6 +143,7 @@ export default function ClientQuestionnaire({ token }) {
     if (chatOpen) setTimeout(() => chatInputRef.current?.focus(), 150);
   }, [chatOpen]);
 
+  // Load questionnaire data — runs once per token
   useEffect(() => {
     if (!token) {
       setError('Invalid questionnaire link.');
@@ -126,17 +161,20 @@ export default function ClientQuestionnaire({ token }) {
           setQuestions(qs);
           setExpiresAt(data.expires_at);
           setClientName(data.client_name || '');
-          // Optional producer contact info
           setProducerEmail(data.producer_email || '');
           setProducerPhone(data.producer_phone || '');
           setProducerName(data.producer_name || '');
+
+          // Build baseline from server values, then overlay server-side draft answers.
+          // draft_answers are saved server-side so they survive incognito / different browsers.
           const init = {};
           qs.forEach((q) => { init[q.field_name] = q.current_value || ''; });
-          setAnswers(init);
+          const serverDraft = data.draft_answers || {};
+          setAnswersState({ ...init, ...serverDraft });
         } else if (data.error === 'expired') {
           setError('This questionnaire link has expired. Please contact your insurance agent for a new link.');
         } else if (data.error === 'already_submitted') {
-          setError('You have already submitted answers for this questionnaire.');
+          setSubmitted(true);
         } else {
           setError(data.message || 'Failed to load questionnaire');
         }
@@ -149,7 +187,15 @@ export default function ClientQuestionnaire({ token }) {
       });
 
     return () => controller.abort();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    };
+  }, []);
 
   const answeredCount = questions.filter(
     (q) => (answers[q.field_name] || '').trim() !== ''
@@ -165,7 +211,7 @@ export default function ClientQuestionnaire({ token }) {
         `Do you want to submit anyway? Your agent will review the answers.\n\n` +
         `Click OK to submit, Cancel to go back and fix.`
       );
-      
+
       if (!userConfirmed) {
         setFieldErrors(errors);
         const first = Object.keys(errors)[0];
@@ -173,7 +219,8 @@ export default function ClientQuestionnaire({ token }) {
         return;
       }
     }
-    
+
+    flushDraft();
     setFieldErrors({});
     setSubmitting(true);
     setError(null);
@@ -186,7 +233,7 @@ export default function ClientQuestionnaire({ token }) {
       const data = await res.json();
       if (res.ok && data.success) {
         setSubmitted(true);
-      } else if (res.status === HTTP_UNPROCESSABLE && data.field_errors) {
+      } else if (res.status === 422 && data.field_errors) {
         setFieldErrors(data.field_errors);
         setError('Please fix the highlighted fields and resubmit.');
         const first = Object.keys(data.field_errors)[0];
@@ -194,8 +241,8 @@ export default function ClientQuestionnaire({ token }) {
       } else {
         setError(data.message || 'Failed to submit answers. Please try again.');
       }
-    } catch (err) {
-      setError(err?.message ? `Submission failed: ${err.message}` : 'Network error. Please try again.');
+    } catch {
+      setError('Network error. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -209,11 +256,20 @@ export default function ClientQuestionnaire({ token }) {
     });
   };
 
-  // Agent escalation card
+  // Agent escalation card - FLOATING (Top position, above save button)
   const AgentContactCard = () => {
-    if (!producerEmail && !producerPhone) return null;
+    if (!producerEmail && !producerPhone && !producerName) return null;
     return (
-      <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 10, padding: '12px 16px', marginTop: 16, fontSize: 13 }}>
+      <div style={{
+        background: '#f0f9ff',
+        border: '1px solid #bae6fd',
+        borderRadius: 12,
+        padding: '12px 16px',
+        fontSize: 13,
+        width: '240px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        marginBottom: '12px',
+      }}>
         <div style={{ fontWeight: 700, color: '#0369a1', marginBottom: 6 }}>📞 Contact Your Agent</div>
         {producerName && <div style={{ color: '#0f172a', marginBottom: 4 }}>{producerName}</div>}
         {producerEmail && (
@@ -305,21 +361,33 @@ export default function ClientQuestionnaire({ token }) {
           })()}
         </div>
 
+        {/* Auto-save indicator - Shows when draft is being saved */}
+        {answeredCount > 0 && (
+          <div style={{
+            margin: '12px 20px 0',
+            padding: '8px 12px',
+            background: '#ecfdf5',
+            borderRadius: 6,
+            fontSize: 11,
+            color: '#065f46',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            justifyContent: 'flex-start'
+          }}>
+            <span>💾 Auto-saving in progress...</span>
+          </div>
+        )}
+
         {/* Body */}
         <div style={{ padding: '20px 20px' }}>
-          
+
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
             <div>
               <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', marginBottom: 2 }}>Questions ({questions.length})</h2>
-              <p style={{ fontSize: 12, color: '#64748b' }}>Please answer as accurately as possible.</p>
+              <p style={{ fontSize: 12, color: '#64748b' }}>Answers are auto-saved as you type. You can close and return later.</p>
             </div>
           </div>
-
-          {error && (
-            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 20, color: '#dc2626', fontSize: 13 }}>
-              ⚠️ {error}
-            </div>
-          )}
 
           {/* Questions */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -364,7 +432,7 @@ export default function ClientQuestionnaire({ token }) {
                       {isCheckbox ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <button
-                            onClick={() => setAnswers((prev) => ({ ...prev, [q.field_name]: prev[q.field_name] === 'Yes' ? 'No' : 'Yes' }))}
+                            onClick={() => setAnswers({ [q.field_name]: answers[q.field_name] === 'Yes' ? 'No' : 'Yes' })}
                             style={{
                               padding: '8px 18px', borderRadius: 20, border: '1px solid',
                               borderColor: answers[q.field_name] === 'Yes' ? '#e6007a' : '#cbd5e1',
@@ -382,7 +450,7 @@ export default function ClientQuestionnaire({ token }) {
                         <textarea
                           value={answers[q.field_name] ?? ''}
                           onChange={(e) => {
-                            setAnswers((prev) => ({ ...prev, [q.field_name]: e.target.value }));
+                            setAnswers({ [q.field_name]: e.target.value });
                             if (fieldErrors[q.field_name])
                               setFieldErrors((prev) => { const n = { ...prev }; delete n[q.field_name]; return n; });
                           }}
@@ -422,26 +490,9 @@ export default function ClientQuestionnaire({ token }) {
             })}
           </div>
 
-          {/* Footer Submit Button (KEPT AS IS) */}
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            style={{ width: '100%', marginTop: 24, padding: '14px', background: '#e6007a', color: '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.6 : 1, transition: 'all 0.2s', minHeight: 50 }}
-          >
-            {submitting ? (
-              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <span style={{ width: 16, height: 16, border: '2px solid white', borderTopColor: 'transparent', borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
-                Submitting...
-              </span>
-            ) : '✓ Submit Answers'}
-          </button>
-
-          <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 16, paddingTop: 16, borderTop: '1px solid #e2e8f0' }}>
-            Your answers will be sent directly to your insurance agent.
+          <p style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', marginTop: 24, paddingTop: 16, borderTop: '1px solid #e2e8f0' }}>
+            Your answers are auto-saved as you type. You can close and return later.
           </p>
-
-          {/* Agent contact escalation */}
-          <AgentContactCard />
 
           <footer style={{ marginTop: '16px', paddingTop: '12px', textAlign: 'center', borderTop: '1px solid #e2e8f0' }}>
             <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0 }}>
@@ -454,72 +505,84 @@ export default function ClientQuestionnaire({ token }) {
         </div>
       </div>
 
-      {/* ── Floating Buttons Container (Submit on Top, Chat Below) ── */}
+      {/* FLOATING BUTTONS CONTAINER */}
       <div style={{
         position: 'fixed',
         right: '24px',
-        top: '90%',
-        transform: 'translateY(-50%)',
+        bottom: '24px',
         zIndex: 999,
         display: 'flex',
         flexDirection: 'column',
-        gap: '16px',
-        alignItems: 'center',
-        justifyContent: 'center'
+        alignItems: 'flex-end',
+        gap: '12px',
       }}>
-        
-        {/* Submit Button (Top) */}
+
+        {/* AGENT CONTACT CARD */}
+        <AgentContactCard />
+
+        {/* SUBMIT BUTTON */}
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="floating-submit-btn"
+          className="floating-save-btn"
           title={`Submit Answers (${answeredCount}/${questions.length})`}
           style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '50%',
+            width: 'auto',
+            minWidth: '100px',
+            padding: '12px 24px',
+            borderRadius: '40px',
             background: submitting ? '#cbd5e1' : '#e6007a',
             border: 'none',
             cursor: submitting ? 'not-allowed' : 'pointer',
             color: '#fff',
-            fontSize: '24px',
-            fontWeight: 'bold',
+            fontSize: '14px',
+            fontWeight: 600,
             boxShadow: '0 4px 20px rgba(230,0,122,0.4)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            gap: '8px',
             transition: 'all 0.2s ease',
-            position: 'relative'
+            position: 'relative',
+            letterSpacing: '0.5px',
           }}
           onMouseEnter={(e) => {
             if (!submitting) {
               e.currentTarget.style.background = '#c00066';
-              e.currentTarget.style.transform = 'scale(1.1)';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 6px 24px rgba(230,0,122,0.5)';
             }
           }}
           onMouseLeave={(e) => {
             if (!submitting) {
               e.currentTarget.style.background = '#e6007a';
-              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 4px 20px rgba(230,0,122,0.4)';
             }
           }}
         >
           {submitting ? (
-            <span style={{
-              width: '20px',
-              height: '20px',
-              border: '2px solid white',
-              borderTopColor: 'transparent',
-              borderRadius: '50%',
-              display: 'inline-block',
-              animation: 'spin 0.7s linear infinite'
-            }} />
+            <>
+              <span style={{
+                width: '16px',
+                height: '16px',
+                border: '2px solid white',
+                borderTopColor: 'transparent',
+                borderRadius: '50%',
+                display: 'inline-block',
+                animation: 'spin 0.7s linear infinite'
+              }} />
+              Submitting...
+            </>
           ) : (
-            '✓'
+            <>
+              <span>✓</span>
+              Submit
+            </>
           )}
         </button>
-        
-        {/* Progress badge for submit button */}
+
+        {/* Progress badge */}
         {!submitting && answeredCount > 0 && (
           <div style={{
             position: 'absolute',
@@ -528,9 +591,9 @@ export default function ClientQuestionnaire({ token }) {
             background: '#10b981',
             color: 'white',
             borderRadius: '50%',
-            width: '22px',
-            height: '22px',
-            fontSize: '11px',
+            width: '24px',
+            height: '24px',
+            fontSize: '12px',
             fontWeight: 'bold',
             display: 'flex',
             alignItems: 'center',
@@ -542,48 +605,54 @@ export default function ClientQuestionnaire({ token }) {
           </div>
         )}
 
-        {/* Chat Toggle Button (Below Submit) */}
+        {/* CHAT BUTTON */}
         <button
           onClick={() => setChatOpen(o => !o)}
           title="Ask Form Assistant"
           style={{
-            width: '54px',
-            height: '54px',
-            borderRadius: '50%',
+            width: 'auto',
+            minWidth: '100px',
+            padding: '12px 24px',
+            borderRadius: '40px',
             background: chatOpen ? '#0f172a' : 'linear-gradient(135deg, #e6007a, #c0005f)',
             border: chatOpen ? '2px solid #e6007a' : 'none',
             cursor: 'pointer',
             color: '#fff',
-            fontSize: '22px',
+            fontSize: '14px',
+            fontWeight: 600,
             boxShadow: '0 4px 20px rgba(230,0,122,0.45)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            gap: '8px',
             transition: 'all 0.2s ease',
+            letterSpacing: '0.5px',
           }}
           onMouseEnter={e => {
             if (!chatOpen) {
-              e.currentTarget.style.transform = 'scale(1.1)';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.background = '#c00066';
             }
           }}
           onMouseLeave={e => {
             if (!chatOpen) {
-              e.currentTarget.style.transform = 'scale(1)';
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.background = 'linear-gradient(135deg, #e6007a, #c0005f)';
             }
           }}
         >
-          {chatOpen ? '✕' : '💬'}
+          {chatOpen ? '✕ Close' : '💬 Chat'}
         </button>
       </div>
 
-      {/* ── Chat Window (Shows when chatOpen is true) ── */}
+      {/* CHAT WINDOW */}
       {chatOpen && (
         <div style={{
           position: 'fixed',
-          bottom: '20px',
-          right: '90px',
+          bottom: '130px',
+          right: '24px',
           zIndex: 1000,
-          width: 'min(340px, calc(100vw - 32px))',
+          width: 'min(360px, calc(100vw - 32px))',
           background: '#fff',
           borderRadius: 16,
           boxShadow: '0 8px 40px rgba(0,0,0,0.18)',
@@ -591,7 +660,7 @@ export default function ClientQuestionnaire({ token }) {
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          maxHeight: 'min(460px, calc(100vh - 120px))',
+          maxHeight: 'min(460px, calc(100vh - 180px))',
         }}>
           {/* Chat header */}
           <div style={{ padding: '12px 16px', background: 'linear-gradient(135deg, #0f172a, #1e293b)', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
@@ -632,14 +701,6 @@ export default function ClientQuestionnaire({ token }) {
             <div ref={chatBottomRef} />
           </div>
 
-          {/* Escalation hint */}
-          <div style={{ padding: '4px 14px 0', flexShrink: 0 }}>
-            <p style={{ fontSize: 10, color: '#94a3b8', margin: 0 }}>
-              Can't find your answer? <span style={{ color: '#0369a1' }}>Contact your agent or broker for assistance.</span>
-              {producerEmail && <a href={`mailto:${producerEmail}`} style={{ color: '#0369a1', marginLeft: 4, textDecoration: 'none' }}>{producerEmail}</a>}
-            </p>
-          </div>
-
           {/* Input */}
           <div style={{ padding: '10px 12px', borderTop: '1px solid #e2e8f0', display: 'flex', gap: 8, flexShrink: 0 }}>
             <input
@@ -674,12 +735,13 @@ export default function ClientQuestionnaire({ token }) {
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
         .questionnaire-textarea:focus { border-color: #e6007a !important; }
-        
-        /* Tooltip on hover for floating submit button */
-        .floating-submit-btn:hover::after {
-          content: "Submit (${answeredCount}/${questions.length})";
+
+        /* Tooltip on hover for floating save button */
+        .floating-save-btn:hover::after {
+          content: "Submit your answers (${answeredCount}/${questions.length})";
           position: absolute;
-          right: 70px;
+          right: 100%;
+          margin-right: 12px;
           white-space: nowrap;
           background: #1e293b;
           color: white;
@@ -690,24 +752,20 @@ export default function ClientQuestionnaire({ token }) {
           pointer-events: none;
           z-index: 1000;
         }
-        
-        @media (max-width: 480px) {
-          .questionnaire-split { flex-direction: column !important; }
-        }
-        
+
         @media (max-width: 768px) {
-          .floating-submit-btn {
-            width: 48px !important;
-            height: 48px !important;
-            font-size: 20px !important;
+          .floating-save-btn {
+            min-width: 80px !important;
+            padding: 10px 18px !important;
+            font-size: 13px !important;
           }
-          .floating-submit-btn:hover::after {
+          .floating-save-btn:hover::after {
             font-size: 10px !important;
             padding: 4px 8px !important;
           }
-          .floating-buttons-container {
+          div[style*="position: fixed"][style*="right: 24px"] {
             right: 16px !important;
-            gap: 12px !important;
+            bottom: 16px !important;
           }
         }
       `}</style>

@@ -716,6 +716,23 @@ async def get_arq_sessions_for_user(user_id: str) -> List[dict]:
 
 
 # ASYNC-SAFE
+async def save_arq_draft(token: str, draft_answers: dict) -> bool:
+    """Persist partial answers server-side without marking the session submitted."""
+    try:
+        async with get_pool().acquire() as conn:
+            result = await conn.execute(
+                """UPDATE arq_sessions
+                   SET draft_answers=$1
+                   WHERE token=$2 AND status != 'submitted'""",
+                json.dumps(draft_answers), token,
+            )
+        return result != "UPDATE 0"
+    except Exception as ex:
+        logger.warning(f"save_arq_draft failed: {ex}")
+        return False
+
+
+# ASYNC-SAFE
 async def mark_arq_viewed(token: str) -> None:
     now = datetime.now(timezone.utc).isoformat()
     async with get_pool().acquire() as conn:

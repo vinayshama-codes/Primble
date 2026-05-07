@@ -1,0 +1,797 @@
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer / agency. ",
+    "required": false
+  },
+  "Producer_ContactPerson_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the individual at the producer's establishment that is the primary contact. ",
+    "required": false
+  },
+  "Producer_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The mailing address line one of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The mailing address line two of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The mailing address city name of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The mailing address state or province code of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The mailing address postal code of the producer / agency. ",
+    "required": false
+  },
+  "Producer_ContactPerson_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The phone number of the individual at the producer's establishment that is the primary contact.  If applicable, include the area code and extension. ",
+    "required": false
+  },
+  "Producer_FaxNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The fax number of the producer / agency. ",
+    "required": false
+  },
+  "Producer_ContactPerson_EmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The e-mail address of the individual at the producer's establishment that is the primary contact. ",
+    "required": false
+  },
+  "Insurer_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the producer (e.g., agency or brokerage firm) by the insurer. ",
+    "required": false
+  },
+  "Insurer_SubProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned by the insurer to the sub-producer (e.g., individual) within a producer's office (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address line one. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address line two. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address city name. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The named insured's mailing address state or province code. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The named insured's mailing address postal code. ",
+    "required": false
+  },
+  "NamedInsured_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ",
+    "required": false
+  },
+  "Insurer_MailingAddress_AddressLineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The first line of the insurer's mailing address. ",
+    "required": false
+  },
+  "Insurer_MailingAddress_AddressLineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The second line of the insurer's mailing address. ",
+    "required": false
+  },
+  "Insurer_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the insurer's mailing address. ",
+    "required": false
+  },
+  "Insurer_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the insurer's mailing address. ",
+    "required": false
+  },
+  "Insurer_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the insurer's mailing address. ",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). ",
+    "required": false
+  },
+  "Policy_TypeDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The type of policy issued to the insured (e. g., personal auto, truckers, garage liability, commercial property, builders risk, etc.). ",
+    "required": false
+  },
+  "AdditionalInterest_AccountNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The loan number, account number or other controlling number that the additional interest may have assigned the insured. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number. ",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Policy_ExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the terms and conditions of the policy will expire.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Policy_ContinuedUntilTerminatedIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy was issued on a continuous basis. ",
+    "required": false
+  },
+  "EvidenceOfProperty_PriorEvidenceDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the prior Evidence of Property Insurance, which this form replaces, was issued to this additional interest. ",
+    "required": false
+  },
+  "Property_Building_CoverageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Building Coverage applies. ",
+    "required": false
+  },
+  "Property_BusinessPersonalProperty_CoverageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that Business Personal Property Coverage applies. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line one of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line two of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the physical location. ",
+    "required": false
+  },
+  "Location_LocationDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the location used to differentiate locations such as vacant land, apartment buildings, townhouses, single family dwellings, farms. Provide the number of acres if farm land. ",
+    "required": false
+  },
+  "Policy_PolicyType_BasicIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the type of policy / perils insured is basic. ",
+    "required": false
+  },
+  "Policy_PolicyType_BroadIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the type of policy / perils insured is broad. ",
+    "required": false
+  },
+  "Policy_PolicyType_SpecialIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the type of policy / perils insured is special. ",
+    "required": false
+  },
+  "Policy_PolicyType_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the type of policy / perils insured is other than those listed. ",
+    "required": false
+  },
+  "Policy_PolicyType_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of policy issued to the insured. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Property_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to the commercial property coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Property_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to the commercial property coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_BusinessIncomeOrRentalValue_BusinessIncomeCoverageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates business income coverage applies. As used here, if the mortgage or loan requires Business Income coverage, indicate the applicable limit, or the number of months of coverage if coverage is provided on an actual loss sustained basis.",
+    "required": false
+  },
+  "CommercialPropertyCoverage_BusinessIncomeOrRentalValue_RentalValueCoverageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates rental value coverage applies. As used here, if the mortgage or loan requires  Rental Value coverage, indicate the applicable limit, or the number of months of coverage if coverage is provided on an actual loss sustained basis.",
+    "required": false
+  },
+  "CommercialPropertyCoverage_BusinessIncomeOrRentalValue_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates business income or rental value coverage exists. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_BusinessIncomeOrRentalValue_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to the business income or rental value coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_BusinessIncomeOrRentalValue_ActualLossSustainedIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is on an actual loss sustained basis. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_BusinessIncomeOrRentalValue_ActualLossSustainedMonthCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of months of coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_BusinessIncomeOrRentalValue_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates business income or rental value coverage does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_BusinessIncomeOrRentalValue_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates business income or rental value coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialProperty_Blanket_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates blanket coverage exists. As used here, if yes, indicate value(s) reported on properties identified in the Property Information section.",
+    "required": false
+  },
+  "StatementOfValues_Premises_ValueAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The value for each property in accordance with the valuation method and the subject of insurance. ",
+    "required": false
+  },
+  "CommercialProperty_Blanket_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates blanket coverage does not exist. ",
+    "required": false
+  },
+  "CommercialProperty_Blanket_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates blanket coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Terrorism_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates terrorism coverage exists. As used here, if yes, attach Disclosure Notice / DEC.",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Terrorism_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates terrorism coverage does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Terrorism_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates terrorism coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_TerrorismExclusion_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a terrorism exclusion applies. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_TerrorismExclusion_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a terrorism exclusion does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_TerrorismExclusion_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a terrorism exclusion is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_DomesticTerrorismExclusion_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a domestic terrorism exclusion applies. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_DomesticTerrorismExclusion_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a domestic terrorism exclusion does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_DomesticTerrorismExclusion_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a domestic terrorism exclusion is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_LimitedFungus_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates limited fungus coverage applies. As used here, if yes, indicate the limit for this coverage and the applicable deducible.",
+    "required": false
+  },
+  "CommercialPropertyCoverage_LimitedFungus_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to limited fungus coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_LimitedFungus_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to limited fungus coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_LimitedFungus_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates limited fungus coverage does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_LimitedFungus_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates limited fungus coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_FungusExclusion_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a fungus exclusion applies. As used here, if yes, indicate the form number, the form date and the owner (name of organization) of the form.",
+    "required": false
+  },
+  "FormEndorsement_FormIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The number used by the insurer for this form. ",
+    "required": false
+  },
+  "FormEndorsement_FormDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The edition date of the form. ",
+    "required": false
+  },
+  "FormEndorsement_CopyrightOwnerCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates the entity that has copyright ownership of the form. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_FungusExclusion_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a fungus exclusion does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_FungusExclusion_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a fungus exclusion is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_ReplacementCost_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates replacement cost coverage exists. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_ReplacementCost_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates replacement cost coverage does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_ReplacementCost_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates replacement cost coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_AgreedValue_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a valuation type of agreed amount exists. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_AgreedValue_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a valuation type of agreed amount does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_AgreedValue_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a valuation type of agreed amount is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Coinsurance_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a coinsurance percentage exists. As used here, if yes, indicate percent.",
+    "required": false
+  },
+  "CommercialProperty_Premises_CoinsurancePercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The Coinsurance Percentage is the percentage of the total value of the subject of insurance being insured.  If the amount of insurance falls below this percentage, the insured must share in the amount of the loss.  This field should be completed even when writing agreed amount coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Coinsurance_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a coinsurance percentage does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Coinsurance_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a coinsurance percentage is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_EquipmentBreakdown_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates equipment breakdown coverage exists. As used here, if yes, indicate the limit for this coverage and the applicable deductible.",
+    "required": false
+  },
+  "CommercialPropertyCoverage_EquipmentBreakdown_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to equipment breakdown coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_EquipmentBreakdown_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to equipment breakdown coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_EquipmentBreakdown_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates equipment breakdown coverage does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_EquipmentBreakdown_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates equipment breakdown coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_UndamagedPortionOfBuildingYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates building ordinance or law undamaged portion of building coverage exists. As used here, if yes, indicate the limit for this coverage and the applicable deductible.",
+    "required": false
+  },
+  "CommercialPropertyCoverage_BuildingOrdinanceOrLaw_UndamagedPortionBuildingLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to building ordinance or law coverage for loss to undamaged portion of the building. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_BuildingOrdinanceOrLaw_UndamagedPortionBuildingDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to building ordinance or law coverage for loss to undamaged portion of the building. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_UndamagedPortionOfBuildingNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates building ordinance or law undamaged portion of building coverage does not exist. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_UndamagedPortionOfBuildingNotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates building ordinance or law undamaged portion of building coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_DemolitionCostsYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates building ordinance or law demolition costs coverage exists. As used here, if yes, indicate the limit for this coverage and the applicable deductible.",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_DemolitionCostsLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to building ordinance or law demolition costs coverage. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_DemolitionCostsDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to building ordinance or law demolition costs coverage. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_DemolitionCostsNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates building ordinance or law demolition costs coverage does not exist. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_DemolitionCostsNotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates building ordinance or law demolition costs coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_IncreasedCostOfConstructionYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates building ordinance or law increased cost of construction coverage exists. As used here, if yes, indicate the limit for this coverage and the applicable deductible.",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_IncreasedCostOfConstructionLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to building ordinance or law increased cost of construction coverage. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_IncreasedCostOfConstructionDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to building ordinance or law increased cost of construction coverage. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_IncreasedCostOfConstructionNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates building ordinance or law increased cost of construction coverage does not exist. ",
+    "required": false
+  },
+  "CommercialProperty_BuildingOrdinanceOrLaw_IncreasedCostOfConstructionNotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates building ordinance or law increased cost of construction coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_EarthMovement_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates earth movement coverage exists. As used here, if yes, indicate the limit for this coverage and the applicable deductible.",
+    "required": false
+  },
+  "CommercialPropertyCoverage_EarthMovement_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to earth movement coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_EarthMovement_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to earth movement coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_EarthMovement_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates earth movement coverage does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_EarthMovement_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates earth movement coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Flood_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates flood coverage exists. As used here, if yes, indicate the limit for this coverage and the applicable deductible.",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Flood_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to flood coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Flood_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to flood coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Flood_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates flood coverage does not exist. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_Flood_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates flood coverage is not applicable. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_WindHail_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates wind / hail coverage is included. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_WindHail_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates wind / hail coverage is not included. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_WindHail_SubjectToProvisionsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates wind hail coverage is subject to different provisions. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_WindHail_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to wind / hail coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_WindHail_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to wind / hail coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_WindHail_SubjectToProvisionsNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates wind hail coverage is not subject to different provisions. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_WindHail_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates wind / hail coverage is not applicable. As used here, indicates subject to different provisions for wind / hail coverage is not applicable.",
+    "required": false
+  },
+  "CommercialPropertyCoverage_NamedWindstorm_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates Named Windstorm coverage is included. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_NamedWindstorm_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates Named Windstorm coverage is not included. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_NamedWindstorm_SubjectToProvisionsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the Named Windstorm coverage is subject to different provisions. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_NamedWindstorm_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit applicable to named windstorm coverage. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_NamedWindstorm_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible applicable to named windstorm coverage ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_NamedWindstorm_SubjectToProvisionsNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the Named Windstorm coverages is not subject to different provisions. ",
+    "required": false
+  },
+  "CommercialPropertyCoverage_NamedWindstorm_SubjectToProvisionsNotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates subject to different provisions is not applicable for Named Wind Storm coverage. ",
+    "required": false
+  },
+  "CommercialProperty_SubrogationWaiver_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the permission to waive subrogation in favor of mortgage holder prior to loss is granted ",
+    "required": false
+  },
+  "CommercialProperty_SubrogationWaiver_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the permission to waive subrogation in favor of mortgage holder prior to loss is not granted. ",
+    "required": false
+  },
+  "CommercialProperty_SubrogationWaiver_NotApplicableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the permission to waive subrogation in favor of mortgage holder prior to loss is not applicable. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_ContractOfSaleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a contract of sale. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LendersLossPayableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lender's loss payable. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LossPayeeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a loss payee. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_MortgageeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a mortgagee. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest is other than those listed. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line one. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line two. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address city name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address state or province code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address postal code. ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. As used here, this is the lender servicing agent.",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineOne_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line one. As used here, this is the lender servicing agent.",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineTwo_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line two. As used here, this is the lender servicing agent.",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CityName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address city name. As used here, this is the lender servicing agent.",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address state or province code. As used here, this is the lender servicing agent.",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_PostalCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address postal code. As used here, this is the lender servicing agent.",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  }
+}

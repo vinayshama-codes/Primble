@@ -1,0 +1,2402 @@
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer. ",
+    "required": false
+  },
+  "Producer_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The mailing address line one of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The mailing address line two of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The mailing address city name of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The mailing address state or province code of the producer / agency. ",
+    "required": false
+  },
+  "Producer_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The mailing address postal code of the producer / agency. ",
+    "required": false
+  },
+  "Producer_ContactPerson_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the individual at the producer's establishment that is the primary contact. ",
+    "required": false
+  },
+  "Producer_CustomerServiceRepresentative_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the customer service representative of the producer. ",
+    "required": false
+  },
+  "Producer_ContactPerson_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The phone number of the individual at the producer's establishment that is the primary contact.  If applicable, include the area code and extension. As used here, this is the office phone number.",
+    "required": false
+  },
+  "Producer_ContactPerson_CellPhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer's contact person's cell phone number. ",
+    "required": false
+  },
+  "Producer_FaxNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The fax number of the producer / agency. ",
+    "required": false
+  },
+  "Producer_ContactPerson_EmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The e-mail address of the individual at the producer's establishment that is the primary contact. ",
+    "required": false
+  },
+  "Insurer_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the producer (e.g., agency or brokerage firm) by the insurer. ",
+    "required": false
+  },
+  "Insurer_SubProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned by the insurer to the sub-producer (e.g., individual) within a producer's office (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ",
+    "required": false
+  },
+  "Insurer_Underwriter_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The company underwriter (or other company staff person) that this form should be directed to. ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "NamedInsured_Primary_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The named insured's primary phone number. As used here, this is the office phone number.",
+    "required": false
+  },
+  "NamedInsured_Secondary_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The named insured's secondary phone number. As used here, this is the cell phone number.",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address line one. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address line two. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's mailing address city name. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The named insured's mailing address state or province code. ",
+    "required": false
+  },
+  "NamedInsured_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The named insured's mailing address postal code. ",
+    "required": false
+  },
+  "NamedInsured_InBusinessYearCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years the insured has been in business. ",
+    "required": false
+  },
+  "NamedInsured_SICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Classification code assigned to the business activity (if known).  This is the code which represents the nature of the employer's business which is contained in the Standard Industrial Classification Manual published by the Federal Office of Management and Budget. ",
+    "required": false
+  },
+  "NamedInsured_NAICSCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the business activity (if known). ",
+    "required": false
+  },
+  "NamedInsured_Primary_WebsiteAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The primary website address for the named insured. ",
+    "required": false
+  },
+  "NamedInsured_Primary_EmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's primary e-mail address. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_SoleProprietorIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Sole Proprietor\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_PartnershipIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Partnership\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_CorporationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Subchapter S Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Limited Liability Corporation\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_JointVentureIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Joint Venture\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_TrustIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is \"Trust\". ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is other than those listed on the form. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other legal entity. ",
+    "required": false
+  },
+  "NamedInsured_LegalEntity_UnincorporatedAssociationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the legal entity code for the named insured is an \"Unincorporated Association\". ",
+    "required": false
+  },
+  "NamedInsured_CreditBureauName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The code identifies an external source that may be used to provide financial or credit information.  For example, a Dun and Bradstreet Number, TRW number, Equifax, Trans-Union, etc. ",
+    "required": false
+  },
+  "NamedInsured_CreditBureauIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the credit bureau for the risk. ",
+    "required": false
+  },
+  "NamedInsured_TaxIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier of the named insured. As used here, this is the Federal Employer Identification Number.",
+    "required": false
+  },
+  "NamedInsured_NCCIRiskIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The nine-digit number assigned to the insured by the National Council on Compensation Insurance (NCCI). This number is required in most states before a policy can be issued.  It also helps insure timely and accurate calculation of experience modifications. The NCCI is a rating bureau operating in most states that also provides interstate experience rating for risks occurring in more than one state. ",
+    "required": false
+  },
+  "NamedInsured_RatingBureauIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The state's rating bureau may assign a separate identification number if the applicant is subject to experience rating in an independent bureau state. In Minnesota, use this box to record the insured's unemployment account number, as required by the state. In New Jersey, use this box to record the insured's state employer registration number. ",
+    "required": false
+  },
+  "Policy_Status_QuoteIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the response expected from the company is a quote. ",
+    "required": false
+  },
+  "Policy_Status_BoundIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage has been bound. As used here, include the date coverage began and attach a copy of the binder. This application is not a substitute for a binder.  You may check more than one box (e.g., if the underwriter indicated by telephone that the risk is acceptable and coverage can be bound, check both Bound and Issue).",
+    "required": false
+  },
+  "Binder_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the terms and conditions of the binder commenced. This date normally coincides with the effective date of the policy or of an endorsement to the policy. ",
+    "required": false
+  },
+  "Policy_Status_AssignedRiskIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the response expected from the company is an assigned risk policy.  For Assigned Risk business check the \"Assigned Risk\" box and complete an ACORD 133 Workers Compensation Insurance Plan Assigned Risk Section. Rules for binding assigned risk policies apply.  The Quote, Issue Policy and Bound options do not apply when submitting an assigned risk application. Please refer to the instructions for the ACORD 133 for specific uses of the ACORD 130 elements as they apply to assigned risk business. ",
+    "required": false
+  },
+  "Policy_Status_IssueIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the response expected from the company is an issued policy. ",
+    "required": false
+  },
+  "Policy_Payment_ProducerBillIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is to be producer / agency billed. ",
+    "required": false
+  },
+  "Policy_Payment_DirectBillIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is to be direct billed. ",
+    "required": false
+  },
+  "Policy_Payment_AnnualIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy will be paid annually. ",
+    "required": false
+  },
+  "Policy_Payment_SemiAnnualIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy will be paid semi-annually. ",
+    "required": false
+  },
+  "Policy_Payment_QuarterlyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy will be paid quarterly. ",
+    "required": false
+  },
+  "Policy_Payment_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy will be paid in a frequency other than those listed. ",
+    "required": false
+  },
+  "Policy_Payment_PaymentScheduleCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The payment plan for the policy (i.e., AN - Annual, MO - Monthly, QT - Quarterly, etc.). ",
+    "required": false
+  },
+  "Policy_Payment_DownPaymentPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of the total estimated annual premium that has been (or will be) received as a down payment for bound policies. ",
+    "required": false
+  },
+  "Policy_Audit_AtExpirationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates audits should be performed for this policy at expiration. ",
+    "required": false
+  },
+  "Policy_Audit_SemiAnnualIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates audits should be performed for this policy semi-annually. ",
+    "required": false
+  },
+  "Policy_Audit_QuarterlyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates audits should be performed for this policy quarterly. ",
+    "required": false
+  },
+  "Policy_Audit_MonthlyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates audits should be performed for this policy monthly. ",
+    "required": false
+  },
+  "Policy_Audit_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates audits should be performed for this policy at a frequency other than those listed. ",
+    "required": false
+  },
+  "Policy_Audit_FrequencyCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The audit term for policies that are subject to periodic audit.  If the audit period is known, enter the code; A - annual, S - semi-annual, Q - Quarterly, M - Monthly, O - Other. ",
+    "required": false
+  },
+  "Location_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "Location_HighestFloorCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The highest floor of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line one of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line two of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CountyName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The county name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the physical location. ",
+    "required": false
+  },
+  "Location_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "Location_HighestFloorCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The highest floor of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineOne_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line one of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineTwo_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line two of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CityName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CountyName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The county name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_PostalCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the physical location. ",
+    "required": false
+  },
+  "Location_ProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "Location_HighestFloorCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The highest floor of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineOne_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line one of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineTwo_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line two of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CityName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CountyName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The county name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_PostalCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the physical location. ",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  (MM/DD/YYYY) As used here, the date on which the terms and conditions of the policy will commence.  For assigned risk business being submitted with the ACORD 133 use the effective date on that form, following state mandated rules.",
+    "required": false
+  },
+  "Policy_ExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the terms and conditions of the policy will expire.  (MM/DD/YYYY) As used here, the date on which the terms and conditions of the policy will expire.\n\nThe normal policy period (effective date to expiration date) is one year. However, a policy may be issued for any length of time up to a maximum of three years. Certain rules and endorsements must be used if the policy is written for more than one year. It may be necessary to use Effective and Expiration Dates that do not indicate a one year term, to concur with other policies.",
+    "required": false
+  },
+  "Policy_RatingEffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The earliest date that a specific modification is applied to a policy. ",
+    "required": false
+  },
+  "Policy_NormalAnniversaryRatingDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The rates used are normally in effect on the effective date of the policy. NCCI Manual rules require that the rates apply for a period of one year.  If a policy is cancelled or short-termed, the rating bureau requires the original effective date to be considered the Normal Anniversary Rating Date for both rates and experience modifications. This is temporary and will last until the next renewal when the new policy effective date will again determine the rates. The rule is intended to prevent wholesale cancellations by insureds and companies to take advantage of rate and/or rule changes. For cancelled or short-termed polices, enter the original effective date. ",
+    "required": false
+  },
+  "Policy_ParticipatingIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is a participating policy.  A Participating policy may result in reduced premiums through the payment of policyholder dividends declared by the insurer. Some policyholder dividends are based on actual experience of the applicant. If such a program is available through the company in the covered state, indicate whether the policy is to be on a Participating or Non-Participating basis. Check with your company on the availability of plans. ",
+    "required": false
+  },
+  "Policy_NonParticipatingIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is a non-participating policy. ",
+    "required": false
+  },
+  "Policy_RetrospectiveRatingPlan_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The retrospective rating plan that permits the adjustment of the final premium based on the actual premiums and losses of the applicant, subject to the plan's minimum and maximum premium limits. One to three year plans may be available. Check with your company on the availability of plans. ",
+    "required": false
+  },
+  "WorkersCompensation_PartOne_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 1 will apply. Part 1 refers to the workers' compensation law and/or occupational disease law in states where the insured has operations. ",
+    "required": false
+  },
+  "WorkersCompensation_PartOne_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 1 will apply. Part 1 refers to the workers' compensation law and/or occupational disease law in states where the insured has operations. ",
+    "required": false
+  },
+  "WorkersCompensation_PartOne_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 1 will apply. Part 1 refers to the workers' compensation law and/or occupational disease law in states where the insured has operations. ",
+    "required": false
+  },
+  "WorkersCompensation_PartOne_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 1 will apply. Part 1 refers to the workers' compensation law and/or occupational disease law in states where the insured has operations. ",
+    "required": false
+  },
+  "WorkersCompensation_PartOne_StateOrProvinceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 1 will apply. Part 1 refers to the workers' compensation law and/or occupational disease law in states where the insured has operations. ",
+    "required": false
+  },
+  "WorkersCompensation_PartOne_StateOrProvinceCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 1 will apply. Part 1 refers to the workers' compensation law and/or occupational disease law in states where the insured has operations. ",
+    "required": false
+  },
+  "WorkersCompensation_PartOne_StateOrProvinceCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 1 will apply. Part 1 refers to the workers' compensation law and/or occupational disease law in states where the insured has operations. ",
+    "required": false
+  },
+  "WorkersCompensation_PartOne_StateOrProvinceCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 1 will apply. Part 1 refers to the workers' compensation law and/or occupational disease law in states where the insured has operations. ",
+    "required": false
+  },
+  "WorkersCompensation_PartOne_StateOrProvinceCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 1 will apply. Part 1 refers to the workers' compensation law and/or occupational disease law in states where the insured has operations. ",
+    "required": false
+  },
+  "WorkersCompensation_PartOne_StateOrProvinceCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 1 will apply. Part 1 refers to the workers' compensation law and/or occupational disease law in states where the insured has operations. ",
+    "required": false
+  },
+  "WorkersCompensationEmployersLiability_EmployersLiability_EachAccidentLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The workers compensation and employers liability policy, employers liability each accident limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "WorkersCompensationEmployersLiability_EmployersLiability_DiseasePolicyLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The workers compensation and employers liability policy, employers liability disease policy limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "WorkersCompensationEmployersLiability_EmployersLiability_DiseaseEachEmployeeLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The workers compensation and employers liability policy, employers liability disease each employee limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "WorkersCompensation_PartThree_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 3 will apply. Part 3 refers to states not listed in Part 1 where the applicant has the potential for operations during the policy term, but none currently exists as of the effective date of the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_PartThree_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 3 will apply. Part 3 refers to states not listed in Part 1 where the applicant has the potential for operations during the policy term, but none currently exists as of the effective date of the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_PartThree_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 3 will apply. Part 3 refers to states not listed in Part 1 where the applicant has the potential for operations during the policy term, but none currently exists as of the effective date of the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_PartThree_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 3 will apply. Part 3 refers to states not listed in Part 1 where the applicant has the potential for operations during the policy term, but none currently exists as of the effective date of the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_PartThree_StateOrProvinceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 3 will apply. Part 3 refers to states not listed in Part 1 where the applicant has the potential for operations during the policy term, but none currently exists as of the effective date of the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_PartThree_StateOrProvinceCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 3 will apply. Part 3 refers to states not listed in Part 1 where the applicant has the potential for operations during the policy term, but none currently exists as of the effective date of the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_PartThree_StateOrProvinceCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 3 will apply. Part 3 refers to states not listed in Part 1 where the applicant has the potential for operations during the policy term, but none currently exists as of the effective date of the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_PartThree_StateOrProvinceCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 3 will apply. Part 3 refers to states not listed in Part 1 where the applicant has the potential for operations during the policy term, but none currently exists as of the effective date of the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_PartThree_StateOrProvinceCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 3 will apply. Part 3 refers to states not listed in Part 1 where the applicant has the potential for operations during the policy term, but none currently exists as of the effective date of the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_PartThree_StateOrProvinceCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: A state in which Part 3 will apply. Part 3 refers to states not listed in Part 1 where the applicant has the potential for operations during the policy term, but none currently exists as of the effective date of the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_DeductibleType_MedicalIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible type is Medical in the state where coverage is being applied for. (In Pennsylvania, the deductible is \"per claim\". The deductible choices are $1,000, $5,000 and $10,000.) ",
+    "required": false
+  },
+  "WorkersCompensation_DeductibleType_IndemnityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible type is Indemnity in the state where coverage is being applied for. (In Pennsylvania, the deductible is \"per claim\". The deductible choices are $1,000, $5,000 and $10,000.) ",
+    "required": false
+  },
+  "WorkersCompensation_DeductibleType_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible type is other than those listed. ",
+    "required": false
+  },
+  "WorkersCompensation_DeductibleType_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the deductible type. ",
+    "required": false
+  },
+  "WorkersCompensation_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount of the deductible as a whole dollar amount or as a percentage. For percentages indicate the percentage amount followed by the percent (%) sign. ",
+    "required": false
+  },
+  "WorkersCompensation_Coverage_USLHIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates United States Longshoremen's & Harbor Workers' (USL&H) coverage is requested.  Exposures for this optional coverages as well as additional coverages should be described in the Specify Additional Coverages / Endorsements section. ",
+    "required": false
+  },
+  "WorkersCompensation_Coverage_VoluntaryCompensationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates Voluntary Compensation coverage is requested.  Exposures for this optional coverages as well as additional coverages should be described in the Specify Additional Coverages/Endorsements section. ",
+    "required": false
+  },
+  "WorkersCompensation_Coverage_ForeignCoverageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates Foreign coverage is requested.  Exposures for this optional coverages as well as additional coverages should be described in the Specify Additional Coverages/Endorsements section. ",
+    "required": false
+  },
+  "WorkersCompensation_Coverage_ManagedCareOptionIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates Managed Care Option is requested.  Exposures for this optional coverages as well as additional coverages should be described in the Specify Additional Coverages/Endorsements section. ",
+    "required": false
+  },
+  "WorkersCompensation_Coverage_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates other coverages than those listed are being requested. ",
+    "required": false
+  },
+  "WorkersCompensation_Coverage_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the coverage being requested. ",
+    "required": false
+  },
+  "WorkersCompensation_Coverage_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates other coverages than those listed are being requested. ",
+    "required": false
+  },
+  "WorkersCompensation_Coverage_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the coverage being requested. ",
+    "required": false
+  },
+  "WorkersCompensation_DividendOrSafetyPlan_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The specific plan or safety group of which the insured is a member. This field is related to the participating plan. Check with your company on the availability of plans. ",
+    "required": false
+  },
+  "WorkersCompensation_AdditionalCompanyInformation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional company or state specific information should be listed in this section. ",
+    "required": false
+  },
+  "WorkersCompensation_AdditionalCoverageEndorsementDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of exposures for the optional coverages selected in the Other Coverages section.  Any additional coverages should also be described. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_TotalEstimatedAnnualPremiumAllStatesAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount resulting from applying all modifications, discounts, taxes and other rating criteria to the total estimated pre-modified premium for all states. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_TotalMinimumPremiumAllStatesAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: Total minimum premium required by company rules for all states. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_TotalDepositPremiumAllStatesAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: Total amount of deposit required by company rules for all states. ",
+    "required": false
+  },
+  "NamedInsured_InspectionContact_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the person to contact to arrange for a premises inspection.  This should be an individual under the insured's employment, not the insurance agent's name and number. ",
+    "required": false
+  },
+  "NamedInsured_InspectionContact_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The telephone number of the person to contact to arrange for a premises inspection.  This should be an individual under the insured's employment. As used here, this is the office phone number.",
+    "required": false
+  },
+  "NamedInsured_InspectionContact_CellPhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The cell phone number of the person to contact to arrange for a premises inspection.  This should be an individual under the insured's employment. ",
+    "required": false
+  },
+  "NamedInsured_InspectionContact_EmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The e-mail address (if applicable) of the person to contact to arrange for a premises inspection.  This should be an individual under the insured's employment, not the insurance agent's name and number. ",
+    "required": false
+  },
+  "NamedInsured_AccountingContact_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the person to contact for accounting information.  This should be an individual under the insured's employment, not the insurance agent. ",
+    "required": false
+  },
+  "NamedInsured_AccountingContact_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The telephone number of the person to contact for accounting information.  This should be an individual under the insured's employment, not the insurance agent's name and number. As used here, this is the office phone number.",
+    "required": false
+  },
+  "NamedInsured_AccountingContact_CellPhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The cell phone number of the person to contact for accounting information. ",
+    "required": false
+  },
+  "NamedInsured_AccountingContact_EmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The e-mail address (if applicable) of the person to contact for accounting information.  This should be an individual under the insured's employment, not the insurance agent's name and number. ",
+    "required": false
+  },
+  "NamedInsured_ClaimContact_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the person the insurer is to contact regarding any potential claims inquiries. ",
+    "required": false
+  },
+  "NamedInsured_ClaimContact_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The telephone number of the person the insurer is to contact regarding any potential claims inquiries. As used here, this is the office phone number.",
+    "required": false
+  },
+  "NamedInsured_ClaimContact_CellPhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The cell phone number of the person the insurer is to contact regarding any potential claims inquiries. ",
+    "required": false
+  },
+  "NamedInsured_ClaimContact_EmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The e-mail address (if applicable) of the person the insurer is to contact regarding any potential claims inquiries. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the individual's payroll developed. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_LocationProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned location number for the individual. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the partner or executive officer being included or excluded by the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_BirthDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The individual's birth date. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_TitleRelationshipCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The individual's title within the organization or relationship to the organization's owners. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_OwnershipPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of ownership the individual has in the organization, if applicable. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_DutiesDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The brief description of the duties of the individual. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_IncludedExcludedCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates if the individual is to be Included or Excluded under the policy's coverages. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_RatingClassificationCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating classification code that the individual's estimated remuneration was assigned to for included individuals only. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_RemunerationAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual remuneration for individual listed. Minimum or maximum remunerations may apply based on state laws.\n\n(Enter the class code and remuneration in the State Rating Worksheet section on Page 2 for all included individuals). ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the individual's payroll developed. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_LocationProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned location number for the individual. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the partner or executive officer being included or excluded by the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_BirthDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The individual's birth date. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_TitleRelationshipCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The individual's title within the organization or relationship to the organization's owners. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_OwnershipPercent_B": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of ownership the individual has in the organization, if applicable. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_DutiesDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The brief description of the duties of the individual. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_IncludedExcludedCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates if the individual is to be Included or Excluded under the policy's coverages. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_RatingClassificationCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating classification code that the individual's estimated remuneration was assigned to for included individuals only. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_RemunerationAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual remuneration for individual listed. Minimum or maximum remunerations may apply based on state laws.\n\n(Enter the class code and remuneration in the State Rating Worksheet section on Page 2 for all included individuals). ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the individual's payroll developed. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_LocationProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned location number for the individual. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_FullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the partner or executive officer being included or excluded by the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_BirthDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The individual's birth date. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_TitleRelationshipCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The individual's title within the organization or relationship to the organization's owners. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_OwnershipPercent_C": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of ownership the individual has in the organization, if applicable. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_DutiesDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The brief description of the duties of the individual. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_IncludedExcludedCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates if the individual is to be Included or Excluded under the policy's coverages. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_RatingClassificationCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating classification code that the individual's estimated remuneration was assigned to for included individuals only. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_RemunerationAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual remuneration for individual listed. Minimum or maximum remunerations may apply based on state laws.\n\n(Enter the class code and remuneration in the State Rating Worksheet section on Page 2 for all included individuals). ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the individual's payroll developed. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_LocationProducerIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned location number for the individual. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_FullName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the partner or executive officer being included or excluded by the policy. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_BirthDate_D": {
+    "ft": "/Tx",
+    "tu": "Enter date: The individual's birth date. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_TitleRelationshipCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The individual's title within the organization or relationship to the organization's owners. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_OwnershipPercent_D": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of ownership the individual has in the organization, if applicable. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_DutiesDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The brief description of the duties of the individual. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_IncludedExcludedCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates if the individual is to be Included or Excluded under the policy's coverages. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_RatingClassificationCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating classification code that the individual's estimated remuneration was assigned to for included individuals only. ",
+    "required": false
+  },
+  "WorkersCompensation_Individual_RemunerationAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual remuneration for individual listed. Minimum or maximum remunerations may apply based on state laws.\n\n(Enter the class code and remuneration in the State Rating Worksheet section on Page 2 for all included individuals). ",
+    "required": false
+  },
+  "WorkersCompensation_RateState_PageNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The chronological number of the state rating sheet out of a total number of sheets. ",
+    "required": false
+  },
+  "WorkersCompensation_RateState_TotalPageNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of state rating sheets. ",
+    "required": false
+  },
+  "WorkersCompensation_RateState_StateOrProvinceName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the state to which the rating information is applicable. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_B": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_C": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_D": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_E": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_F": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_G": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_G": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_G": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_G": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_G": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_G": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_G": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_H": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_H": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_H": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_H": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_H": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_H": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_H": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_I": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_I": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_I": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_I": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_I": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_I": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_I": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_J": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_J": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_J": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_J": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_J": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_J": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_K": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_K": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_K": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_K": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_K": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_K": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_L": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_L": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_L": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_L": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_L": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_L": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_L": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_M": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_M": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_M": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_M": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_M": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_M": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_M": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_LocationProducerIdentifier_N": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_ClassificationCode_N": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Rating Classification Code is a six-digit alpha-numeric code obtained from the National Counsel on Compensation Insurance (NCCI) Workers Compensation and Employers' Liability Insurance Manual.  Only suffixes specifically shown on rate pages may be used. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DescriptionCode_N": {
+    "ft": "/Tx",
+    "tu": "Enter code: The company description code for this type of risk (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_DutiesDescription_N": {
+    "ft": "/Tx",
+    "tu": "Enter text: The descriptions of activities and operations.  One class code may include several descriptions.  It is extremely important to enter the specific classification description or, at least, a brief statement regarding the duties of the employees.  Enter as much information as necessary to avoid misclassifying the operations. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_FullTimeEmployeeCount_N": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_PartTimeEmployeeCount_N": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees to whom the classification applies.  The average number is sufficient when the total number fluctuates during the year.  Underwriters use this number to determine if the payroll estimates appear adequate ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_SICCode_N": {
+    "ft": "/Tx",
+    "tu": "Enter code: The Standard Industry Class code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_NAICSCode_N": {
+    "ft": "/Tx",
+    "tu": "Enter code: The North American Industry Classification System (NAICS) 6-digit industry code assigned to the particular type of business (if known). ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_RemunerationAmount_N": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated total annual remuneration/payroll for the class. Remuneration/Payroll means money or substitutes for money, such as the value of meals or lodging if provided.  Accurate payroll estimates help avoid additional premium requirements being discovered during an audit.  Do not include overtime premium. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_Rate_N": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The manual rate for the classification from the appropriate state manual. ",
+    "required": false
+  },
+  "WorkersCompensation_RateClass_EstimatedManualPremiumAmount_N": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated annual manual premium amount for the classification. ",
+    "required": false
+  },
+  "WorkersCompensation_RateState_StateOrProvinceName_A1": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the state to which the rating information is applicable. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_TotalFactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_IncreasedLimits_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The modification factor if limits other than the standard limits for Part 2 Employers Liability are requested. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_IncreasedLimits_FactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_Deductible_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The deductible factor if a state deductible option is available and chosen. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_Deductible_FactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_ExperienceOrMerit_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The modification factor if the insured is subject to experience or merit rating.  Generally the business has to have been in operation for at least two years under present ownership and the premium must meet or exceed a level which is established by the state to qualify for experience or merit rating. If more than one modification factor applies to the applicant, explain in the Remarks section. Attach the most recent experience or merit rating data sheet. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_ExperienceOrMerit_FactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_Terrorism_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount applicable to terrorism coverage. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_Catastrophe_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The premium amount applicable to catastrophe coverage. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_AssignedRiskSurcharge_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The modification factor for assigned risk policy surcharge.  A state specific surcharge may apply for placement of business into an assigned risk pool. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_AssignedRiskSurcharge_FactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_AssignedRiskAdditionalPremium_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The modification factor for assigned risk adjustment program (ARAP).  A state specific adjustment for assigned risk policies. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_AssignedRiskAdditionalPremium_FactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_Other_CoverageDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of optional factors, charges or credits that are required or applicable. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_Other_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The modification factor for optional factors, charges or credits that are required or applicable. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_Other_FactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_ScheduleRating_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The modification factor for schedule rating (if applicable). ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_ScheduleRating_FactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_ContractingClassPremiumAdjustmentProgram_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The modification factor for the contracting class premium adjustment program (CCPAP).  Not applicable in all states. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_ContractingClassPremiumAdjustmentProgram_FactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_StandardPremium_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The modification factor for the total premium before applying premium discount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_StandardPremium_FactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_PremiumDiscount_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The modification factor for premium discount.  A premium discount may be applicable due to large premium levels. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_PremiumDiscount_FactoredPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_ExpenseConstant_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount including the flat amount of the expense constant as applicable per the state rating manual. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_TaxesFeeAssessment_PremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount including state taxes and assessments applicable. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_Other_CoverageDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of optional factors, charges or credits that are required or applicable. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_Other_ModificationFactor_B": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The modification factor for optional factors, charges or credits that are required or applicable. ",
+    "required": false
+  },
+  "WorkersCompensationStateCoverage_Other_FactoredPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The modified premium amount. ",
+    "required": false
+  },
+  "WorkersCompensation_RateState_TotalEstimatedAnnualPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount resulting from applying all modifications, discounts, taxes and other rating criteria to the estimated pre-modified premium for this state. ",
+    "required": false
+  },
+  "WorkersCompensation_RateState_MinimumPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The minimum premium amount required by company rules for this state. ",
+    "required": false
+  },
+  "WorkersCompensation_RateState_DepositPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount of deposit required by rules for this state. ",
+    "required": false
+  },
+  "WorkersCompensation_RateState_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the state.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Attachment_LossRunIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a loss run is attached to this application. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ABFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is there an Employee Health Plan provided?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_EmployeeHealthPlansProvidedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any employee health plans provided. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ABACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any other insurance with this company?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_OtherInsuranceWithThisInsurerExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any other insurance with this insurer. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_AAICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any policy or coverage declined, cancelled or non-renewed during the mandated number of years (Not applicable in Missouri)?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_PriorCoverageDeclinedCancelledNonRenewedLastThreeYearsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any prior coverage declined/cancelled/non-renewed in the last three (3) years. ",
+    "required": false
+  },
+  "PriorCoverage_EffectiveYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the prior coverage policy term became effective. ",
+    "required": false
+  },
+  "PriorCoverage_InsurerFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous insurer. ",
+    "required": false
+  },
+  "PriorCoverage_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_TotalPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the specified line of business. ",
+    "required": false
+  },
+  "PriorCoverage_ModificationFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The reciprocal of the percentage by which the premium shown differs from the manual. ",
+    "required": false
+  },
+  "LossHistory_ClaimCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of claims for the corresponding policy period. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date.  As used here, this is the total for all claims on the policy.",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim.  As used here, this is the total for all claims on the policy.",
+    "required": false
+  },
+  "PriorCoverage_EffectiveYear_B": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the prior coverage policy term became effective. ",
+    "required": false
+  },
+  "PriorCoverage_InsurerFullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous insurer. ",
+    "required": false
+  },
+  "PriorCoverage_PolicyNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_TotalPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the specified line of business. ",
+    "required": false
+  },
+  "PriorCoverage_ModificationFactor_B": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The reciprocal of the percentage by which the premium shown differs from the manual. ",
+    "required": false
+  },
+  "LossHistory_ClaimCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of claims for the corresponding policy period. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date.  As used here, this is the total for all claims on the policy.",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim.  As used here, this is the total for all claims on the policy.",
+    "required": false
+  },
+  "PriorCoverage_EffectiveYear_C": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the prior coverage policy term became effective. ",
+    "required": false
+  },
+  "PriorCoverage_InsurerFullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous insurer. ",
+    "required": false
+  },
+  "PriorCoverage_PolicyNumberIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_TotalPremiumAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the specified line of business. ",
+    "required": false
+  },
+  "PriorCoverage_ModificationFactor_C": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The reciprocal of the percentage by which the premium shown differs from the manual. ",
+    "required": false
+  },
+  "LossHistory_ClaimCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of claims for the corresponding policy period. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date.  As used here, this is the total for all claims on the policy.",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim.  As used here, this is the total for all claims on the policy.",
+    "required": false
+  },
+  "PriorCoverage_EffectiveYear_D": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the prior coverage policy term became effective. ",
+    "required": false
+  },
+  "PriorCoverage_InsurerFullName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous insurer. ",
+    "required": false
+  },
+  "PriorCoverage_PolicyNumberIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_TotalPremiumAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the specified line of business. ",
+    "required": false
+  },
+  "PriorCoverage_ModificationFactor_D": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The reciprocal of the percentage by which the premium shown differs from the manual. ",
+    "required": false
+  },
+  "LossHistory_ClaimCount_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of claims for the corresponding policy period. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date.  As used here, this is the total for all claims on the policy.",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim.  As used here, this is the total for all claims on the policy.",
+    "required": false
+  },
+  "PriorCoverage_EffectiveYear_E": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the prior coverage policy term became effective. ",
+    "required": false
+  },
+  "PriorCoverage_InsurerFullName_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the previous insurer. ",
+    "required": false
+  },
+  "PriorCoverage_PolicyNumberIdentifier_E": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The policy number of the previous coverage. ",
+    "required": false
+  },
+  "PriorCoverage_TotalPremiumAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual modified premium charged (not including taxes or service charges) for the specified line of business. ",
+    "required": false
+  },
+  "PriorCoverage_ModificationFactor_E": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The reciprocal of the percentage by which the premium shown differs from the manual. ",
+    "required": false
+  },
+  "LossHistory_ClaimCount_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of claims for the corresponding policy period. ",
+    "required": false
+  },
+  "LossHistory_PaidAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The amount that has been paid on this claim to date.  As used here, this is the total for all claims on the policy.",
+    "required": false
+  },
+  "LossHistory_ReservedAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The reserve amount the previous carrier is holding open for this claim.  As used here, this is the total for all claims on the policy.",
+    "required": false
+  },
+  "CommercialPolicy_OperationsDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the operations of this risk or insured. As used here, this section informs the underwriter of each applicant's business and the way it is conducted by premises. Operations, which may not be apparent in a general description, may be segmented by location. For example, location #1 may be the general offices while location #2 may be the warehouse. The section should include enough detail to enable the underwriter to understand and classify each operation. Do not use the classification phraseology from the Commercial Lines Manual or Workers' Compensation Manual, because they do not provide adequate detail.\n\nFor example, a manufacturer of pulley wheels used in sewing machines should be described as such and not as \"Metal Goods Mfg. N.O.C.\"",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ABECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does applicant own, operate or lease aircraft or watercraft?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_ApplicantOwnLeaseAircraftOrWatercraftExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: A statement explaining if  applicant owns, operates or leases aircraft / watercraft. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ACDCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do/have past, present or discontinued operations involve(d) storing, treating, discharging, applying, disposing, or transporting of hazardous material?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_PastPresentDiscontinuedOperationsHazardousMaterialExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any past, present or discontinued operations involving storing, treating, discharging, applying, disposing, or transporting of hazardous material. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_AADCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work performed underground or above 15 feet?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_WorkPerformedUndergroundOrAboveFifteenFeetExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any work performed underground or above 15 ft. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_KARCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is work performed on barges, vessels, docks, bridge over water?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_WorkPerformedOnVesselsDocksBridgesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any work performed on barges, vessels, docks or bridges over water. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_KASCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is applicant engaged in any other type of business?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_ApplicantEngagedAnyOtherTypeOfBusinessExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: A statement explaining if applicant engaged in any other type of business. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_KATCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are subcontractors used?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_SubcontractorsUsedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: A statement explaining if  subcontractors are used. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_KAUCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work sublet without certificates of insurance?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_AnyWorkSubletWithoutCertificatesOfInsuranceExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any work sublet without certificates of insurance. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ABCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is a written safety program in operation?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_WrittenSafetyProgramInOperationExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any written safety program in operation. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ABICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any group transportation provided?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_AnyGroupTransportationProvidedExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any group transportation provided. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_AAECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any employees under 16 or over 60 years of age?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_AnyEmployeesUnderSixteenOrOverSixtyYearsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any employees under 16 or over 60 years of age. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_KAVCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any seasonal employees?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_AnySeasonalEmployeesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any seasonal employees. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_AAFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is there any volunteer or donated labor?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_VolunteerOrDonatedLabourExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any volunteer or donated labor. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ABJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any employees with physical handicaps?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_EmployeesWithPhysicalHandicapsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any employees with physical handicaps. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ABHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do employees travel out of state?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_EmployeesTravelOutOfStateExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any employees who travel out of state. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_AABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are athletic teams sponsored?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_AthleticTeamsSponsoredExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any athletic teams that are sponsored. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ACBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are physicals required after offers of employment are made?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_PhysicalsRequiredAfterOffersOfEmploymentAreMadeExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: A statement explaining if physicals are required after offers of employment are made. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_KAWCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do any employees perform work for other businesses or subsidiaries?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_AnyEmployeesPerformWorkForOtherBusinessesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any employees who perform work for other businesses or subsidiaries. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_AAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do you lease employees to or from other employers?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_LeaseEmployeesToOrFromOtherEmployersExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any employees leased to or from other employers. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ABGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do employees predominantly work from home?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_AtHomeEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that predominantly work from home. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_EmployeesPredominantlyWorkAtHomeExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any employees predominantly working  at home. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_KAXCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any tax liens or bankruptcy within the past mandated number of years?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_TaxLiensOrBankruptcyWithinLastFiveYearsExplanation_W": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any tax liens or bankruptcy within the last five (5) years. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_KAYCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any undisputed and unpaid workers compensation premium due from you or any commonly managed or owned enterprises?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_UndisputedUnpaidWorkersCompensationPremiumDueExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any undisputed and unpaid workers compensation premium due from you or any company managed or owned enterprises. ",
+    "required": false
+  },
+  "Policy_InformationPracticesNoticeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a copy of the Notice of Information Practices (ACORD 38 or state specific ACORD 38) has been given to the applicant.  State specific 38s are available for applicants in AZ, DE, KS, MN, ND, NY, OR, VA, and WV.  In addition, ACORD 38 contains CA and MA state specific language. ",
+    "required": false
+  },
+  "NamedInsured_Initials_A": {
+    "ft": "/Tx",
+    "tu": "Initial here: The named insured's initials. ",
+    "required": false
+  },
+  "NamedInsured_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_Signature_B": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  },
+  "Producer_NationalIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number. ",
+    "required": false
+  }
+}

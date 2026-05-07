@@ -10,10 +10,6 @@ const FAQ_DATA = [
     a: "It grants the right to use ACORD form templates for insurance transaction purposes - populating, generating, and submitting completed forms. It does not permit redistribution of blank templates or use of ACORD branding outside the form context.",
   },
   {
-    q: "Can I use Acordly without an ACORD license?",
-    a: "You can create sessions, upload documents, and use AI extraction. However, ACORD-branded form generation and download is gated behind license confirmation. You cannot complete a package download without confirming your organization's license status.",
-  },
-  {
     q: "What if our license lapses?",
     a: "Form generation and download becomes unavailable until the license is renewed and re-confirmed in the app. Your session data is fully preserved throughout.",
   },

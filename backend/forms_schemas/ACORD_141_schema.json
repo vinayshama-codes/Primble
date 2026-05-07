@@ -1,0 +1,1822 @@
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "CommercialStructure_Building_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The building number for the premises.  Used when more than one building exists at an individual location. ",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer / agency. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number. ",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "CrimeCoverage_CoverageBasis_DiscoveryIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the basis for coverage is Discovery. ",
+    "required": false
+  },
+  "CrimeCoverage_CoverageBasis_LossSustainedIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the basis for coverage is Loss Sustained. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_BlanketIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the employee theft coverage is written on a blanket basis. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_ScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the employee theft coverage is written on a schedule basis. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeRetirementIncomeSecurityAct_CoverageIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates coverage is requested for Employee Retirement Income Security Act (ERISA). ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeRetirementIncomeSecurityAct_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for ERISA coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeRetirementIncomeSecurityAct_AggregateLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The aggregate limit for ERISA coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeRetirementIncomeSecurityAct_ExcessLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The ERISA excess amount over the blanket limit. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeRetirementIncomeSecurityAct_TotalAssetValueLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The total asset value for ERISA coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeRetirementIncomeSecurityAct_TotalAssetValuePerPlanLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The total asset value (per plan) for ERISA coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheftGovernmentalCrime_BlanketIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is written on a blanket basis. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheftGovernmentalCrime_ScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is written on a schedule basis. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheftGovernmentalCrime_PerLossIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is written on a per loss basis. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheftGovernmentalCrime_PerEmployeeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is written on a per employee basis. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheftGovernmentalCrime_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for employee theft governmental crime coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheftGovernmentalCrime_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible for employee theft governmental crime coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_ForgeryOrAlteration_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for forgery or alteration coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_ForgeryOrAlteration_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible for forgery or alteration coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_InsidePremisesTheft_BlanketIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is written on a blanket basis. ",
+    "required": false
+  },
+  "CrimeCoverage_InsidePremisesTheft_ScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is written on a schedule basis. ",
+    "required": false
+  },
+  "CrimeCoverage_InsidePremisesTheft_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for inside the premises theft of money and securities coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_InsidePremisesTheft_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible for inside the premises theft of money and securities coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_InsidePremisesRobbery_BlanketIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is written on a blanket basis. ",
+    "required": false
+  },
+  "CrimeCoverage_InsidePremisesRobbery_ScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is written on a schedule basis. ",
+    "required": false
+  },
+  "CrimeCoverage_InsidePremisesRobbery_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for inside the premises robbery or burglary of other property coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_InsidePremisesRobbery_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible for inside the premises robbery or burglary of other property coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_OutsidePremisesMoneyAndSecurities_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for outside the premises money and securities coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_OutsidePremisesMoneyAndSecurities_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible for outside the premises money and securities coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_OutsidePremisesOtherProperty_BlanketIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is written on a blanket basis. ",
+    "required": false
+  },
+  "CrimeCoverage_OutsidePremisesOtherProperty_ScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the coverage is written on a schedule basis. ",
+    "required": false
+  },
+  "CrimeCoverage_OutsidePremisesOtherProperty_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for outside the premises other property coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_OutsidePremisesOtherProperty_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible for outside the premises other property coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_ComputerFraud_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for computer fraud coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_ComputerFraud_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible for computer fraud coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_FundsTransferFraud_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for funds transfer fraud coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_FundsTransferFraud_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible for funds transfer fraud coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_MoneyOrders_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for money orders and counterfeit paper currency coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_MoneyOrders_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible for money orders and counterfeit paper currency coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_OtherCoverage_CoverageDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the coverage endorsements. ",
+    "required": false
+  },
+  "CrimeCoverage_OtherCoverage_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount for the coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_OtherCoverage_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount for the coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_OtherCoverage_CoverageDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the coverage endorsements. ",
+    "required": false
+  },
+  "EmployeeBenefitPlan_PlanName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the employee benefit plan, such as ERISA. ",
+    "required": false
+  },
+  "EmployeeBenefitPlan_PrincipleAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The employee benefit plan's first address line. ",
+    "required": false
+  },
+  "EmployeeBenefitPlan_PrincipleAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The employee benefit plan's second address line. ",
+    "required": false
+  },
+  "EmployeeBenefitPlan_PrincipleAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The employee benefit plan's city. ",
+    "required": false
+  },
+  "EmployeeBenefitPlan_PrincipleAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The employee benefit plan's state or province code. ",
+    "required": false
+  },
+  "EmployeeBenefitPlan_PrincipleAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The employee benefit plan's postal code. ",
+    "required": false
+  },
+  "EmployeeBenefitPlan_TrusteeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of trustees, employees, etc. handling plan assets. ",
+    "required": false
+  },
+  "EmployeeBenefitPlan_ParticipantCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of plan participants. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_AABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is there a licensed securities firm responsible for investing of funds under plan(s)?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are volunteers used?\". ",
+    "required": false
+  },
+  "EmployeeClass_VolunteerCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of volunteers used. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any employees leased to others?\". ",
+    "required": false
+  },
+  "EmployeeClass_LeasedToOthersEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees leased to others. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_AnyEmployeesLeasedToOthersExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any employees are leased to others. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KACCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any employees leased from others?\". ",
+    "required": false
+  },
+  "EmployeeClass_LeasedFromOthersEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees leased from others. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_AnyEmployeesLeasedFromOthersExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any employees are leased from others. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KADCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any employees perform money investing or trading?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_AnyEmployeesPerformMoneyInvestingExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any employees perform money investing or trading. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any employees receive or issue warehouse receipts?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_AnyEmployeesReceiveOrIssuesWarehouseReceiptsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any employees receive or issue warehouse receipts. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any employee(s) been cancelled for crime coverage by any insurer?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_AnyEmployeesCancelledForCrimeCoverageByInsurerExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether any employee(s) has / have been canceled for crime coverage by any insurer. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does applicant have any written agreements with clients?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_ApplicantWrittenAgreementWithClientsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant has any written agreement with clients. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does applicant transfer any funds via phone or fax?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_ApplicantTransferFundsViaPhoneOrFaxExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether the applicant transfers any funds via phone or fax. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any exposure from loss to guest property?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_AnyExposureFromLossToGuestPropertyExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether there is any exposure from loss to guest property. ",
+    "required": false
+  },
+  "EmployeeClass_Accountants_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are accountants and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_Adjusters_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are adjusters. ",
+    "required": false
+  },
+  "EmployeeClass_Administrators_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are administrators and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_Appraisers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are appraisers and clerks acting as appraisers. ",
+    "required": false
+  },
+  "EmployeeClass_Attorneys_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are attorneys. ",
+    "required": false
+  },
+  "EmployeeClass_Auditors_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are auditors and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_Bookkeepers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are bookkeepers. ",
+    "required": false
+  },
+  "EmployeeClass_BusDrivers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are bus drivers. ",
+    "required": false
+  },
+  "EmployeeClass_Buyers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are buyers and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_Canvassers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are canvassers (door-to-door salespeople). ",
+    "required": false
+  },
+  "EmployeeClass_Cashiers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are cashiers and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_Chairpersons_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are chairpersons. ",
+    "required": false
+  },
+  "EmployeeClass_Chefs_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are chefs who order food. ",
+    "required": false
+  },
+  "EmployeeClass_Collectors_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are collectors. ",
+    "required": false
+  },
+  "EmployeeClass_ComputerProgrammers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are computer programmers. ",
+    "required": false
+  },
+  "EmployeeClass_Comptrollers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are comptrollers and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_CreditClerks_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are credit clerks and managers. ",
+    "required": false
+  },
+  "EmployeeClass_Custodians_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are custodians. ",
+    "required": false
+  },
+  "EmployeeClass_DeliveryPersons_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are delivery persons. ",
+    "required": false
+  },
+  "EmployeeClass_Demonstrators_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are demonstrators. ",
+    "required": false
+  },
+  "EmployeeClass_Dieticians_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are dietitians who order food. ",
+    "required": false
+  },
+  "EmployeeClass_Drivers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are drivers and drivers' helpers. ",
+    "required": false
+  },
+  "EmployeeClass_FoodInspectors_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are food inspectors. ",
+    "required": false
+  },
+  "EmployeeClass_HeadPharmacists_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are head pharmacists. ",
+    "required": false
+  },
+  "EmployeeClass_InstructorsWithMoneyOrSecurities_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are instructors having custody of money and securities. ",
+    "required": false
+  },
+  "EmployeeClass_Janitors_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are janitors. ",
+    "required": false
+  },
+  "EmployeeClass_LockerRoomAttendants_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are locker room attendants. ",
+    "required": false
+  },
+  "EmployeeClass_MaitreDs_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are maitre d's and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_Managers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are managers and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_MedicalDirectors_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are medical directors. ",
+    "required": false
+  },
+  "EmployeeClass_MessengersOutside_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are messengers, outside. ",
+    "required": false
+  },
+  "EmployeeClass_PayrollDistributors_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are payroll distributors. ",
+    "required": false
+  },
+  "EmployeeClass_PurchasingAgents_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are purchasing agents and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_ReceivingClerks_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are receiving clerks. ",
+    "required": false
+  },
+  "EmployeeClass_RefineryGaugers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are refinery gaugers of oil companies handling refined gasoline and oils. ",
+    "required": false
+  },
+  "EmployeeClass_Salespeople_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are salespeople. ",
+    "required": false
+  },
+  "EmployeeClass_SecurityPersonnel_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are security personnel. ",
+    "required": false
+  },
+  "EmployeeClass_ServiceStationAttendants_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are service station attendants. ",
+    "required": false
+  },
+  "EmployeeClass_ShippingClerks_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are shipping clerks. ",
+    "required": false
+  },
+  "EmployeeClass_StockClerks_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are stock clerks. ",
+    "required": false
+  },
+  "EmployeeClass_Storekeepers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are storekeepers. ",
+    "required": false
+  },
+  "EmployeeClass_StoreroomPersonnel_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are storeroom personnel. ",
+    "required": false
+  },
+  "EmployeeClass_Superintendents_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are superintendents and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_Supervisors_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are supervisors and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_TaxiDrivers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are taxi drivers. ",
+    "required": false
+  },
+  "EmployeeClass_TeachersWithMoneyOrSecurities_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are teachers having custody of money or securities. ",
+    "required": false
+  },
+  "EmployeeClass_Timekeepers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are timekeepers and assistants. ",
+    "required": false
+  },
+  "EmployeeClass_TruckDrivers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are truck drivers. ",
+    "required": false
+  },
+  "EmployeeClass_WarehousePersonnel_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are warehouse personnel. ",
+    "required": false
+  },
+  "EmployeeClass_WineCellarPersonnel_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are wine cellar personnel. ",
+    "required": false
+  },
+  "EmployeeClass_WineStewards_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that are wine stewards / stewardesses. ",
+    "required": false
+  },
+  "EmployeeClass_OtherOfficersAndEmployees_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of all other officers and employees not listed elsewhere. ",
+    "required": false
+  },
+  "EmployeeClass_Officers_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of officers. ",
+    "required": false
+  },
+  "EmployeeClass_Other_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of other employees. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_RetailLocationCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of retail locations. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_LocationCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of locations other than home or head offices. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is prior employer history checked?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAKCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is education and training verified?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KALCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is drug testing conducted?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAMCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is a formal training program established and followed?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KANCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are credit checks secured for employees with access to financial transactions?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAOCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are social security numbers verified?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAPCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is criminal history checked?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAQCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are managers provided with names and salaries of all assigned employees?\". ",
+    "required": false
+  },
+  "AuditInformation_PerformedBy_CPAIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the audit is performed by a Certified Public Accountant (CPA). ",
+    "required": false
+  },
+  "AuditInformation_PerformedBy_PublicAccountantIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the audit is performed by a Public Accountant. ",
+    "required": false
+  },
+  "AuditInformation_PerformedBy_Staff_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the audit is performed by staff. ",
+    "required": false
+  },
+  "AuditInformation_PerformedBy_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the audit is performed by someone other than those listed. ",
+    "required": false
+  },
+  "AuditInformation_PerformedBy_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The person that performs this audit. ",
+    "required": false
+  },
+  "Auditor_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the person or firm performing the audit. ",
+    "required": false
+  },
+  "Auditor_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The auditor's mailing address first address line. ",
+    "required": false
+  },
+  "Auditor_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The auditor's mailing address second address line. ",
+    "required": false
+  },
+  "Auditor_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The auditor's mailing address city. ",
+    "required": false
+  },
+  "Auditor_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The auditor's mailing address state or province code. ",
+    "required": false
+  },
+  "Auditor_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The auditor's mailing address postal code. ",
+    "required": false
+  },
+  "AuditInformation_CashAndAccounts_AuditDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the last audit of cash and accounts was completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "AuditInformation_Inventory_AuditDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the last audit of inventory was completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "AuditInformation_Frequency_AnnualIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates audits are performed annually. ",
+    "required": false
+  },
+  "AuditInformation_Frequency_SemiAnnualIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates audits are performed semi-annually. ",
+    "required": false
+  },
+  "AuditInformation_Frequency_QuarterlyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates audits are performed quarterly. ",
+    "required": false
+  },
+  "AuditInformation_Frequency_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates audits are performed other than the frequencies listed. ",
+    "required": false
+  },
+  "AuditInformation_Frequency_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The audit frequency. ",
+    "required": false
+  },
+  "AuditInformation_RenderedTo_OwnerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the audit is rendered to the owner. ",
+    "required": false
+  },
+  "AuditInformation_RenderedTo_PartnersIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the audit is rendered to the partners. ",
+    "required": false
+  },
+  "AuditInformation_RenderedTo_BoardOfDirectorsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the audit is rendered to the board of directors. ",
+    "required": false
+  },
+  "AuditInformation_RenderedTo_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the audit is rendered to other than those listed. ",
+    "required": false
+  },
+  "AuditInformation_RenderedTo_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The person(s) the audit is rendered to. ",
+    "required": false
+  },
+  "AuditInformation_FinancialFormat_AuditIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the financial format is an audit. ",
+    "required": false
+  },
+  "AuditInformation_FinancialFormat_ReviewIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the financial format is a review. ",
+    "required": false
+  },
+  "AuditInformation_FinancialFormat_CompilationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the financial format is a compilation. ",
+    "required": false
+  },
+  "AuditInformation_FinancialFormat_TaxReturnOnlyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the financial format is a tax return only. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_AAHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are all locations audited?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_AAICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is audit made in accordance with generally accepted auditing standards and so certified?\".   If no, explain scope of audit. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_AuditMadeInAccordanceWithAuditStandardsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation as to whether an audit is made in accordance with generally accepted auditing standards and so certified. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_AAJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Were any discrepancies or loose practices commented upon in this audit?\".  If \"yes\", submit a copy of the audit and auditor's comments. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_AACCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does audit include inventory?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KARCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are references of all new hires checked with respect to employment history?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KASCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does audit department have a program to detect ghost employees?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KATCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is payroll system audited annually?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAUCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is a complete physical inventory made?\". ",
+    "required": false
+  },
+  "AuditInformation_PhysicalInventory_FrequencyDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The frequency that a physical inventory is made. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAVCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is inventory made by persons who do not have custody control?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAWCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is a requisition / shipping order required for removal of goods from storeroom / warehouse?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_AADCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are bank accounts reconciled by someone not authorized to deposit or withdraw?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_AAECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is countersignature of checks required?\".  If \"No\", explain who signs controls. ",
+    "required": false
+  },
+  "Audit_SignsControlsFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the person who signs controls if countersignatures are not required. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_AAFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are securities subject to joint control of two or more responsible employees?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_AAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are all officers and employees required to take annual vacations of at least five consecutive business days?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAXCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is there written policy regarding (electronic funds transfer) EFTs?\". ",
+    "required": false
+  },
+  "Audit_MaximumEFTAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum amount that can be transferred via electronic funds transfer. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAYCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Prior to funds transfer, does financial institution verify authenticity with another employee?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KAZCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are hard copies of funds transfer confirmations received and reconciled?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KBACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are detailed records of bank deposits maintained?\". ",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_MoneyAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for money. As used here, this refers to items inside.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_ChecksForDepositAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for checks for deposit. As used here, this refers to items inside.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_ChecksForAccountsPayableAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for checks for accounts payable. As used here, this refers to items inside.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_PayrollChecks_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for payroll checks. As used here, this refers to items inside.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_MoneyOvernightAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for money overnight. As used here, this refers to items inside.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_SecuritiesAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for securities. As used here, this refers to items inside.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_MoneyAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for money. As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_ChecksForDepositAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for checks for deposit. As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_ChecksForAccountsPayableAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for checks for accounts payable. As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_PayrollChecks_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for payroll checks. As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_MoneyOvernightAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for money overnight. As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_MoneyAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for money. As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_ChecksForDepositAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for checks for deposit. As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_ChecksForAccountsPayableAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for checks for accounts payable. As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_PayrollChecks_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for payroll checks. As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeMoneyAndSecurities_MoneyOvernightAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum exposure amount for money overnight. As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KBBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are duties segregated?\". As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KBCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are departments supervised by someone not authorized to pay bills?\". As used here, this refers to money and securities with a messenger.",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KBDCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is responsibility for checking merchandise received, controlled by more than one individual?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KBECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is actual receipt of merchandise verified before payment is made?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KBFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is a numbered purchase order system implemented and followed?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KBGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do internal audit procedures include computer operations?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KBHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is there an employee or department whose sole duty is security?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KBICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are suspicious transactions reviewed and investigated?\". ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_Question_KBJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is physical access to computer room and equipment restricted to authorized personnel?\". ",
+    "required": false
+  },
+  "CrimeInformation_PropertyDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The complete description of the property including merchandise and stock. ",
+    "required": false
+  },
+  "CrimeInformation_PropertyMaximumValueAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The maximum value of the property. ",
+    "required": false
+  },
+  "CrimeInformation_BusinessHoursStartTime_A": {
+    "ft": "/Tx",
+    "tu": "Enter time: The starting time for the normal business day. ",
+    "required": false
+  },
+  "CrimeInformation_BusinessHoursCloseTime_A": {
+    "ft": "/Tx",
+    "tu": "Enter time: The closing time for the normal business day. ",
+    "required": false
+  },
+  "CrimeInformation_AverageEmployeesOnDutyCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The average number of employees on duty during the normal business hours. ",
+    "required": false
+  },
+  "CrimeInformation_ChecksStampedCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if checks are stamped \"For Deposit Only\". ",
+    "required": false
+  },
+  "CrimeInformation_DepositFrequency_DailyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates deposits are made daily. ",
+    "required": false
+  },
+  "CrimeInformation_DepositFrequency_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates deposits are made other than those frequencies listed. ",
+    "required": false
+  },
+  "CrimeInformation_DepositFrequencyCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The frequency of deposits. ",
+    "required": false
+  },
+  "CrimeInformation_NightDepositoryUsedCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if a night depository is used. ",
+    "required": false
+  },
+  "CrimeInformation_AnnualGrossReceiptsAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The annual gross sales or receipts for the last fiscal year ",
+    "required": false
+  },
+  "BuildingProtection_DoubleCylinderDoorLockCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the type of locks on the entry doors of the insured premises are double cylinder deadbolt door locks. ",
+    "required": false
+  },
+  "CrimeInformation_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of any supplemental information such as police patrol, central shopping center guard\ninformation, proprietary closed circuit television, etc. ",
+    "required": false
+  },
+  "SafeVault_ManufacturerFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The safe or vault manufacturer's name. ",
+    "required": false
+  },
+  "SafeVault_Label_ULIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the rating is based on Underwriters Laboratories, Inc. (UL). ",
+    "required": false
+  },
+  "SafeVault_Label_SMNAIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the rating is based on Safe Manufacturers National Association (SMNA). ",
+    "required": false
+  },
+  "SafeVault_ClassCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The construction classification representing the extent of burglary protection for this safe or vault. Use the classification from the Burglary label and not the Fire label located on the safe or vault. For industry definitions of the classifications, refer to the Commercial Lines Manual. ",
+    "required": false
+  },
+  "SafeVault_DoorType_RoundIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the door is round. ",
+    "required": false
+  },
+  "SafeVault_DoorType_SquareIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the door is square. ",
+    "required": false
+  },
+  "SafeVault_CombinationLock_OuterIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if there are outer combination locks on the safe or vault. ",
+    "required": false
+  },
+  "SafeVault_CombinationLock_InnerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if there are inner combination locks on the safe or vault. ",
+    "required": false
+  },
+  "SafeVault_CombinationLock_ChestIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if there are chest combination locks on the safe or vault. ",
+    "required": false
+  },
+  "SafeVault_DoorThickness_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The door thickness in inches, excluding bolt work. ",
+    "required": false
+  },
+  "SafeVault_WallThickness_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The wall thickness in inches. ",
+    "required": false
+  },
+  "SafeVault_ManufacturerFullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The safe or vault manufacturer's name. ",
+    "required": false
+  },
+  "SafeVault_Label_ULIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the rating is based on Underwriters Laboratories, Inc. (UL). ",
+    "required": false
+  },
+  "SafeVault_Label_SMNAIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the rating is based on Safe Manufacturers National Association (SMNA). ",
+    "required": false
+  },
+  "SafeVault_ClassCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The construction classification representing the extent of burglary protection for this safe or vault. Use the classification from the Burglary label and not the Fire label located on the safe or vault. For industry definitions of the classifications, refer to the Commercial Lines Manual. ",
+    "required": false
+  },
+  "SafeVault_DoorType_RoundIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the door is round. ",
+    "required": false
+  },
+  "SafeVault_DoorType_SquareIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the door is square. ",
+    "required": false
+  },
+  "SafeVault_CombinationLock_OuterIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if there are outer combination locks on the safe or vault. ",
+    "required": false
+  },
+  "SafeVault_CombinationLock_InnerIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if there are inner combination locks on the safe or vault. ",
+    "required": false
+  },
+  "SafeVault_CombinationLock_ChestIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if there are chest combination locks on the safe or vault. ",
+    "required": false
+  },
+  "SafeVault_DoorThickness_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The door thickness in inches, excluding bolt work. ",
+    "required": false
+  },
+  "SafeVault_WallThickness_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The wall thickness in inches. ",
+    "required": false
+  },
+  "MessengerProtection_MessengerCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of messengers to which limits apply. ",
+    "required": false
+  },
+  "MessengerProtection_GuardCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of guards assigned to work with each messenger. ",
+    "required": false
+  },
+  "MessengerProtection_ArmouredVehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of armored vehicles to which the limits apply. ",
+    "required": false
+  },
+  "MessengerProtection_PrivateConveyanceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicate if the messenger uses a car or truck provided for his/her exclusive use during the\nentire trip. ",
+    "required": false
+  },
+  "MessengerProtection_SafetySatchelCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicate if the insured's property is carried in an Underwriters Laboratories-approved\nsafety satchel (e.g., a key-locked bank depository bag or case with handcuffs). ",
+    "required": false
+  },
+  "Alarm_AlarmType_HoldUpIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the alarm type is a hold-up alarm.  A manual or semiautomatic control which can transmit an alarm in the event of a hold-up. ",
+    "required": false
+  },
+  "Alarm_AlarmType_PremisesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the alarm type is a premises alarm.  A sensing device installed on premises which transmits an alarm in the event of unauthorized entry. The Premises Extent must be completed for Premises Alarms. ",
+    "required": false
+  },
+  "Alarm_AlarmType_SafeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the alarm type is a safe / vault alarm.  A system that protects the safe or vault and is connected to an outside central station, gong or siren. The Extent of Protection for safe / vault must be completed. ",
+    "required": false
+  },
+  "Alarm_Burglar_LocalGongIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the burglar alarm sounds or appears outside the premises. ",
+    "required": false
+  },
+  "Alarm_Burglar_CentralStationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the burglar alarm rings at an alarm company. ",
+    "required": false
+  },
+  "Alarm_Burglar_PoliceConnectIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if alarms (hold-up and burglar) are transmitted to police headquarters rather than to a private control station ",
+    "required": false
+  },
+  "Alarm_Burglar_WithKeysIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the alarm company, located off the insured's premises, has keys to the applicant's property. ",
+    "required": false
+  },
+  "Alarm_Burglar_GradeCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The alarm system grade as described in the Underwriters Laboratories (UL) standard (i.e., AA, A, BB, B, CC and C) which indicates the time required to respond to a signal from the alarm system. ",
+    "required": false
+  },
+  "Alarm_Burglar_ProtectionExtentSafeVaultPartialIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the extent of protection for the safe / vault is partial and covers around the door only. ",
+    "required": false
+  },
+  "Alarm_Burglar_ProtectionExtentSafeVaultCompleteIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the extent of protection for the safe / vault is complete and covers the sides, top walls, floor and ceiling. ",
+    "required": false
+  },
+  "Alarm_Burglar_ProtectionExtentPremisesOneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the extent of protection for the premises is protection grade 1 as defined in the Underwriters Laboratories (UL) standard. ",
+    "required": false
+  },
+  "Alarm_Burglar_ProtectionExtentPremisesTwoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the extent of protection for the premises is protection grade 2 as defined in the Underwriters Laboratories (UL) standard. ",
+    "required": false
+  },
+  "Alarm_Burglar_ProtectionExtentPremisesThreeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the extent of protection for the premises is protection grade 3 as defined in the Underwriters Laboratories (UL) standard. ",
+    "required": false
+  },
+  "Alarm_Burglar_InstalledAndServicedByName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the alarm company that installed and services the alarm.  Alarm companies often install, maintain, and service the system in addition to providing Central Station facilities. ",
+    "required": false
+  },
+  "BuildingSecurity_GuardCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of guards within the premises or at its door during regular business hours. ",
+    "required": false
+  },
+  "BuildingSecurity_WatchpersonCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of watchpersons on the premises during non-office hours. ",
+    "required": false
+  },
+  "BuildingSecurity_WatchpersonFactorCredit_CentralStationHourlyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the watchpersons report to a central station on an hourly basis. ",
+    "required": false
+  },
+  "BuildingSecurity_WatchpersonFactorCredit_ClockHourlyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the watchpersons register hourly with an approved watchperson's clock (Detex Time Clock, etc.). ",
+    "required": false
+  },
+  "BuildingSecurity_WatchpersonFactorCredit_DoesNotSignalIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the watchpersons do not do any type of reporting or registering. ",
+    "required": false
+  },
+  "Alarm_Burglar_CertificateIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The Underwriters Laboratories or other testing organization Certificate Number, if applicable. Attach a copy of the certificate to the application. ",
+    "required": false
+  },
+  "Alarm_Burglar_CertificateExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The expiration date of the certificate.  (MM/DD/YYYY) As used here, this is the expiration date of the UL certificate.",
+    "required": false
+  },
+  "BuildingSecurity_AccessibleOpeningsDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The information regarding access to the premises. Indicate number of doors and if they are protected. Indicate what type of locks are used, and if there is a gate or bars. ",
+    "required": false
+  },
+  "BuildingSecurity_OtherProtectionDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other protective measures or devices (e.g., if windows have steel grates and are connected to an alarm). Indicate if the building has skylights and if windows are visible from the street. ",
+    "required": false
+  },
+  "Employee_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_G": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_G": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_G": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_G": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_H": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_H": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_H": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_H": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_I": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_I": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_I": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_I": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_J": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_J": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_K": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_K": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_L": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_L": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_L": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_L": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_M": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_M": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_N": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_N": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_O": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_O": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_O": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_O": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_P": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_P": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_P": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_P": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_Q": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_Q": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_Q": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_Q": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_R": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_R": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_R": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_R": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_S": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_S": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "Employee_FullName_S": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employee. ",
+    "required": false
+  },
+  "EmploymentInformation_EmploymentTitle_S": {
+    "ft": "/Tx",
+    "tu": "Enter text: The title this person has in the current employment position. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_LimitAmount_T": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeCoverage_EmployeeTheft_DeductibleAmount_T": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The deductible for the employee theft coverage. ",
+    "required": false
+  },
+  "CrimeLineOfBusiness_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The general remarks for the Crime line of business. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the authorized representative of the producer, agency and/or broker that signed the form. ",
+    "required": false
+  },
+  "Producer_StateLicenseIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The State License Number of the producer. ",
+    "required": false
+  },
+  "NamedInsured_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_NationalIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number. ",
+    "required": false
+  }
+}

@@ -1,0 +1,682 @@
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. As used here, enter the complete legal name of the employer. Provide all applicable D.B.A.'s (Doing business as). If more than one named insured, please submit appropriate ERM-14 form(s) \"Confidential Request for Information.\"  Contact NCCI for this form.",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  (MM/DD/YYYY) As used here, enter the proposed policy effective date.  Such requested effective date shall be the later of the following options:\n\n1. 12:01 A.M. on the date following the receipt by the Plan Administrator of a complete and eligible application,\n2. the date of expiration of existing coverage, or\n3. a date the application requested.",
+    "required": false
+  },
+  "Location_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the location. As used here, list the company name, physical address and telephone number where payroll records are maintained. A P.O. box address only is not acceptable.",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line one of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line two of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the physical location. ",
+    "required": false
+  },
+  "Location_Primary_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The primary phone number of the location. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_HighestPayrollStateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state which generates the highest payroll.  Follow all specific instructions for this state. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ADCYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Has there been previous workers compensation coverage in this state?\". As used here, If there was no prior coverage, indicate why by checking the appropriate box for either new business, self insured (independent or group), or insufficient number of employees.",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ADCNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Has there been previous workers compensation coverage in this state?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ADBYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Has there been previous workers compensation coverage in any other state?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ADBNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Has there been previous workers compensation coverage in any other state?\". ",
+    "required": false
+  },
+  "Policy_Status_NewIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the response expected from the company is a new issued policy. ",
+    "required": false
+  },
+  "Policy_NoPreviousCoverage_SelfInsuredIndependentIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the insured is independently self-insured. ",
+    "required": false
+  },
+  "Policy_NoPreviousCoverage_SelfInsuredGroupIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the insured is self-insured as part of a group. ",
+    "required": false
+  },
+  "Policy_NoPreviousCoverage_EmployeeCountIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates there was no previous coverage due to the number of employees. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ACEYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Is there any unpaid workers compensation premium due or in dispute from you or any commonly managed or owned enterprise?\". As used here, if \"YES\", explain, including entity name(s) and policy number(s).  Details of any outstanding obligations must be furnished in the available space.  If more space is required use the Remarks Section or attach additional sheets of paper.",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ACENoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Is there any unpaid workers compensation premium due or in dispute from you or any commonly managed or owned enterprise?\". ",
+    "required": false
+  },
+  "Underwriting_Question_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of a response to a general information or underwriting question.  Normally, \"Yes\" responses require an explanation. ",
+    "required": false
+  },
+  "NamedInsured_BusinessStartedYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The year the business was started. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KASYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Has there been a name change, consolidation, merger, acquisition, sale, purchase or transfer of assets or ownership change during the past mandated number of years?\". As used here, a signed ERM-14 form \"Confidential Request for Information,\" must accompany the application if a name or ownership change has occurred over the past five years, and has not already been reported. Contact NCCI for this form.",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KASNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Has there been a name change, consolidation, merger, acquisition, sale, purchase or transfer of assets or ownership change during the past mandated number of years?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_ACHYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Is the applicant related through common management or ownership to any entity not listed here whether coverage is required or not?\". As used here, a signed ERM-14 form \"Confidential Request for Information,\" must accompany the application if applicant is related through common management or ownership to any entity not listed on the ACORD 130 form, whether coverage is required or not. Contact NCCI for this form.",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_ACHNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Is the applicant related through common management or ownership to any entity not listed here whether coverage is required or not?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KATYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Do you lease workers from a professional employer organization (PEO)?\". As used here, refer to the WCIP state instruction sheet for state requirements.",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KATNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Do you lease workers from a professional employer organization (PEO)?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_EmployerOrganization_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the employer organization (PEO). ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_AAFYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Do you lease workers to a client company?\". As used here, refer to the WCIP state instruction sheet for state requirements.",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_AAFNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Do you lease workers to a client company?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_AAGYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Are you seeking to cover the leased workers?\". As used here, refer to the WCIP state instruction sheet for state requirements.",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_AAGNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Are you seeking to cover the leased workers?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAUYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Do you provide temporary arrangement services to other employers?\". As used here, if \"YES\", provide a completed Temporary Labor Contractor Employee form.",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAUNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Do you provide temporary arrangement services to other employers?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ACHYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Do you have a franchise or licensing agreement?\". As used here, If \"YES\", provide a copy of the agreement.",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ACHNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Do you have a franchise or licensing agreement?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAZYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Is coverage requested for a sports team?\". As used here, if \"YES\", provide the name of the sports team and domiciled state in the space provided.",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAZNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Is coverage requested for a sports team?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_SportsTeam_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of a sports team for which coverage is being requested. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_SportsTeam_DomiciledStateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The state or province code where a sports team is domiciled. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_AAJYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Do trucking classifications apply?\". As used here, if yes, complete questions 13 - 20.",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_AAJNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Do trucking classifications apply?\". ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ADFYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Do you or your employees regularly operate from a base terminal(s) which is (are) used to load, unload, store or transfer freight?\". As used here, if \"YES\", list the complete address for each base terminal which is used by the drivers to load, unload, and/or transfer freight on a regular basis.",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ADFNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Do you or your employees regularly operate from a base terminal(s) which is (are) used to load, unload, store or transfer freight?\". ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineOne_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line one of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CityName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CountyName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The county name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_PostalCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineOne_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line one of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CityName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CountyName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The county name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_PostalCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_LineOne_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The address line one of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CityName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_CountyName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The county name of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the physical location. ",
+    "required": false
+  },
+  "Location_PhysicalAddress_PostalCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the physical location. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ACGYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Can each driver's state of majority driving time be established through verifiable records or logs?\". As used here, If the state of majority driving time can be established for each driver through verifiable logs or records, list the state for each driver in the appropriate section of question 15.",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_Question_ACGNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Can each driver's state of majority driving time be established through verifiable records or logs?\". ",
+    "required": false
+  },
+  "Driver_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's full name. ",
+    "required": false
+  },
+  "Location_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "Driver_MajorityDrivingStateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province where the driver does the majority of their driving. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's full name. ",
+    "required": false
+  },
+  "Location_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "Driver_MajorityDrivingStateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province where the driver does the majority of their driving. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_FullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's full name. ",
+    "required": false
+  },
+  "Location_ProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location. ",
+    "required": false
+  },
+  "Driver_MajorityDrivingStateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province where the driver does the majority of their driving. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_GoodsHauledDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The type(s) of goods that are being hauled. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAVYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Do you own goods that are being hauled?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAVNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Do you own goods that are being hauled?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAWYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Is applicant under exclusive contract with any retail stores?\". As used here, if \"YES\", provide a copy of contract(s).",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAWNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Is applicant under exclusive contract with any retail stores?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAXYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Is applicant under exclusive contract with any postal service?\". As used here, if \"YES\", provide a copy of contract(s).",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAXNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Is applicant under exclusive contract with any postal service?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_HaulingRadius_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in whole numbers within which hauling is done. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_ABBYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"Have you received any offers of voluntary coverage?\". As used here, an offer of voluntary coverage will affect an applicant's eligibility for Plan coverage; therefore voluntary offers of coverage must be fully and completely described including plan terms.",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_ABBNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"Have you received any offers of voluntary coverage?\". ",
+    "required": false
+  },
+  "Underwriting_Question_RemarkText_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of a response to a general information or underwriting question.  Normally, \"Yes\" responses require an explanation. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_InsurerCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of insurance companies that have refused the applicant coverage in the past specified time. As used here, refer to the state instructions for requirements regarding the number of refusals needed before an applicant is eligible for the state's WCIP coverage. Refusal must come from non-affiliated insurers who are licensed and actively writing workers compensation insurance in the state of application. The employer and/or its representative must retain in file the refusing carrier's name, contact person, address, phone number and date of refusal.",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of an insurer that has rejected coverage for the applicant. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RepresentativeFullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the representative of the insurer that has rejected coverage for the applicant. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The phone number of the insurer rejecting coverage. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RefusalDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the insurer refused coverage. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RefusalComments_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The comments regarding the refusal of insurance. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of an insurer that has rejected coverage for the applicant. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RepresentativeFullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the representative of the insurer that has rejected coverage for the applicant. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_PhoneNumber_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The phone number of the insurer rejecting coverage. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RefusalDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the insurer refused coverage. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RefusalComments_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The comments regarding the refusal of insurance. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_FullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of an insurer that has rejected coverage for the applicant. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RepresentativeFullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the representative of the insurer that has rejected coverage for the applicant. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_PhoneNumber_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The phone number of the insurer rejecting coverage. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RefusalDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the insurer refused coverage. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RefusalComments_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The comments regarding the refusal of insurance. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_FullName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of an insurer that has rejected coverage for the applicant. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RepresentativeFullName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the representative of the insurer that has rejected coverage for the applicant. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_PhoneNumber_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The phone number of the insurer rejecting coverage. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RefusalDate_D": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the insurer refused coverage. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_RejectingInsurer_RefusalComments_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The comments regarding the refusal of insurance. ",
+    "required": false
+  },
+  "Policy_Payor_PremiumFinancedYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the premium has been financed. As used here, if \"YES\", provide a copy of the agreement.",
+    "required": false
+  },
+  "Policy_Payor_PremiumFinancedNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the premium has not been financed. ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAYYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"Yes\" response to the question, \"In applicable jurisdictions on qualifying risks, is the loss sensitive rating program (LSRP) contingency deposit being paid in full at this time?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_Question_KAYNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates a \"No\" response to the question, \"In applicable jurisdictions on qualifying risks, is the loss sensitive rating program (LSRP) contingency deposit being paid in full at this time?\". ",
+    "required": false
+  },
+  "WorkersCompensationNoticeOfAssignment_ApplicantStatement_ClaimHandlingProblemDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of any difficulties the applicant has had with any producer or company in regard to handling of any claim or accident report. As used here, list any exceptions with regard to bona fide disputes in the space provided.   The Loss Sensitive Rating Plan acknowledgement applies only in those jurisdictions where the program has been approved for use.\n\nReminder: Both the 130 and 133 applications must be signed by the insured and the producer.",
+    "required": false
+  },
+  "Policy_Applicant_ElectsExclusionListOfEmployersTennesseeAssignedRiskYesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the insured elects to be excluded from the list of employers in the Tennessee assigned risk plan. ",
+    "required": false
+  },
+  "Policy_Applicant_ElectsExclusionListOfEmployersTennesseeAssignedRiskNoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the insured does not elect to be excluded from the list of employers in the Tennessee assigned risk plan. ",
+    "required": false
+  },
+  "NamedInsured_Primary_EmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured's primary e-mail address. ",
+    "required": false
+  },
+  "NamedInsured_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "NamedInsured_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. As used here, this application must be signed by an officer, owner or partner. If a person other than any of these has signed the application (e.g., spouse, trustee, general manager), attach a copy of the power of attorney.  With the signature, provide the signer's name, title and signature date.",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_ContactPerson_EmailAddress_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The e-mail address of the individual at the producer's establishment that is the primary contact. ",
+    "required": false
+  },
+  "Producer_TaxIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The producer's tax identification number. ",
+    "required": false
+  },
+  "Producer_NationalIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number. ",
+    "required": false
+  },
+  "Producer_ContactPerson_PhoneNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The phone number of the individual at the producer's establishment that is the primary contact.  If applicable, include the area code and extension. ",
+    "required": false
+  },
+  "Producer_FaxNumber_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The fax number of the producer / agency. ",
+    "required": false
+  },
+  "Producer_StateLicenseIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The State License Number of the producer. ",
+    "required": false
+  },
+  "Producer_ResidentLicenseStateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the producer's resident license. ",
+    "required": false
+  },
+  "Producer_StateLicenseExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the producer's state license expires. ",
+    "required": false
+  },
+  "Producer_NonResidentLicenseIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The producer's non-resident license number. ",
+    "required": false
+  },
+  "Producer_NonResidentLicenseStateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province code of the producer's non-resident license. ",
+    "required": false
+  },
+  "Producer_NonResidentLicenseExpirationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the producer's non-resident license expires. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the authorized representative of the producer, agency and/or broker that signed the form. ",
+    "required": false
+  },
+  "Producer_ContactPerson_EmailAddress_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The e-mail address of the individual at the producer's establishment that is the primary contact. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the producer, agent, broker, etc. ",
+    "required": false
+  },
+  "WorkersCompensationLineOfBusiness_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the Workers Compensation line of business.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  }
+}

@@ -1,0 +1,662 @@
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g. agency or brokerage). ",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed. ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer/agency. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols. If required for self-insurance, the self-insured license or contract number. ",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence. ",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the NAIC. ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it/they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_ContractorTypeDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The type of contractor. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_YearsExperienceCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The contractor's number of years of experience. ",
+    "required": false
+  },
+  "BusinessInformation_FullTimeEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of full time employees. ",
+    "required": false
+  },
+  "BusinessInformation_PartTimeEmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of part time employees. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_LicenseNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The state or local license number for the applicant. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_LicenseHolder_OwnerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the license holder is the owner of the business. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_LicenseHolder_OfficerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the license holder is an officer of the business. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_LicenseHolder_EmployeeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the license holder is an employee of the business. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_LicenseHolder_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the license holder has a relationship with the business other than those listed. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_LicenseHolder_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The relationship the license holder has with the business. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_ResidentialWorkPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of work that is residential. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_CommercialWorkPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of work that is commercial. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_NewConstructionWorkPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of work that is new construction. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_RemodelWorkPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of work that is remodeling. ",
+    "required": false
+  },
+  "BusinessInformation_AnnualGrossReceiptsAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual gross sales or receipts. ",
+    "required": false
+  },
+  "BusinessInformation_TotalPayrollAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total annual payroll of the business in whole dollars. ",
+    "required": false
+  },
+  "GeneralLiability_EachOccurrence_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, each occurrence limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is the minimum limit.",
+    "required": false
+  },
+  "GeneralLiability_GeneralAggregate_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The general liability, general aggregate limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, this is the minimum limit.",
+    "required": false
+  },
+  "ContractorsUnderwriting_SubcontractedWorkCostAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total cost of subcontracted work for the past 12 months. ",
+    "required": false
+  },
+  "Contractors_Question_ABACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Explosive Environments (Paints, Solvents, etc.)? ",
+    "required": false
+  },
+  "Contractors_Question_ABCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Installation of Emergency Back-up Equipment?\". ",
+    "required": false
+  },
+  "Contractors_Question_ABDCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Airport Construction or Repair?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Dam, Bridge or River Related Construction?\". ",
+    "required": false
+  },
+  "Contractors_Question_ABJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Petrochemical Plants?\". ",
+    "required": false
+  },
+  "Contractors_Question_ABECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Fire Alarm or Automatic Sprinkler Design, Install Repair?\". ",
+    "required": false
+  },
+  "Contractors_Question_ABFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Burglar Alarm Design, Install or Repair?\". ",
+    "required": false
+  },
+  "Contractors_Question_ABGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around High Voltage (over 480 volts) or High Amperage? ",
+    "required": false
+  },
+  "Contractors_Question_ABHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Major Electrical Control Panels?\". ",
+    "required": false
+  },
+  "Contractors_Question_ACGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Nuclear Power Plants?\". ",
+    "required": false
+  },
+  "Contractors_Question_ACACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Hospitals?\". ",
+    "required": false
+  },
+  "Contractors_Question_ACBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Power Plants?\". ",
+    "required": false
+  },
+  "Contractors_Question_ACDCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Traffic Signals?\". ",
+    "required": false
+  },
+  "Contractors_Question_ABICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Oil or Gas Refineries?\". ",
+    "required": false
+  },
+  "Contractors_Question_ACECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Power Lines?\". ",
+    "required": false
+  },
+  "Contractors_Question_ACJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Swimming Pools?\". ",
+    "required": false
+  },
+  "Contractors_Question_ACHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Hot or Live Wires?\". ",
+    "required": false
+  },
+  "Contractors_Question_ACICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Land Fills?\". ",
+    "required": false
+  },
+  "Contractors_Question_ACFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in or around Hazardous Material Abatement?\". ",
+    "required": false
+  },
+  "Contractors_Question_KABExposureDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the exposure. ",
+    "required": false
+  },
+  "Contractors_Question_KABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any other types of exposures?\". ",
+    "required": false
+  },
+  "Contractors_Question_AABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Does applicant draw plans, designs or specifications for others?\". ",
+    "required": false
+  },
+  "Contractors_Question_AAICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Do any operations include blasting or utilize, or store explosive material?\". ",
+    "required": false
+  },
+  "Contractors_Question_AACCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Does any operation involve excavation, tunneling, underground work or earth moving?\". ",
+    "required": false
+  },
+  "Contractors_Question_AAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Is there a formal, written safety and security policy in effect?\". ",
+    "required": false
+  },
+  "Contractors_Question_KACCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any demolition or wrecking work?\". ",
+    "required": false
+  },
+  "Contractors_Question_AAJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any use of cranes?\". ",
+    "required": false
+  },
+  "Contractors_Question_ABBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Do subcontractors carry coverages or limits less than applicant?\". ",
+    "required": false
+  },
+  "Contractors_Question_AADCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Are subcontractors allowed to work without providing you with a certificate of insurance?\". ",
+    "required": false
+  },
+  "Contractors_Question_AAECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. The response to the question, \"Does applicant lease equipment to others with or without operators?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any boats, docks, floats owned or leased?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any advertising signs away from premises?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does an employee of the applicant have direct oversight of each jobsite in progress?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_EmployeeOversightRadius_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius of operations for an employee having direct oversight of job sites in progress. ",
+    "required": false
+  },
+  "Contractors_Question_KAHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do you lease employees to or from other employees?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any operation or owned, leased or rented property not covered by this policy?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any product manufactured or sold under the applicant's name?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAKCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any boiler work done?\". ",
+    "required": false
+  },
+  "Contractors_Question_KALCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any asbestos removal done?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAMCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is dust collection system present?\". ",
+    "required": false
+  },
+  "Contractors_Question_KANCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does spray booth meet NFPA standards?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAOCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any roofing done?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_RoofingPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of work that is roofing work. ",
+    "required": false
+  },
+  "Contractors_Question_KAPCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any shop work done?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAQCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any renovation work done?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_RenovationPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of work that is renovation work. ",
+    "required": false
+  },
+  "Contractors_Question_KARCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any gutting of interior load bearing walls?\". ",
+    "required": false
+  },
+  "Contractors_Question_KASCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any underground cable work?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_MaximumExcavationDepth_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The maximum depth of excavation & grading of land & septic installation ",
+    "required": false
+  },
+  "Contractors_Question_ADACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is there any excavation of water lines?\". ",
+    "required": false
+  },
+  "Contractors_Question_ADBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is there any excavation of sewers?\". ",
+    "required": false
+  },
+  "Contractors_Question_ADCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is there any excavation or installation of septic systems?\". ",
+    "required": false
+  },
+  "Contractors_Question_ADDCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is there any excavation of basements?\". ",
+    "required": false
+  },
+  "Contractors_Question_ACCDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the type of excavation work being done. ",
+    "required": false
+  },
+  "Contractors_Question_ACCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Other Type of Excavation?\". ",
+    "required": false
+  },
+  "Contractors_Question_KATCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done in streets or roads?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAUCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are excavations marked and guarded at end of day?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAVCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are utilities staked before the start of every dig?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAWCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"If telephone inquiries are made, is a log maintained showing date, time, person spoken to, plot # and map # referred to?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBICode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any snowplowing done?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAXCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is shoring work done in accordance with standards?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAYCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any insulation removal?\". ",
+    "required": false
+  },
+  "Contractors_Question_KAZCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any encapsulation or removal of asbestos?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Has applicant applied or installed  any exterior insulation or finishing, or any exterior insulation finishing systems (EIFS) related product or materials in the past?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Have you been involved with the application or installation of material that is directly in contact with EIFS, such as windows, doors, paint caulk or flashing materials?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"If you are a general contractor or subcontractor using subcontractors, have you managed projects or operations using EIFS or EIFS related products as the exterior finish?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBDCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Have you had any EIFS related losses?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any grading of land or excavation work done?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_GradingPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of work done that is grading of land or excavation. ",
+    "required": false
+  },
+  "Contractors_Question_KBFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any spraying of bushes, lawns, etc with pesticides, herbicides, or fertilizers?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any tree trimming work done?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_TreeTrimmingPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of work done that is tree trimming. ",
+    "required": false
+  },
+  "Contractors_Question_KBHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done during \"off season\" months?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any snowplowing done?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_SnowPloughingPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of work done that is snow plowing. ",
+    "required": false
+  },
+  "Contractors_Question_KBJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do you excavate also?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBKCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any retaining walls built?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBLCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any mix-in-transit?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBMCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work involving load-bearing walls?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBNCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any basement work?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_PaintingInsidePercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of painting work that is inside. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_PaintingOutsidePercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of painting work that is outside. ",
+    "required": false
+  },
+  "Contractors_Question_KBOCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work done above 2 stories?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBPCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any scaffolding used?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_ScaffoldingHeight_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The height of scaffolding used. ",
+    "required": false
+  },
+  "Contractors_Question_KBQCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any painting of tanks, water or gas?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBRCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any painting of bridges or towers?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBSCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any exterior spray painting?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_ExteriorSprayPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of painting work that is exterior spray painting. ",
+    "required": false
+  },
+  "Contractors_Question_KBTCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any airless spray guns used?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBUCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any epoxies used?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBVCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any lead paint removal done?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBWCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any installation of high pressure systems, caustics, flammables, gases or chemicals?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBXCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any refrigeration systems installed?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBYCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any mechanical contracting operations?\". ",
+    "required": false
+  },
+  "Contractors_Question_KBZCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are proper written procedures in place with respect to \"sweating\" of pipes?\". ",
+    "required": false
+  },
+  "Contractors_Question_KCACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any septic tank installation?\". ",
+    "required": false
+  },
+  "Contractors_Question_KCBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any asbestos removal done?\". ",
+    "required": false
+  },
+  "Contractors_Question_KCDCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any work above two stories?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_RoofingCommercialPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of roofing work that is done commercial buildings. ",
+    "required": false
+  },
+  "ContractorsUnderwriting_RoofingResidentialPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of roofing work that is done on residential buildings. ",
+    "required": false
+  },
+  "Contractors_Question_KCECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is hot tar used?\". ",
+    "required": false
+  },
+  "Contractors_Question_KCFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are written procedures in place to assure that an opening in the roof will never left unattended and will be properly covered an anchored before leaving the jobsite?\". ",
+    "required": false
+  },
+  "ContractorsUnderwriting_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The contractors underwriting general remarks.  Enter any additional information required for underwriting or rating.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  }
+}

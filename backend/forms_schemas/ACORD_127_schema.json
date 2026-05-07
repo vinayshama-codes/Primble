@@ -1,0 +1,3172 @@
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer / agency. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number. ",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Attachment_CommercialAutoDriverInformationScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that additional drivers appear on the attached ACORD 163 Commercial Auto Driver Information Schedule. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_B": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_B": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_C": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_C": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_D": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_D": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_D": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_D": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_E": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_E": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_E": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_E": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_E": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_E": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_F": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_F": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_F": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_F": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_F": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_F": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_G": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_G": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_G": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_G": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_G": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_G": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_G": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_G": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_G": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_G": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_G": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_G": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_G": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_H": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_H": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_H": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_H": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_H": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_H": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_H": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_H": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_H": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_H": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_H": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_H": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_H": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_I": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_I": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_I": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_I": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_I": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_I": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_I": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_I": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_I": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_I": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_I": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_I": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_I": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_J": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_J": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_J": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_J": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_J": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_J": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_J": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_J": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_J": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_K": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_K": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_K": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_K": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_K": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_K": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_K": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_K": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_K": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_L": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_L": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_L": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_L": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_L": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_L": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_L": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_L": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_L": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_L": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_L": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_L": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_L": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "Driver_ProducerIdentifier_M": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number assigned to the driver by the producer. ",
+    "required": false
+  },
+  "Driver_GivenName_M": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's first name (given name). ",
+    "required": false
+  },
+  "Driver_OtherGivenNameInitial_M": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's middle name or initial (other given name). ",
+    "required": false
+  },
+  "Driver_Surname_M": {
+    "ft": "/Tx",
+    "tu": "Enter text: The driver's last name (surname). ",
+    "required": false
+  },
+  "Driver_MailingAddress_CityName_M": {
+    "ft": "/Tx",
+    "tu": "Enter text: The city of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_StateOrProvinceCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province of the driver. ",
+    "required": false
+  },
+  "Driver_MailingAddress_PostalCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: The postal code of the driver. ",
+    "required": false
+  },
+  "Driver_GenderCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: The gender of the driver. ",
+    "required": false
+  },
+  "Driver_MaritalStatusCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: The marital status of the driver. Examples are: S - Single; M - Married; D - Divorced; P - Separated; W - Widowed, C - Domestic Partner (unmarried), V - Civil Union / Registered Domestic Partner, F- Fianc\u00e9 / Fianc\u00e9e, U - Unknown, O - Other ",
+    "required": false
+  },
+  "Driver_BirthDate_M": {
+    "ft": "/Tx",
+    "tu": "Enter date: The birth date of the driver.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Driver_ExperienceYearCount_M": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years of driving experience for the driver. ",
+    "required": false
+  },
+  "Driver_LicensedYear_M": {
+    "ft": "/Tx",
+    "tu": "Enter year: The original year in which a driver's license was issued to this driver. ",
+    "required": false
+  },
+  "Driver_LicenseNumberIdentifier_M": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The driver's license number. ",
+    "required": false
+  },
+  "Driver_TaxIdentifier_M": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The tax identifier (social security number) of the driver. As used here, only enter the social security number if the driver\u2019s license number is unavailable.",
+    "required": false
+  },
+  "Driver_LicensedStateOrProvinceCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state in which the driver is licensed. ",
+    "required": false
+  },
+  "Driver_HiredDate_M": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver was hired. ",
+    "required": false
+  },
+  "Driver_Coverage_BroadenedNoFaultCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if broadened no fault coverage applies to the driver (not applicable in all states). ",
+    "required": false
+  },
+  "Driver_Coverage_DriverOtherCarCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if driver is covered by Drive Other Car coverage. ",
+    "required": false
+  },
+  "Driver_Vehicle_ProducerIdentifier_M": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number that this driver primarily uses. ",
+    "required": false
+  },
+  "Driver_Vehicle_UsePercent_M": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: Indicates the percentage of driving done by this driver in the primary vehicle that this driver uses. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_AAJCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"With the exception of encumbrances, are any vehicles not solely owned by and registered to the application\"?. ",
+    "required": false
+  },
+  "Vehicle_ProducerIdentifier_AA": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number. ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. As used here, this is the name of the other owner of the vehicle.",
+    "required": false
+  },
+  "Vehicle_ProducerIdentifier_AB": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number. ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. As used here, this is the name of the other owner of the vehicle.",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_ABACode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do over 50% of the employees use their own autos in the business?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_KADCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Is there a vehicle maintenance program in operation?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_VehicleMaintenanceProgramInOperationExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any vehicle maintenance program in operation. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_ABCCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are any vehicles leased to others?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_VehiclesLeasedToOthersExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any vehicles leased to others. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_AAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are any vehicle customized, altered or have special equipment?\". ",
+    "required": false
+  },
+  "Vehicle_ProducerIdentifier_AC": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number. ",
+    "required": false
+  },
+  "Vehicle_Question_ModifiedEquipmentDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of modified or special equipment on the vehicle. ",
+    "required": false
+  },
+  "Vehicle_Question_ModifiedEquipmentCostAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The cost of the modified or special equipment on the vehicle. ",
+    "required": false
+  },
+  "Vehicle_ProducerIdentifier_AD": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number. ",
+    "required": false
+  },
+  "Vehicle_Question_ModifiedEquipmentDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of modified or special equipment on the vehicle. ",
+    "required": false
+  },
+  "Vehicle_Question_ModifiedEquipmentCostAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The cost of the modified or special equipment on the vehicle. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_AAECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are ICC, PUC or other filings required?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_AAFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do operations involve transporting hazardous material?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_OperationInvolveTransportingHazardousMaterialsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any operations that involve transporting hazardous materials.. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_AABCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any hold harmless agreements?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_HoldHarmlessAgreementsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any Hold Harmless Agreements. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_AACCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any vehicles used by family members?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_VehiclesUsedByFamilyMembersExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any vehicles used by family members. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_KAECode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does the applicant obtain MVR verifications?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ApplicantObtainMVRVerificationsExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any applicant needing to obtain MVR verifications. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_KAFCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Does the applicant have a specific driver recruiting method?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ApplicantSpecificDriverRecruitingMethodExplanation_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any applicant specific driver recruiting methods. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_AAHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are any drivers not covered by workers compensation?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_AnyDriversNotCoveredWorkersCompensationExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any drivers not covered by workers compensation. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_AADCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any vehicles owned but not scheduled on this application?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_AnyVehiclesOwnedNotScheduledExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any vehicles owned but not scheduled on this application. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_AAICode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Any drivers with convictions for moving traffic violations?\". ",
+    "required": false
+  },
+  "AccidentConviction_DriverProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer's driver number for the driver involved in the accident or conviction. ",
+    "required": false
+  },
+  "AccidentConviction_TrafficViolationDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the driver received the traffic violation. ",
+    "required": false
+  },
+  "AccidentConviction_TrafficViolationDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the traffic violation.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "AccidentConviction_PlaceOfIncident_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The place of the accident or conviction. ",
+    "required": false
+  },
+  "AccidentConviction_ViolationYearCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of years associated with \"\u2026 an accident... or convicted of a moving violation\" question. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_ABBCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Has agent inspected vehicles?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_AgentInspectedVehiclesExplanation_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: An explanation of any vehicles inspected by an agent. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Question_KAGCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Are all vehicles to be included in this policy part of a fleet?\". ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_KAHCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates the response to the question, \"Do you have electronic monitoring devices that record and transmit data in any of your vehicles.\" ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ElectronicDataMonitoringDevice_FleetMonitoredPercent_A": {
+    "ft": "/Tx",
+    "tu": "Enter percentage: The percentage of vehicles in your overall fleet that are monitored. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ElectronicDataMonitoringDevice_MonitorDriverSafetyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that driver safety is monitored. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ElectronicDataMonitoringDevice_TrackFuelConsumptionIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a track fuel consumption device is utilized. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ElectronicDataMonitoringDevice_MonitorVehicleMaintenanceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a vehicle maintenance monitor device is utilized. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ElectronicDataMonitoringDevice_MileageTrackingDeviceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a mileage tracking device is utilized. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_LocationTrackingDeviceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a location tracking device is utilized. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ElectronicDataMonitoringDevice_NavigationIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a navigation device is utilized. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ElectronicDataMonitoringDevice_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that an electronic data monitoring device other than those listed is utilized. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ElectronicDataMonitoringDevice_OtherDesciption_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the other electronic tracking device. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_ElectronicDataMonitoringDevice_AdditionalDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: Provide additional information clarifying the general use of electronic monitoring devices. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_GarageStorageDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the garage / storage location. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_MaximumExposureAllVehiclesAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The highest value that the insurer would be subject to if a major automobile loss occurred on the insured premises. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Attachment_AdditionalInterestIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that further additional interests appear on the attached ACORD 45. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_AdditionalInsuredIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an additional insured. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_EmployeeAsLessorIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an employee as lessor. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LendersLossPayableIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lender's loss payable. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LienholderIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lien holder. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LossPayeeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a loss payee. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OwnerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an owner. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_RegistrantIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a registrant. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest is other than those listed. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line one. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineTwo_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line two. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address city name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address state or province code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address postal code. ",
+    "required": false
+  },
+  "AdditionalInterest_InterestRank_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The ranking of 'this' additional interest when multiple additional interests are associated with the same item. ",
+    "required": false
+  },
+  "AdditionalInterest_CertificateRequiredIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the additional interest requires a Certificate of Insurance. ",
+    "required": false
+  },
+  "AdditionalInterest_AccountNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The loan number, account number or other controlling number that the additional interest may have assigned the insured. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_VehicleProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the vehicle which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_LocationProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_AdditionalInsuredIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an additional insured. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_EmployeeAsLessorIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an employee as lessor. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LendersLossPayableIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lender's loss payable. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LienholderIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a lien holder. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_LossPayeeIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a loss payee. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OwnerIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is an owner. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_RegistrantIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest type is a registrant. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the additional interest is other than those listed. ",
+    "required": false
+  },
+  "AdditionalInterest_Interest_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_FullName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's full name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineOne_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line one. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_LineTwo_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address line two. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_CityName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The additional interest's mailing address city name. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address state or province code. ",
+    "required": false
+  },
+  "AdditionalInterest_MailingAddress_PostalCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The additional interest's mailing address postal code. ",
+    "required": false
+  },
+  "AdditionalInterest_InterestRank_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The ranking of 'this' additional interest when multiple additional interests are associated with the same item. ",
+    "required": false
+  },
+  "AdditionalInterest_CertificateRequiredIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the additional interest requires a Certificate of Insurance. ",
+    "required": false
+  },
+  "AdditionalInterest_AccountNumberIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The loan number, account number or other controlling number that the additional interest may have assigned the insured. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_VehicleProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the vehicle which has an additional interest. ",
+    "required": false
+  },
+  "AdditionalInterest_Item_LocationProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number of the location which has an additional interest. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the commercial vehicle line of business.  Enter any endorsements that apply. Be sure to include the form numbers and the required information for attaching the endorsement.   ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_Attachment_VehicleScheduleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that additional vehicles appear on the attached ACORD 129. ",
+    "required": false
+  },
+  "Vehicle_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number. ",
+    "required": false
+  },
+  "Vehicle_ModelYear_A": {
+    "ft": "/Tx",
+    "tu": "Enter year: The model year of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_ManufacturersName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The manufacturer of the vehicle (e.g., Ford, Chevy). ",
+    "required": false
+  },
+  "Vehicle_ModelName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The manufacturer's model name for the vehicle. ",
+    "required": false
+  },
+  "Vehicle_BodyCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The body type of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_VINIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The vehicle identification number (VIN) or serial number assigned by the manufacturer. ",
+    "required": false
+  },
+  "Vehicle_VehicleType_PrivatePassengerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is private passenger. ",
+    "required": false
+  },
+  "Vehicle_VehicleType_SpecialIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is special (e.g. classic, antique automobile). ",
+    "required": false
+  },
+  "Vehicle_VehicleType_CommercialIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is commercial. ",
+    "required": false
+  },
+  "Vehicle_SymbolCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_ComprehensiveSymbolCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for comprehensive / other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_CollisionSymbolCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for collision coverage. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_LineOne_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address line one. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_CityName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address city name. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_CountyName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address county name. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The vehicle's physical address state or province code. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_PostalCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The vehicle's physical address postal code. ",
+    "required": false
+  },
+  "Vehicle_Registration_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province in which the vehicle is registered. ",
+    "required": false
+  },
+  "Vehicle_RatingTerritoryCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating territory code where the vehicle is principally garaged. ",
+    "required": false
+  },
+  "Vehicle_GrossVehicleWeight_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The actual weight of the vehicle or the combined weight of tractor and trailer in pounds. ",
+    "required": false
+  },
+  "Vehicle_RateClassCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rate class of the vehicle.  If two rate classes are required, this element should be used to enter the liability code. ",
+    "required": false
+  },
+  "Vehicle_SpecialIndustryClassCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The secondary Special Industry Class code which applies to commercial vehicles as determined by industry rating manuals. ",
+    "required": false
+  },
+  "Vehicle_PrimaryLiabilityRatingFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The primary liability rating factor contains the number which is used, along with the secondary rating factor, in determining the liability premium.  The primary rating factor which is always positive is based on the primary class. ",
+    "required": false
+  },
+  "Vehicle_SeatingCapacityCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The seating capacity of the vehicle.  Required for rating public passenger vehicles. ",
+    "required": false
+  },
+  "Vehicle_RadiusOfUse_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in whole numbers within which this vehicle is operated. ",
+    "required": false
+  },
+  "Vehicle_FarthestZoneCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: Identifies the location of the farthest zone from the vehicle's base of operation in which the vehicle is operated. The source of this code is the Insurance Services Office Zone code list. ",
+    "required": false
+  },
+  "Vehicle_CostNewAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The original cost of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_Use_PleasureIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for pleasure. ",
+    "required": false
+  },
+  "Vehicle_Use_FarmIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for farming. ",
+    "required": false
+  },
+  "Vehicle_Use_CommercialIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for commercial purposes. ",
+    "required": false
+  },
+  "Vehicle_Use_RetailIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for the retail industry. ",
+    "required": false
+  },
+  "Vehicle_Use_ServiceIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for the service industry. ",
+    "required": false
+  },
+  "Vehicle_Use_ForHireIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for hire. ",
+    "required": false
+  },
+  "Vehicle_Use_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is other than those listed. ",
+    "required": false
+  },
+  "Vehicle_Use_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other vehicle usage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_LiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has liability coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_NoFaultIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has no-fault coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_AdditionalNoFaultIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has additional no-fault coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_MedicalPaymentsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has medical payments coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_UninsuredMotoristsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has uninsured motorists coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_UnderinsuredMotoristsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has underinsured motorists coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_TowingAndLabourIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has towing and labor coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has specified cause of loss coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire and theft is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftWindstormIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire, theft and windstorm is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_LimitedSpecifiedPerilsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates limited specified perils is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has comprehensive or other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_CollisionIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_RentalReimbursementIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has rental reimbursement or transportation expense coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FullGlassIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has full glass coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_OtherIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has a type of coverage not specifically listed. ",
+    "required": false
+  },
+  "Vehicle_Coverage_OtherDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of coverage on the vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationActualCashValueIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the actual cash value or market value. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationAgreedAmountIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the agreed amount. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationStatedAmountIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the stated amount. ",
+    "required": false
+  },
+  "Vehicle_Coverage_AgreedOrStatedAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The agreed or stated amount used in determining the value of the vehicle at the time of loss. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveDeductibleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible is for comprehensive or other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossDeductibleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible is for specified causes of loss.  The Specified Cause of Loss Codes are:\n\nSCL        Specified Cause of Loss\nF            Fire\nF&T        Fire and Theft\nF,T&W    Fire, Theft and Wind\nLSP        Limited Specified Perils\nSP         Specified Perils ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The comprehensive or specified cause of loss deductible amount. ",
+    "required": false
+  },
+  "Vehicle_Collision_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The collision deductible amount. ",
+    "required": false
+  },
+  "Vehicle_Use_UnderFifteenMilesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle is used for commuting purposes to work or school, and is driven to work or school under 15 miles one way. ",
+    "required": false
+  },
+  "Vehicle_Use_FifteenMilesOrOverIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle is used for commuting purposes to work or school, and is driven to work or school 15 miles or over one way. ",
+    "required": false
+  },
+  "Vehicle_NetRatingFactor_A": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The net rating factor that applies to this vehicle. Do not include debits or credits that apply on a policy level. Provide under remarks a description of each debit or credit used in the calculation of the net rating factor. ",
+    "required": false
+  },
+  "Vehicle_TotalPremiumAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total amount for the vehicle. ",
+    "required": false
+  },
+  "Vehicle_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number. ",
+    "required": false
+  },
+  "Vehicle_ModelYear_B": {
+    "ft": "/Tx",
+    "tu": "Enter year: The model year of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_ManufacturersName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The manufacturer of the vehicle (e.g., Ford, Chevy). ",
+    "required": false
+  },
+  "Vehicle_ModelName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The manufacturer's model name for the vehicle. ",
+    "required": false
+  },
+  "Vehicle_BodyCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The body type of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_VINIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The vehicle identification number (VIN) or serial number assigned by the manufacturer. ",
+    "required": false
+  },
+  "Vehicle_VehicleType_PrivatePassengerIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is private passenger. ",
+    "required": false
+  },
+  "Vehicle_VehicleType_SpecialIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is special (e.g. classic, antique automobile). ",
+    "required": false
+  },
+  "Vehicle_VehicleType_CommercialIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is commercial. ",
+    "required": false
+  },
+  "Vehicle_SymbolCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_ComprehensiveSymbolCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for comprehensive / other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_CollisionSymbolCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for collision coverage. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_LineOne_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address line one. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_CityName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address city name. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_CountyName_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address county name. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The vehicle's physical address state or province code. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_PostalCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The vehicle's physical address postal code. ",
+    "required": false
+  },
+  "Vehicle_Registration_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province in which the vehicle is registered. ",
+    "required": false
+  },
+  "Vehicle_RatingTerritoryCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating territory code where the vehicle is principally garaged. ",
+    "required": false
+  },
+  "Vehicle_GrossVehicleWeight_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The actual weight of the vehicle or the combined weight of tractor and trailer in pounds. ",
+    "required": false
+  },
+  "Vehicle_RateClassCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rate class of the vehicle.  If two rate classes are required, this element should be used to enter the liability code. ",
+    "required": false
+  },
+  "Vehicle_SpecialIndustryClassCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The secondary Special Industry Class code which applies to commercial vehicles as determined by industry rating manuals. ",
+    "required": false
+  },
+  "Vehicle_PrimaryLiabilityRatingFactor_B": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The primary liability rating factor contains the number which is used, along with the secondary rating factor, in determining the liability premium.  The primary rating factor which is always positive is based on the primary class. ",
+    "required": false
+  },
+  "Vehicle_SeatingCapacityCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The seating capacity of the vehicle.  Required for rating public passenger vehicles. ",
+    "required": false
+  },
+  "Vehicle_RadiusOfUse_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in whole numbers within which this vehicle is operated. ",
+    "required": false
+  },
+  "Vehicle_FarthestZoneCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: Identifies the location of the farthest zone from the vehicle's base of operation in which the vehicle is operated. The source of this code is the Insurance Services Office Zone code list. ",
+    "required": false
+  },
+  "Vehicle_CostNewAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The original cost of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_Use_PleasureIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for pleasure. ",
+    "required": false
+  },
+  "Vehicle_Use_FarmIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for farming. ",
+    "required": false
+  },
+  "Vehicle_Use_CommercialIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for commercial purposes. ",
+    "required": false
+  },
+  "Vehicle_Use_RetailIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for the retail industry. ",
+    "required": false
+  },
+  "Vehicle_Use_ServiceIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for the service industry. ",
+    "required": false
+  },
+  "Vehicle_Use_ForHireIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for hire. ",
+    "required": false
+  },
+  "Vehicle_Use_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is other than those listed. ",
+    "required": false
+  },
+  "Vehicle_Use_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other vehicle usage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_LiabilityIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has liability coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_NoFaultIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has no-fault coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_AdditionalNoFaultIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has additional no-fault coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_MedicalPaymentsIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has medical payments coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_UninsuredMotoristsIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has uninsured motorists coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_UnderinsuredMotoristsIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has underinsured motorists coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_TowingAndLabourIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has towing and labor coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has specified cause of loss coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire and theft is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftWindstormIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire, theft and windstorm is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_LimitedSpecifiedPerilsIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates limited specified perils is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has comprehensive or other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_CollisionIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_RentalReimbursementIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has rental reimbursement or transportation expense coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FullGlassIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has full glass coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_OtherIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has a type of coverage not specifically listed. ",
+    "required": false
+  },
+  "Vehicle_Coverage_OtherDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of coverage on the vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationActualCashValueIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the actual cash value or market value. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationAgreedAmountIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the agreed amount. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationStatedAmountIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the stated amount. ",
+    "required": false
+  },
+  "Vehicle_Coverage_AgreedOrStatedAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The agreed or stated amount used in determining the value of the vehicle at the time of loss. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveDeductibleIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible is for comprehensive or other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossDeductibleIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible is for specified causes of loss.  The Specified Cause of Loss Codes are:\n\nSCL        Specified Cause of Loss\nF            Fire\nF&T        Fire and Theft\nF,T&W    Fire, Theft and Wind\nLSP        Limited Specified Perils\nSP         Specified Perils ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The comprehensive or specified cause of loss deductible amount. ",
+    "required": false
+  },
+  "Vehicle_Collision_DeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The collision deductible amount. ",
+    "required": false
+  },
+  "Vehicle_Use_UnderFifteenMilesIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle is used for commuting purposes to work or school, and is driven to work or school under 15 miles one way. ",
+    "required": false
+  },
+  "Vehicle_Use_FifteenMilesOrOverIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle is used for commuting purposes to work or school, and is driven to work or school 15 miles or over one way. ",
+    "required": false
+  },
+  "Vehicle_NetRatingFactor_B": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The net rating factor that applies to this vehicle. Do not include debits or credits that apply on a policy level. Provide under remarks a description of each debit or credit used in the calculation of the net rating factor. ",
+    "required": false
+  },
+  "Vehicle_TotalPremiumAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total amount for the vehicle. ",
+    "required": false
+  },
+  "Vehicle_ProducerIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number. ",
+    "required": false
+  },
+  "Vehicle_ModelYear_C": {
+    "ft": "/Tx",
+    "tu": "Enter year: The model year of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_ManufacturersName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The manufacturer of the vehicle (e.g., Ford, Chevy). ",
+    "required": false
+  },
+  "Vehicle_ModelName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The manufacturer's model name for the vehicle. ",
+    "required": false
+  },
+  "Vehicle_BodyCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The body type of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_VINIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The vehicle identification number (VIN) or serial number assigned by the manufacturer. ",
+    "required": false
+  },
+  "Vehicle_VehicleType_PrivatePassengerIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is private passenger. ",
+    "required": false
+  },
+  "Vehicle_VehicleType_SpecialIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is special (e.g. classic, antique automobile). ",
+    "required": false
+  },
+  "Vehicle_VehicleType_CommercialIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is commercial. ",
+    "required": false
+  },
+  "Vehicle_SymbolCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_ComprehensiveSymbolCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for comprehensive / other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_CollisionSymbolCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for collision coverage. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_LineOne_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address line one. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_CityName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address city name. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_CountyName_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address county name. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The vehicle's physical address state or province code. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_PostalCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The vehicle's physical address postal code. ",
+    "required": false
+  },
+  "Vehicle_Registration_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province in which the vehicle is registered. ",
+    "required": false
+  },
+  "Vehicle_RatingTerritoryCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating territory code where the vehicle is principally garaged. ",
+    "required": false
+  },
+  "Vehicle_GrossVehicleWeight_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The actual weight of the vehicle or the combined weight of tractor and trailer in pounds. ",
+    "required": false
+  },
+  "Vehicle_RateClassCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rate class of the vehicle.  If two rate classes are required, this element should be used to enter the liability code. ",
+    "required": false
+  },
+  "Vehicle_SpecialIndustryClassCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The secondary Special Industry Class code which applies to commercial vehicles as determined by industry rating manuals. ",
+    "required": false
+  },
+  "Vehicle_PrimaryLiabilityRatingFactor_C": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The primary liability rating factor contains the number which is used, along with the secondary rating factor, in determining the liability premium.  The primary rating factor which is always positive is based on the primary class. ",
+    "required": false
+  },
+  "Vehicle_SeatingCapacityCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The seating capacity of the vehicle.  Required for rating public passenger vehicles. ",
+    "required": false
+  },
+  "Vehicle_RadiusOfUse_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in whole numbers within which this vehicle is operated. ",
+    "required": false
+  },
+  "Vehicle_FarthestZoneCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: Identifies the location of the farthest zone from the vehicle's base of operation in which the vehicle is operated. The source of this code is the Insurance Services Office Zone code list. ",
+    "required": false
+  },
+  "Vehicle_CostNewAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The original cost of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_Use_PleasureIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for pleasure. ",
+    "required": false
+  },
+  "Vehicle_Use_FarmIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for farming. ",
+    "required": false
+  },
+  "Vehicle_Use_CommercialIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for commercial purposes. ",
+    "required": false
+  },
+  "Vehicle_Use_RetailIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for the retail industry. ",
+    "required": false
+  },
+  "Vehicle_Use_ServiceIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for the service industry. ",
+    "required": false
+  },
+  "Vehicle_Use_ForHireIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for hire. ",
+    "required": false
+  },
+  "Vehicle_Use_OtherIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is other than those listed. ",
+    "required": false
+  },
+  "Vehicle_Use_OtherDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other vehicle usage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_LiabilityIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has liability coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_NoFaultIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has no-fault coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_AdditionalNoFaultIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has additional no-fault coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_MedicalPaymentsIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has medical payments coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_UninsuredMotoristsIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has uninsured motorists coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_UnderinsuredMotoristsIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has underinsured motorists coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_TowingAndLabourIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has towing and labor coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has specified cause of loss coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire and theft is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftWindstormIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire, theft and windstorm is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_LimitedSpecifiedPerilsIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates limited specified perils is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has comprehensive or other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_CollisionIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_RentalReimbursementIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has rental reimbursement or transportation expense coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FullGlassIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has full glass coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_OtherIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has a type of coverage not specifically listed. ",
+    "required": false
+  },
+  "Vehicle_Coverage_OtherDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of coverage on the vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationActualCashValueIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the actual cash value or market value. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationAgreedAmountIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the agreed amount. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationStatedAmountIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the stated amount. ",
+    "required": false
+  },
+  "Vehicle_Coverage_AgreedOrStatedAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The agreed or stated amount used in determining the value of the vehicle at the time of loss. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveDeductibleIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible is for comprehensive or other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossDeductibleIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible is for specified causes of loss.  The Specified Cause of Loss Codes are:\n\nSCL        Specified Cause of Loss\nF            Fire\nF&T        Fire and Theft\nF,T&W    Fire, Theft and Wind\nLSP        Limited Specified Perils\nSP         Specified Perils ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The comprehensive or specified cause of loss deductible amount. ",
+    "required": false
+  },
+  "Vehicle_Collision_DeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The collision deductible amount. ",
+    "required": false
+  },
+  "Vehicle_Use_UnderFifteenMilesIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle is used for commuting purposes to work or school, and is driven to work or school under 15 miles one way. ",
+    "required": false
+  },
+  "Vehicle_Use_FifteenMilesOrOverIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle is used for commuting purposes to work or school, and is driven to work or school 15 miles or over one way. ",
+    "required": false
+  },
+  "Vehicle_NetRatingFactor_C": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The net rating factor that applies to this vehicle. Do not include debits or credits that apply on a policy level. Provide under remarks a description of each debit or credit used in the calculation of the net rating factor. ",
+    "required": false
+  },
+  "Vehicle_TotalPremiumAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total amount for the vehicle. ",
+    "required": false
+  },
+  "Vehicle_ProducerIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned vehicle number. ",
+    "required": false
+  },
+  "Vehicle_ModelYear_D": {
+    "ft": "/Tx",
+    "tu": "Enter year: The model year of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_ManufacturersName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The manufacturer of the vehicle (e.g., Ford, Chevy). ",
+    "required": false
+  },
+  "Vehicle_ModelName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The manufacturer's model name for the vehicle. ",
+    "required": false
+  },
+  "Vehicle_BodyCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The body type of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_VINIdentifier_D": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The vehicle identification number (VIN) or serial number assigned by the manufacturer. ",
+    "required": false
+  },
+  "Vehicle_VehicleType_PrivatePassengerIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is private passenger. ",
+    "required": false
+  },
+  "Vehicle_VehicleType_SpecialIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is special (e.g. classic, antique automobile). ",
+    "required": false
+  },
+  "Vehicle_VehicleType_CommercialIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the predominant type of the vehicle is commercial. ",
+    "required": false
+  },
+  "Vehicle_SymbolCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_ComprehensiveSymbolCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for comprehensive / other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_CollisionSymbolCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol required for collision coverage. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_LineOne_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address line one. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_CityName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address city name. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_CountyName_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The vehicle's physical address county name. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The vehicle's physical address state or province code. ",
+    "required": false
+  },
+  "Vehicle_PhysicalAddress_PostalCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The vehicle's physical address postal code. ",
+    "required": false
+  },
+  "Vehicle_Registration_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state or province in which the vehicle is registered. ",
+    "required": false
+  },
+  "Vehicle_RatingTerritoryCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rating territory code where the vehicle is principally garaged. ",
+    "required": false
+  },
+  "Vehicle_GrossVehicleWeight_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The actual weight of the vehicle or the combined weight of tractor and trailer in pounds. ",
+    "required": false
+  },
+  "Vehicle_RateClassCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The rate class of the vehicle.  If two rate classes are required, this element should be used to enter the liability code. ",
+    "required": false
+  },
+  "Vehicle_SpecialIndustryClassCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The secondary Special Industry Class code which applies to commercial vehicles as determined by industry rating manuals. ",
+    "required": false
+  },
+  "Vehicle_PrimaryLiabilityRatingFactor_D": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The primary liability rating factor contains the number which is used, along with the secondary rating factor, in determining the liability premium.  The primary rating factor which is always positive is based on the primary class. ",
+    "required": false
+  },
+  "Vehicle_SeatingCapacityCount_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The seating capacity of the vehicle.  Required for rating public passenger vehicles. ",
+    "required": false
+  },
+  "Vehicle_RadiusOfUse_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in whole numbers within which this vehicle is operated. ",
+    "required": false
+  },
+  "Vehicle_FarthestZoneCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: Identifies the location of the farthest zone from the vehicle's base of operation in which the vehicle is operated. The source of this code is the Insurance Services Office Zone code list. ",
+    "required": false
+  },
+  "Vehicle_CostNewAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The original cost of the vehicle. ",
+    "required": false
+  },
+  "Vehicle_Use_PleasureIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for pleasure. ",
+    "required": false
+  },
+  "Vehicle_Use_FarmIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for farming. ",
+    "required": false
+  },
+  "Vehicle_Use_CommercialIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for commercial purposes. ",
+    "required": false
+  },
+  "Vehicle_Use_RetailIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for the retail industry. ",
+    "required": false
+  },
+  "Vehicle_Use_ServiceIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for the service industry. ",
+    "required": false
+  },
+  "Vehicle_Use_ForHireIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is for hire. ",
+    "required": false
+  },
+  "Vehicle_Use_OtherIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the primary use for the vehicle is other than those listed. ",
+    "required": false
+  },
+  "Vehicle_Use_OtherDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other vehicle usage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_LiabilityIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has liability coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_NoFaultIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has no-fault coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_AdditionalNoFaultIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has additional no-fault coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_MedicalPaymentsIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has medical payments coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_UninsuredMotoristsIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has uninsured motorists coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_UnderinsuredMotoristsIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has underinsured motorists coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_TowingAndLabourIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has towing and labor coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has specified cause of loss coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire and theft is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftWindstormIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire, theft and windstorm is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_LimitedSpecifiedPerilsIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates limited specified perils is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has comprehensive or other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_CollisionIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_RentalReimbursementIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has rental reimbursement or transportation expense coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FullGlassIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has full glass coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_OtherIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has a type of coverage not specifically listed. ",
+    "required": false
+  },
+  "Vehicle_Coverage_OtherDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of the other type of coverage on the vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationActualCashValueIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the actual cash value or market value. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationAgreedAmountIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the agreed amount. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ValuationStatedAmountIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the valuation method used in determining the value of the vehicle at the time of loss is the stated amount. ",
+    "required": false
+  },
+  "Vehicle_Coverage_AgreedOrStatedAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The agreed or stated amount used in determining the value of the vehicle at the time of loss. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveDeductibleIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible is for comprehensive or other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossDeductibleIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible is for specified causes of loss.  The Specified Cause of Loss Codes are:\n\nSCL        Specified Cause of Loss\nF            Fire\nF&T        Fire and Theft\nF,T&W    Fire, Theft and Wind\nLSP        Limited Specified Perils\nSP         Specified Perils ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The comprehensive or specified cause of loss deductible amount. ",
+    "required": false
+  },
+  "Vehicle_Collision_DeductibleAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The collision deductible amount. ",
+    "required": false
+  },
+  "Vehicle_Use_UnderFifteenMilesIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle is used for commuting purposes to work or school, and is driven to work or school under 15 miles one way. ",
+    "required": false
+  },
+  "Vehicle_Use_FifteenMilesOrOverIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle is used for commuting purposes to work or school, and is driven to work or school 15 miles or over one way. ",
+    "required": false
+  },
+  "Vehicle_NetRatingFactor_D": {
+    "ft": "/Tx",
+    "tu": "Enter rate: The net rating factor that applies to this vehicle. Do not include debits or credits that apply on a policy level. Provide under remarks a description of each debit or credit used in the calculation of the net rating factor. ",
+    "required": false
+  },
+  "Vehicle_TotalPremiumAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The total amount for the vehicle. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_RemarkText_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the commercial vehicle line of business.  Enter any endorsements that apply. Be sure to include the form numbers and the required information for attaching the endorsement.   ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The name of the authorized representative of the producer, agency and/or broker that signed the form. ",
+    "required": false
+  },
+  "Producer_StateLicenseIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The State License Number of the producer. ",
+    "required": false
+  },
+  "NamedInsured_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_NationalIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number. ",
+    "required": false
+  }
+}

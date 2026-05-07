@@ -18,11 +18,11 @@ export default function AboutPage({ onGetStarted, onNavigate }) {
       <section className="mkt-hero">
         <div className="mkt-hero-eyebrow" style={{ fontSize: "1rem" }}>About Acordly</div>
         <h1 className="mkt-hero-h1">
-          Source document to ACORD package.<br />
-          <span className="mkt-hero-accent">No manual re-entry.</span>
+          Source document to ACORD package<br />
+          <span className="mkt-hero-accent">No manual re-entry</span>
         </h1>
         <p className="mkt-hero-p">
-          Built for brokers, independent agents, and underwriting teams who spend hours re-keying data that already exists in documents they've already received.
+          Built for brokers, independent agents, and underwriting teams who spend hours manually filling ACORD forms from Dec Page documents - now it’s done in just one click.
         </p>
       </section>
 

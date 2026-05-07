@@ -128,7 +128,11 @@ export default function PDFJsViewer({
             const pd = pageDimsRef.current[pageNum - 1];
             const resolvedScale = pd ? vp.width / pd.width : scale;
             renderScaleRef.current = resolvedScale;
-            buildOverlay(resolvedScale, vp.width, vp.height, fieldValuesRef.current);
+            // Only rebuild overlay if field data has been loaded; if not, the
+            // overlay rebuild useEffect will fire once fieldsLoaded becomes true.
+            if (fieldsRef.current.length > 0) {
+              buildOverlay(resolvedScale, vp.width, vp.height, fieldValuesRef.current);
+            }
           });
         });
       } catch (e) {
@@ -168,9 +172,10 @@ export default function PDFJsViewer({
         setFieldValues(vals);
         fieldValuesRef.current         = vals;
         originalFieldValuesRef.current = { ...vals };
-        // ── INSTANCE 1: fetchFields ────────────────────────────────────
         setFieldsLoaded(true);
         updateHighlightCounts(data.fields || [], confLabels, clientFilledRef.current, vals);
+        // If the canvas is already painted (e.g. refresh), rebuild the overlay immediately.
+        // If not, the useEffect([..., fields, fieldsLoaded, ...]) fires once canvas is ready.
         requestAnimationFrame(() => {
           const canvas = canvasRef.current;
           if (!canvas || canvas.width === 0) return;
@@ -205,7 +210,6 @@ export default function PDFJsViewer({
         setFieldValues(vals);
         fieldValuesRef.current         = vals;
         originalFieldValuesRef.current = { ...vals };
-        // ── INSTANCE 2: initial fetch ──────────────────────────────────
         setFieldsLoaded(true);
         updateHighlightCounts(data.fields || [], confLabels, clientFilledRef.current, vals);
         requestAnimationFrame(() => {
@@ -226,9 +230,10 @@ export default function PDFJsViewer({
     fieldList.forEach(f => {
       const name = f.name;
       const val  = (vals[name] || f.value || "").toString().trim();
-      if (clientFilled.includes(name)) { green++; return; }
-      if (YELLOW_REQUIRED.has(name) && (!val || val === "null" || val === "None")) { yellow++; return; }
       const conf = confLabels[name];
+      if (clientFilled.includes(name) || conf === "client_arq") { green++; return; }
+      if (YELLOW_REQUIRED.has(name) && (!val || val === "null" || val === "None")) { yellow++; return; }
+      if (conf === "missing_required" && (!val || val === "null" || val === "None")) { yellow++; return; }
       if (conf === "low_confidence" && val && val !== "null" && val !== "None") pink++;
     });
     setHighlightCounts({ pink, yellow, green });
@@ -257,14 +262,15 @@ export default function PDFJsViewer({
   };
 
   const _getHighlight = (fieldName, val) => {
-    if (clientFilledRef.current.includes(fieldName)) return "green";
-    const v    = (val || "").toString().trim();
     const conf = fieldConfLabelRef.current[fieldName];
+    if (clientFilledRef.current.includes(fieldName) || conf === "client_arq") return "green";
+    const v    = (val || "").toString().trim();
     if (YELLOW_REQUIRED.has(fieldName)) {
       if (!v || v === "null" || v === "None") return "yellow";
       return null;
     }
     if (conf === "low_confidence" && v && v !== "null" && v !== "None") return "pink";
+    if (conf === "missing_required" && (!v || v === "null" || v === "None")) return "yellow";
     return null;
   };
 
@@ -289,15 +295,19 @@ export default function PDFJsViewer({
       const val = liveValues[field.name] ?? field.value ?? "";
       const hl  = _getHighlight(field.name, val);
 
-      let border = "0px solid transparent";
-      let bg     = "transparent";
-      if      (hl === "green")  { border = "2px solid #10b981"; bg = "rgba(16,185,129,0.13)"; }
-      else if (hl === "yellow") { border = "2px solid #f59e0b"; bg = curEdit ? "rgba(245,158,11,0.22)" : "rgba(245,158,11,0.10)"; }
-      else if (hl === "pink")   { border = "2px solid #e6007a"; bg = curEdit ? "rgba(230,0,122,0.12)" : "rgba(230,0,122,0.06)"; }
-      else if (curEdit)         { border = "1px solid rgba(79,124,255,0.4)"; bg = "rgba(255,255,255,0.85)"; }
+      // Highlighted fields use fully-opaque pastel fills so the PDF canvas text
+      // underneath is completely hidden — preventing the double-text ghost effect.
+      // Non-highlighted edit fields use a near-opaque white for the same reason.
+      let bg = "transparent";
+      if      (hl === "green")  { bg = "rgb(187,247,208)"; }
+      else if (hl === "yellow") { bg = "rgb(254,243,199)"; }
+      else if (hl === "pink")   { bg = "rgb(254,226,226)"; }
+      else if (curEdit)         { bg = "rgba(255,255,255,0.97)"; }
 
       const wrap = document.createElement("div");
-      wrap.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:${cw}px;height:${ch}px;pointer-events:${curEdit?"all":"none"};border:${border};border-radius:2px;background:${bg};box-sizing:border-box;transition:all 0.1s ease;`;
+      // Inset by 1px on all sides so the highlight sits strictly inside the field
+      // boundary — prevents sub-pixel bleed at the edges regardless of scale.
+      wrap.style.cssText = `position:absolute;left:${cx+1}px;top:${cy+1}px;width:${Math.max(cw-2,4)}px;height:${Math.max(ch-2,4)}px;pointer-events:${curEdit?"all":"none"};border:none;border-radius:1px;background:${bg};box-sizing:border-box;overflow:hidden;`;
 
       const isSigF = _isSigField(field.name);
 
@@ -333,12 +343,16 @@ export default function PDFJsViewer({
         }
       } else if (curEdit) {
         const inp = document.createElement("input"); inp.type = "text"; inp.value = val;
-        inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:rgba(255,255,255,0.95);border:none;outline:none;border-radius:2px;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#111;padding:1px 3px;cursor:text;overflow:hidden;white-space:nowrap;`;
+        // background:transparent lets the wrap's bg (highlight or white) show through;
+        // no additional layer means no double-text artifact in edit mode.
+        inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:transparent;border:none;outline:none;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#000;padding:1px 3px;cursor:text;`;
         inp.addEventListener("input", e => triggerSave(field.name, e.target.value));
         wrap.appendChild(inp);
-      } else if (clientFilledRef.current.includes(field.name) && val && val !== "null" && val !== "None") {
+      } else if (hl && val && val !== "null" && val !== "None") {
+        // Render value as DOM text over the opaque highlight background.
+        // The wrap's fully-opaque bg already hides the PDF canvas text beneath.
         const txt = document.createElement("div");
-        txt.style.cssText = `width:100%;height:100%;box-sizing:border-box;overflow:hidden;white-space:nowrap;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#111;padding:1px 3px;display:flex;align-items:center;background:rgba(255,255,255,0.9);`;
+        txt.style.cssText = `width:100%;height:100%;box-sizing:border-box;overflow:hidden;white-space:nowrap;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#000;font-weight:500;padding:1px 3px;display:flex;align-items:center;`;
         txt.textContent = val;
         wrap.appendChild(txt);
       }
@@ -392,11 +406,16 @@ export default function PDFJsViewer({
         setSaveStatus("saving");
         try {
           const clearedSigFields = Array.from(clearedSigFieldsRef.current);
+          const changedValues = {};
+          Object.keys(allValues).forEach(k => {
+            if (allValues[k] !== (originalFieldValuesRef.current[k] ?? "")) changedValues[k] = allValues[k];
+          });
+          clearedSigFields.forEach(k => { changedValues[k] = ""; });
           const res = await fetch(`${API_BASE}/api/update-pdf`, {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ session_id: sessionId, field_updates: { ...allValues, __form_id__: formId, __signed__: isSignedLocal ? "1" : "0", __cleared_sig_fields__: JSON.stringify(clearedSigFields) } }),
+            body: JSON.stringify({ session_id: sessionId, field_updates: { ...changedValues, __form_id__: formId, __signed__: isSignedLocal ? "1" : "0", __cleared_sig_fields__: JSON.stringify(clearedSigFields) } }),
           });
           if (res.ok) {
             const data = await res.json();
@@ -404,6 +423,12 @@ export default function PDFJsViewer({
             const allSigF = fieldsRef.current.filter(f => _isSigField(f.name)).map(f => f.name);
             if (allSigF.length > 0 && allSigF.every(n => clearedSigFields.includes(n))) setIsSignedLocal(false);
             if (data?.sqs && onSqsUpdate) onSqsUpdate(formId, data.sqs);
+            // Sync confidence labels from backend so overlay reflects the post-save state
+            // (e.g. user-edited fields become "filled", not "low_confidence").
+            if (data?.confidence) {
+              fieldConfLabelRef.current = { ...fieldConfLabelRef.current, ...data.confidence };
+              updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, allValues);
+            }
             setSaveStatus("generating");
             _loadPdfInBackground(allValues);
           } else { setSaveStatus("error"); }
@@ -475,9 +500,9 @@ export default function PDFJsViewer({
           <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>📄 {formName}</span>
           {fieldsLoaded && (
             <>
-              {highlightCounts.yellow > 0 && <span style={{ background: "rgba(245,158,11,0.15)", color: "#f59e0b", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "1px solid #f59e0b", fontWeight: 600 }}>🟡 {highlightCounts.yellow} required</span>}
-              {highlightCounts.pink   > 0 && <span style={{ background: "rgba(230,0,122,0.12)",  color: "#e6007a", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "1px solid #e6007a", fontWeight: 600 }}>🩷 {highlightCounts.pink} review</span>}
-              {highlightCounts.green  > 0 && <span style={{ background: "rgba(16,185,129,0.12)", color: "#10b981", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "1px solid #10b981", fontWeight: 600 }}>✅ {highlightCounts.green} client</span>}
+              {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>🟡 {highlightCounts.yellow} required</span>}
+              {highlightCounts.pink   > 0 && <span style={{ background: "rgba(254,226,226,0.9)", color: "#991b1b", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>🩷 {highlightCounts.pink} review</span>}
+              {highlightCounts.green  > 0 && <span style={{ background: "rgba(187,247,208,0.9)", color: "#166534", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>✅ {highlightCounts.green} client</span>}
             </>
           )}
         </div>
@@ -522,9 +547,9 @@ export default function PDFJsViewer({
       {editMode && (
         <div style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ color: "#f59e0b", fontSize: 11 }}>✏️ Click any field to edit — "Done Editing" saves all changes</span>
-          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(245,158,11,0.3)", border: "2px solid #f59e0b", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🟡 Signature required</span></span>
-          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(230,0,122,0.15)", border: "2px solid #e6007a", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🩷 Low confidence</span></span>
-          {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(16,185,129,0.18)", border: "2px solid #10b981", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>✅ Client-filled</span></span>}
+          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,243,199,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🟡 Signature required</span></span>
+          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,226,226,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🩷 Low confidence</span></span>
+          {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(187,247,208,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>✅ Client-filled</span></span>}
         </div>
       )}
 

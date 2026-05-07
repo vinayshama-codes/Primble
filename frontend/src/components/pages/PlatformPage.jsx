@@ -3,7 +3,7 @@ const WORKFLOW_STEPS = [
     num: "01",
     title: "Upload source documents",
     desc: "",
-    tags: ["upload endpoint", "multi-file", "zip support"],
+    tags: ["upload ", "multi-file", "zip support"],
   },
   {
     num: "02",
@@ -198,7 +198,6 @@ export default function PlatformPage({ onGetStarted, onNavigate }) {
               <h3 className="mkt-ops-title">Session history</h3>
               <p className="mkt-ops-desc">Every submission saved as a named session. Restore, continue, or delete from within the app. Persists across logins.</p>
               <div className="mkt-ops-features">
-                <span className="mkt-tag">session APIs</span>
                 <span className="mkt-tag">named sessions + timestamp</span>
                 <span className="mkt-tag">status tracking</span>
                 <span className="mkt-tag">bulk delete</span>

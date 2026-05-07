@@ -75,6 +75,9 @@ def run_migration():
                     processed_at TEXT NOT NULL
                 )
             """, "table stripe_events"),
+            # draft_answers — server-side draft persistence for ARQ (cross-browser/incognito safe)
+            ("ALTER TABLE arq_sessions ADD COLUMN IF NOT EXISTS draft_answers JSONB DEFAULT '{}'",
+             "arq_sessions.draft_answers"),
         ]
 
         for sql, label in migrations:
