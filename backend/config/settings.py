@@ -85,12 +85,25 @@ SUPPORTED_IMG = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(FORMS_SCHEMAS_DIR, exist_ok=True)
 
+ADMIN_EMAILS: set = {
+    e.strip().lower()
+    for e in os.getenv("ADMIN_EMAILS", "").split(",")
+    if e.strip()
+}
+
+DEV_ROUTES_ENABLED: bool = os.getenv("DEV_ROUTES_ENABLED", "false").lower() == "true"
+
 _REQUIRED_PRODUCTION_SECRETS = {
     "DATABASE_URL":           DATABASE_URL,
-    "SECRET_KEY":             SECRET_KEY,
+    # SECRET_KEY removed: it is read from env but never consumed by any application
+    # code (no JWT signing, no HMAC, no session middleware uses it).  Validating an
+    # unused secret creates false security assurance.  If a signing key is needed in
+    # future, wire it explicitly at that point and re-add here.
     "STRIPE_SECRET_KEY":      os.getenv("STRIPE_SECRET_KEY", ""),
     "STRIPE_WEBHOOK_SECRET":  STRIPE_WEBHOOK_SECRET,
     "GOOGLE_CLIENT_ID":       GOOGLE_CLIENT_ID,
+    "GROQ_API_KEY":           os.getenv("GROQ_API_KEY", ""),
+    "FIELD_ENCRYPTION_KEY":   os.getenv("FIELD_ENCRYPTION_KEY", ""),
 }
 
 
@@ -103,6 +116,16 @@ def validate_production_config() -> None:
         raise RuntimeError(
             "Missing required environment variables for production: "
             + ", ".join(missing)
+        )
+    if DEV_ROUTES_ENABLED and not ADMIN_EMAILS:
+        raise RuntimeError(
+            "Production misconfiguration: DEV_ROUTES_ENABLED requires ADMIN_EMAILS to be set."
+        )
+    if not ADMIN_EMAILS:
+        raise RuntimeError(
+            "ADMIN_EMAILS must be set in production. "
+            "Admin-gated endpoints will reject all requests without this. "
+            "Set ADMIN_EMAILS=email1@example.com,email2@example.com in your .env"
         )
 
 

@@ -7,6 +7,8 @@ from services.job_queue import JobQueue, STATUS_PENDING, _build_job, _now_iso
 
 logger = logging.getLogger(__name__)
 
+_UPDATABLE_JOB_COLS = frozenset({"status", "updated_at", "result", "error_message", "progress_message"})
+
 
 class JobRepository(JobQueue):
     """PostgreSQL-backed JobQueue via asyncpg. Enable with JOB_QUEUE_BACKEND=db."""
@@ -86,6 +88,11 @@ class JobRepository(JobQueue):
             params.append(progress_message)
             cols.append(f"progress_message = ${len(params)}")
         params.append(job_id)
+        # SOC 2 secure coding: whitelist guard prevents future injection via dynamic cols
+        col_names = {c.split(" =")[0].strip() for c in cols}
+        assert col_names <= _UPDATABLE_JOB_COLS, (
+            f"SOC2: Unexpected column(s) in dynamic job UPDATE: {col_names - _UPDATABLE_JOB_COLS}"
+        )
         async with get_pool().acquire() as conn:
             await conn.execute(
                 f"UPDATE jobs SET {', '.join(cols)} WHERE job_id = ${len(params)}",

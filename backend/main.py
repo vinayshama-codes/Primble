@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 
 _SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 if _SENTRY_DSN:
@@ -28,7 +29,13 @@ if _SENTRY_DSN:
     )
 
 from config.database import create_pool, close_pool, get_pool, init_db
-from config.settings import ALLOWED_ORIGINS, MAX_UPLOAD_SIZE_BYTES, validate_production_config  # noqa: F401
+from config.settings import (  # noqa: F401
+    ALLOWED_ORIGINS,
+    MAX_UPLOAD_SIZE_BYTES,
+    ADMIN_EMAILS as _SETTINGS_ADMIN_EMAILS,
+    DEV_ROUTES_ENABLED as _SETTINGS_DEV_ROUTES_ENABLED,
+    validate_production_config,
+)
 from services.scheduler_service import start_scheduler, stop_scheduler
 from utils.json_logging import JsonFormatter, set_trace_id
 from routes.auth_routes import router as auth_router
@@ -132,7 +139,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline' https://accounts.google.com https://apis.google.com; "
+            # TODO: remove 'unsafe-inline' requires migrating any inline scripts in
+            # frontend/index.html and frontend/src to external files or CSP nonces.
+            "script-src 'self' https://accounts.google.com https://apis.google.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data: https:; "
@@ -152,6 +161,12 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TraceIDMiddleware)
 app.add_middleware(InFlightMiddleware)
 
+if _IS_PROD:
+    # Redirects HTTP → HTTPS at the application layer.
+    # If a load balancer handles TLS termination and performs the redirect upstream,
+    # remove this middleware and document that control in your infra runbook instead.
+    app.add_middleware(HTTPSRedirectMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -169,6 +184,9 @@ app.include_router(arq_router)
 app.include_router(audit_router)
 app.include_router(job_router)
 app.include_router(admin_router)
+
+if _IS_PROD and _DEV_ROUTES_ENABLED:
+    raise RuntimeError("DEV_ROUTES_ENABLED=true is not allowed in production.")
 
 if _DEV_ROUTES_ENABLED:
     from routes.dev_routes import router as dev_router
@@ -197,6 +215,12 @@ def _check_redis_reachable() -> bool:
 @app.on_event("startup")
 async def startup():
     validate_production_config()
+
+    if _SETTINGS_DEV_ROUTES_ENABLED and not _SETTINGS_ADMIN_EMAILS:
+        logger.warning(
+            "SECURITY WARNING: DEV_ROUTES_ENABLED=true but ADMIN_EMAILS is empty. "
+            "All admin endpoints will reject every request. Set ADMIN_EMAILS in env."
+        )
 
     from services.job_queue import validate_queue_backend_for_environment
     validate_queue_backend_for_environment()
@@ -281,7 +305,7 @@ signal.signal(signal.SIGTERM, _handle_sigterm)
 
 @app.get("/")
 def home():
-    return {"message": "API v12.4.0", "status": "operational"}
+    return {"status": "operational"}
 
 
 @app.get("/api/health")
@@ -291,5 +315,5 @@ async def health():
             await conn.execute("SELECT 1")
         return {"status": "healthy"}
     except Exception as e:
-        logger.exception("Health check failed")
-        return JSONResponse(status_code=503, content={"status": "error", "detail": str(e)})
+        logger.error(f"Health check failed: {e}")
+        return JSONResponse(status_code=503, content={"status": "unhealthy"})

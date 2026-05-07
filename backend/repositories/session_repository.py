@@ -15,10 +15,41 @@ from services.s3_service import (
     upload_pdf_async    as _s3_upload_async,
     is_configured       as _s3_configured,
 )
+from utils.crypto import encrypt_field, decrypt_field
+
+_FACTS_PREFIX = "enc:"
 
 _IS_PROD = os.getenv("ENVIRONMENT", "development").lower() == "production"
 
 logger = logging.getLogger(__name__)
+
+
+def _encrypt_facts(data: dict) -> dict:
+    """Encrypt the facts dict inside session data before writing to DB."""
+    facts = data.get("facts")
+    if not facts:
+        return data
+    serialized = json.dumps(facts)
+    # idempotent: encrypt_field already checks for enc: prefix
+    data = dict(data)
+    data["facts"] = encrypt_field(serialized)
+    return data
+
+
+def _decrypt_facts(data: dict) -> dict:
+    """Decrypt the facts value in session data after reading from DB."""
+    facts_raw = data.get("facts")
+    if not facts_raw:
+        return data
+    if isinstance(facts_raw, str):
+        decrypted = decrypt_field(facts_raw)
+        try:
+            data = dict(data)
+            data["facts"] = json.loads(decrypted)
+        except (json.JSONDecodeError, TypeError):
+            # Legacy row stored facts as a plain JSON object string — leave as-is
+            pass
+    return data
 
 
 def _strip_null_bytes(obj):
@@ -128,7 +159,7 @@ async def new_processing_session(data: dict) -> str:
     sid  = str(uuid.uuid4())
     now  = datetime.now(timezone.utc).isoformat()
     await _save_pdf_bytes(sid, data.get("generated_forms", {}))
-    clean = _session_to_db(data)
+    clean = _session_to_db(_encrypt_facts(data))
     async with get_pool().acquire() as conn:
         await conn.execute(
             "INSERT INTO processing_sessions (id, user_id, data, created_at, updated_at)"
@@ -148,6 +179,7 @@ async def get_processing_session(sid: str, include_pdf: bool = False) -> dict:
     if not row:
         raise HTTPException(404, f"Processing session {sid} not found")
     data = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
+    data = _decrypt_facts(data)
     if include_pdf:
         return await _session_from_db(data, sid)
     return data
@@ -170,6 +202,7 @@ async def upd_processing_session(sid: str, updates: dict) -> None:
                 raise HTTPException(404, f"Processing session {sid} not found")
 
             current = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
+            current = _decrypt_facts(current)
             version = row["version"]
 
             if "generated_forms" in updates:
@@ -185,7 +218,7 @@ async def upd_processing_session(sid: str, updates: dict) -> None:
                 if k != "generated_forms":
                     current[k] = v
 
-            clean = _session_to_db(current)
+            clean = _session_to_db(_encrypt_facts(current))
             now   = datetime.now(timezone.utc).isoformat()
             await conn.execute(
                 "UPDATE processing_sessions"
@@ -193,6 +226,54 @@ async def upd_processing_session(sid: str, updates: dict) -> None:
                 " WHERE id=$4",
                 clean, now, version + 1, sid,
             )
+
+
+def _mask_ssn(value: str | None) -> str | None:
+    """Return ***-**-XXXX, exposing only the last 4 digits."""
+    if not value:
+        return value
+    digits = "".join(c for c in str(value) if c.isdigit())
+    last4  = digits[-4:] if len(digits) >= 4 else digits.ljust(4, "X")
+    return f"***-**-{last4}"
+
+
+def _mask_fein(value: str | None) -> str | None:
+    """Return **-***XXXX, exposing only the last 4 digits."""
+    if not value:
+        return value
+    digits = "".join(c for c in str(value) if c.isdigit())
+    last4  = digits[-4:] if len(digits) >= 4 else digits.ljust(4, "X")
+    return f"**-***{last4}"
+
+
+def _mask_dob(value: str | None) -> str | None:
+    """Return only the year component; mask month and day."""
+    if not value:
+        return value
+    parts = str(value).replace("/", "-").split("-")
+    # Support YYYY-MM-DD and MM/DD/YYYY
+    for part in parts:
+        if len(part) == 4 and part.isdigit():
+            return part
+    return "****"
+
+
+def _mask_facts_for_summary(facts: dict) -> dict:
+    """Return a copy of facts with sensitive PII fields masked for list/summary responses."""
+    if not facts or not isinstance(facts, dict):
+        return facts
+    masked = dict(facts)
+    for key in list(masked.keys()):
+        lower = key.lower()
+        val   = masked[key]
+        raw   = val.get("value", val) if isinstance(val, dict) else val
+        if "ssn" in lower or "social_security" in lower:
+            masked[key] = _mask_ssn(str(raw)) if raw else raw
+        elif "fein" in lower or "federal_employer" in lower or "ein" in lower:
+            masked[key] = _mask_fein(str(raw)) if raw else raw
+        elif "dob" in lower or "date_of_birth" in lower or "birth_date" in lower:
+            masked[key] = _mask_dob(str(raw)) if raw else raw
+    return masked
 
 
 def compute_session_status(data: dict) -> str:

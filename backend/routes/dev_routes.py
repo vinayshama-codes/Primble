@@ -27,24 +27,41 @@ def _require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
 
 
-
 # ASYNC-SAFE
-@router.get("/api/acord/audit-log")
+@router.get("/api/admin/audit-log")
 async def get_audit_log(
-    current_user: dict = Depends(get_current_user),
+    request: Request,
+    admin_user: dict = Depends(_require_admin),
     limit: int = 100,
     offset: int = 0,
 ):
+    capped_limit = min(limit, 500)
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT * FROM acord_audit_log WHERE user_id = $1 ORDER BY timestamp DESC LIMIT $2 OFFSET $3",
-            current_user["id"], limit, offset,
+            "SELECT * FROM acord_audit_log ORDER BY timestamp DESC LIMIT $1 OFFSET $2",
+            capped_limit, offset,
         )
+
+    await write_audit_log(
+        user=admin_user,
+        action="admin.audit_log_accessed",
+        ip_address=request.client.host if request.client else None,
+        form_name=f"limit={capped_limit} offset={offset}",
+    )
+
     return {"success": True, "entries": [dict(r) for r in rows], "count": len(rows)}
 
 
 @router.post("/api/billing/payment-lifecycle")
-async def run_payment_lifecycle(_: dict = Depends(_require_admin)):
+async def run_payment_lifecycle(
+    request: Request,
+    admin_user: dict = Depends(_require_admin),
+):
+    await write_audit_log(
+        user=admin_user,
+        action="admin.run_payment_lifecycle",
+        ip_address=request.client.host if request.client else None,
+    )
     await run_daily_payment_lifecycle()
     return {
         "processed":  True,
@@ -55,7 +72,7 @@ async def run_payment_lifecycle(_: dict = Depends(_require_admin)):
 @router.post("/api/dev/test-email")
 async def test_email(
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    admin_user: dict = Depends(_require_admin),
 ):
     body = await request.json()
     to   = body.get("email", "")
@@ -64,11 +81,18 @@ async def test_email(
     if not to:
         raise HTTPException(400, "email required")
 
+    await write_audit_log(
+        user=admin_user,
+        action="admin.test_email",
+        ip_address=request.client.host if request.client else None,
+        form_name=f"to={to} day={day}",
+    )
+
     sent = _send_payment_failed_email(to, "Test User", day=day)
     logger.info(
         f"Test email day={day} to {to}: "
         f"{'sent' if sent else 'FAILED'} "
-        f"(triggered by {current_user['email']})"
+        f"(triggered by {admin_user['email']})"
     )
     return {"sent": sent, "to": to, "day": day}
 
@@ -77,7 +101,7 @@ async def test_email(
 @router.post("/api/dev/simulate-payment-failure")
 async def simulate_payment_failure(
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    admin_user: dict = Depends(_require_admin),
 ):
     body     = await request.json()
     days_ago = int(body.get("days_ago", 0))
@@ -93,12 +117,19 @@ async def simulate_payment_failure(
     async with get_pool().acquire() as conn:
         await conn.execute(
             "UPDATE users SET payment_status=$1, payment_failed_at=$2 WHERE id=$3",
-            final_status, fake_dt, current_user["id"],
+            final_status, fake_dt, admin_user["id"],
         )
+
+    await write_audit_log(
+        user=admin_user,
+        action="admin.simulate_payment_failure",
+        ip_address=request.client.host if request.client else None,
+        form_name=f"days_ago={days_ago} status_set={final_status}",
+    )
 
     logger.info(
         f"DEV: simulated payment failure {days_ago} days ago "
-        f"→ {final_status} for user={current_user['id']}"
+        f"→ {final_status} for user={admin_user['id']}"
     )
 
     email_day = (
@@ -108,13 +139,13 @@ async def simulate_payment_failure(
         else 1
     )
     sent = _send_payment_failed_email(
-        current_user["email"],
-        current_user.get("full_name", ""),
+        admin_user["email"],
+        admin_user.get("full_name", ""),
         day=email_day,
     )
     logger.info(
         f"DEV simulate: sent day={email_day} email "
-        f"to {current_user['email']}: {'ok' if sent else 'FAILED'}"
+        f"to {admin_user['email']}: {'ok' if sent else 'FAILED'}"
     )
 
     return {

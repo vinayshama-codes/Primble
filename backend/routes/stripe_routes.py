@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from config.database import get_pool
 from config.settings import PLANS, FRONTEND_URL, STRIPE_WEBHOOK_SECRET
 from models.schemas import ApplyOverageRequest, CheckoutRequest, OverageCheckoutRequest
+from repositories.audit_repository import write_audit_log
 from services.auth_service import get_current_user
 from services.email_service import _send_payment_failed_email
 from services.stripe_service import evaluate_package_limit, get_or_create_stripe_customer
@@ -80,8 +81,8 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
     except stripe.error.AuthenticationError:
         raise HTTPException(500, "Stripe API key is invalid. Contact support.")
     except stripe.error.StripeError as e:
-        logger.error(f"Stripe checkout error: {e}")
-        raise HTTPException(500, str(e.user_message or e) or "Payment processing failed.")
+        logger.error(f"Stripe error: {e}")
+        raise HTTPException(500, detail="Payment processing failed. Please try again.")
     except Exception as e:
         logger.error(f"Stripe checkout error: {e}")
         raise HTTPException(500, "Payment processing failed. Please try again.")
@@ -157,6 +158,12 @@ async def stripe_webhook(request: Request):
                             await conn.execute(
                                 "INSERT INTO applied_overage_sessions VALUES ($1,$2,$3,$4)", sid, str(uid), qty, now
                             )
+                            await write_audit_log(
+                                {"id": uid, "email": ""},
+                                "payment.overage_applied",
+                                session_id=sid,
+                                form_name=str(qty),
+                            )
             return {"received": True}
 
         if obj.get("mode") != "setup":
@@ -210,6 +217,11 @@ async def stripe_webhook(request: Request):
                                 overage_packages_pending=0, overage_packages_invoiced=0 WHERE id=$7""",
                             plan, sub_id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id,
                         )
+                    await write_audit_log(
+                        {"id": user_id, "email": obj.get("customer_email", ""), "stripe_customer_id": stripe_customer},
+                        "payment.subscription_created",
+                        session_id=sub_id,
+                    )
 
         customer_id = obj.get("customer")
         if customer_id:
@@ -313,10 +325,15 @@ async def stripe_webhook(request: Request):
                         now, sub_id,
                     )
                     row = await conn.fetchrow(
-                        "SELECT email, full_name, payment_failed_at FROM users WHERE stripe_subscription_id = $1",
+                        "SELECT id, email, full_name, stripe_customer_id, payment_failed_at FROM users WHERE stripe_subscription_id = $1",
                         sub_id,
                     )
             if row:
+                await write_audit_log(
+                    {"id": row["id"], "email": row["email"], "stripe_customer_id": row.get("stripe_customer_id", "")},
+                    "payment.failed",
+                    session_id=sub_id,
+                )
                 row = dict(row)
                 failed_at_val = row.get("payment_failed_at")
                 if failed_at_val is not None:
@@ -362,12 +379,22 @@ async def stripe_webhook(request: Request):
                             if int(idempotency_status.split()[-1]) == 0:
                                 logger.info(f"Stripe webhook: duplicate event {event_id}, skipping")
                                 return {"received": True}
+                        cancelled_row = await conn.fetchrow(
+                            "SELECT id, email, stripe_customer_id FROM users WHERE stripe_subscription_id = $1",
+                            sub_id,
+                        )
                         await conn.execute(
                             "UPDATE users SET subscription_tier='free', packages_limit=0, packages_used=0,"
                             " payment_status='ok', payment_failed_at=NULL, stripe_subscription_id=NULL,"
                             " overage_packages_pending=0, overage_packages_invoiced=0"
                             " WHERE stripe_subscription_id=$1",
                             sub_id,
+                        )
+                    if cancelled_row:
+                        await write_audit_log(
+                            {"id": cancelled_row["id"], "email": cancelled_row["email"], "stripe_customer_id": cancelled_row.get("stripe_customer_id", "")},
+                            "payment.subscription_cancelled",
+                            session_id=sub_id,
                         )
                 logger.info(f"Subscription deleted: user downgraded to free for sub {sub_id}")
 
@@ -493,7 +520,8 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
         raise HTTPException(500, "Stripe API key not configured")
     except Exception as e:
         import traceback
-        logger.error(f"verify-upgrade error: {e}\n{traceback.format_exc()}")
+        logger.error(f"verify-upgrade error: error_type={type(e).__name__}, error_code={getattr(e, 'code', None)}")
+        logger.debug(f"verify-upgrade traceback:\n{traceback.format_exc()}")
         raise HTTPException(500, "Subscription verification failed. Please try again.")
 
 

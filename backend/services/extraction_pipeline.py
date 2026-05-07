@@ -23,9 +23,12 @@ extra_forms_scored  : list[dict]
 unique_low_conf     : list
 available_forms     : list[dict]
 """
+import json
 import logging
 import os
-from typing import Any
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from services.ocr_service import extract_text
 from services.extraction_service import (
@@ -42,6 +45,61 @@ from repositories.session_repository import new_processing_session
 logger = logging.getLogger(__name__)
 
 
+class ProcessingIntegrityError(RuntimeError):
+    """Raised when LLM extraction output fails schema validation before DB persist."""
+
+
+class _ExtractionOutput(BaseModel):
+    """Minimal schema guard on extract_facts_long output before it reaches the DB.
+
+    Facts and flags are open dicts — we only enforce that both keys are present
+    and are dicts.  Field-level constraints live in extraction_service._validate_parsed;
+    this layer catches any structural regression that bypasses that validator.
+
+    extra="allow" preserves top-level keys produced by extract_facts() beyond
+    facts/flags (e.g. manual_confirmation_required) so they are not silently
+    dropped by Pydantic before the result reaches processed_docs.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    facts: Dict[str, Any]
+    flags: Dict[str, Any]
+
+    @field_validator("facts", "flags", mode="before")
+    @classmethod
+    def _must_be_dict(cls, v: Any, info: Any) -> Any:
+        if not isinstance(v, dict):
+            raise ValueError(f"'{info.field_name}' must be a dict, got {type(v).__name__}")
+        return v
+
+
+def _validate_extraction_output(raw: dict, doc_type: str) -> dict:
+    """Validate extract_facts_long output with Pydantic before persisting to DB.
+
+    On failure: logs the raw output, raises ProcessingIntegrityError.
+    """
+    try:
+        validated = _ExtractionOutput.model_validate(raw)
+        # Attribute access (not .model_dump()) so Pydantic's serializer never
+        # runs over the annotated envelopes inside facts.
+        result = {"facts": validated.facts, "flags": validated.flags}
+        # Forward any extra top-level keys (e.g. manual_confirmation_required).
+        if validated.model_extra:
+            result.update(validated.model_extra)
+        return result
+    except Exception as exc:
+        logger.error(
+            "extract_facts_long output failed schema validation for doc_type=%r. "
+            "Raw output (truncated): %.2000s — error: %s",
+            doc_type,
+            json.dumps(raw, default=str),
+            exc,
+        )
+        raise ProcessingIntegrityError(
+            f"Extraction output for doc_type={doc_type!r} failed integrity check: {exc}"
+        ) from exc
+
+
 async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
     """Run OCR, extraction, validation, and form-matching for *file_paths*.
 
@@ -56,8 +114,9 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
         if len(text) < 30:
             continue
         all_low_conf += low_conf
-        doc_type       = identify_doc_type(text)
-        extracted      = await extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
+        doc_type  = identify_doc_type(text)
+        raw       = await extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
+        extracted = _validate_extraction_output(raw, doc_type)
         processed_docs.append({
             "filename":              os.path.basename(path),
             "path":                  path,

@@ -178,6 +178,130 @@ async def run_retention_cleanup():
         logger.error("Retention cleanup failed: %s", ex)
 
 
+# ASYNC-SAFE
+async def run_audit_log_retention():
+    """
+    SOC 2 Availability — nightly audit log retention sweep (runs at 03:30 UTC).
+
+    Minimum retention per table: 1 year (365 days). Configurable upward via env vars.
+    - acord_audit_log:         SOC 2 audit trail for all form activity
+    - field_source_audit:      field-level change provenance
+    - sqs_recommendation_audit: recommendation and SQS scoring history
+
+    processing_sessions.facts retention is handled by run_facts_retention() at 04:00 UTC.
+    """
+    import os as _os
+
+    audit_days = int(_os.getenv("AUDIT_LOG_RETENTION_DAYS", "365"))
+    cutoff     = (datetime.now(timezone.utc) - timedelta(days=audit_days)).isoformat()
+
+    def _row_count(status: str) -> int:
+        try:
+            return int(status.split()[-1])
+        except Exception:
+            return 0
+
+    try:
+        async with get_pool().acquire() as conn:
+            async with conn.transaction():
+                r_audit = await conn.execute(
+                    "DELETE FROM acord_audit_log WHERE created_at < $1",
+                    cutoff,
+                )
+                r_field = await conn.execute(
+                    "DELETE FROM field_source_audit WHERE created_at < $1",
+                    cutoff,
+                )
+                r_sqs = await conn.execute(
+                    "DELETE FROM sqs_recommendation_audit WHERE created_at < $1",
+                    cutoff,
+                )
+
+        n_audit = _row_count(r_audit)
+        n_field = _row_count(r_field)
+        n_sqs   = _row_count(r_sqs)
+        ts      = datetime.now(timezone.utc).isoformat()
+
+        logger.info(
+            "Audit log retention: cutoff=%s deleted acord_audit_log=%d "
+            "field_source_audit=%d sqs_recommendation_audit=%d at=%s",
+            cutoff, n_audit, n_field, n_sqs, ts,
+        )
+    except Exception as ex:
+        logger.error("Audit log retention cleanup failed: %s", ex)
+
+
+# ASYNC-SAFE
+async def run_facts_retention():
+    """
+    SOC 2 Privacy / GDPR Art. 5(1)(e) — nightly facts data-minimization sweep (04:00 UTC).
+
+    Nulls out processing_sessions.facts for sessions older than the tier threshold.
+    The session row is preserved; only the facts JSONB column is replaced with a
+    tombstone so downstream audit queries remain valid.
+
+    Retention windows:
+      free        →  30 days
+      essentials  → 180 days
+      professional / enterprise → indefinite (skipped)
+    """
+    import json as _json
+
+    now = datetime.now(timezone.utc)
+    ts  = now.isoformat()
+
+    TIERS = {
+        "free":       30,
+        "essentials": 180,
+    }
+
+    def _tombstone(tier: str) -> str:
+        return _json.dumps({
+            "purged":    True,
+            "purged_at": ts,
+            "reason":    "retention_policy",
+            "tier":      tier,
+        })
+
+    def _row_count(status: str) -> int:
+        try:
+            return int(status.split()[-1])
+        except Exception:
+            return 0
+
+    totals: dict[str, int] = {}
+
+    try:
+        for tier, days in TIERS.items():
+            cutoff = (now - timedelta(days=days)).isoformat()
+            tombstone = _tombstone(tier)
+            try:
+                async with get_pool().acquire() as conn:
+                    result = await conn.execute(
+                        """
+                        UPDATE processing_sessions ps
+                        SET    facts = $1::jsonb
+                        FROM   users u
+                        WHERE  ps.user_id     = u.id
+                          AND  u.subscription_tier = $2
+                          AND  ps.updated_at  < $3
+                          AND  (ps.facts IS NULL OR ps.facts->>'purged' IS DISTINCT FROM 'true')
+                        """,
+                        tombstone, tier, cutoff,
+                    )
+                totals[tier] = _row_count(result)
+            except Exception as ex:
+                logger.error("Facts retention failed for tier=%s: %s", tier, ex)
+                totals[tier] = -1
+
+        logger.info(
+            "Facts retention: purged free=%d essentials=%d at=%s",
+            totals.get("free", 0), totals.get("essentials", 0), ts,
+        )
+    except Exception as ex:
+        logger.error("Facts retention cron failed: %s", ex)
+
+
 def start_scheduler():
     global _lock_conn
     try:
@@ -212,8 +336,13 @@ def start_scheduler():
     scheduler.add_job(run_daily_payment_lifecycle, "cron", hour=9,  minute=0)
     scheduler.add_job(run_arq_auto_reminders,      "cron", hour=10, minute=0)
     scheduler.add_job(run_retention_cleanup,        "cron", hour=3,  minute=0)
+    scheduler.add_job(run_audit_log_retention,      "cron", hour=3,  minute=30)
+    scheduler.add_job(run_facts_retention,          "cron", hour=4,  minute=0)
     scheduler.start()
-    logger.info("Schedulers started: payment lifecycle + ARQ auto-reminders + retention cleanup")
+    logger.info(
+        "Schedulers started: payment lifecycle + ARQ auto-reminders + "
+        "retention cleanup + audit log retention + facts retention"
+    )
 
 
 def stop_scheduler():

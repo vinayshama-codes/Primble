@@ -19,7 +19,7 @@ from repositories.session_repository import (
     get_processing_session, new_processing_session, upd_processing_session,
 )
 from services.auth_service import get_current_user
-from services.extraction_pipeline import run_extraction_pipeline
+from services.extraction_pipeline import run_extraction_pipeline, ProcessingIntegrityError
 from services.extraction_service import extract_facts_long, identify_doc_type, merge_facts, select_primary_truth
 from services.form_service import (
     filter_available_forms, load_all_forms, match_forms, process_single_form,
@@ -84,8 +84,21 @@ async def upload_declaration(
         if len(files) > MAX_FILES_PER_UPLOAD:
             raise HTTPException(400, f"Too many files — maximum {MAX_FILES_PER_UPLOAD} per upload.")
 
+        # Read all file bytes first so we can enforce the aggregate size cap before
+        # touching the filesystem.  10 × 50 MB = 500 MB per request without this guard.
+        contents = []
         for f in files:
-            content = await f.read(MAX_UPLOAD_SIZE_BYTES + 1)
+            contents.append((f, await f.read(MAX_UPLOAD_SIZE_BYTES + 1)))
+
+        total_bytes = sum(len(c) for _, c in contents)
+        if total_bytes > MAX_UPLOAD_SIZE_BYTES * MAX_FILES_PER_UPLOAD:
+            raise HTTPException(
+                413,
+                f"Total upload size exceeds the aggregate limit "
+                f"({MAX_UPLOAD_SIZE_BYTES * MAX_FILES_PER_UPLOAD // 1024 // 1024} MB).",
+            )
+
+        for f, content in contents:
             if len(content) > MAX_UPLOAD_SIZE_BYTES:
                 raise HTTPException(
                     413,
@@ -194,6 +207,8 @@ async def upload_declaration(
             pipeline_result = await run_extraction_pipeline(all_paths, current_user["id"])
         except ValueError:
             raise HTTPException(400, "No readable text found in uploaded files")
+        except ProcessingIntegrityError:
+            raise HTTPException(422, "Document processing failed an integrity check. Please re-upload your files or contact support.")
 
         processed_docs     = pipeline_result["processed_docs"]
         primary            = pipeline_result["primary"]
@@ -843,7 +858,7 @@ async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depen
     else:
         raise HTTPException(404, f"Form '{form_id}' not found")
 
-    logger.info(f"EPIC EXPORT: form={form_id} session={session_id[:8]} user={current_user.get('email')}\n{json.dumps(epic_payload, indent=2, default=str)}")
+    logger.info("EPIC EXPORT: form=%s session=%s user=%s", form_id, session_id[:8] if session_id else "none", current_user.get("email", "unknown"))
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
@@ -886,7 +901,7 @@ async def send_to_vertafore(session_id: str, form_id: str, current_user: dict = 
     else:
         raise HTTPException(404, f"Form '{form_id}' not found")
 
-    logger.info(f"VERTAFORE EXPORT: form={form_id} session={session_id[:8]} user={current_user.get('email')}\n{json.dumps(payload, indent=2, default=str)}")
+    logger.info("VERTAFORE EXPORT: form=%s session=%s user=%s", form_id, session_id[:8] if session_id else "none", current_user.get("email", "unknown"))
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()

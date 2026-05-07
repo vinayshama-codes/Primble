@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import uuid
 import logging
@@ -31,9 +32,10 @@ except Exception as _redis_init_err:
     )
     _auth_redis = None
 
-_AUTH_CACHE_TTL  = 300                 # seconds — user dict cache
-_SESSION_TTL_H   = _CFG_SESSION_TTL_H  # hours   — driven by SESSION_TTL_H env var
-_REVOKED_KEY_PFX = "revoked:"
+_AUTH_CACHE_TTL        = 300                 # seconds — user dict cache
+_SESSION_TTL_H         = _CFG_SESSION_TTL_H  # hours   — driven by SESSION_TTL_H env var
+_INACTIVITY_TIMEOUT_H  = int(os.getenv("SESSION_INACTIVITY_TIMEOUT_H", "2"))
+_REVOKED_KEY_PFX       = "revoked:"
 
 
 def hash_password(password: str) -> str:
@@ -186,6 +188,11 @@ async def get_current_user(
         session = dict(session)
         if datetime.fromisoformat(session["expires_at"]) < datetime.now(timezone.utc):
             raise HTTPException(401, "Session expired")
+        last_used = session.get("last_used_at")
+        if last_used:
+            idle_since = datetime.now(timezone.utc) - datetime.fromisoformat(last_used)
+            if idle_since > timedelta(hours=_INACTIVITY_TIMEOUT_H):
+                raise HTTPException(401, "Session expired due to inactivity")
         # refresh last_used_at; ignore failure (non-critical)
         try:
             await conn.execute(

@@ -35,7 +35,13 @@ def _client():
     global _s3_client
     if _s3_client is None:
         import boto3
-        _s3_client = boto3.client("s3", region_name=_REGION)
+        _s3_client = boto3.client(
+            "s3",
+            endpoint_url=os.getenv("STORAGE_ENDPOINT"),
+            aws_access_key_id=os.getenv("STORAGE_ACCESS_KEY"),
+            aws_secret_access_key=os.getenv("STORAGE_SECRET_KEY"),
+            region_name="auto",
+        )
     return _s3_client
 
 

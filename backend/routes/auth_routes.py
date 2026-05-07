@@ -17,11 +17,13 @@ from models.schemas import (
 from services.auth_service import (
     hash_password, verify_password, create_session_token, get_current_user,
     revoke_token, rotate_session, revoke_all_sessions,
+    _auth_redis,
 )
 from services.email_service import send_verification_email, _send_generic_email
 from utils.helpers import generate_verification_code
 from utils.validators import validate_work_email, validate_password
 from utils.rate_limiter import check_auth_rate_limit, get_client_ip, _redis as _rate_limiter_redis
+from repositories.audit_repository import write_audit_log
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -36,6 +38,17 @@ _NONCE_TTL = 300  # seconds
 # In-process nonce store used when Redis is unavailable.
 # Maps nonce -> (fingerprint, expires_at_monotonic)
 _nonce_store: dict = {}
+
+# Account lockout configuration (SOC 2 CC6.1)
+_LOCKOUT_MAX_FAILURES = 10
+_LOCKOUT_WINDOW_S     = 900  # 15 minutes
+# In-memory fallback: email_hash -> (failure_count, locked_until_monotonic | None)
+_lockout_store: dict = {}
+
+
+def _email_hash(email: str) -> str:
+    return hashlib.sha256(email.lower().encode()).hexdigest()
+
 
 def _nonce_fingerprint(request: Request) -> str:
     ip = request.client.host if request.client else "unknown"
@@ -71,6 +84,94 @@ def _nonce_pop(nonce: str):
     return fingerprint
 
 
+# ── Account lockout helpers (SOC 2 CC6.1) ────────────────────────────────────
+
+def _lockout_key(email: str) -> str:
+    return f"login_failures:{_email_hash(email)}"
+
+
+def _check_lockout(email: str) -> None:
+    """Raise 429 if the account is currently locked out."""
+    key = _lockout_key(email)
+    redis = _auth_redis or _rate_limiter_redis
+    if redis is not None:
+        try:
+            val = redis.get(key)
+            if val is not None:
+                count = int(val)
+                if count >= _LOCKOUT_MAX_FAILURES:
+                    raise HTTPException(
+                        429,
+                        "Account temporarily locked. Try again in 15 minutes.",
+                    )
+            return
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+    import time
+    entry = _lockout_store.get(key)
+    if entry:
+        count, locked_until = entry
+        if locked_until and time.monotonic() < locked_until and count >= _LOCKOUT_MAX_FAILURES:
+            raise HTTPException(
+                429,
+                "Account temporarily locked. Try again in 15 minutes.",
+            )
+
+
+def _record_failed_login(email: str) -> bool:
+    """Increment failure counter. Returns True if this attempt triggers lockout."""
+    key = _lockout_key(email)
+    redis = _auth_redis or _rate_limiter_redis
+    if redis is not None:
+        try:
+            count = redis.incr(key)
+            redis.expire(key, _LOCKOUT_WINDOW_S)
+            return int(count) >= _LOCKOUT_MAX_FAILURES
+        except Exception:
+            pass
+    import time
+    entry = _lockout_store.get(key, (0, None))
+    count = entry[0] + 1
+    locked_until = time.monotonic() + _LOCKOUT_WINDOW_S if count >= _LOCKOUT_MAX_FAILURES else None
+    _lockout_store[key] = (count, locked_until)
+    return count >= _LOCKOUT_MAX_FAILURES
+
+
+def _clear_failed_logins(email: str) -> None:
+    key = _lockout_key(email)
+    redis = _auth_redis or _rate_limiter_redis
+    if redis is not None:
+        try:
+            redis.delete(key)
+            return
+        except Exception:
+            pass
+    _lockout_store.pop(key, None)
+
+
+def _send_lockout_notification(email: str) -> None:
+    subject   = "Acordly: Your account has been temporarily locked"
+    body_txt  = (
+        "Multiple failed login attempts were detected on your Acordly account.\n\n"
+        "Your account has been temporarily locked for 15 minutes as a security precaution.\n\n"
+        "If this was you, please wait and try again. If this was not you, consider resetting your password."
+    )
+    body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
+  <h2 style="color:#dc2626;">Security Alert</h2>
+  <p>Multiple failed login attempts were detected on your <strong>Acordly</strong> account.</p>
+  <p>Your account has been <strong>temporarily locked for 15 minutes</strong> as a security precaution.</p>
+  <p style="color:#64748b;font-size:13px;">If this was you, please wait and try again. If this was not you, <a href="#" style="color:#e6007a;">reset your password</a> immediately.</p>
+</div>"""
+    try:
+        _send_generic_email(email, subject, body_txt, body_html)
+    except Exception as ex:
+        logger.warning(f"Failed to send lockout notification to {email}: {ex}")
+
+
+# ── Cookie helpers ────────────────────────────────────────────────────────────
+
 def _set_session_cookie(response: JSONResponse, token: str) -> None:
     response.set_cookie(
         key="acordly_session",
@@ -86,6 +187,8 @@ def _set_session_cookie(response: JSONResponse, token: str) -> None:
 def _clear_session_cookie(response: JSONResponse) -> None:
     response.delete_cookie(key="acordly_session", path="/")
 
+
+# ── Auth endpoints ────────────────────────────────────────────────────────────
 
 @router.post("/signup")
 async def signup(req: SignupRequest, request: Request):
@@ -183,7 +286,19 @@ async def verify_email(req: VerifyEmailRequest, request: Request):
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
-    resp  = JSONResponse({
+    user_stub = {
+        "id": user_id,
+        "email": pending["email"],
+        "full_name": pending.get("full_name", ""),
+        "organization_name": pending.get("organization_name", ""),
+        "acord_license_confirmed": 0,
+        "acord_disclaimer_accepted": 1,
+    }
+    await write_audit_log(
+        user_stub, "user.signup",
+        ip_address=request.client.host if request.client else None,
+    )
+    resp = JSONResponse({
         "success": True,
         "user": {
             "id": user_id, "email": pending["email"],
@@ -226,13 +341,34 @@ async def resend_verification(request: Request):
 @router.post("/login")
 async def login(req: LoginRequest, request: Request):
     check_auth_rate_limit(req.email.lower())
+    _check_lockout(req.email)
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", req.email)
         if not row or not dict(row).get("password_hash"):
+            # Log failed attempt with hashed email — SOC 2 CC7.2
+            await write_audit_log(
+                {"id": None, "email": _email_hash(req.email.lower()), "organization_name": "",
+                 "acord_license_confirmed": 0},
+                "user.login_failed",
+                ip_address=request.client.host if request.client else None,
+            )
+            triggered_lockout = _record_failed_login(req.email)
+            if triggered_lockout:
+                _send_lockout_notification(req.email)
             raise HTTPException(401, "Invalid credentials")
         user = dict(row)
         if not verify_password(req.password, user["password_hash"]):
+            # Log failed attempt with hashed email — SOC 2 CC7.2
+            await write_audit_log(
+                {"id": None, "email": _email_hash(req.email.lower()), "organization_name": "",
+                 "acord_license_confirmed": 0},
+                "user.login_failed",
+                ip_address=request.client.host if request.client else None,
+            )
+            triggered_lockout = _record_failed_login(req.email)
+            if triggered_lockout:
+                _send_lockout_notification(req.email)
             raise HTTPException(401, "Invalid credentials")
         if not int(user.get("email_verified", 0) or 0):
             return JSONResponse(
@@ -245,10 +381,15 @@ async def login(req: LoginRequest, request: Request):
             datetime.now(timezone.utc).isoformat(), user["id"],
         )
 
+    _clear_failed_logins(req.email)
     token = await create_session_token(
         user["id"],
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
+    )
+    await write_audit_log(
+        user, "user.login",
+        ip_address=request.client.host if request.client else None,
     )
     sub   = user.get("subscription_tier", "free") or "free"
     used  = int(user.get("downloads_used", 0) or 0)
@@ -334,6 +475,22 @@ async def reset_password(request: Request):
         )
 
     await revoke_all_sessions(user["id"])
+
+    # Notify the user that their password was changed (SOC 2 CC6.1)
+    try:
+        _send_generic_email(
+            email,
+            "Your Acordly password was changed",
+            "Your Acordly account password was successfully changed. If you did not do this, please contact support immediately.",
+            """<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
+  <h2>Password Changed</h2>
+  <p>Your <strong>Acordly</strong> account password was successfully changed.</p>
+  <p style="color:#dc2626;">If you did not make this change, please contact support immediately and reset your password.</p>
+</div>""",
+        )
+    except Exception as ex:
+        logger.warning(f"Failed to send password-change notification to {email}: {ex}")
+
     return {"success": True, "message": "Password updated successfully."}
 
 
@@ -403,6 +560,10 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
             user["id"],
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
+        )
+        await write_audit_log(
+            user, "user.oauth_login",
+            ip_address=request.client.host if request.client else None,
         )
         sub                = user.get("subscription_tier", "free") or "free"
         used               = int(user.get("downloads_used", 0) or 0)
@@ -524,14 +685,148 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 @router.post("/logout")
 async def logout(
+    request: Request,
     authorization: str = Header(None),
     acordly_session: str = Cookie(None),
+    current_user: dict = Depends(get_current_user),
 ):
     token = acordly_session
     if not token and authorization and authorization.startswith("Bearer "):
         token = authorization.replace("Bearer ", "")
     if token:
         await revoke_token(token)
+    await write_audit_log(
+        current_user, "user.logout",
+        ip_address=request.client.host if request.client else None,
+    )
     resp = JSONResponse({"success": True})
     _clear_session_cookie(resp)
     return resp
+
+
+# ── GDPR / SOC 2 user-rights endpoints ───────────────────────────────────────
+
+@router.delete("/delete-account")
+async def delete_account(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    acordly_session: str = Cookie(None),
+    authorization: str = Header(None),
+):
+    """
+    Permanently delete the caller's account.
+
+    Request body: { "password": "<current password>" }
+    Google-only accounts (no password_hash) skip the password check.
+    All user PII and related data are cascade-deleted; the Stripe subscription
+    is cancelled immediately if one exists.
+    """
+    body = await request.json()
+    provided_pw = body.get("password") or ""
+
+    # Password confirmation — skip for Google-only accounts
+    has_password = bool(current_user.get("password_hash"))
+    if has_password:
+        if not provided_pw:
+            raise HTTPException(400, "Password confirmation is required to delete your account.")
+        if not verify_password(provided_pw, current_user["password_hash"]):
+            raise HTTPException(403, "Incorrect password.")
+
+    user_id     = current_user["id"]
+    email       = current_user.get("email", "")
+    customer_id = current_user.get("stripe_customer_id")
+    sub_id      = current_user.get("stripe_subscription_id")
+
+    # Cancel Stripe subscription immediately
+    if customer_id or sub_id:
+        try:
+            import stripe as _stripe
+            if sub_id:
+                try:
+                    _stripe.Subscription.cancel(sub_id)
+                    logger.info(f"delete_account: cancelled Stripe sub {sub_id} for user {user_id}")
+                except Exception as se:
+                    logger.warning(f"delete_account: could not cancel sub {sub_id}: {se}")
+            else:
+                subs = _stripe.Subscription.list(customer=customer_id, status="active", limit=10)
+                for s in subs.data:
+                    try:
+                        _stripe.Subscription.cancel(s.id)
+                    except Exception as se:
+                        logger.warning(f"delete_account: could not cancel sub {s.id}: {se}")
+        except Exception as ex:
+            logger.warning(f"delete_account: Stripe cancellation error for user {user_id}: {ex}")
+
+    # Revoke all sessions
+    token = acordly_session
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization.replace("Bearer ", "")
+    await revoke_all_sessions(user_id)
+
+    # Audit log before deletion (so we have a record)
+    await write_audit_log(
+        current_user, "user.account_deleted",
+        ip_address=request.client.host if request.client else None,
+    )
+
+    # Cascade-delete all user data
+    async with get_pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM sessions            WHERE user_id = $1", user_id)
+            await conn.execute("DELETE FROM processing_sessions WHERE user_id = $1", user_id)
+            await conn.execute("DELETE FROM applied_overage_sessions WHERE user_id = $1", user_id)
+            await conn.execute("DELETE FROM arq_sessions        WHERE user_id = $1", user_id)
+            # Anonymize audit log rows rather than deleting (preserves the deletion record)
+            await conn.execute(
+                """UPDATE acord_audit_log
+                   SET user_email = '[deleted]', organization_name = '[deleted]'
+                   WHERE user_id = $1""",
+                user_id,
+            )
+            # Hard-delete the user row; cascade handles FK-linked tables
+            await conn.execute("DELETE FROM users WHERE id = $1", user_id)
+
+    logger.info(f"delete_account: user {user_id} ({email}) deleted their account")
+    resp = JSONResponse({"success": True, "message": "Account deleted."})
+    _clear_session_cookie(resp)
+    return resp
+
+
+@router.get("/data-export")
+async def data_export(
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    GDPR Art. 20 data portability — return all data held for this user.
+    """
+    user_id = current_user["id"]
+
+    async with get_pool().acquire() as conn:
+        sessions_rows = await conn.fetch(
+            """SELECT id, created_at, last_used_at, expires_at, ip_address, user_agent
+               FROM sessions WHERE user_id = $1 ORDER BY created_at DESC""",
+            user_id,
+        )
+        audit_rows = await conn.fetch(
+            """SELECT id, action, form_id, form_name, ip_address, timestamp
+               FROM acord_audit_log WHERE user_id = $1 ORDER BY timestamp DESC LIMIT 500""",
+            user_id,
+        )
+        ps_rows = await conn.fetch(
+            """SELECT id, form_type, status, created_at, updated_at
+               FROM processing_sessions WHERE user_id = $1 ORDER BY created_at DESC""",
+            user_id,
+        )
+
+    # Redact sensitive columns from the user profile before exporting
+    profile = {k: v for k, v in current_user.items() if k not in (
+        "password_hash", "verification_code", "verification_expires",
+    )}
+
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "profile": {k: (str(v) if v is not None else None) for k, v in profile.items()},
+        "sessions": [dict(r) for r in sessions_rows],
+        "audit_log": [dict(r) for r in audit_rows],
+        "form_submissions": [dict(r) for r in ps_rows],
+    }
