@@ -650,6 +650,235 @@ def _apply_fact_key(fact_key: str, facts: dict):
     return str(val) if val is not None else None
 
 
+_ACORD125_REQUIRED_ALWAYS = {
+    "Producer_FullName_A",
+    "NamedInsured_FullName_A",
+    "NamedInsured_MailingAddress_LineOne_A",
+    "NamedInsured_MailingAddress_CityName_A",
+    "NamedInsured_MailingAddress_StateOrProvinceCode_A",
+    "NamedInsured_MailingAddress_PostalCode_A",
+    "Policy_EffectiveDate_A",
+    "Policy_ExpirationDate_A",
+    "CommercialPolicy_OperationsDescription_A",
+    "NamedInsured_BusinessStartDate_A",
+}
+
+_ACORD125_CONTACT_FIELDS = {
+    "Producer_ContactPerson_FullName_A",
+    "Producer_ContactPerson_PhoneNumber_A",
+    "Producer_ContactPerson_EmailAddress_A",
+    "NamedInsured_Primary_PhoneNumber_A",
+}
+
+_ACORD125_LOB_FIELDS = {
+    "Policy_LineOfBusiness_BoilerAndMachineryIndicator_A",
+    "Policy_LineOfBusiness_BusinessAutoIndicator_A",
+    "Policy_LineOfBusiness_BusinessOwnersIndicator_A",
+    "Policy_LineOfBusiness_CommercialGeneralLiability_A",
+    "Policy_LineOfBusiness_CommercialInlandMarineIndicator_A",
+    "Policy_LineOfBusiness_CommercialProperty_A",
+    "Policy_LineOfBusiness_CrimeIndicator_A",
+    "Policy_LineOfBusiness_CyberAndPrivacy_A",
+    "Policy_LineOfBusiness_FiduciaryLiabilityIndicator_A",
+    "Policy_LineOfBusiness_GarageAndDealersIndicator_A",
+    "Policy_LineOfBusiness_LiquorLiabilityIndicator_A",
+    "Policy_LineOfBusiness_MotorCarrierIndicator_A",
+    "Policy_LineOfBusiness_TruckersIndicator_A",
+    "Policy_LineOfBusiness_UmbrellaIndicator_A",
+    "Policy_LineOfBusiness_YachtIndicator_A",
+    "Policy_LineOfBusiness_OtherIndicator_A",
+    "Policy_LineOfBusiness_OtherIndicator_B",
+    "Policy_LineOfBusiness_OtherIndicator_C",
+    "Policy_LineOfBusiness_OtherIndicator_D",
+    "Policy_LineOfBusiness_OtherIndicator_E",
+    "Policy_LineOfBusiness_OtherIndicator_F",
+}
+
+_ACORD125_BUSINESS_TYPE_FIELDS = {
+    "BusinessInformation_BusinessType_ApartmentsIndicator_A",
+    "BusinessInformation_BusinessType_CondominiumsIndicator_A",
+    "BusinessInformation_BusinessType_ContractorIndicator_A",
+    "BusinessInformation_BusinessType_InstitutionalIndicator_A",
+    "BusinessInformation_BusinessType_ManufacturingIndicator_A",
+    "BusinessInformation_BusinessType_OfficeIndicator_A",
+    "BusinessInformation_BusinessType_RestaurantIndicator_A",
+    "BusinessInformation_BusinessType_RetailIndicator_A",
+    "BusinessInformation_BusinessType_ServiceIndicator_A",
+    "BusinessInformation_BusinessType_WholesaleIndicator_A",
+    "BusinessInformation_BusinessType_OtherIndicator_A",
+}
+
+_ACORD125_ENTITY_FIELDS = {
+    "NamedInsured_LegalEntity_CorporationIndicator_A",
+    "NamedInsured_LegalEntity_IndividualIndicator_A",
+    "NamedInsured_LegalEntity_JointVentureIndicator_A",
+    "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A",
+    "NamedInsured_LegalEntity_NotForProfitIndicator_A",
+    "NamedInsured_LegalEntity_PartnershipIndicator_A",
+    "NamedInsured_LegalEntity_SubchapterSCorporationIndicator_A",
+    "NamedInsured_LegalEntity_TrustIndicator_A",
+    "NamedInsured_LegalEntity_OtherIndicator_A",
+}
+
+_ACORD125_LOSS_ROW_FIELDS = (
+    "LossHistory_OccurrenceDate_{row}",
+    "LossHistory_LineOfBusiness_{row}",
+    "LossHistory_OccurrenceDescription_{row}",
+    "LossHistory_ClaimDate_{row}",
+    "LossHistory_PaidAmount_{row}",
+    "LossHistory_ReservedAmount_{row}",
+    "LossHistory_ClaimStatus_OpenCode_{row}",
+)
+
+
+def _acord125_has_value(data: dict, field: str) -> bool:
+    val = data.get(field)
+    return val is not None and str(val).strip() not in ("", "null", "None", "Off", "No", "false", "0")
+
+
+def _acord125_is_yes(data: dict, field: str) -> bool:
+    return str(data.get(field) or "").strip().lower() in {"yes", "y", "true", "1", "on"}
+
+
+def _acord125_any(data: dict, fields: set) -> bool:
+    return any(_acord125_has_value(data, field) for field in fields)
+
+
+def _acord125_row_started(data: dict, prefix: str, row: str) -> bool:
+    needle = f"{prefix}_"
+    suffix = f"_{row}"
+    return any(k.startswith(needle) and k.endswith(suffix) and _acord125_has_value(data, k) for k in data)
+
+
+def apply_acord125_missing_field_highlights(
+    form_id: str,
+    facts: dict,
+    field_state: dict,
+    confidence: dict,
+) -> dict:
+    """
+    ACORD 125-only visual completeness layer.
+
+    This does not change validation, scoring, mappings, or API shape. It only
+    reuses the existing `missing_required` confidence label so the current PDF
+    viewer/PDF renderer can paint empty required/triggered fields yellow.
+    """
+    if form_id != "ACORD_125":
+        return confidence
+
+    required_now = set(_ACORD125_REQUIRED_ALWAYS)
+    managed = set(_ACORD125_REQUIRED_ALWAYS)
+
+    managed.update(_ACORD125_CONTACT_FIELDS)
+    if not _acord125_any(field_state, _ACORD125_CONTACT_FIELDS):
+        required_now.update(_ACORD125_CONTACT_FIELDS)
+
+    managed.update(_ACORD125_LOB_FIELDS)
+    if not _acord125_any(field_state, _ACORD125_LOB_FIELDS):
+        required_now.update(_ACORD125_LOB_FIELDS)
+
+    managed.update(_ACORD125_BUSINESS_TYPE_FIELDS)
+    if not _acord125_any(field_state, _ACORD125_BUSINESS_TYPE_FIELDS):
+        required_now.update(_ACORD125_BUSINESS_TYPE_FIELDS)
+
+    managed.update(_ACORD125_ENTITY_FIELDS)
+    if not _acord125_any(field_state, _ACORD125_ENTITY_FIELDS):
+        required_now.update(_ACORD125_ENTITY_FIELDS)
+
+    for row in ("A", "B", "C", "D", "E", "F"):
+        other = f"Policy_LineOfBusiness_OtherIndicator_{row}"
+        desc = f"Policy_LineOfBusiness_OtherLineOfBusinessDescription_{row}"
+        managed.add(desc)
+        if _acord125_is_yes(field_state, other):
+            required_now.add(desc)
+
+        attachment_other = f"CommercialPolicy_Attachment_OtherIndicator_{row}"
+        attachment_desc = f"CommercialPolicy_Attachment_OtherDescription_{row}"
+        managed.add(attachment_desc)
+        if _acord125_is_yes(field_state, attachment_other):
+            required_now.add(attachment_desc)
+
+    for row in ("B", "C"):
+        row_fields = {
+            f"NamedInsured_FullName_{row}",
+            f"NamedInsured_MailingAddress_LineOne_{row}",
+            f"NamedInsured_MailingAddress_CityName_{row}",
+            f"NamedInsured_MailingAddress_StateOrProvinceCode_{row}",
+            f"NamedInsured_MailingAddress_PostalCode_{row}",
+        }
+        managed.update(row_fields)
+        if _acord125_row_started(field_state, "NamedInsured", row):
+            required_now.update(row_fields)
+
+    for row in ("A", "B", "C", "D"):
+        location_fields = {
+            f"CommercialStructure_Location_ProducerIdentifier_{row}",
+            f"CommercialStructure_PhysicalAddress_LineOne_{row}",
+            f"CommercialStructure_PhysicalAddress_CityName_{row}",
+            f"CommercialStructure_PhysicalAddress_StateOrProvinceCode_{row}",
+            f"CommercialStructure_PhysicalAddress_PostalCode_{row}",
+            f"CommercialStructure_AnnualRevenueAmount_{row}",
+            f"BusinessInformation_FullTimeEmployeeCount_{row}",
+            f"BusinessInformation_PartTimeEmployeeCount_{row}",
+            f"BuildingOccupancy_OperationsDescription_{row}",
+        }
+        managed.update(location_fields)
+        if _acord125_row_started(field_state, "CommercialStructure", row) or _acord125_row_started(field_state, "BuildingOccupancy", row):
+            required_now.update(location_fields)
+
+        for trigger, dependent in (
+            (f"CommercialStructure_RiskLocation_OtherIndicator_{row}", f"CommercialStructure_RiskLocation_OtherDescription_{row}"),
+            (f"CommercialStructure_InsuredInterest_OtherIndicator_{row}", f"CommercialStructure_InsuredInterest_OtherDescription_{row}"),
+        ):
+            managed.add(dependent)
+            if _acord125_is_yes(field_state, trigger):
+                required_now.add(dependent)
+
+    if _acord125_is_yes(field_state, "NamedInsured_LegalEntity_OtherIndicator_A"):
+        required_now.add("NamedInsured_LegalEntity_OtherDescription_A")
+    managed.add("NamedInsured_LegalEntity_OtherDescription_A")
+
+    if _acord125_is_yes(field_state, "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A"):
+        required_now.add("NamedInsured_LegalEntity_MemberManagerCount_A")
+    managed.add("NamedInsured_LegalEntity_MemberManagerCount_A")
+
+    conditional_pairs = {
+        "BusinessInformation_BusinessType_OtherIndicator_A": ["BusinessInformation_BusinessType_OtherDescription_A"],
+        "CommercialPolicy_Question_AAICode_A": ["BusinessInformation_ParentOrganizationName_A", "Subsidiary_ParentSubsidiaryRelationshipDescription_A", "Subsidiary_ParentOwnershipPercent_A"],
+        "CommercialPolicy_Question_AAJCode_A": ["Subsidiary_OrganizationName_A", "Subsidiary_ParentSubsidiaryRelationshipDescription_B", "Subsidiary_ParentOwnershipPercent_B"],
+        "CommercialPolicy_Question_ABCCode_A": ["CommercialPolicy_AnyExposureToFlammableExplosivesChemicalsExplanation_A"],
+        "CommercialPolicy_Question_AADCode_A": ["CommercialPolicy_PastLossesClaimsRelatingSexualAbuseDiscriminationNegligentHiringExplanation_A"],
+        "CommercialPolicy_Question_KABCode_A": ["CommercialPolicy_PastFiveYearsAnyApplicantIndictedOrConvictedFraudBriberyArsonExplanation_A"],
+        "CommercialPolicy_Question_KAMCode_A": ["CommercialPolicy_ApplicantOtherBusinessVenturesCoverageNotRequestedExplanation_A"],
+        "CommercialPolicy_Question_KANCode_A": ["CommercialPolicy_ApplicantOwnLeaseOperateDronesExplanation_A"],
+        "CommercialPolicy_Question_KAOCode_A": ["CommercialPolicy_ApplicantHireOthersOperateDronesExplanation_A"],
+    }
+    for trigger, dependents in conditional_pairs.items():
+        managed.update(dependents)
+        if _acord125_is_yes(field_state, trigger):
+            required_now.update(dependents)
+
+    managed.update({"LossHistory_NoPriorLossesIndicator_A", "LossHistory_InformationYearCount_A"})
+    loss_rows_started = any(_acord125_row_started(field_state, "LossHistory", row) for row in ("A", "B", "C"))
+    if not _acord125_is_yes(field_state, "LossHistory_NoPriorLossesIndicator_A") and not loss_rows_started:
+        required_now.update({"LossHistory_NoPriorLossesIndicator_A", "LossHistory_InformationYearCount_A"})
+    for row in ("A", "B", "C"):
+        row_fields = {tmpl.format(row=row) for tmpl in _ACORD125_LOSS_ROW_FIELDS}
+        managed.update(row_fields)
+        if _acord125_row_started(field_state, "LossHistory", row):
+            required_now.update(row_fields)
+
+    for field in managed:
+        if field not in field_state and field not in confidence:
+            continue
+        if field in required_now and not _acord125_has_value(field_state, field):
+            confidence[field] = "missing_required"
+        elif confidence.get(field) == "missing_required":
+            confidence[field] = "filled" if _acord125_has_value(field_state, field) else "low_confidence"
+
+    return confidence
+
+
 def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dict, dict]:
     if not schema:
         return {}, {}
@@ -762,6 +991,8 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
             confidence[field] = "missing_required"
         else:
             confidence[field] = "low_confidence"
+
+    confidence = apply_acord125_missing_field_highlights(form_id, facts, mapped, confidence)
 
     total_filled = sum(1 for v in mapped.values() if v is not None and str(v).strip() not in ("", "null", "None"))
     logger.info(f"Mapped {total_filled}/{len(schema)} fields (form_id={form_id or 'unknown'})")

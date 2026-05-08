@@ -1,0 +1,12 @@
+{
+  "pythonVersion": "3.11",
+  "venvPath": ".",
+  "include": ["backend"],
+  "extraPaths": ["backend"],
+  "reportArgumentType": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportCallIssue": "none",
+  "reportIndexIssue": "none",
+  "reportOperatorIssue": "none",
+  "reportReturnType": "none"
+}

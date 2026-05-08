@@ -274,6 +274,13 @@ export default function PDFJsViewer({
     return null;
   };
 
+  const _highlightBg = (hl, curEdit) => {
+    if (hl === "green") return "rgb(187,247,208)";
+    if (hl === "yellow") return "rgb(254,243,199)";
+    if (hl === "pink") return "rgb(254,226,226)";
+    return curEdit ? "rgba(255,255,255,0.97)" : "transparent";
+  };
+
   const buildOverlay = (scale, canvasW, canvasH, liveValues) => {
     const overlay = overlayRef.current;
     if (!overlay) return;
@@ -298,11 +305,7 @@ export default function PDFJsViewer({
       // Highlighted fields use fully-opaque pastel fills so the PDF canvas text
       // underneath is completely hidden — preventing the double-text ghost effect.
       // Non-highlighted edit fields use a near-opaque white for the same reason.
-      let bg = "transparent";
-      if      (hl === "green")  { bg = "rgb(187,247,208)"; }
-      else if (hl === "yellow") { bg = "rgb(254,243,199)"; }
-      else if (hl === "pink")   { bg = "rgb(254,226,226)"; }
-      else if (curEdit)         { bg = "rgba(255,255,255,0.97)"; }
+      let bg = _highlightBg(hl, curEdit);
 
       const wrap = document.createElement("div");
       // Inset by 1px on all sides so the highlight sits strictly inside the field
@@ -317,7 +320,12 @@ export default function PDFJsViewer({
         cb.checked  = val === "Yes" || val === "true" || val === "1" || val === "On";
         cb.disabled = !curEdit;
         cb.style.cssText = `position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:${Math.min(ch*0.7,13)}px;height:${Math.min(ch*0.7,13)}px;margin:0;cursor:${curEdit?"pointer":"default"};accent-color:#4f7cff;opacity:${curEdit?1:0.5};`;
-        cb.addEventListener("change", e => triggerSave(field.name, e.target.checked ? "Yes" : "Off"));
+        cb.addEventListener("change", e => {
+          const nextVal = e.target.checked ? "Yes" : "Off";
+          triggerSave(field.name, nextVal);
+          wrap.style.background = _highlightBg(_getHighlight(field.name, nextVal), curEdit);
+          updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
+        });
         wrap.appendChild(cb);
       } else if (isSigF) {
         const thisCleared  = clearedSigFieldsRef.current.has(field.name);
@@ -331,14 +339,22 @@ export default function PDFJsViewer({
             triggerSave(field.name, ""); clearedSigFieldsRef.current.add(field.name); wrap.innerHTML = "";
             const inp = document.createElement("input"); inp.type = "text"; inp.value = ""; inp.placeholder = "Type name…";
             inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:rgba(255,255,255,0.95);border:1px solid #ef4444;outline:none;border-radius:2px;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#111;padding:1px 3px;cursor:text;`;
-            inp.addEventListener("input", e => triggerSave(field.name, e.target.value));
+            inp.addEventListener("input", e => {
+              triggerSave(field.name, e.target.value);
+              wrap.style.background = _highlightBg(_getHighlight(field.name, e.target.value), curEdit);
+              updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
+            });
             wrap.appendChild(inp); inp.focus();
           });
           wrap.appendChild(btn);
         } else if (showTextInp) {
           const inp = document.createElement("input"); inp.type = "text"; inp.value = val; inp.placeholder = "Type name…";
           inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:rgba(255,255,255,0.85);border:1px solid rgba(230,0,122,0.4);outline:none;border-radius:2px;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#111;padding:1px 3px;cursor:text;`;
-          inp.addEventListener("input", e => triggerSave(field.name, e.target.value));
+          inp.addEventListener("input", e => {
+            triggerSave(field.name, e.target.value);
+            wrap.style.background = _highlightBg(_getHighlight(field.name, e.target.value), curEdit);
+            updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
+          });
           wrap.appendChild(inp);
         }
       } else if (curEdit) {
@@ -346,7 +362,11 @@ export default function PDFJsViewer({
         // background:transparent lets the wrap's bg (highlight or white) show through;
         // no additional layer means no double-text artifact in edit mode.
         inp.style.cssText = `width:100%;height:100%;box-sizing:border-box;background:transparent;border:none;outline:none;font-size:${fs}px;font-family:Helvetica,Arial,sans-serif;color:#000;padding:1px 3px;cursor:text;`;
-        inp.addEventListener("input", e => triggerSave(field.name, e.target.value));
+        inp.addEventListener("input", e => {
+          triggerSave(field.name, e.target.value);
+          wrap.style.background = _highlightBg(_getHighlight(field.name, e.target.value), curEdit);
+          updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
+        });
         wrap.appendChild(inp);
       } else if (hl && val && val !== "null" && val !== "None") {
         // Render value as DOM text over the opaque highlight background.
@@ -547,7 +567,7 @@ export default function PDFJsViewer({
       {editMode && (
         <div style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ color: "#f59e0b", fontSize: 11 }}>✏️ Click any field to edit — "Done Editing" saves all changes</span>
-          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,243,199,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🟡 Signature required</span></span>
+          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,243,199,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🟡 Required field</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,226,226,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🩷 Low confidence</span></span>
           {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(187,247,208,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>✅ Client-filled</span></span>}
         </div>

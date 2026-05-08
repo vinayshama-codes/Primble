@@ -29,6 +29,7 @@ from services.ocr_service import extract_text, extract_zip
 from services.pdf_service import (
     extract_form_fields_with_positions, get_page_dims_pikepdf, regenerate_pdf_for_form,
     fill_pdf, _is_signature_field, _load_fieldmap,
+    apply_acord125_missing_field_highlights,
 )
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
@@ -256,7 +257,12 @@ async def upload_declaration(
             "truncation_warnings": truncation_warnings,
             "all_available_forms": extra_forms_scored,
         })
-    except HTTPException:
+    except HTTPException as ex:
+        if _job_id:
+            try:
+                await get_job_queue().update_status(_job_id, STATUS_FAILED, error=str(ex.detail))
+            except Exception:
+                pass
         raise
     except Exception as ex:
         logger.error(f"Upload error [trace={get_trace_id()}]: {ex}", exc_info=True)
@@ -534,6 +540,10 @@ async def get_form_fields(
         generated[form_id]["confidence"] = confidence
         await upd_processing_session(session_id, {"generated_forms": generated})
 
+    confidence = apply_acord125_missing_field_highlights(
+        form_id, proc_session.get("facts", {}), field_state, confidence
+    )
+
     for f in fields:
         name = f["name"]
         if name in field_state:
@@ -650,6 +660,10 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                 # Field cleared — demote to low_confidence unless ARQ-filled
                 if confidence.get(k) not in ("client_arq", "missing_required"):
                     confidence[k] = "low_confidence"
+
+        confidence = apply_acord125_missing_field_highlights(
+            form_id, session.get("facts", {}), current_state, confidence
+        )
 
         from services.pdf_service import _ACORD_FIELD_RULES
         updated_facts = dict(session["facts"])
@@ -858,7 +872,7 @@ async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depen
     else:
         raise HTTPException(404, f"Form '{form_id}' not found")
 
-    logger.info("EPIC EXPORT: form=%s session=%s user=%s", form_id, session_id[:8] if session_id else "none", current_user.get("email", "unknown"))
+    logger.info(f"EPIC EXPORT: form={form_id} session={session_id[:8]} user={current_user.get('email')}\n{json.dumps(epic_payload, indent=2, default=str)}")
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
@@ -901,7 +915,7 @@ async def send_to_vertafore(session_id: str, form_id: str, current_user: dict = 
     else:
         raise HTTPException(404, f"Form '{form_id}' not found")
 
-    logger.info("VERTAFORE EXPORT: form=%s session=%s user=%s", form_id, session_id[:8] if session_id else "none", current_user.get("email", "unknown"))
+    logger.info(f"VERTAFORE EXPORT: form={form_id} session={session_id[:8]} user={current_user.get('email')}\n{json.dumps(payload, indent=2, default=str)}")
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
