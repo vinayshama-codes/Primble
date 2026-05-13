@@ -65,7 +65,7 @@ def _build_form_required_keys() -> Dict[str, FrozenSet[str]]:
                 with open(fieldmap_path) as f:
                     fieldmap = json.load(f)
                 for fact_key in fieldmap.values():
-                    if fact_key and not str(fact_key).startswith("_"):
+                    if fact_key and isinstance(fact_key, str) and not fact_key.startswith("_"):
                         keys.add(fact_key)
             except Exception as exc:
                 logger.warning("form_service: could not read fieldmap %s: %s", fieldmap_path, exc)
@@ -543,8 +543,11 @@ def process_single_form(form_meta: dict, session: dict) -> dict:
     tpl              = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
     schema           = extract_form_schema(tpl, form_id=form_meta["form_id"])
     raw_text         = " ".join(d.get("text", "") for d in session.get("docs", []))
+    # Merge flags into facts so _derive_indicator and GPT both see has_general_liability,
+    # is_contractor, has_auto_coverage, etc. for checkbox resolution.
+    facts_with_flags = {**session["facts"], **session.get("flags", {})}
     mapped, confidence = map_facts_to_form(
-        session["facts"], schema,
+        facts_with_flags, schema,
         form_id=form_meta["form_id"],
         raw_text=raw_text,
     )

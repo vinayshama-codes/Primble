@@ -64,7 +64,12 @@
       "Bash(\"C:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -c \"import openai; print\\(openai.__version__\\)\")",
       "Bash(printenv HTTP_PROXY HTTPS_PROXY ALL_PROXY)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import pikepdf; s = pikepdf.Stream\\(pikepdf.Pdf.new\\(\\), b'test'\\); print\\(dir\\(s\\)\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('services/pdf_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('C:/Users/lenovo/Desktop/ACORD-PY-VERSION2/backend/services/s3_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import services.pdf_service; print\\('OK'\\)\")",
+      "Bash(python -c \"import services.form_service; print\\('OK'\\)\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",

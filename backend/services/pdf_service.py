@@ -247,8 +247,8 @@ _ACORD_FIELD_RULES = [
     ("Producer_MailingAddress_CityName",                   "_addr_city"),
     ("Producer_MailingAddress_StateOrProv",                "_addr_state"),
     ("Producer_MailingAddress_PostalCode",                 "_addr_zip"),
-    ("Producer_FaxNumber",                                 None),
-    ("Producer_AuthorizedRepresentative",                  None),
+    ("Producer_FaxNumber",                                 None),   # not in extraction schema
+    ("Producer_AuthorizedRepresentative",                  "contact_name"),
 
     # ── Named insured ───────────────────────────────────────────────────────
     ("NamedInsured_FullName",                              "applicant_name"),
@@ -276,8 +276,12 @@ _ACORD_FIELD_RULES = [
     ("NamedInsured_PhoneNumber",                           "contact_phone"),
     ("NamedInsured_Primary_PhoneNumber",                   "contact_phone"),
     ("NamedInsured_EmailAddress",                          "contact_email"),
-    ("NamedInsured_WebsiteAddress",                        None),
+    ("NamedInsured_WebsiteAddress",                        None),   # not in extraction schema
     ("NamedInsured_BusinessStartDate",                     "years_in_business"),
+    # Named insured contact sub-fields (ACORD 125 contact section)
+    ("NamedInsured_Contact_FullName",                      "contact_name"),
+    ("NamedInsured_Contact_PrimaryPhoneNumber",            "contact_phone"),
+    ("NamedInsured_Contact_PrimaryEmailAddress",           "contact_email"),
     ("NamedInsured_NumberOfEmployees",                     "num_employees"),
     ("NamedInsured_AnnualRevenue",                         "total_revenue"),
     ("NamedInsured_AnnualPayroll",                         "total_payroll"),
@@ -293,6 +297,23 @@ _ACORD_FIELD_RULES = [
     ("PreviousPolicy_PolicyNumber",                        "prior_policy_number"),
     ("PreviousPolicy_EffectiveDate",                       "prior_effective_date"),
     ("PreviousPolicy_ExpirationDate",                      "prior_expiration_date"),
+    # Per-line prior coverage rows (ACORD 125 prior coverage section)
+    ("PriorCoverage_GeneralLiability_InsurerFullName",     "prior_carrier"),
+    ("PriorCoverage_GeneralLiability_PolicyNumberIdentifier", "prior_policy_number"),
+    ("PriorCoverage_GeneralLiability_EffectiveDate",       "prior_effective_date"),
+    ("PriorCoverage_GeneralLiability_ExpirationDate",      "prior_expiration_date"),
+    ("PriorCoverage_Automobile_InsurerFullName",           "prior_carrier"),
+    ("PriorCoverage_Automobile_PolicyNumberIdentifier",    "prior_policy_number"),
+    ("PriorCoverage_Automobile_EffectiveDate",             "prior_effective_date"),
+    ("PriorCoverage_Automobile_ExpirationDate",            "prior_expiration_date"),
+    ("PriorCoverage_Property_InsurerFullName",             "prior_carrier"),
+    ("PriorCoverage_Property_PolicyNumberIdentifier",      "prior_policy_number"),
+    ("PriorCoverage_Property_EffectiveDate",               "prior_effective_date"),
+    ("PriorCoverage_Property_ExpirationDate",              "prior_expiration_date"),
+    ("PriorCoverage_OtherLine_InsurerFullName",            "prior_carrier"),
+    ("PriorCoverage_OtherLine_PolicyNumberIdentifier",     "prior_policy_number"),
+    ("PriorCoverage_OtherLine_EffectiveDate",              "prior_effective_date"),
+    ("PriorCoverage_OtherLine_ExpirationDate",             "prior_expiration_date"),
 
     # ── Business information ─────────────────────────────────────────────────
     ("BusinessInformation_NAICSCode",                      "naics_code"),
@@ -936,6 +957,84 @@ def migrate_fieldmaps_to_v5() -> None:
     logger.info("migrate_fieldmaps_to_v5: done — %d/%d files updated", migrated, len(files))
 
 
+def purge_stale_null_fieldmap_entries() -> None:
+    """Remove null entries from all fieldmaps for fields that are actually fillable.
+
+    Null entries for fillable fields (indicator checkboxes, contact fields, prior
+    coverage rows, etc.) were written by older code that didn't have _INDICATOR_RULES
+    or full _ACORD_FIELD_RULES coverage. Keeping them as null permanently blocks GPT
+    from filling those fields. This function removes those nulls so the next form fill
+    run sends them through GPT, which can now tick the right boxes from the document.
+
+    Runs at startup; idempotent — only modifies files that have removable nulls.
+    """
+    import glob as _glob
+
+    # Fields whose null entry is VALID and must NOT be removed (carrier-computed, admin-only).
+    # Use precise substrings — avoid over-broad patterns that catch Indicator fields.
+    _PERMANENT_NULL_SUBSTRINGS = (
+        "Signature", "_Sig", "InsurerLetterCode",
+        "Hazard_", "Premium", "Rate_", "Revision",
+        "EditionIdentifier", "NeedAppearances",
+        "Underwriter", "CarrierCode", "PolicyNumber_Carrier",
+        # Truly un-extractable identifier fields
+        "ProducerIdentifier", "SubProducerIdentifier",
+        "ProductDescription", "ProductCode",
+        "WebsiteAddress",       # not extracted
+        "Initials_",            # handwritten initials widget
+        "GeneralLiabilityCode", # carrier-assigned
+        "OccupiedArea", "OpenToPublicArea",
+        "Sublocation", "TaxCode",
+    )
+
+    # Additional whole-name patterns (exact contains check on stripped field name)
+    _PERMANENT_NULL_EXACT = (
+        "Policy_Status_EffectiveTime_A",
+        "Policy_Status_EffectiveTimeAMIndicator_A",
+        "Policy_Status_EffectiveTimePMIndicator_A",
+        "LossHistory_TotalAmount_A",
+    )
+
+    def _is_permanent_null(field: str) -> bool:
+        if field in _PERMANENT_NULL_EXACT:
+            return True
+        return any(s in field for s in _PERMANENT_NULL_SUBSTRINGS)
+
+    pattern = os.path.join(FORMS_DB_DIR, "ACORD_ACORD_*_fieldmap.json")
+    files   = _glob.glob(pattern)
+    if not files:
+        return
+
+    total_purged = 0
+    for path in files:
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            purged = []
+            for field, value in list(data.items()):
+                if field.startswith("__"):
+                    continue
+                if value is None and not _is_permanent_null(field):
+                    del data[field]
+                    purged.append(field)
+            if purged:
+                with open(path, "w") as f:
+                    json.dump(data, f, indent=2)
+                total_purged += len(purged)
+                logger.info(
+                    "purge_null_fieldmap: %s — removed %d stale nulls: %s",
+                    os.path.basename(path), len(purged),
+                    ", ".join(purged[:8]) + ("…" if len(purged) > 8 else ""),
+                )
+        except Exception as ex:
+            logger.warning("purge_null_fieldmap: skipped %s — %s", os.path.basename(path), ex)
+
+    if total_purged:
+        logger.info("purge_null_fieldmap: done — %d null entries removed across %d files", total_purged, len(files))
+    else:
+        logger.debug("purge_null_fieldmap: no stale nulls found")
+
+
 def _resolve_special(key: str, facts: dict, prefix: str) -> str:
     if prefix == "_addr":
         raw = _fv(facts, "mailing_address", "")
@@ -973,33 +1072,64 @@ _INDICATOR_RULES: Dict[str, Tuple[str, str]] = {
     "NamedInsured_LegalEntity_TrustIndicator": ("entity_type", "trust"),
     "NamedInsured_LegalEntity_JointVentureIndicator": ("entity_type", "joint venture"),
     "NamedInsured_LegalEntity_OtherIndicator": ("entity_type", "other"),
-    # Lines of business — ACORD 125
-    "Policy_LineOfBusiness_BusinessAutoIndicator": ("lines_of_business", "auto"),
-    "Policy_LineOfBusiness_CommercialGeneralLiability": ("lines_of_business", "gl"),
-    "Policy_LineOfBusiness_CommercialProperty": ("lines_of_business", "property"),
-    "Policy_LineOfBusiness_UmbrellaIndicator": ("lines_of_business", "umbrella"),
-    "Policy_LineOfBusiness_WorkersCompensation": ("lines_of_business", "workers comp"),
-    "Policy_LineOfBusiness_BusinessOwnersIndicator": ("lines_of_business", "bop"),
-    "Policy_LineOfBusiness_CrimeIndicator": ("lines_of_business", "crime"),
-    "Policy_LineOfBusiness_GarageAndDealersIndicator": ("lines_of_business", "garage"),
+    # Lines of business — primary: flags booleans (has_*) from extraction; fallback: lines_of_business list
+    "Policy_LineOfBusiness_BusinessAutoIndicator":          ("has_auto_coverage",      "yes"),
+    "Policy_LineOfBusiness_CommercialGeneralLiability":     ("has_general_liability",  "yes"),
+    "Policy_LineOfBusiness_CommercialProperty":             ("has_property_coverage",  "yes"),
+    "Policy_LineOfBusiness_UmbrellaIndicator":              ("has_umbrella",           "yes"),
+    "Policy_LineOfBusiness_WorkersCompensation":            ("has_workers_comp",       "yes"),
+    "Policy_LineOfBusiness_BusinessOwnersIndicator":        ("lines_of_business",      "bop"),
+    "Policy_LineOfBusiness_CrimeIndicator":                 ("has_crime",              "yes"),
+    "Policy_LineOfBusiness_GarageAndDealersIndicator":      ("lines_of_business",      "garage"),
+    "Policy_LineOfBusiness_CommercialInlandMarineIndicator":("has_inland_marine",      "yes"),
+    "Policy_LineOfBusiness_MotorCarrierIndicator":          ("lines_of_business",      "motor carrier"),
+    "Policy_LineOfBusiness_TruckersIndicator":              ("lines_of_business",      "truckers"),
+    "Policy_LineOfBusiness_FiduciaryLiabilityIndicator":    ("lines_of_business",      "fiduciary"),
+    "Policy_LineOfBusiness_LiquorLiabilityIndicator":       ("lines_of_business",      "liquor"),
+    "Policy_LineOfBusiness_CyberAndPrivacy":                ("has_cyber",              "yes"),
+    "Policy_LineOfBusiness_YachtIndicator":                 ("lines_of_business",      "yacht"),
+    "Policy_LineOfBusiness_BoilerAndMachineryIndicator":    ("lines_of_business",      "boiler"),
+    # Business type indicators — ACORD 125 BusinessInformation section
+    "BusinessInformation_BusinessType_ContractorIndicator":    ("is_contractor",          "yes"),
+    "BusinessInformation_BusinessType_ManufacturingIndicator": ("operations_description", "manufactur"),
+    "BusinessInformation_BusinessType_RestaurantIndicator":    ("operations_description", "restaurant"),
+    "BusinessInformation_BusinessType_RetailIndicator":        ("operations_description", "retail"),
+    "BusinessInformation_BusinessType_ServiceIndicator":       ("operations_description", "service"),
+    "BusinessInformation_BusinessType_WholesaleIndicator":     ("operations_description", "wholesale"),
+    "BusinessInformation_BusinessType_OfficeIndicator":        ("operations_description", "office"),
+    "BusinessInformation_BusinessType_ApartmentsIndicator":    ("operations_description", "apartment"),
+    "BusinessInformation_BusinessType_CondominiumsIndicator":  ("operations_description", "condominium"),
+    "BusinessInformation_BusinessType_InstitutionalIndicator": ("operations_description", "institutional"),
+    # Policy status — new/renewal
+    "CommercialPolicy_NewBusinessIndicator": ("is_renewal", "no"),
+    "CommercialPolicy_RenewalIndicator":     ("is_renewal", "yes"),
+    # Billing method
+    "Policy_Payment_DirectBillIndicator":   ("billing_plan", "direct"),
+    "Policy_Payment_ProducerBillIndicator": ("billing_plan", "agency"),
     # Hired/non-owned auto
-    "Vehicle_HiredIndicator":    ("hired_auto_indicator", "yes"),
-    "Vehicle_HiredAutosIndicator": ("hired_auto_indicator", "yes"),
-    "Vehicle_NonOwnedIndicator": ("non_owned_auto_indicator", "yes"),
+    "Vehicle_HiredIndicator":         ("hired_auto_indicator", "yes"),
+    "Vehicle_HiredAutosIndicator":    ("hired_auto_indicator", "yes"),
+    "Vehicle_NonOwnedIndicator":      ("non_owned_auto_indicator", "yes"),
     "Vehicle_NonOwnedAutosIndicator": ("non_owned_auto_indicator", "yes"),
     # Property valuation
     "ValuationCode_ReplacementCostIndicator": ("valuation_method", "rcv"),
     "ValuationCode_ActualCashValueIndicator": ("valuation_method", "acv"),
     # Loss history
     "LossHistory_NoPriorLossesIndicator": ("num_claims", "0"),
-    # New / renewal
-    "CommercialPolicy_NewBusinessIndicator": ("is_renewal", "no"),
-    "CommercialPolicy_RenewalIndicator":     ("is_renewal", "yes"),
     # Umbrella form type
     "ExcessUmbrella_OccurrenceIndicator": ("gl_form_type", "occurrence"),
     "ExcessUmbrella_ClaimsMadeIndicator": ("gl_form_type", "claims"),
     # WC statutory limits indicator
     "WorkersCompensationEmployersLiability_WorkersCompensationStatutoryLimitIndicator": ("wc_el_each_accident", "statutory"),
+    # Builders risk
+    "Policy_SectionAttached_InstallationBuildersRiskIndicator": ("has_builders_risk", "true"),
+    # Inland marine
+    "Policy_SectionAttached_OpenCargoIndicator": ("has_inland_marine", "true"),
+    # Driver/vehicle schedule attachments
+    "Policy_SectionAttached_DriverInformationScheduleIndicator": ("auto_drivers", "non-empty"),
+    "Policy_SectionAttached_VehicleScheduleIndicator":           ("auto_vin_schedule", "non-empty"),
+    # Contractors supplement
+    "CommercialPolicy_Attachment_ContractorsSupplementIndicator": ("contractor_type", "contractor"),
 }
 
 
@@ -1021,12 +1151,22 @@ def _derive_indicator(field_name: str, facts: dict) -> Optional[str]:
     for substr, (fact_key, match_val) in _INDICATOR_RULES.items():
         if substr.lower() in fn_lower:
             raw = _fv(facts, fact_key)
+            # Special case: match_val=="non-empty" means check whether a list is populated
+            if match_val == "non-empty":
+                if raw is None:
+                    return "No"
+                if isinstance(raw, list):
+                    return "Yes" if raw else "No"
+                return "Yes" if str(raw).strip() else "No"
             if raw is None:
                 return None
             if isinstance(raw, bool):
                 # Direct boolean fact: treat match_val=="yes"/"true" as "truthy expected"
                 expected_true = match_val.lower() in {"yes", "true", "1"}
                 return "Yes" if (raw == expected_true) else "No"
+            if isinstance(raw, list):
+                # List fact (e.g. lines_of_business): check if match_val appears in any element
+                return "Yes" if any(match_val.lower() in str(item).lower() for item in raw) else "No"
             val_str = str(raw).lower()
             if match_val.lower() in val_str:
                 return "Yes"
@@ -1499,29 +1639,23 @@ def _fill_unmatched_with_gpt(
 ) -> dict:
     """GPT form-fill: fills unmatched fields from structured facts + full raw document text.
 
-    Uses a dedicated AsyncOpenAI client. Form-fill always uses OpenAI regardless
-    of LLM_PROVIDER (extraction provider).
+    Strategy — single-pass chunking:
+      Everything (facts + fields + raw text) goes into one prompt per chunk.
+      The raw text is the only thing that needs chunking; facts and fields are
+      small enough to repeat in every call.
 
-    Architecture — chunked full-coverage pass:
-      STEP A: raw_text is split into semantic chunks of _FORM_FILL_RAW_CHUNK_CHARS.
-              Every character is covered — no truncation.
-      STEP B: Each chunk is sent independently to the LLM with the fields block
-              and structured facts. Candidate values are collected per chunk.
-      STEP C: Per-field conflict resolution: structured-facts values win; for
-              raw-text-sourced values the most-frequent candidate across chunks wins.
-      STEP D: Final merged field map returned.
+      Chunk sizing is automatic:
+        chunk_chars = _GPT_CALL_BUDGET_CHARS - reply_reserve - fixed_overhead - fields_block
+      where fixed_overhead = prompt skeleton + facts block (measured, not guessed).
 
-    Source priority:
-      SOURCE 1 — PII-filtered structured facts (stable, doc-independent mappings)
-      SOURCE 2 — Raw OCR text chunks (full coverage, no truncation)
+      For a short doc (< budget): exactly 1 LLM call.
+      For a large doc (500k tokens): N calls, each carrying ALL still-empty fields
+      + one slice of the raw text.  Fields resolved in earlier chunks are dropped
+      from later chunks, shrinking the fields block and leaving more budget for text.
 
-    Returns:
-        {
-            "filled_values":   {field_name: value_string, ...},
-            "new_mappings":    {field_name: fact_key_or_null, ...},
-            "raw_text_fields": {field_name},
-            "model_used":      str,
-        }
+      Conflict resolution: if multiple chunks return different values for the same
+      field, the most-frequent candidate wins (majority vote across chunks).
+      Structured-facts values always beat raw-text values.
     """
     if not unmatched_fields:
         return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": model or GPT_MODEL}
@@ -1534,7 +1668,7 @@ def _fill_unmatched_with_gpt(
 
     llm_model = model or GPT_MODEL
 
-    # ── PII-filtered facts for LLM prompt ────────────────────────────────────
+    # ── PII-filtered structured facts ────────────────────────────────────────
     facts_for_llm = {
         k: str(_fv(facts, k))[:120]
         for k in facts
@@ -1542,11 +1676,8 @@ def _fill_unmatched_with_gpt(
         and _fv(facts, k) is not None
         and not isinstance(_fv(facts, k), (list, dict))
     }
-
     fact_lines   = [f'  "{k}": "{v}"' for k, v in facts_for_llm.items()]
     fact_context = "{\n" + ",\n".join(fact_lines) + "\n}"
-
-    raw_text_used = bool(raw_text and raw_text.strip())
 
     # ── Filter out schedule/admin fields ─────────────────────────────────────
     eligible_fields = {
@@ -1555,60 +1686,83 @@ def _fill_unmatched_with_gpt(
         if not _is_schedule_field(f)
         and not any(p in f for p in _RAW_TEXT_SKIP_PATTERNS)
     }
-
     if not eligible_fields:
         return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": llm_model}
 
     field_list = list(eligible_fields.keys())
+    raw_text_used = bool(raw_text and raw_text.strip())
 
-    # ── Helper: build a field-spec block for a given list of field names ──────
-    def _build_fields_block(fields: List[str]) -> str:
-        specs = []
-        for f in fields:
-            info = eligible_fields.get(f) or {}
-            info = info if isinstance(info, dict) else {}
-            tu   = info.get("tu", "")[:80]
-            ft   = info.get("ft", "")
-            req  = " [REQUIRED]" if info.get("required") else ""
-            spec = f"  - {f}{req}"
-            if tu:
-                spec += f": {tu}"
-            if "/Ch" in ft:
-                spec += " (dropdown)"
-            elif "/Btn" in ft:
-                spec += " (checkbox — Yes/No)"
-            specs.append(spec)
-        return "\n".join(specs)
+    # ── Shared accumulators ───────────────────────────────────────────────────
+    # candidate_counts[field][value] = number of chunks that returned that value.
+    # Majority vote across chunks; structured-fact values always win at resolution.
+    candidate_counts: Dict[str, Dict[str, int]] = {f: {} for f in field_list}
+    all_mappings:     Dict[str, Optional[str]]  = {}   # field → fact_key (first chunk only)
+    all_raw_fields:   set                       = set()
 
-    # ── Helper: build prompt and call LLM, return parsed result dict ──────────
-    def _build_prompt(fields_block: str, raw_text_section: str) -> str:
+    # ── Build a field-spec line for the prompt ───────────────────────────────
+    def _field_spec(f: str) -> str:
+        info = eligible_fields.get(f) or {}
+        info = info if isinstance(info, dict) else {}
+        tu   = info.get("tu", "")[:80]
+        ft   = info.get("ft", "")
+        req  = " [REQUIRED]" if info.get("required") else ""
+        spec = f"  - {f}{req}"
+        if tu:
+            spec += f": {tu}"
+        if "/Ch" in ft:
+            spec += " (dropdown)"
+        elif "/Btn" in ft:
+            spec += " (checkbox — Yes/No)"
+        return spec
+
+    # ── Prompt builder ───────────────────────────────────────────────────────
+    _PROMPT_SKELETON = (
+        f"You are filling ACORD form {form_id} for an insurance submission.\n"
+        "You have two data sources:\n"
+        "  SOURCE 1 — structured extracted facts (compact, structured)\n"
+        "  SOURCE 2 — raw OCR document text (when provided)\n"
+        "Prefer SOURCE 1. Use SOURCE 2 only when SOURCE 1 has no answer.\n\n"
+        "Return exactly three keys:\n"
+        '  "values":          {FieldName: "exact_value_or_null"}\n'
+        '  "mappings":        {FieldName: "fact_key_or_null"}\n'
+        '  "raw_text_sourced":[FieldName, ...]\n\n'
+        "Rules:\n"
+        "  1. EXACT values only — do not paraphrase or invent.\n"
+        "  2. Return null when neither source has the answer.\n"
+        "  3. Checkbox/indicator fields (marked 'checkbox — Yes/No'): return 'Yes' or 'No' ONLY.\n"
+        "     Examples of how to fill checkboxes:\n"
+        "     - Policy_Status_BoundIndicator: 'Yes' if the document is a bound policy, else 'No'\n"
+        "     - Policy_Status_QuoteIndicator: 'Yes' if document is a quote/application, else 'No'\n"
+        "     - Policy_LineOfBusiness_CommercialGeneralLiability: 'Yes' if GL coverage is requested\n"
+        "     - NamedInsured_LegalEntity_CorporationIndicator: 'Yes' if entity type is Corporation\n"
+        "     - BusinessInformation_BusinessType_ContractorIndicator: 'Yes' if business is a contractor\n"
+        "     - LossHistory_NoPriorLossesIndicator: 'Yes' only if document explicitly states no losses\n"
+        "  4. Dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
+        "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n"
+        "  6. mappings: use ONLY exact fact keys from SOURCE 1. null if no clean match.\n"
+        "  7. NEVER put raw_text_sourced fields in mappings.\n\n"
+    )
+    _SKELETON_CHARS = len(_PROMPT_SKELETON)
+    _FACTS_CHARS    = len(fact_context)
+    # Fixed overhead per call: skeleton + facts header + facts block + fields header + footer
+    _FIXED_OVERHEAD = _SKELETON_CHARS + _FACTS_CHARS + 200
+
+    def _build_prompt(active_fields: List[str], raw_chunk: str, chunk_idx: int, total_chunks: int) -> str:
+        fields_block = "\n".join(_field_spec(f) for f in active_fields)
+        raw_section  = (
+            f"\n\n=== SOURCE 2: RAW DOCUMENT TEXT (chunk {chunk_idx + 1}/{total_chunks}) ===\n{raw_chunk}"
+            if raw_chunk else ""
+        )
         return (
-            f"You are filling ACORD form {form_id} for an insurance submission.\n"
-            "You have TWO data sources. Use SOURCE 1 (structured facts) first. "
-            "Fall back to SOURCE 2 (raw document text) only when SOURCE 1 has no answer.\n\n"
-            "Return three keys:\n"
-            '  "values":          {FieldName: "exact_value_or_null"}\n'
-            '  "mappings":        {FieldName: "fact_key_or_null"}\n'
-            '  "raw_text_sourced":[FieldName, ...]\n\n'
-            "Rules for values:\n"
-            "  1. Extract the EXACT value — do not paraphrase or invent.\n"
-            "  2. Use null if neither source has the answer. Prefer null over a wrong value.\n"
-            "  3. For checkbox fields (Yes/No): return 'Yes' or 'No' only.\n"
-            "  4. For dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
-            "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n\n"
-            "Rules for mappings:\n"
-            "  1. Use ONLY exact key names from SOURCE 1 extracted_facts.\n"
-            "  2. A mapping is the structural field→fact relationship — not document-specific.\n"
-            "  3. Use null if no single fact key cleanly maps to this field.\n"
-            "  4. NEVER set a mapping for fields in raw_text_sourced.\n\n"
-            f"=== SOURCE 1: EXTRACTED FACTS ===\n{fact_context}\n\n"
-            f"Fields to fill ({form_id}):\n{fields_block}"
-            f"{raw_text_section}\n\n"
-            'Return ONLY valid JSON: {"values": {...}, "mappings": {...}, "raw_text_sourced": [...]}'
+            _PROMPT_SKELETON
+            + f"=== SOURCE 1: EXTRACTED FACTS ===\n{fact_context}\n\n"
+            + f"Fields to fill ({form_id}):\n{fields_block}"
+            + raw_section
+            + '\n\nReturn ONLY valid JSON: {"values": {...}, "mappings": {...}, "raw_text_sourced": [...]}'
         )
 
+    # ── LLM caller with retry ─────────────────────────────────────────────────
     def _call_llm_sync(prompt: str) -> dict:
-        """Call OpenAI synchronously and return the parsed JSON result dict."""
         async def _inner(_p=prompt):
             resp = await _client.chat.completions.create(
                 model=llm_model,
@@ -1621,178 +1775,121 @@ def _fill_unmatched_with_gpt(
         import time as _time
         for attempt in range(_FORM_FILL_BATCH_RETRIES):
             try:
-                raw = _run_coro_sync(_inner())
-                return json.loads(raw)
+                return json.loads(_run_coro_sync(_inner()))
             except Exception as ex:
                 if attempt < _FORM_FILL_BATCH_RETRIES - 1:
                     wait = 2 ** attempt
-                    logger.warning("gpt_fill: LLM call failed attempt=%d/%d retrying in %ds — %s",
+                    logger.warning("gpt_fill: call failed attempt=%d/%d retrying in %ds — %s",
                                    attempt + 1, _FORM_FILL_BATCH_RETRIES, wait, ex)
                     _time.sleep(wait)
                 else:
-                    logger.warning("gpt_fill: LLM call permanently failed — %s", ex)
+                    logger.warning("gpt_fill: call permanently failed — %s", ex)
                     return {}
 
-    # ── Helper: process one LLM result dict, accumulate into shared state ─────
-    def _absorb_result(
-        result: dict,
-        sent_fields: List[str],
-        candidate_counts: Dict[str, Dict[str, int]],
-        all_mappings: Dict[str, Optional[str]],
-        all_raw_fields: set,
-        is_facts_pass: bool,   # True on the facts-only pass (chunk_idx == 0 equiv.)
-    ) -> None:
-        batch_values      = result.get("values",          {}) or {}
-        batch_mappings    = result.get("mappings",        {}) or {}
-        batch_raw_sourced = set(result.get("raw_text_sourced", []) or [])
+    # ── Result absorber ───────────────────────────────────────────────────────
+    def _absorb(result: dict, sent: List[str], is_first_chunk: bool, chunk_label: str = "1/1") -> None:
+        values      = result.get("values",          {}) or {}
+        mappings    = result.get("mappings",        {}) or {}
+        raw_sourced = set(result.get("raw_text_sourced", []) or [])
+        _chunk_label = chunk_label
 
-        for field, fact_key in batch_mappings.items():
-            if field not in sent_fields:
+        for field, fk in mappings.items():
+            if field not in sent:
                 continue
-            if field in batch_raw_sourced:
-                fact_key = None
-            elif fact_key is not None and fact_key not in _FULL_REGISTRY_KEYS:
-                logger.debug("gpt_fill: rejected hallucinated fact_key=%r field=%r", fact_key, field)
-                fact_key = None
-            if is_facts_pass and field not in all_mappings:
-                all_mappings[field] = fact_key
+            if field in raw_sourced:
+                fk = None
+            elif fk is not None and fk not in _FULL_REGISTRY_KEYS:
+                logger.debug("gpt_fill: rejected hallucinated fact_key=%r field=%r", fk, field)
+                fk = None
+            # Structural mappings are doc-independent — record from first chunk only
+            if is_first_chunk and field not in all_mappings:
+                all_mappings[field] = fk
 
-        for field, value in batch_values.items():
-            if field not in sent_fields:
+        filled_count = 0
+        for field, value in values.items():
+            if field not in sent:
                 continue
             if value and str(value).strip() not in ("", "null", "None"):
                 vstr = str(value).strip()
                 candidate_counts[field][vstr] = candidate_counts[field].get(vstr, 0) + 1
-                if field in batch_raw_sourced:
+                if field in raw_sourced:
                     all_raw_fields.add(field)
+                filled_count += 1
 
         logger.info(
-            "gpt_fill: pass=%s sent=%d filled=%d raw_sourced=%d",
-            "facts" if is_facts_pass else "rawtext",
-            len(sent_fields),
-            sum(1 for v in batch_values.values() if v and str(v).strip() not in ("", "null", "None")),
-            len(batch_raw_sourced),
+            "gpt_fill: chunk=%s form=%s sent=%d filled=%d raw_sourced=%d",
+            _chunk_label,
+            form_id, len(sent), filled_count, len(raw_sourced),
         )
 
-    # ────────────────────────────────────────────────────────────────────────
-    # TWO-PASS STRATEGY
-    # ────────────────────────────────────────────────────────────────────────
-    # PASS 1 — facts-only (no raw text): one call covers ALL fields.
-    #   Structured facts are compact (~5k chars) so even 400+ fields fit easily.
-    #   This is always a single call regardless of document size.
-    #
-    # PASS 2 — raw-text (only fields still empty after Pass 1):
-    #   Raw text is split into chunks sized so that:
-    #     chunk_chars ≤ _GPT_CALL_BUDGET_CHARS − fixed_overhead − fields_block_chars
-    #   Only the STILL-UNFILLED fields are sent in each chunk call, so the
-    #   fields block shrinks as values are resolved, leaving more room for text.
-    #   For small docs (e.g. 8k chars) this is a single call.
-    #   For large docs (500k tokens) it fans out across many chunks but each
-    #   call carries only the necessary fields — no redundant re-sending.
-    # ────────────────────────────────────────────────────────────────────────
+    # ── Chunk sizing ──────────────────────────────────────────────────────────
+    # Budget per call: model context minus reply headroom minus fixed overhead
+    # minus fields block chars for the fields active in this call.
+    def _raw_budget(active_fields: List[str]) -> int:
+        fields_chars = sum(len(_field_spec(f)) + 1 for f in active_fields)
+        return max(
+            10_000,
+            _GPT_CALL_BUDGET_CHARS - _GPT_REPLY_RESERVE_CHARS - _FIXED_OVERHEAD - fields_chars,
+        )
 
-    candidate_counts: Dict[str, Dict[str, int]] = {f: {} for f in field_list}
-    all_mappings:     Dict[str, Optional[str]]  = {}
-    all_raw_fields:   set                       = set()
-    raw_chunks:       List[str]                 = []
-    remaining_fields: List[str]                 = []
-
-    # ── PASS 1: structured facts — single call, all eligible fields ───────────
-    fields_block_p1 = _build_fields_block(field_list)
-    prompt_p1       = _build_prompt(fields_block_p1, "")
-    logger.info(
-        "gpt_fill PASS1 (facts-only): form=%s fields=%d prompt_chars=%d",
-        form_id, len(field_list), len(prompt_p1),
-    )
-    result_p1 = _call_llm_sync(prompt_p1)
-    _absorb_result(result_p1, field_list, candidate_counts, all_mappings, all_raw_fields,
-                   is_facts_pass=True)
-
-    # ── PASS 2: raw-text chunks — only for fields still unfilled ─────────────
+    # ── Split raw text into chunks that fit the model context ─────────────────
+    # Chunk size is computed from the INITIAL field list (conservative; shrinks
+    # later chunks have more budget as fields get resolved, which is fine).
     if raw_text_used:
-        # Determine which fields are still empty after the facts pass.
-        def _still_empty(fields: List[str]) -> List[str]:
-            return [f for f in fields if not candidate_counts[f]]
-
-        remaining_fields = _still_empty(field_list)
+        initial_budget = _raw_budget(field_list)
+        raw_chunks: List[str] = []
+        rest = raw_text
+        while rest:
+            if len(rest) <= initial_budget:
+                raw_chunks.append(rest)
+                break
+            split_at = rest.rfind("\n\n", 0, initial_budget)
+            if split_at == -1:
+                split_at = rest.rfind("\n", 0, initial_budget)
+            if split_at == -1:
+                split_at = initial_budget
+            raw_chunks.append(rest[:split_at])
+            rest = rest[split_at:].lstrip("\n")
         logger.info(
-            "gpt_fill PASS2 start: form=%s fields_remaining=%d/%d raw_text_chars=%d",
-            form_id, len(remaining_fields), len(field_list), len(raw_text),
+            "gpt_fill: form=%s fields=%d raw_text_chars=%d chunks=%d chunk_budget=%d",
+            form_id, len(field_list), len(raw_text), len(raw_chunks), initial_budget,
         )
+    else:
+        # No raw text — single call with facts only
+        raw_chunks = [""]
 
-        if remaining_fields:
-            # Compute how many raw-text chars we can fit alongside the fields block.
-            # We recalculate this each chunk because the fields block shrinks as fields
-            # get resolved, freeing up budget for more text per call.
-            _FIXED_OVERHEAD = len(fact_context) + 3_000   # prompt skeleton + facts
+    # ── Main loop: one LLM call per chunk ─────────────────────────────────────
+    for chunk_idx, raw_chunk in enumerate(raw_chunks):
+        # Only send fields not yet resolved in a previous chunk
+        active_fields = [f for f in field_list if not candidate_counts[f]]
+        if not active_fields:
+            logger.info("gpt_fill: all fields resolved — stopping at chunk %d/%d",
+                        chunk_idx + 1, len(raw_chunks))
+            break
 
-            def _chunk_budget(fields: List[str]) -> int:
-                fields_chars = sum(len(f) + 60 for f in fields)  # ~60 chars per spec
-                return max(10_000, _GPT_CALL_BUDGET_CHARS - _GPT_REPLY_RESERVE_CHARS
-                           - _FIXED_OVERHEAD - fields_chars)
+        prompt = _build_prompt(active_fields, raw_chunk, chunk_idx, len(raw_chunks))
+        logger.info(
+            "gpt_fill: chunk %d/%d form=%s active_fields=%d prompt_chars=%d",
+            chunk_idx + 1, len(raw_chunks), form_id, len(active_fields), len(prompt),
+        )
+        result = _call_llm_sync(prompt)
+        _absorb(result, active_fields, is_first_chunk=(chunk_idx == 0),
+                chunk_label=f"{chunk_idx + 1}/{len(raw_chunks)}")
 
-            # Split raw_text into chunks sized to the initial remaining-fields budget.
-            # We use the initial budget for splitting (conservative) — individual calls
-            # may send slightly more text if fields are resolved, but that's fine.
-            initial_budget  = _chunk_budget(remaining_fields)
-            raw_chunks: List[str] = []
-            rest = raw_text
-            while rest:
-                if len(rest) <= initial_budget:
-                    raw_chunks.append(rest)
-                    break
-                split_at = rest.rfind("\n\n", 0, initial_budget)
-                if split_at == -1:
-                    split_at = rest.rfind("\n", 0, initial_budget)
-                if split_at == -1:
-                    split_at = initial_budget
-                raw_chunks.append(rest[:split_at])
-                rest = rest[split_at:].lstrip("\n")
-
-            logger.info(
-                "gpt_fill PASS2: form=%s raw_chunks=%d initial_chunk_budget=%d",
-                form_id, len(raw_chunks), initial_budget,
-            )
-
-            for chunk_idx, raw_chunk in enumerate(raw_chunks):
-                # Refresh remaining fields — drop any resolved in earlier chunks.
-                remaining_fields = _still_empty(field_list)
-                if not remaining_fields:
-                    logger.info("gpt_fill PASS2: all fields resolved — stopping at chunk %d/%d",
-                                chunk_idx + 1, len(raw_chunks))
-                    break
-
-                raw_text_section = (
-                    f"\n\n=== SOURCE 2: RAW DOCUMENT TEXT "
-                    f"(chunk {chunk_idx + 1}/{len(raw_chunks)}) ===\n{raw_chunk}"
-                )
-                fields_block_p2 = _build_fields_block(remaining_fields)
-                prompt_p2       = _build_prompt(fields_block_p2, raw_text_section)
-
-                logger.info(
-                    "gpt_fill PASS2 chunk %d/%d: form=%s fields=%d prompt_chars=%d",
-                    chunk_idx + 1, len(raw_chunks), form_id,
-                    len(remaining_fields), len(prompt_p2),
-                )
-                result_p2 = _call_llm_sync(prompt_p2)
-                _absorb_result(result_p2, remaining_fields, candidate_counts,
-                               all_mappings, all_raw_fields, is_facts_pass=False)
-
-    # ── Conflict resolution — pick winner per field ───────────────────────────
-    # SOURCE 1 (structured facts) always beats SOURCE 2 (raw text).
-    # Among raw-text candidates the most-frequent value across chunks wins.
+    # ── Conflict resolution ───────────────────────────────────────────────────
+    # SOURCE 1 (structured facts) always wins; among raw-text candidates the
+    # most-frequent value across chunks wins (majority vote).
     all_filled: dict = {}
     for field, candidates in candidate_counts.items():
         if not candidates:
             continue
-        fact_key = all_mappings.get(field)
-        if fact_key and _fv(facts, fact_key) is not None:
-            src1_val = str(_fv(facts, fact_key)).strip()
-            if src1_val and src1_val.lower() not in ("", "null", "none"):
-                all_filled[field] = src1_val
+        fk = all_mappings.get(field)
+        if fk and _fv(facts, fk) is not None:
+            src1 = str(_fv(facts, fk)).strip()
+            if src1 and src1.lower() not in ("", "null", "none"):
+                all_filled[field] = src1
                 continue
-        winner = max(candidates, key=lambda v: candidates[v])
-        all_filled[field] = winner
+        all_filled[field] = max(candidates, key=lambda v: candidates[v])
 
     # ── Audit log ─────────────────────────────────────────────────────────────
     for field, value in all_filled.items():
@@ -1805,12 +1902,10 @@ def _fill_unmatched_with_gpt(
             candidate_counts.get(field, {}).get(value, 1),
         )
 
-    raw_chunks_used = len(raw_chunks)
     logger.info(
-        "gpt_fill DONE: form=%s fields_filled=%d/%d pass1_calls=1 pass2_chunks=%d model=%s",
-        form_id, len(all_filled), len(eligible_fields), raw_chunks_used, llm_model,
+        "gpt_fill DONE: form=%s fields_filled=%d/%d chunks=%d model=%s",
+        form_id, len(all_filled), len(eligible_fields), len(raw_chunks), llm_model,
     )
-
     return {
         "filled_values":   all_filled,
         "new_mappings":    all_mappings,
@@ -2129,12 +2224,65 @@ def regenerate_pdf_for_form(
     return pdf_bytes
 
 
+def _get_page_content_scale(page) -> float:
+    """Return the uniform scale factor applied by the first 'cm' operator in the
+    page content stream, or 1.0 if none is found.
+
+    Many ACORD templates open their content stream with a line like:
+        0.12 0 0 0.12 0 0 cm
+    which maps widget /Rect coordinates (in PDF user space) to a scaled internal
+    coordinate system. When we append new content we must use the internal space,
+    so all user-space coordinates need to be divided by this scale.
+
+    Only handles the simple uniform-scale case (a == d, b == 0, c == 0, e == 0,
+    f == 0). Returns 1.0 for any other transform so painting degrades gracefully.
+    """
+    import re as _re
+    try:
+        contents = page.get("/Contents")
+        if contents is None:
+            return 1.0
+        if isinstance(contents, pikepdf.Array):
+            raw = b"".join(bytes(s.read_bytes()) for s in contents)
+        else:
+            raw = bytes(contents.read_bytes())
+        text = raw[:500].decode("latin-1", errors="replace")
+        # Match "sx 0[.0] 0[.0] sy tx ty cm" — the zero components may be 0.00
+        m = _re.search(
+            r"([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.\-]+)\s+([\d\.\-]+)\s+cm",
+            text,
+        )
+        if m:
+            sx  = float(m.group(1))
+            shx = float(m.group(2))
+            shy = float(m.group(3))
+            sy  = float(m.group(4))
+            tx  = float(m.group(5))
+            ty  = float(m.group(6))
+            # Only trust as a pure uniform scale (no shear, no translation)
+            if (abs(shx) < 0.001 and abs(shy) < 0.001
+                    and abs(sx - sy) < 0.001
+                    and abs(tx) < 0.001 and abs(ty) < 0.001
+                    and sx > 0):
+                return sx
+    except Exception:
+        pass
+    return 1.0
+
+
 def inject_signature_into_pdf(
     template_path: str,
     field_data: dict,
     confidence: dict,
     signature_b64: str,
 ) -> bytes:
+    """Fill the PDF then paint the signature image directly into the page content
+    stream at every signature-field rectangle.
+
+    Painting into the content stream (not just adding an annotation) ensures the
+    signature renders in every PDF viewer, including print dialogs and flattened
+    exports that ignore annotations.
+    """
     import base64
     filled_bytes = fill_pdf(template_path, field_data, confidence)
     try:
@@ -2162,29 +2310,35 @@ def inject_signature_into_pdf(
                 annot_list = list(raw_annots)
             except Exception:
                 continue
+
+            # Collect signature field rects on this page, then remove the widget
+            # annotations so the empty field boxes don't show through the image.
+            sig_rects: List[tuple] = []   # (x1, y1, draw_w, draw_h, jpeg_bytes, px_w, px_h)
             annots_to_keep = []
+
             for annot_ref in annot_list:
                 field_name = "?"
                 try:
-                    annot = annot_ref
-                    if "/Widget" not in str(annot.get("/Subtype", "")):
+                    annot  = annot_ref
+                    subtyp = str(annot.get("/Subtype", ""))
+                    if "/Widget" not in subtyp:
                         annots_to_keep.append(annot_ref)
                         continue
                     ft_raw = annot.get("/FT")
                     if ft_raw is None:
                         try:
-                            parent_obj = annot.get("/Parent")
-                            if parent_obj is not None:
-                                ft_raw = parent_obj.get("/FT")
+                            p = annot.get("/Parent")
+                            if p is not None:
+                                ft_raw = p.get("/FT")
                         except Exception:
                             pass
                     ft_str = str(ft_raw) if ft_raw is not None else ""
                     t = annot.get("/T")
                     if t is None:
                         try:
-                            parent_obj = annot.get("/Parent")
-                            if parent_obj is not None:
-                                t = parent_obj.get("/T")
+                            p = annot.get("/Parent")
+                            if p is not None:
+                                t = p.get("/T")
                         except Exception:
                             pass
                     field_name = str(t) if t is not None else ""
@@ -2198,12 +2352,13 @@ def inject_signature_into_pdf(
                     x1, y1, x2, y2 = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
                     if x1 > x2: x1, x2 = x2, x1
                     if y1 > y2: y1, y2 = y2, y1
-                    INSET   = 0.0
-                    field_w = max(x2 - x1 - INSET * 2, 1.0)
-                    field_h = max(y2 - y1 - INSET * 2, 1.0)
+                    field_w = max(x2 - x1, 1.0)
+                    field_h = max(y2 - y1, 1.0)
+
+                    # Scale signature to fit inside the field, preserving aspect ratio
                     img_w, img_h = sig_img.size
-                    img_ratio   = img_w / max(img_h, 1)
-                    field_ratio = field_w / max(field_h, 1)
+                    img_ratio    = img_w / max(img_h, 1)
+                    field_ratio  = field_w / max(field_h, 1)
                     if img_ratio >= field_ratio:
                         draw_w = field_w
                         draw_h = field_w / img_ratio
@@ -2212,8 +2367,11 @@ def inject_signature_into_pdf(
                         draw_w = field_h * img_ratio
                     draw_w = min(draw_w, field_w)
                     draw_h = min(draw_h, field_h)
-                    draw_x = x1 + INSET + (field_w - draw_w) / 2.0
-                    draw_y = y1 + INSET + (field_h - draw_h) / 2.0
+                    # Centre inside the field
+                    draw_x = x1 + (field_w - draw_w) / 2.0
+                    draw_y = y1 + (field_h - draw_h) / 2.0
+
+                    # Rasterise at 4× the point size for crisp output
                     px_w = max(int(draw_w * 4), 4)
                     px_h = max(int(draw_h * 4), 4)
                     sig_resized = sig_img.resize((px_w, px_h), Image.LANCZOS)
@@ -2224,7 +2382,31 @@ def inject_signature_into_pdf(
                         bg.paste(sig_resized.convert("RGB"))
                     jpeg_buf = io.BytesIO()
                     bg.save(jpeg_buf, format="JPEG", quality=92)
-                    jpeg_bytes = jpeg_buf.getvalue()
+                    sig_rects.append((draw_x, draw_y, draw_w, draw_h,
+                                      jpeg_buf.getvalue(), px_w, px_h))
+                    # Drop the widget annotation — the image replaces it
+                    injected += 1
+                except Exception as field_ex:
+                    logger.warning(f"Sig field error page={page_idx} field={field_name!r}: {field_ex}")
+                    annots_to_keep.append(annot_ref)
+
+            page["/Annots"] = pikepdf.Array(annots_to_keep)
+
+            if not sig_rects:
+                continue
+
+            # Detect the page's global CTM scale so we can paint in the correct
+            # coordinate space.  Many ACORD templates open their content stream
+            # with "sx 0 0 sy 0 0 cm" which scales all internal coordinates.
+            # Widget /Rect values are always in PDF user-space (post-transform),
+            # but when we append new content the current graphics state already
+            # has that scale applied — so we must invert it.
+            page_scale = _get_page_content_scale(page)  # e.g. 0.12 for ACORD 125
+
+            # Paint each signature image directly into the page content stream
+            for draw_x, draw_y, draw_w, draw_h, jpeg_bytes, px_w, px_h in sig_rects:
+                try:
+                    # Register the image XObject on this page's /Resources
                     img_xobj = pikepdf.Stream(pdf, jpeg_bytes)
                     img_xobj["/Type"]             = pikepdf.Name("/XObject")
                     img_xobj["/Subtype"]          = pikepdf.Name("/Image")
@@ -2234,58 +2416,89 @@ def inject_signature_into_pdf(
                     img_xobj["/BitsPerComponent"] = 8
                     img_xobj["/Filter"]           = pikepdf.Name("/DCTDecode")
                     indirect_img = pdf.make_indirect(img_xobj)
-                    img_name = pikepdf.Name("/SigImg")
-                    ap_ops = (
-                        f"q {draw_w:.4f} 0 0 {draw_h:.4f} 0 0 cm /SigImg Do Q"
-                    ).encode("latin-1")
-                    ap_stream = pikepdf.Stream(pdf, ap_ops)
-                    ap_stream["/Type"]    = pikepdf.Name("/XObject")
-                    ap_stream["/Subtype"] = pikepdf.Name("/Form")
-                    ap_stream["/BBox"]    = pikepdf.Array([pikepdf.Real(0), pikepdf.Real(0), pikepdf.Real(draw_w), pikepdf.Real(draw_h)])
-                    ap_stream["/Resources"] = pikepdf.Dictionary(XObject=pikepdf.Dictionary())
-                    ap_stream["/Resources"]["/XObject"][img_name] = indirect_img
-                    indirect_ap  = pdf.make_indirect(ap_stream)
-                    stamp_rect   = pikepdf.Array([pikepdf.Real(draw_x), pikepdf.Real(draw_y), pikepdf.Real(draw_x + draw_w), pikepdf.Real(draw_y + draw_h)])
-                    stamp_annot  = pikepdf.Dictionary(Type=pikepdf.Name("/Annot"), Subtype=pikepdf.Name("/Stamp"), Rect=stamp_rect, F=pikepdf.Integer(4), AP=pikepdf.Dictionary(N=indirect_ap))
-                    indirect_stamp = pdf.make_indirect(stamp_annot)
-                    annots_to_keep.append(indirect_stamp)
-                    injected += 1
-                except Exception as field_ex:
-                    logger.warning(f"Sig field error page={page_idx} field={field_name!r}: {field_ex}")
-                    annots_to_keep.append(annot_ref)
-            page["/Annots"] = pikepdf.Array(annots_to_keep)
 
+                    # Find a unique XObject name for this page
+                    if "/Resources" not in page:
+                        page["/Resources"] = pikepdf.Dictionary()
+                    res = page["/Resources"]
+                    if "/XObject" not in res:
+                        res["/XObject"] = pikepdf.Dictionary()
+                    xobj_name = "/SigImg"
+                    counter = 0
+                    while pikepdf.Name(xobj_name) in res["/XObject"]:
+                        counter += 1
+                        xobj_name = f"/SigImg{counter}"
+                    res["/XObject"][pikepdf.Name(xobj_name)] = indirect_img
+
+                    # Convert user-space coordinates to the page's internal space.
+                    # Widget rects are in user space; the content stream may have a
+                    # global scale (e.g. 0.12) already applied, so we divide by it.
+                    if page_scale and page_scale != 1.0:
+                        ix = draw_x / page_scale
+                        iy = draw_y / page_scale
+                        iw = draw_w / page_scale
+                        ih = draw_h / page_scale
+                    else:
+                        ix, iy, iw, ih = draw_x, draw_y, draw_w, draw_h
+
+                    # q ... cm Image Do Q — save/restore graphics state so we
+                    # don't disturb any transforms that follow in the stream.
+                    paint_ops = (
+                        f"q "
+                        f"{iw:.4f} 0 0 {ih:.4f} {ix:.4f} {iy:.4f} cm "
+                        f"{xobj_name} Do "
+                        f"Q\n"
+                    ).encode("latin-1")
+
+                    # Append paint ops after the existing page content
+                    existing = page.get("/Contents")
+                    paint_stream = pikepdf.Stream(pdf, paint_ops)
+                    if existing is None:
+                        page["/Contents"] = pdf.make_indirect(paint_stream)
+                    elif isinstance(existing, pikepdf.Array):
+                        existing.append(pdf.make_indirect(paint_stream))
+                        page["/Contents"] = existing
+                    else:
+                        page["/Contents"] = pikepdf.Array([
+                            existing if existing.is_indirect else pdf.make_indirect(existing),
+                            pdf.make_indirect(paint_stream),
+                        ])
+                except Exception as paint_ex:
+                    logger.warning(f"Sig paint error page={page_idx}: {paint_ex}")
+
+        # Clean up AcroForm: remove signature field entries so readers don't
+        # show an empty signature widget on top of the painted image.
         if injected > 0 and "/AcroForm" in pdf.Root:
-            acro       = pdf.Root["/AcroForm"]
-            acro["/NeedAppearances"] = pikepdf.Boolean(True)
+            acro = pdf.Root["/AcroForm"]
+            # NeedAppearances=false since we've painted directly
+            acro["/NeedAppearances"] = pikepdf.Boolean(False)
             fields_arr = acro.get("/Fields")
             if fields_arr is not None:
                 def _remove_sig_fields(arr):
-                    result = []
+                    kept = []
                     for item in arr:
                         try:
-                            t      = item.get("/T")
-                            ft_raw = item.get("/FT")
-                            ft_s   = str(ft_raw) if ft_raw is not None else ""
-                            name   = str(t) if t is not None else ""
+                            t     = item.get("/T")
+                            ft_r  = item.get("/FT")
+                            name  = str(t) if t is not None else ""
+                            ft_s  = str(ft_r) if ft_r is not None else ""
                             if _is_signature_field(name, ft_s):
                                 continue
                             kids = item.get("/Kids")
                             if kids:
                                 item["/Kids"] = pikepdf.Array(_remove_sig_fields(list(kids)))
-                            result.append(item)
+                            kept.append(item)
                         except Exception:
-                            result.append(item)
-                    return result
+                            kept.append(item)
+                    return kept
                 acro["/Fields"] = pikepdf.Array(_remove_sig_fields(list(fields_arr)))
 
         out_buf = io.BytesIO()
         pdf.save(out_buf)
         pdf.close()
         out_buf.seek(0)
-        result = out_buf.getvalue()
-        logger.info(f"Signature injection: {injected} field(s) stamped")
-        return result
+        logger.info(f"Signature injection: {injected} field(s) painted into content stream")
+        return out_buf.getvalue()
     except Exception as ex:
         logger.error(f"Signature injection failed: {ex}", exc_info=True)
         try:

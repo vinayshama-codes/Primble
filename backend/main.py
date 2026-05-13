@@ -271,6 +271,15 @@ async def startup():
     except Exception as _e:
         logger.warning(f"fieldmap migration failed (non-fatal): {_e}")
 
+    # Remove stale null entries for fillable fields so they go through GPT on
+    # next run rather than being permanently skipped (indicator/checkbox fields,
+    # contact fields, per-line prior coverage rows, etc.).
+    try:
+        from services.pdf_service import purge_stale_null_fieldmap_entries
+        purge_stale_null_fieldmap_entries()
+    except Exception as _e:
+        logger.warning(f"fieldmap null purge failed (non-fatal): {_e}")
+
     # Log GPT form-fill config so env issues are immediately visible in deployment logs.
     try:
         from services.pdf_service import GPT_MODEL, GPT_BATCH_SIZE, GPT_TEMPERATURE

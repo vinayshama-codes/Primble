@@ -37,10 +37,10 @@ def _client():
         import boto3
         _s3_client = boto3.client(
             "s3",
-            endpoint_url=os.getenv("STORAGE_ENDPOINT"),
-            aws_access_key_id=os.getenv("STORAGE_ACCESS_KEY"),
-            aws_secret_access_key=os.getenv("STORAGE_SECRET_KEY"),
-            region_name="auto",
+            endpoint_url=os.getenv("STORAGE_ENDPOINT") or None,
+            aws_access_key_id=os.getenv("STORAGE_ACCESS_KEY") or os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("STORAGE_SECRET_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY"),
+            region_name=os.getenv("AWS_REGION", "us-east-1"),
         )
     return _s3_client
 
