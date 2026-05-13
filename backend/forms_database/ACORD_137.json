@@ -1,0 +1,38 @@
+{
+  "form_id": "ACORD_137",
+  "form_name": "ACORD 137 - Commercial Auto Coverages / Limits Section",
+  "form_type": "commercial_auto_section",
+  "template_file": "ACORD_137.pdf",
+  "description": "Captures commercial auto, truckers, and motor carrier coverage details including liability limits, physical damage, hired/non-owned auto coverage, trailer interchange, and uninsured motorist coverage.",
+  "always_include": false,
+  "matching_flags": [
+    "is_commercial_policy",
+    "has_commercial_auto",
+    "has_business_vehicles",
+    "has_auto_liability"
+  ],
+  "matching_keywords": [
+    "commercial auto",
+    "business auto",
+    "truckers",
+    "motor carrier",
+    "fleet",
+    "vehicle schedule",
+    "auto liability",
+    "physical damage",
+    "hired auto",
+    "non owned auto",
+    "trailer interchange",
+    "uninsured motorist",
+    "garage location",
+    "acord 137"
+  ],
+  "coverage_types": [
+    "auto",
+    "commercial_auto",
+    "truckers"
+  ],
+  "policy_types": [
+    "commercial"
+  ]
+}

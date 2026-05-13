@@ -8,7 +8,7 @@ import textwrap
 from datetime import datetime, timezone
 from typing import List
 
-from config.settings import groq_chat
+from config.settings import groq_chat, LLM_MODEL
 from services.extraction_service import _fv, _cache_get, _cache_set
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ Respond with ONLY a valid JSON object with exactly three keys:
 
 Return ONLY the JSON object."""
     try:
-        raw = groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
+        raw = groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
         if raw.startswith("```"):
             raw = raw.replace("```json", "").replace("```", "").strip()
         s, e = raw.find("{"), raw.rfind("}")
@@ -153,7 +153,7 @@ Respond with ONLY a valid JSON object with exactly three keys:
 
 Return ONLY the JSON object."""
     try:
-        raw = groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
+        raw = groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
         if raw.startswith("```"):
             raw = raw.replace("```json", "").replace("```", "").strip()
         s, e = raw.find("{"), raw.rfind("}")

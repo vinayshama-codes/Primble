@@ -1,0 +1,37 @@
+{
+  "form_id": "ACORD_138",
+  "form_name": "ACORD 138 - Garage and Dealers Coverages / Limits Section",
+  "form_type": "garage_dealers_section",
+  "template_file": "ACORD_138.pdf",
+  "description": "Captures garage and auto dealer coverage information including garage liability, garage keepers coverage, dealer plate coverage, physical damage, and dealer operations exposures.",
+  "always_include": false,
+  "matching_flags": [
+    "is_commercial_policy",
+    "has_garage_operations",
+    "has_auto_dealer_exposure",
+    "has_garagekeepers_coverage"
+  ],
+  "matching_keywords": [
+    "garage liability",
+    "garage keepers",
+    "auto dealer",
+    "dealer plates",
+    "repair shop",
+    "service garage",
+    "dealer operations",
+    "garage operations",
+    "physical damage",
+    "autos left for service",
+    "safe keeping",
+    "transportation plates",
+    "acord 138"
+  ],
+  "coverage_types": [
+    "garage_liability",
+    "garagekeepers",
+    "commercial_auto"
+  ],
+  "policy_types": [
+    "commercial"
+  ]
+}

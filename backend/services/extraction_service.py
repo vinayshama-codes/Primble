@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Tuple, Dict, Any
 
-from config.settings import groq_chat
+from config.settings import groq_chat, LLM_MODEL
 
 # ASYNC-SAFE: shared executor for CPU-bound blocking work (tiktoken, sync helpers)
 _EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
@@ -21,23 +21,22 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
 logger = logging.getLogger(__name__)
 
 # ── Cache versioning (Fix 3) ──────────────────────────────────────────────────
-PROMPT_VERSION = "v2"
-SCHEMA_VERSION = "v2"
+PROMPT_VERSION = "v6"
+SCHEMA_VERSION = "v6"
 
 # ── Model context config ──────────────────────────────────────────────────────
 _MODEL_CHUNK_CHARS: Dict[str, int] = {
-    "groq":    4_000,
     "claude": 28_000,
     "openai": 40_000,
 }
-ACTIVE_MODEL = os.getenv("LLM_PROVIDER", "groq").lower()
+ACTIVE_MODEL = "openai"
 
 _MAX_TOKENS_PER_DOC = int(os.getenv("ACORDLY_MAX_DOC_TOKENS", "500000"))
 _CHARS_PER_TOKEN    = 4
 
 
 def get_chunk_size(model: str = ACTIVE_MODEL) -> int:
-    return _MODEL_CHUNK_CHARS.get(model, _MODEL_CHUNK_CHARS["groq"])
+    return _MODEL_CHUNK_CHARS.get(model, _MODEL_CHUNK_CHARS["openai"])
 
 
 # ── Token estimation (tiktoken with char/4 fallback) ─────────────────────────
@@ -69,19 +68,39 @@ _EXTRACT_SCHEMA = (
     '  "physical_address": string or null, "contact_name": string or null,\n'
     '  "contact_phone": string or null, "contact_email": string or null,\n'
     '  "fein": string or null, "entity_type": string or null,\n'
+    # CURRENT policy dates/number — NEVER mix with prior policy fields below
     '  "effective_date": string or null, "expiration_date": string or null,\n'
-    '  "policy_number": string or null, "lines_of_business": [],\n'
+    '  "policy_number": string or null, "lines_of_business": [string],\n'
     '  "total_revenue": string or null, "total_payroll": string or null,\n'
     '  "num_employees": string or null, "locations": [string],\n'
-    '  "operations_description": string or null, "prior_carrier": string or null,\n'
+    '  "operations_description": string or null,\n'
+    # PRIOR/PREVIOUS policy — separate namespace, never overwrite current policy keys
+    '  "prior_carrier": string or null,\n'
+    '  "prior_policy_number": string or null,\n'
+    '  "prior_effective_date": string or null,\n'
+    '  "prior_expiration_date": string or null,\n'
     '  "naics_code": string or null, "sic_code": string or null,\n'
     '  "years_in_business": string or null,\n'
     '  "gl_limits": string or null, "gl_aggregate": string or null,\n'
     '  "gl_each_occurrence": string or null,\n'
+    '  "gl_products_aggregate": string or null,\n'
+    '  "gl_personal_advertising_injury": string or null,\n'
+    '  "gl_fire_damage_limit": string or null,\n'
+    '  "gl_medical_expense": string or null,\n'
     '  "gl_class_codes_by_location": [{"location": string, "codes": [string]}],\n'
     '  "gl_deductible": string or null, "gl_form_type": string or null,\n'
     '  "retro_date": string or null,\n'
-    '  "additional_named_insureds": [],\n'
+    '  "carrier_name": string or null,\n'
+    '  "carrier_naic": string or null,\n'
+    '  "prior_carrier_naic": string or null,\n'
+    '  "audit_period": string or null,\n'
+    '  "billing_plan": string or null,\n'
+    '  "wc_el_each_accident": string or null,\n'
+    '  "wc_el_disease_each_employee": string or null,\n'
+    '  "wc_el_disease_policy_limit": string or null,\n'
+    '  "hired_auto_indicator": string or null,\n'
+    '  "non_owned_auto_indicator": string or null,\n'
+    '  "additional_named_insureds": [string],\n'
     '  "property_building_value": string or null, "property_bpp_value": string or null,\n'
     '  "construction_type": string or null, "occupancy_type": string or null,\n'
     '  "year_built": string or null, "roof_year": string or null,\n'
@@ -92,8 +111,12 @@ _EXTRACT_SCHEMA = (
     '  "property_deductible_earthquake": string or null, "property_deductible_flood": string or null,\n'
     '  "mortgagee_name": string or null, "auto_liability_limit": string or null,\n'
     '  "auto_liability_structure": string or null, "auto_deductible_comp": string or null,\n'
-    '  "auto_deductible_collision": string or null, "auto_vin_schedule": [], "auto_garaging_addresses": [],\n'
-    '  "wc_payroll": string or null, "wc_payroll_by_state": {}, "wc_class_codes": [],\n'
+    '  "auto_deductible_collision": string or null,\n'
+    # Vehicle schedule: one object per vehicle row
+    '  "auto_vin_schedule": [{"year": string, "make": string, "model": string, "vin": string, "body_type": string or null, "gvw": string or null}],\n'
+    '  "auto_garaging_addresses": [string],\n'
+    # WC class codes: one object per class code row
+    '  "wc_payroll": string or null, "wc_payroll_by_state": {}, "wc_class_codes": [{"code": string, "description": string, "state": string or null, "payroll": string or null, "rate": string or null}],\n'
     '  "wc_xmod": string or null, "wc_xmod_effective_date": string or null,\n'
     '  "wc_officer_exclusions": string or null,\n'
     '  "wc_monopolistic_payroll": {"state": "amount"},\n'
@@ -107,7 +130,8 @@ _EXTRACT_SCHEMA = (
     '  "is_renewal": string or null,\n'
     '  "wc_prior_carrier": string or null,\n'
     '  "wc_payroll_period": string or null,\n'
-    '  "auto_drivers": [],\n'
+    # Driver schedule: one object per driver row
+    '  "auto_drivers": [{"name": string, "dob": string or null, "license_number": string or null, "license_state": string or null}],\n'
     '  "auto_radius_of_operation": string or null,\n'
     '  "auto_physical_damage_valuation": string or null,\n'
     '  "auto_covered_symbols": [int],\n'
@@ -124,7 +148,8 @@ _EXTRACT_SCHEMA = (
     '  "total_incurred": string or null,\n'
     '  "total_paid": string or null,\n'
     '  "open_claims_count": string or null,\n'
-    '  "property_locations": [],\n'
+    # Property location schedule: one object per location row
+    '  "property_locations": [{"address": string, "building_value": string or null, "bpp_value": string or null, "construction_type": string or null, "year_built": string or null}],\n'
     '  "loss_run_age_days": string or null,\n'
     '  "risk_transfer": {\n'
     '    "additional_insured_required": boolean,\n'
@@ -135,7 +160,58 @@ _EXTRACT_SCHEMA = (
     '    "loss_payee_name": string or null,\n'
     '    "mortgagee_name": string or null,\n'
     '    "specific_wording_requirements": string or null\n'
-    '  }\n'
+    '  },\n'
+    '  "builders_risk_project_address": string or null,\n'
+    '  "builders_risk_project_cost": string or null,\n'
+    '  "builders_risk_completion_date": string or null,\n'
+    '  "builders_risk_construction_type": string or null,\n'
+    '  "builders_risk_owner_name": string or null,\n'
+    '  "builders_risk_contractor_name": string or null,\n'
+    '  "builders_risk_insured_interest": string or null,\n'
+    '  "crime_limit": string or null,\n'
+    '  "crime_deductible": string or null,\n'
+    '  "crime_employee_count": string or null,\n'
+    '  "crime_locations_count": string or null,\n'
+    '  "cyber_limit": string or null,\n'
+    '  "cyber_retention": string or null,\n'
+    '  "cyber_prior_incidents": string or null,\n'
+    '  "cyber_controls_mfa": boolean,\n'
+    '  "cyber_controls_backups": boolean,\n'
+    '  "cyber_pii_records_count": string or null,\n'
+    '  "cyber_third_party_vendors": string or null,\n'
+    '  "inland_marine_total_value": string or null,\n'
+    '  "inland_marine_transit_limit": string or null,\n'
+    '  "inland_marine_items": [{"description": string, "value": string or null, "serial_number": string or null}],\n'
+    '  "contractor_residential_pct": string or null,\n'
+    '  "contractor_commercial_pct": string or null,\n'
+    '  "contractor_high_hazard_ops": [string],\n'
+    '  "contractor_license_number": string or null,\n'
+    '  "certificate_holder_address": string or null,\n'
+    '  "certificate_description_of_operations": string or null,\n'
+    '  "loss_payee_name": string or null,\n'
+    '  "additional_remarks_text": string or null,\n'
+    # ── Loss history schedule (ACORD 125, 186) ────────────────────────────
+    '  "loss_history": [{"date": string or null, "description": string or null, '
+    '"amount": string or null, "paid": string or null, "claim_number": string or null, '
+    '"open": boolean}],\n'
+    # ── Prior coverage by line (ACORD 125/126/127/130) ───────────────────
+    '  "prior_coverage_by_line": [{"line": string, "carrier": string or null, '
+    '"policy_no": string or null, "effective": string or null, '
+    '"expiration": string or null, "premium": string or null}],\n'
+    # ── WC officers / owners (ACORD 130, 138) ────────────────────────────
+    '  "wc_officers": [{"name": string, "title": string or null, '
+    '"ownership_pct": string or null, "include": boolean, "exclude": boolean, '
+    '"state": string or null}],\n'
+    # ── Garage / Dealers (ACORD 137) ─────────────────────────────────────
+    '  "garage_operations_type": string or null,\n'
+    '  "garage_liability_limit": string or null,\n'
+    '  "garage_deductible": string or null,\n'
+    '  "garagekeeper_liability_limit": string or null,\n'
+    '  "garagekeeper_comp_deductible": string or null,\n'
+    '  "garagekeeper_coll_deductible": string or null,\n'
+    '  "auto_dealers_inventory_value": string or null,\n'
+    # ── WC Application (ACORD 138) ────────────────────────────────────────
+    '  "wc_description_of_operations": string or null\n'
     '},\n\n'
     '"flags": {\n'
     '  "is_commercial_policy": boolean, "has_general_liability": boolean,\n'
@@ -150,17 +226,42 @@ _EXTRACT_SCHEMA = (
     '  "property_has_bi_coverage": boolean, "property_has_peril_deductibles": boolean,\n'
     '  "has_additional_insured_requirement": boolean,\n'
     '  "has_waiver_of_subrogation": boolean,\n'
-    '  "has_primary_noncontributory": boolean\n'
+    '  "has_primary_noncontributory": boolean,\n'
+    '  "has_builders_risk": boolean,\n'
+    '  "has_inland_marine": boolean,\n'
+    '  "has_crime": boolean,\n'
+    '  "has_cyber": boolean\n'
     '}'
 )
 
+# Full verbose prompt — used for Claude / OpenAI paths where token budget is ample.
 _EXTRACT_PROMPT_PREFIX = (
-    'You are a carrier-grade insurance document analyzer. Extract every available data point.\n\n'
+    'You are a carrier-grade insurance document analyzer with deep expertise in commercial '
+    'insurance policies, declarations pages, ACORD forms, certificates, loss runs, and '
+    'endorsements. Your job is to read every word of the document and extract EVERY visible '
+    'data point — leave nothing behind.\n\n'
+    'RULE 1 — Policy namespace separation:\n'
+    '  • Current/active policy  → policy_number, effective_date, expiration_date\n'
+    '  • Prior/previous policy  → prior_policy_number, prior_effective_date, prior_expiration_date, prior_carrier\n'
+    '  NEVER mix these two groups. If a document shows "Prior Policy: XYZ / 01/01/2023–01/01/2024" '
+    'and "Current Policy: ABC / 01/01/2024–01/01/2025", both sets must appear in their correct keys.\n\n'
+    'RULE 2 — Schedule tables: output ONE JSON object per row.\n'
+    '  • Vehicle schedule      → one entry per vehicle in auto_vin_schedule\n'
+    '  • WC class code table   → one entry per class code row in wc_class_codes\n'
+    '  • Driver schedule       → one entry per driver in auto_drivers\n'
+    '  • Property locations    → one entry per location in property_locations\n\n'
+    'RULE 3 — Never hallucinate. If a value is not visible in the document, set the field to null '
+    '(or [] for list fields). Do not invent or infer values that are not explicitly stated.\n\n'
+    'RULE 4 — Extract ALL financial figures exactly as printed: limits, premiums, payrolls, '
+    'deductibles, values. Include currency symbols and formatting as-is.\n\n'
+    'RULE 5 — For addresses: extract the full address string including city, state, ZIP.\n\n'
     'Return ONLY a valid JSON object with exactly these two top-level keys:\n\n'
     + _EXTRACT_SCHEMA
-    + '\n\nReturn ONLY the JSON object, no markdown, no extra text.\n\n'
+    + '\n\nReturn ONLY the JSON object. No markdown fences, no explanation, no extra text. '
+    'Start your response with { and end with }.\n\n'
 )
 
+# ── Prompt overhead constants ─────────────────────────────────────────────────
 # Max realistic context_section length (label + context_prefix up to max_chars//7 tail).
 # Max realistic low_conf_note length (label + 40 tokens * ~10 chars).
 # These are upper bounds used for prompt overhead calculation — no magic constants.
@@ -484,6 +585,8 @@ _LIST_FIELDS = frozenset({
     "auto_vin_schedule", "auto_garaging_addresses", "auto_drivers",
     "gl_class_codes_by_location", "wc_class_codes", "underlying_policies",
     "additional_named_insureds", "auto_covered_symbols",
+    "loss_history", "prior_coverage_by_line", "wc_officers",
+    "inland_marine_items", "contractor_high_hazard_ops",
 })
 
 
@@ -500,17 +603,24 @@ def _validate_parsed(result: dict, context: str) -> dict:
     _annotate_facts ran before _validate_parsed — that is a pipeline ordering bug.
     Raise RuntimeError immediately to surface it.
     """
-    # Require both top-level keys as dicts — no silent insertion
-    for k in ("facts", "flags"):
-        if k not in result:
-            raise RuntimeError(
-                f"_validate_parsed [{context}]: required top-level key '{k}' missing. "
-                "LLM output did not include required schema keys."
-            )
-        if not isinstance(result[k], dict):
-            raise RuntimeError(
-                f"_validate_parsed [{context}]: '{k}' is {type(result[k]).__name__}, expected dict."
-            )
+    # Require "facts" as a dict. "flags" is optional — insert empty dict if absent.
+    if "facts" not in result:
+        raise RuntimeError(
+            f"_validate_parsed [{context}]: required top-level key 'facts' missing. "
+            "LLM output did not include required schema keys."
+        )
+    if not isinstance(result["facts"], dict):
+        raise RuntimeError(
+            f"_validate_parsed [{context}]: 'facts' is {type(result['facts']).__name__}, expected dict."
+        )
+    if "flags" not in result:
+        logger.warning(f"_validate_parsed [{context}]: 'flags' missing — inserting empty dict")
+        result["flags"] = {}
+    elif not isinstance(result["flags"], dict):
+        logger.warning(
+            f"_validate_parsed [{context}]: 'flags' is {type(result['flags']).__name__} — resetting to {{}}"
+        )
+        result["flags"] = {}
 
     normalized: dict = {}
     for field, v in result["facts"].items():
@@ -572,6 +682,29 @@ def _validate_parsed(result: dict, context: str) -> dict:
         str_val = str(v).strip()
         if str_val.lower() in _NULL_STRINGS:
             normalized[field] = None
+        elif field in _LIST_FIELDS:
+            # LLM returned a scalar for a known list field — try to recover.
+            # Attempt JSON parse (LLM sometimes returns a JSON array as a string).
+            try:
+                parsed = json.loads(str_val)
+                if isinstance(parsed, list):
+                    normalized[field] = parsed
+                    logger.warning(
+                        f"_validate_parsed [{context}]: list field {field!r} "
+                        "returned as JSON string — parsed successfully"
+                    )
+                else:
+                    logger.warning(
+                        f"_validate_parsed [{context}]: list field {field!r} "
+                        f"returned scalar {str_val!r} — defaulting to []"
+                    )
+                    normalized[field] = []
+            except (json.JSONDecodeError, ValueError):
+                logger.warning(
+                    f"_validate_parsed [{context}]: list field {field!r} "
+                    f"returned scalar {str_val!r} — defaulting to []"
+                )
+                normalized[field] = []
         else:
             normalized[field] = str_val
 
@@ -599,47 +732,41 @@ async def _safe_json_parse(raw: str, context: str = "") -> dict:
         if s != -1 and e != -1:
             candidate = raw[s : e + 1]
             try:
-                result = json.loads(candidate)
-                if not isinstance(result, dict):
-                    raise RuntimeError(
-                        f"_safe_json_parse [{context}]: top-level value is "
-                        f"{type(result).__name__}, expected dict."
+                parsed = json.loads(candidate)
+            except (json.JSONDecodeError, ValueError):
+                parsed = None
+
+            if isinstance(parsed, dict):
+                # If the model returned a bare field-dict without the facts/flags wrapper,
+                # wrap it automatically. This happens when the model echoes the schema
+                # structure rather than wrapping it in {"facts": {...}, "flags": {...}}.
+                if "facts" not in parsed and "flags" not in parsed:
+                    logger.warning(
+                        f"_safe_json_parse [{context}]: bare dict (no facts/flags keys) "
+                        "— wrapping into {{facts: ..., flags: {{}}}}"
                     )
-                # Strict schema enforcement — raises RuntimeError on violation
-                result = _validate_parsed(result, context)
-                # Sanity check on repair attempts: 0 facts after repair = truncation
-                if attempt > 0:
-                    fact_count = sum(1 for v in result["facts"].values() if v is not None)
-                    if fact_count == 0:
-                        logger.warning(
-                            f"_safe_json_parse [{context}]: repair attempt {attempt} "
-                            "produced 0 non-null facts — continuing"
-                        )
-                        if attempt < 2:
-                            pass
-                        else:
-                            raise RuntimeError(
-                                f"_safe_json_parse [{context}]: repair produced 0 non-null facts "
-                                "after all attempts."
+                    parsed = {"facts": parsed, "flags": {}}
+
+                try:
+                    result = _validate_parsed(parsed, context)
+                    if attempt > 0:
+                        fact_count = sum(1 for v in result["facts"].values() if v is not None)
+                        if fact_count == 0:
+                            logger.warning(
+                                f"_safe_json_parse [{context}]: repair attempt {attempt} "
+                                "produced 0 non-null facts — continuing"
                             )
+                            if attempt >= 2:
+                                raise RuntimeError(
+                                    f"_safe_json_parse [{context}]: repair produced 0 non-null "
+                                    "facts after all attempts."
+                                )
+                        else:
+                            return result
                     else:
                         return result
-                else:
-                    return result
-            except RuntimeError:
-                raise
-            except (json.JSONDecodeError, ValueError):
-                try:
-                    bare = json.loads(candidate)
-                    if isinstance(bare, dict) and "facts" not in bare and "flags" not in bare:
-                        wrapped = {"facts": bare, "flags": {}}
-                        result = _validate_parsed(wrapped, context)
-                        logger.warning(
-                            f"_safe_json_parse [{context}]: wrapped bare dict into facts/flags"
-                        )
-                        return result
-                except Exception:
-                    pass
+                except RuntimeError:
+                    raise
 
         if attempt < 2:
             logger.warning(
@@ -648,7 +775,7 @@ async def _safe_json_parse(raw: str, context: str = "") -> dict:
             )
             try:
                 raw = await groq_chat(
-                    "llama-3.1-8b-instant",
+                    LLM_MODEL,
                     [{
                         "role": "user",
                         "content": (
@@ -707,6 +834,8 @@ _LONG_DOC_LIST_KEYS = [
     "locations", "property_locations", "auto_vin_schedule", "auto_garaging_addresses",
     "auto_drivers", "gl_class_codes_by_location", "wc_class_codes", "underlying_policies",
     "additional_named_insureds", "auto_covered_symbols",
+    "loss_history", "prior_coverage_by_line", "wc_officers",
+    "inland_marine_items", "contractor_high_hazard_ops",
 ]
 
 DOC_TYPE_CHUNK_LIMITS: Dict[str, int] = {
@@ -757,9 +886,7 @@ def _split_lines_into_chunks(
     line_start_idx: int,
     line_starts: List[int],
     max_chars: int,
-    max_chunks: int,
     init_context: str,
-    existing_count: int,
 ) -> List[ChunkTuple]:
     """
     Line-level fallback for oversized sections.
@@ -788,9 +915,8 @@ def _split_lines_into_chunks(
         buf_char_start = c_end
 
     while i < total_lines:
-        if existing_count + len(results) >= max_chunks:
-            break
-
+        # max_chunks is advisory — never break early and drop content.
+        # All lines are always processed to guarantee zero truncation.
         abs_line = line_start_idx + i
 
         # KV guard with chaining
@@ -826,7 +952,6 @@ def _chunk_by_sections(
     text: str,
     max_chars: int,
     overlap_pct: float,
-    max_chunks: int,
 ) -> List[ChunkTuple]:
     """
     Hybrid semantic + line chunking.
@@ -869,13 +994,10 @@ def _chunk_by_sections(
         cur_chars      = 0
 
     for sec_start_li, sec_end_li in sections:
-        if len(results) >= max_chunks:
-            break
-
+        # max_chunks is advisory — never drop sections. Full coverage is required.
         sec_lines      = lines[sec_start_li:sec_end_li]
         sec_chars      = sum(len(l) for l in sec_lines)
         sec_char_start = line_starts[sec_start_li]
-        sec_char_end   = line_starts[sec_end_li]
 
         if sec_chars > max_chars:
             if cur_lines:
@@ -884,8 +1006,7 @@ def _chunk_by_sections(
 
             sub_chunks = _split_lines_into_chunks(
                 sec_lines, sec_start_li, line_starts,
-                max_chars, max_chunks, context_prefix,
-                existing_count=len(results),
+                max_chars, context_prefix,
             )
             results.extend(sub_chunks)
             if sub_chunks:
@@ -896,8 +1017,6 @@ def _chunk_by_sections(
             continue
 
         if cur_chars + sec_chars > max_chars and cur_lines:
-            if len(results) >= max_chunks:
-                break
             _flush_cur(sec_char_start)
             cur_char_start = sec_char_start
             cur_lines      = list(sec_lines)
@@ -908,7 +1027,8 @@ def _chunk_by_sections(
             cur_lines.extend(sec_lines)
             cur_chars += sec_chars
 
-    if cur_lines and len(results) < max_chunks:
+    # Always flush the final buffer — no cap guard here either.
+    if cur_lines:
         _flush_cur(line_starts[len(lines)])
 
     if not results:
@@ -1090,7 +1210,7 @@ async def extract_facts(
         + _EXTRACT_PROMPT_SUFFIX
     )
 
-    raw = await groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
+    raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
 
     result   = await _safe_json_parse(raw, context=f"key={ck[:8]}")
     annotated, manual_conf = _annotate_facts(result["facts"], low_confidence_tokens, source=source)
@@ -1464,7 +1584,7 @@ async def _run_reconciliation(conflicts: Dict[str, dict], result: dict) -> None:
             "Return ONLY a JSON object: {\"field_name\": \"chosen_value\"}.\n\n"
             "Conflicts:\n" + json.dumps(llm_conflicts, indent=2)
         )
-        raw      = await groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
+        raw      = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
         resolved = _parse_flat_json(raw, context="reconciliation")
         for k, v in resolved.items():
             if k not in _OCR_CRITICAL_FIELDS or _is_empty(v):
@@ -1572,10 +1692,13 @@ async def extract_facts_async(
     """
     Async wrapper with jittered exponential backoff for transient errors.
     RuntimeError (JSON/schema failure) propagates immediately — not transient.
-    All retries live here. _gather_chunks_async adds no extra retry layer.
+    All retries live here. Per-chunk retries in _gather_chunks_async are additional.
     """
-    _TRANSIENT = ("rate", "timeout", "connection", "503", "502", "500", "429",
-                  "service unavailable", "temporarily")
+    _TRANSIENT      = ("rate", "timeout", "connection", "503", "502", "500", "429",
+                       "413", "service unavailable", "temporarily")
+    # Rate-limit signals — applies to all providers (OpenAI 429, Groq 413/TPM, etc.)
+    _RATE_LIM_MARKS = ("rate_limit", "413", "tokens per minute", "tpm", "rate limit exceeded",
+                       "requests per minute", "rpm")
     last_ex: Optional[Exception] = None
     for attempt in range(3):
         try:
@@ -1584,13 +1707,22 @@ async def extract_facts_async(
             raise
         except Exception as ex:
             last_ex = ex
-            if attempt < 2 and any(t in str(ex).lower() for t in _TRANSIENT):
-                base   = 2 ** attempt
-                jitter = random.uniform(-0.25 * base, 0.25 * base)
-                wait   = max(0.5, base + jitter)
-                logger.warning(
-                    f"extract_facts_async: transient attempt={attempt + 1}/3 wait={wait:.2f}s — {ex}"
-                )
+            msg = str(ex).lower()
+            if attempt < 2 and any(t in msg for t in _TRANSIENT):
+                if any(m in msg for m in _RATE_LIM_MARKS):
+                    # Rate-limited — wait for provider bucket to refill before retrying.
+                    wait = 62.0 + random.uniform(0, 5)
+                    logger.warning(
+                        f"extract_facts_async: rate-limited attempt={attempt + 1}/3 "
+                        f"waiting {wait:.0f}s — {ex}"
+                    )
+                else:
+                    base   = 2 ** attempt
+                    jitter = random.uniform(-0.25 * base, 0.25 * base)
+                    wait   = max(0.5, base + jitter)
+                    logger.warning(
+                        f"extract_facts_async: transient attempt={attempt + 1}/3 wait={wait:.2f}s — {ex}"
+                    )
                 await asyncio.sleep(wait)
                 continue
             raise
@@ -1605,38 +1737,65 @@ async def _gather_chunks_async(
     sem             = _AdaptiveSemaphore()
     total_llm_calls = 0
 
-    # Inter-chunk pacing. Groq free-tier is sensitive to burst; tune via env vars.
-    _PRE_CALL_DELAY  = float(os.getenv("GROQ_PRE_CALL_DELAY",  "0.3"))
-    _POST_CALL_DELAY = float(os.getenv("GROQ_POST_CALL_DELAY", "0.2"))
+    # Inter-chunk pacing — tunable via env vars (defaults suit OpenAI rate limits).
+    _PRE_CALL_DELAY  = float(os.getenv("CHUNK_PRE_CALL_DELAY",  "0.1"))
+    _POST_CALL_DELAY = float(os.getenv("CHUNK_POST_CALL_DELAY", "0.1"))
+    # Per-chunk retry budget — retried inside _one before marking chunk_failed.
+    _CHUNK_MAX_RETRIES = int(os.getenv("CHUNK_MAX_RETRIES", "3"))
 
     async def _one(idx: int, chunk_text: str, c_start: int, c_end: int, ctx: str) -> dict:
         nonlocal total_llm_calls
+        last_ex: Optional[Exception] = None
         async with sem:
-            try:
-                await asyncio.sleep(_PRE_CALL_DELAY)
-                total_llm_calls += 1
-                result = await extract_facts_async(chunk_text, low_confidence_tokens, ctx, source="ai")
-                await asyncio.sleep(_POST_CALL_DELAY)
-                result.update({"_chunk_idx": idx, "_char_start": c_start, "_char_end": c_end})
-                await sem.record(retried=False)
-                logger.debug(f"chunk {idx}: ok chars={c_start}–{c_end}")
-                return result
-            except Exception as ex:
-                logger.error(f"chunk {idx} (chars {c_start}–{c_end}): permanent fail — {ex}")
-                await sem.record(retried=True)
-                return {
-                    "facts": {}, "flags": {},
-                    "_chunk_idx": idx, "_char_start": c_start, "_char_end": c_end,
-                    "chunk_failed": True, "chunk_error": str(ex),
-                }
+            for attempt in range(_CHUNK_MAX_RETRIES):
+                try:
+                    await asyncio.sleep(_PRE_CALL_DELAY)
+                    total_llm_calls += 1
+                    result = await extract_facts_async(chunk_text, low_confidence_tokens, ctx, source="ai")
+                    await asyncio.sleep(_POST_CALL_DELAY)
+                    result.update({"_chunk_idx": idx, "_char_start": c_start, "_char_end": c_end})
+                    await sem.record(retried=(attempt > 0))
+                    if attempt > 0:
+                        logger.info(f"chunk {idx}: recovered on attempt {attempt + 1} chars={c_start}–{c_end}")
+                    else:
+                        logger.debug(f"chunk {idx}: ok chars={c_start}–{c_end}")
+                    return result
+                except RuntimeError:
+                    # Schema/JSON failure — not transient, do not retry.
+                    raise
+                except Exception as ex:
+                    last_ex = ex
+                    wait = 2 ** attempt + random.uniform(0, 0.5)
+                    logger.warning(
+                        f"chunk {idx} attempt {attempt + 1}/{_CHUNK_MAX_RETRIES} "
+                        f"(chars {c_start}–{c_end}) failed — retrying in {wait:.1f}s: {ex}"
+                    )
+                    if attempt < _CHUNK_MAX_RETRIES - 1:
+                        await asyncio.sleep(wait)
+            # All retries exhausted — mark as failed but preserve metadata for audit.
+            logger.error(
+                f"chunk {idx} (chars {c_start}–{c_end}): all {_CHUNK_MAX_RETRIES} attempts failed — {last_ex}"
+            )
+            await sem.record(retried=True)
+            return {
+                "facts": {}, "flags": {},
+                "_chunk_idx": idx, "_char_start": c_start, "_char_end": c_end,
+                "chunk_failed": True, "chunk_error": str(last_ex),
+            }
 
     results = list(await asyncio.gather(*[
         _one(i, ct, cs, ce, cx) for i, (ct, cs, ce, cx) in enumerate(chunks)
     ]))
-    failed = sum(1 for r in results if r.get("chunk_failed"))
+    failed        = sum(1 for r in results if r.get("chunk_failed"))
+    total_chars   = sum(r.get("_char_end", 0) - r.get("_char_start", 0) for r in results)
+    failed_ranges = [
+        f"{r['_char_start']}–{r['_char_end']}"
+        for r in results if r.get("chunk_failed")
+    ]
     logger.info(
-        f"gather_chunks doc_type='{doc_type}' chunks={len(chunks)} "
-        f"failed={failed} llm_calls={total_llm_calls}"
+        f"gather_chunks doc_type='{doc_type}' chunks={len(chunks)} failed={failed} "
+        f"llm_calls={total_llm_calls} total_chars_processed={total_chars}"
+        + (f" failed_ranges={failed_ranges}" if failed_ranges else "")
     )
     return results
 
@@ -1724,51 +1883,74 @@ async def _run_extraction(
         text,
         max_chars=chunk_size,
         overlap_pct=overlap_pct,
-        max_chunks=cap,
     )
-
-    if len(chunks) > cap:
-        raise ValueError(
-            f"_run_extraction: doc_type='{doc_type}' actual chunk count={len(chunks)} "
-            f"exceeds cap={cap}. Raise DOC_TYPE_CHUNK_LIMITS['{doc_type}'] or split the document."
-        )
 
     _verify_coverage(chunks, len(text), doc_type)
 
     logger.info(
-        f"extraction doc_type='{doc_type}' model='{ACTIVE_MODEL}' "
-        f"chunks={len(chunks)} total_chars={len(text)} est_tokens={estimate_tokens(text):,}"
+        f"extraction START doc_type='{doc_type}' model='{ACTIVE_MODEL}' "
+        f"chunks={len(chunks)} total_chars={len(text)} est_tokens={estimate_tokens(text):,} "
+        f"chunk_size={chunk_size}"
     )
 
     partials = await _gather_chunks_async(chunks, low_confidence_tokens, doc_type)
 
-    failed = [p["_chunk_idx"] for p in partials if p.get("chunk_failed")]
+    failed_partials  = [p for p in partials if p.get("chunk_failed")]
+    success_partials = [p for p in partials if not p.get("chunk_failed")]
+    failed_indices   = [p["_chunk_idx"] for p in failed_partials]
+    failed_ranges    = [f"{p['_char_start']}–{p['_char_end']}" for p in failed_partials]
+    fail_ratio       = len(failed_partials) / len(chunks) if chunks else 0.0
 
-    if failed:
-        errors     = [p.get("chunk_error", "?") for p in partials if p.get("chunk_failed")]
-        fail_ratio = len(failed) / len(chunks)
+    # ── Document-level retry: if majority failed, halve chunk size and retry ──
+    if fail_ratio > 0.5 and chunk_size > 1500:
+        new_chunk_size = int(chunk_size * 0.6)
+        logger.warning(
+            f"_run_extraction: majority failed ({len(failed_partials)}/{len(chunks)}), "
+            f"retrying with smaller chunks {chunk_size} → {new_chunk_size}"
+        )
+        return await _run_extraction(text, doc_type, low_confidence_tokens, new_chunk_size, cap)
 
-        if fail_ratio > 0.5 and chunk_size > 1500:
-            new_chunk_size = int(chunk_size * 0.6)
-            logger.warning(
-                f"_run_extraction: majority failed ({len(failed)}/{len(chunks)}), "
-                f"retrying {chunk_size} → {new_chunk_size}"
-            )
-            return await _run_extraction(text, doc_type, low_confidence_tokens, new_chunk_size, cap)
+    # ── Surface failed chunks — NEVER silently discard ────────────────────────
+    if failed_partials:
+        errors = [p.get("chunk_error", "?") for p in failed_partials]
+        covered_chars = sum(
+            p.get("_char_end", 0) - p.get("_char_start", 0) for p in success_partials
+        )
+        failed_chars = sum(
+            p.get("_char_end", 0) - p.get("_char_start", 0) for p in failed_partials
+        )
+        coverage_pct = covered_chars / len(text) if len(text) > 0 else 0.0
+        logger.warning(
+            f"_run_extraction PARTIAL doc_type='{doc_type}' "
+            f"failed={len(failed_partials)}/{len(chunks)} chunks "
+            f"failed_indices={failed_indices} failed_ranges={failed_ranges} "
+            f"failed_chars={failed_chars} covered_chars={covered_chars} "
+            f"coverage={coverage_pct:.1%} errors={errors}"
+        )
+        # Use only successful partials for merging, but warn downstream.
+        merge_partials = success_partials
+        extraction_complete = False
+    else:
+        merge_partials      = partials
+        extraction_complete = True
 
-        if fail_ratio <= 0.5:
-            logger.warning(
-                f"_run_extraction: {len(failed)}/{len(chunks)} chunks failed "
-                f"(below threshold) — continuing with partial results. indices={failed}"
-            )
-            partials = [p for p in partials if not p.get("chunk_failed")]
-        else:
-            raise RuntimeError(
-                f"extraction: {len(failed)}/{len(chunks)} chunks permanently failed "
-                f"doc_type='{doc_type}' indices={failed} errors={errors}"
-            )
+    if not merge_partials:
+        raise RuntimeError(
+            f"extraction: all {len(chunks)} chunks failed for doc_type='{doc_type}' "
+            f"indices={failed_indices} errors={[p.get('chunk_error') for p in failed_partials]}"
+        )
 
-    result = _merge_list_fields(partials, list_keys=_LONG_DOC_LIST_KEYS)
+    result = _merge_list_fields(merge_partials, list_keys=_LONG_DOC_LIST_KEYS)
+
+    # Attach audit metadata so callers can surface warnings to the user.
+    if not extraction_complete:
+        result["extraction_incomplete"] = True
+        result["failed_chunk_count"]    = len(failed_partials)
+        result["failed_chunk_ranges"]   = failed_ranges
+        result["coverage_pct"]          = round(
+            sum(p.get("_char_end", 0) - p.get("_char_start", 0) for p in success_partials) / len(text),
+            4,
+        ) if len(text) > 0 else 0.0
 
     if doc_type == "loss_run":
         regex_count = _count_claims_from_text(text)
@@ -1792,7 +1974,7 @@ async def _run_extraction(
                     "source": "ai",
                 }
 
-    conflicts = _build_reconciliation_payload(partials, text)
+    conflicts = _build_reconciliation_payload(merge_partials, text)
 
     if conflicts:
         logger.info(f"reconciliation triggered fields={list(conflicts.keys())}")
@@ -1800,9 +1982,18 @@ async def _run_extraction(
     else:
         logger.info("reconciliation: no conflicts — skipped")
 
+    # Final extraction audit log
+    fact_count  = sum(1 for v in result.get("facts", {}).values() if not _is_empty(v))
+    status_str  = "FULL" if extraction_complete else f"PARTIAL({len(failed_partials)}/{len(chunks)} chunks failed)"
+    logger.info(
+        f"extraction DONE doc_type='{doc_type}' status={status_str} "
+        f"chunks_ok={len(success_partials)}/{len(chunks)} "
+        f"facts_extracted={fact_count} model='{ACTIVE_MODEL}'"
+    )
+
     return result
 
-# ── Fix 10: Unified single+long extraction path ───────────────────────────────
+# ── Unified single+long extraction path ──────────────────────────────────────
 
 # ASYNC-SAFE
 async def _extract_any(
@@ -1813,9 +2004,11 @@ async def _extract_any(
     """
     All documents go through extract_facts() which enforces the full pipeline:
     LLM → _safe_json_parse → _validate_parsed → _annotate_facts.
+    chunk_size is computed from the active provider's context budget via
+    _effective_chunk_size() — OpenAI gets 40k chars, Claude 28k.
     """
     chunk_size = _effective_chunk_size(ACTIVE_MODEL)
-    cap        = DOC_TYPE_CHUNK_LIMITS.get(doc_type, DOC_TYPE_CHUNK_LIMITS["default"])
+    cap = DOC_TYPE_CHUNK_LIMITS.get(doc_type, DOC_TYPE_CHUNK_LIMITS["default"])
 
     if len(text) <= chunk_size:
         return await extract_facts(text, low_confidence_tokens, context_prefix="", source="ai")

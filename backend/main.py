@@ -263,6 +263,24 @@ async def startup():
     except Exception as _e:
         logger.warning(f"signature_data migration failed (non-fatal): {_e}")
 
+    # Stamp all on-disk fieldmaps to the current schema version so Pass 1 cache
+    # is not silently destroyed on every boot (v4 → v5 mismatch fix).
+    try:
+        from services.pdf_service import migrate_fieldmaps_to_v5
+        migrate_fieldmaps_to_v5()
+    except Exception as _e:
+        logger.warning(f"fieldmap migration failed (non-fatal): {_e}")
+
+    # Log GPT form-fill config so env issues are immediately visible in deployment logs.
+    try:
+        from services.pdf_service import GPT_MODEL, GPT_BATCH_SIZE, GPT_TEMPERATURE
+        logger.info(
+            "GPT form-fill config: model=%s  batch_size=%d  temperature=%s",
+            GPT_MODEL, GPT_BATCH_SIZE, GPT_TEMPERATURE,
+        )
+    except Exception as _e:
+        logger.warning(f"GPT config logging failed (non-fatal): {_e}")
+
     if _SCHEDULER_ENABLED:
         start_scheduler()
     else:

@@ -328,7 +328,7 @@ async def submit_arq(token: str, request: Request):
 
 @router.post("/chat/{token}")
 async def arq_chat(token: str, request: Request):
-    from config.settings import groq_chat
+    from config.settings import groq_chat, LLM_MODEL
 
     client_ip = get_client_ip(request)
     check_arq_chat_rate_limit(client_ip)
@@ -384,7 +384,7 @@ Here are the EXACT questions from this insurance form:
 
     try:
         reply = await groq_chat(
-            "llama-3.1-8b-instant",
+            LLM_MODEL,
             messages,
             temperature=0.3,
             max_tokens=300,

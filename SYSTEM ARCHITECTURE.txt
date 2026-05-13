@@ -1,120 +1,354 @@
-CURRENT SYSTEM ARCHITECTURE : 
-
-<root>
+ACORD-PY-VERSION2/
+│
 ├── .claude/
-│    └── settings.local.json → Claude Code config
-├── ACORD Forms Decision Tree Only.docx → Decision tree doc
-├── .gitignore → Git ignore rules
+│   └── settings.local.json          Claude Code permissions config for this project
+│
+├── .github/
+│   └── workflows/
+│       └── ci.yml                   GitHub Actions CI pipeline (lint, test on push)
+│
+├── docs/
+│   └── KNOWN_LIMITATIONS.md         Documented known bugs, gaps, and workarounds
+│
+├── infra/
+│   └── terraform/
+│       └── main.tf                  AWS infrastructure-as-code (S3, SQS, IAM, networking)
 │
 ├── backend/
-│    ├── config/
-│    │    ├── __init__.py
-│    │    ├── database.py → Database configuration
-│    │    └── settings.py → App settings
-│    ├── models/
-│    │    ├── __init__.py
-│    │    └── schemas.py → Pydantic data models
-│    ├── repositories/
-│    │    ├── __init__.py
-│    │    ├── audit_repository.py → Audit log repo
-│    │    ├── session_repository.py → Session management repo
-│    │    └── user_repository.py → User data repo
-│    ├── routes/
-│    │    ├── __init__.py
-│    │    ├── arq_routes.py → ARQ form endpoints
-│    │    ├── auth_routes.py → Authentication endpoints
-│    │    ├── dev_routes.py → Dev/debug routes
-│    │    ├── download_routes.py → File download endpoints
-│    │    ├── form_routes.py → Form submission endpoints
-│    │    ├── signature_routes.py → Signature endpoints
-│    │    └── stripe_routes.py → Stripe payment endpoints
-│    ├── services/
-│    │    ├── __init__.py
-│    │    ├── arq_service.py → ARQ form service
-│    │    ├── auth_service.py → Auth logic
-│    │    ├── cover_service.py → Cover sheet service
-│    │    ├── email_service.py → Email sending
-│    │    ├── extraction_service.py → Data extraction
-│    │    ├── fact_registry.py → Fact storage/lookup
-│    │    ├── form_service.py → Form processing
-│    │    ├── ocr_service.py → OCR processing
-│    │    ├── pdf_service.py → PDF generation/manipulation
-│    │    ├── pipeline_router.py → Processing pipeline router
-│    │    ├── scheduler_service.py → Job scheduling
-│    │    ├── sqs_service.py → AWS SQS integration
-│    │    └── stripe_service.py → Stripe integration
-│    ├── scripts/
-│    │    └── generate_fieldmaps.py → Generate form fieldmaps
-│    ├── utils/
-│    │    ├── __init__.py
-│    │    ├── helpers.py → Utility helpers
-│    │    └── validators.py → Data validation
-│    ├── forms_database/ → ACORD form schemas
-│    ├── forms_schemas/ → Pre-cached form schemas
-│    ├── templates/ → PDF template files
-│    ├── storage/ → File storage (uploads/generated)
-│    ├── tmp/ → Temporary processing files
-│    ├── venv/ → Python virtual environment
-│    ├── .env → Environment variables
-│    ├── .pytest_cache/ → Test cache
-│    ├── main.py → FastAPI app entry point
-│    ├── create_tables.py → DB initialization
-│    ├── migrate.py → DB migrations
-│    ├── requirements.txt → Python dependencies
-│    ├── test_q2.py → Test file
-│    └── sqlite3.exe → SQLite CLI
+│   │
+│   ├── alembic/                     Database migration tool (schema versioning)
+│   │   ├── env.py                   Alembic runtime config — connects to DB, runs migrations
+│   │   └── versions/
+│   │       └── 0001_initial_schema.py   First migration: creates all core tables from scratch
+│   │
+│   ├── config/                      App-wide configuration and DB wiring
+│   │   ├── __init__.py
+│   │   ├── database.py              DB connection pool, session factory, health check helper
+│   │   └── settings.py             Reads all env vars (DATABASE_URL, API keys, etc.) into one object
+│   │
+│   ├── forms_database/              Source-of-truth field definitions for each ACORD form
+│   │   ├── forms_index.json         Master index listing all supported forms and their metadata
+│   │   ├── ACORD_25.json            Field names, types, positions for ACORD 25
+│   │   ├── ACORD_28.json            Field names, types, positions for ACORD 28
+│   │   ├── ACORD_101.json           Field names, types, positions for ACORD 101
+│   │   ├── ACORD_125.json           Field names, types, positions for ACORD 125
+│   │   ├── ACORD_126.json           Field names, types, positions for ACORD 126
+│   │   ├── ACORD_127.json           Field names, types, positions for ACORD 127
+│   │   ├── ACORD_130.json           Field names, types, positions for ACORD 130
+│   │   ├── ACORD_131.json           Field names, types, positions for ACORD 131
+│   │   ├── ACORD_133.json           Field names, types, positions for ACORD 133
+│   │   ├── ACORD_140.json           Field names, types, positions for ACORD 140
+│   │   ├── ACORD_141.json           Field names, types, positions for ACORD 141
+│   │   ├── ACORD_160.json           Field names, types, positions for ACORD 160
+│   │   ├── ACORD_186.json           Field names, types, positions for ACORD 186
+│   │   ├── ACORD_ACORD_25_fieldmap.json    OCR text → ACORD 25 field mapping rules
+│   │   ├── ACORD_ACORD_126_fieldmap.json   OCR text → ACORD 126 field mapping rules
+│   │   └── ACORD_ACORD_140_fieldmap.json   OCR text → ACORD 140 field mapping rules
+│   │
+│   ├── forms_schemas/               JSON validation schemas for form field payloads
+│   │   ├── ACORD_25_schema.json     Validates extracted data shape for ACORD 25
+│   │   ├── ACORD_28_schema.json     Validates extracted data shape for ACORD 28
+│   │   ├── ACORD_101_schema.json    Validates extracted data shape for ACORD 101
+│   │   ├── ACORD_125_schema.json    Validates extracted data shape for ACORD 125
+│   │   ├── ACORD_126_schema.json    Validates extracted data shape for ACORD 126
+│   │   ├── ACORD_127_schema.json    Validates extracted data shape for ACORD 127
+│   │   ├── ACORD_130_schema.json    Validates extracted data shape for ACORD 130
+│   │   ├── ACORD_131_schema.json    Validates extracted data shape for ACORD 131
+│   │   ├── ACORD_133_schema.json    Validates extracted data shape for ACORD 133
+│   │   ├── ACORD_140_schema.json    Validates extracted data shape for ACORD 140
+│   │   ├── ACORD_141_schema.json    Validates extracted data shape for ACORD 141
+│   │   ├── ACORD_160_schema.json    Validates extracted data shape for ACORD 160
+│   │   └── ACORD_186_schema.json    Validates extracted data shape for ACORD 186
+│   │
+│   ├── models/                      Pydantic data contracts (request/response bodies)
+│   │   ├── __init__.py
+│   │   └── schemas.py               All Pydantic models: users, sessions, jobs, forms, auth, payments
+│   │
+│   ├── repositories/                Database access layer — all raw SQL/ORM lives here
+│   │   ├── __init__.py
+│   │   ├── audit_repository.py      Read/write audit log entries (who did what, when)
+│   │   ├── job_repository.py        Read/write async job records (status, result, errors)
+│   │   ├── session_repository.py    Read/write user processing sessions (form + upload state)
+│   │   └── user_repository.py       Read/write user accounts (profile, plan, OAuth data)
+│   │
+│   ├── routes/                      FastAPI routers — HTTP endpoints only, no business logic
+│   │   ├── __init__.py
+│   │   ├── admin_routes.py          Admin endpoints: user list, usage stats, manual overrides
+│   │   ├── arq_routes.py            ARQ endpoints: create questionnaire, submit answers, get status
+│   │   ├── audit_routes.py          Audit log query endpoints for admins and compliance review
+│   │   ├── auth_routes.py           Login, logout, Google OAuth callback, JWT refresh
+│   │   ├── dev_routes.py            Dev/test-only endpoints: seed data, debug state, reset jobs
+│   │   ├── download_routes.py       Generate and serve completed filled ACORD PDFs for download
+│   │   ├── form_routes.py           Upload source doc, trigger extraction, save/edit form fields
+│   │   ├── job_routes.py            Poll async job status (used by frontend while OCR runs)
+│   │   ├── signature_routes.py      Save, retrieve, and apply digital signature to a form
+│   │   └── stripe_routes.py         Create checkout session, handle webhooks, manage subscriptions
+│   │
+│   ├── services/                    Business logic — where the actual work happens
+│   │   ├── __init__.py
+│   │   ├── arq_service.py           ARQ workflow: decides which questions to ask, aggregates answers
+│   │   ├── audit_service.py         Writes structured audit entries on every sensitive action
+│   │   ├── auth_service.py          JWT sign/verify, Google token exchange, session management
+│   │   ├── cover_service.py         Generates the Acordly cover sheet PDF prepended to submissions
+│   │   ├── email_service.py         Sends transactional emails: job done, client link, alerts
+│   │   ├── extraction_pipeline.py   Orchestrates multi-step extraction: OCR → clean → LLM → map
+│   │   ├── extraction_service.py    Core field extraction: calls OCR, runs Groq LLM, returns field map
+│   │   ├── fact_registry.py         In-memory accumulator of extracted facts across pipeline stages
+│   │   ├── form_service.py          Loads form schemas, validates field data, merges partial fills
+│   │   ├── job_queue.py             In-process async job queue (fallback when SQS is not used)
+│   │   ├── ocr_service.py           Provider abstraction: routes to Textract, EasyOCR, or Google Vision
+│   │   ├── pdf_service.py           Fills PDF form fields, overlays data, merges pages via pikepdf/reportlab
+│   │   ├── pipeline_router.py       Inspects uploaded doc and routes to correct extraction pipeline
+│   │   ├── s3_service.py            Upload/download/presign files (S3 or S3-compatible storage)
+│   │   ├── scheduler_service.py     Defines and registers all APScheduler background job functions
+│   │   ├── sqs_service.py           Publish and consume AWS SQS messages for async job dispatch
+│   │   └── stripe_service.py        Stripe customer CRUD, subscription lifecycle, webhook verification
+│   │
+│   ├── scripts/                     One-off maintenance and migration scripts
+│   │   ├── encrypt_signature_data.py   Backfill: encrypts existing plaintext signature records in DB
+│   │   └── generate_fieldmaps.py       Auto-generates OCR→field mapping JSONs from form definitions
+│   │
+│   ├── storage/                     Local file storage (replaced by S3/R2 in production)
+│   │   ├── uploads/                 Incoming user-uploaded source PDFs (40 files, dev only)
+│   │   └── generated/               Completed filled ACORD PDFs ready for download (5 files, dev only)
+│   │
+│   ├── templates/                   Blank fillable ACORD PDF templates used for output generation
+│   │   ├── ACORD_25.pdf             Blank ACORD 25 template
+│   │   ├── ACORD_28.pdf             Blank ACORD 28 template
+│   │   ├── ACORD_101.pdf            Blank ACORD 101 template
+│   │   ├── ACORD_125.pdf            Blank ACORD 125 template
+│   │   ├── ACORD_126.pdf            Blank ACORD 126 template
+│   │   ├── ACORD_127.pdf            Blank ACORD 127 template
+│   │   ├── ACORD_130.pdf            Blank ACORD 130 template
+│   │   ├── ACORD_131.pdf            Blank ACORD 131 template
+│   │   ├── ACORD_133.pdf            Blank ACORD 133 template
+│   │   ├── ACORD_140.pdf            Blank ACORD 140 template
+│   │   ├── ACORD_160.pdf            Blank ACORD 160 template
+│   │   └── ACORD_186.pdf            Blank ACORD 186 template
+│   │
+│   ├── tests/                       Automated test suite
+│   │   ├── test_all_changes.py      Integration tests covering recent production changes
+│   │   └── test_production_guards.py   Assertions that catch unsafe production configurations
+│   │
+│   ├── tmp/                         Scratch space for in-progress PDFs and dev test files
+│   │   └── jobs/                    JSON files persisting async job state between restarts
+│   │
+│   ├── utils/                       Reusable low-level helpers with no business logic
+│   │   ├── __init__.py
+│   │   ├── concurrency.py           Thread-safe locks, async semaphores for shared resources
+│   │   ├── crypto.py                Encrypt/decrypt sensitive fields (signatures, PII) at rest
+│   │   ├── helpers.py               Miscellaneous utility functions used across the codebase
+│   │   ├── json_logging.py          Structured JSON log formatter for all app-level logs
+│   │   ├── mime_validator.py        Validates uploaded file MIME types before processing
+│   │   ├── rate_limiter.py          Per-user and per-IP request throttling logic
+│   │   ├── table_extractor.py       Extracts tabular data structures from raw OCR output
+│   │   ├── text_cleaner.py          Normalizes raw OCR text: removes noise, fixes encoding
+│   │   ├── validators.py            Domain validators: SSN format, date ranges, policy numbers
+│   │   └── virus_scanner.py         Scans uploaded files via ClamAV before storage
+│   │
+│   ├── venv/                        Python virtual environment (not in git, 22k+ installed package files)
+│   │
+│   ├── .dockerignore                Excludes venv, storage, tmp from Docker build context
+│   ├── .env                         Local secrets: DB URL, API keys (not committed to git)
+│   ├── .env.example                 Template listing every required env var with placeholders
+│   ├── acordly.db                   SQLite DB used in local development
+│   ├── acordly_audit.db             SQLite audit log DB used in local development
+│   ├── acordly_local.db             Alternate SQLite DB for isolated local testing
+│   ├── create_tables.py             One-time script: creates all DB tables without migrations
+│   ├── Dockerfile                   Container build: installs deps, copies code, starts uvicorn
+│   ├── main.py                      FastAPI app entry point: registers all routers, middleware, startup hooks
+│   ├── migrate.py                   Runs Alembic migrations programmatically (used in deploy scripts)
+│   ├── requirements.txt             Production Python dependencies (pinned versions)
+│   ├── requirements-dev.txt         Dev-only dependencies: pytest, black, mypy, etc.
+│   ├── scheduler.py                 Standalone entrypoint to run APScheduler as its own process
+│   ├── sqlite3.exe                  SQLite CLI binary for Windows (local DB inspection only)
+│   ├── test_q2.py                   Ad-hoc scratch test file for Q2 feature exploration
+│   └── worker.py                    Worker process entrypoint: polls queue, executes OCR/extraction jobs
 │
-└── frontend/
-     ├── src/
-     │    ├── api/
-     │    │    ├── arqApi.js → ARQ API client
-     │    │    ├── authApi.js → Auth API client
-     │    │    ├── formApi.js → Form API client
-     │    │    └── stripeApi.js → Stripe API client
-     │    ├── components/
-     │    │    ├── arq/
-     │    │    │    ├── ARQModal.jsx
-     │    │    │    ├── ARQStatusPanel.jsx
-     │    │    │    └── ClientQuestionnaire.jsx
-     │    │    ├── auth/
-     │    │    │    ├── AuthModal.jsx
-     │    │    │    └── CompleteProfileModal.jsx
-     │    │    ├── billing/
-     │    │    │    ├── PlanModal.jsx
-     │    │    │    └── UpgradeModal.jsx
-     │    │    ├── form/
-     │    │    │    ├── AcordModal.jsx
-     │    │    │    └── PDFJsViewer.jsx
-     │    │    ├── layout/
-     │    │    │    ├── Header.jsx
-     │    │    │    └── LandingPage.jsx
-     │    │    ├── overlays/
-     │    │    │    ├── ProcessStageOverlay.jsx
-     │    │    │    ├── SaveStageOverlay.jsx
-     │    │    │    └── UpgradeStageOverlay.jsx
-     │    │    └── signature/
-     │    │         ├── NoSignaturePrompt.jsx
-     │    │         ├── SignatureModal.jsx
-     │    │         └── UseSignaturePrompt.jsx
-     │    ├── config/
-     │    │    └── constants.js → App constants
-     │    ├── hooks/
-     │    │    ├── useAuth.js → Auth state hook
-     │    │    ├── useSignature.js → Signature hook
-     │    │    └── useUpgradePolling.js → Plan upgrade polling
-     │    ├── styles/
-     │    │    └── injected.js → Injected CSS/styles
-     │    ├── utils/
-     │    │    └── formatters.js → Data formatters
-     │    ├── assets/ → React logo, etc.
-     │    ├── index.css → Global styles
-     │    └── App.jsx → Main app component
-     ├── public/ → Static files (favicon)
-     ├── vite.config.js → Vite build config
-     ├── index.html → HTML entry point
-     ├── eslint.config.js → ESLint rules
-     ├── README.md → Frontend readme
-     ├── .gitignore → Git ignore for frontend
-     ├── package.json → JS dependencies
-     ├── node_modules/ → JS packages
-     └── *.webp → Feature images
+├── frontend/
+│   │
+│   ├── public/
+│   │   └── vite.svg                 Default Vite favicon (replace with Acordly logo)
+│   │
+│   ├── src/
+│   │   │
+│   │   ├── api/                     All HTTP calls to backend — one file per domain
+│   │   │   ├── arqApi.js            Calls ARQ endpoints: create session, submit answers, poll status
+│   │   │   ├── authApi.js           Calls auth endpoints: Google login, token refresh, logout
+│   │   │   ├── formApi.js           Calls form endpoints: upload, extract, save fields, download PDF
+│   │   │   └── stripeApi.js         Calls billing endpoints: checkout, portal, plan status
+│   │   │
+│   │   ├── assets/
+│   │   │   └── react.svg            React logo (unused in production UI)
+│   │   │
+│   │   ├── components/
+│   │   │   │
+│   │   │   ├── arq/                 Agent Report Questionnaire UI flow
+│   │   │   │   ├── ARQModal.jsx          Modal that launches the ARQ workflow for a submission
+│   │   │   │   ├── ARQStatusPanel.jsx    Displays live ARQ job progress and completion state
+│   │   │   │   └── ClientQuestionnaire.jsx  Form UI sent to client to answer ARQ questions
+│   │   │   │
+│   │   │   ├── auth/                Authentication UI
+│   │   │   │   ├── AuthModal.jsx         Google OAuth sign-in modal
+│   │   │   │   └── CompleteProfileModal.jsx  Post-login modal to collect name, company, role
+│   │   │   │
+│   │   │   ├── billing/             Subscription and plan management UI
+│   │   │   │   ├── PlanModal.jsx         Shows all available plans with feature comparison
+│   │   │   │   └── UpgradeModal.jsx      Upsell prompt when user hits a plan limit
+│   │   │   │
+│   │   │   ├── form/                Core product UI — the ACORD form editor
+│   │   │   │   ├── AcordModal.jsx        Main modal: upload doc → OCR → review/edit extracted fields
+│   │   │   │   └── PDFJsViewer.jsx       In-browser PDF renderer using PDF.js (side-by-side with fields)
+│   │   │   │
+│   │   │   ├── layout/              Page-level structural components
+│   │   │   │   ├── Header.jsx            Top nav: logo, user avatar, plan badge, auth state
+│   │   │   │   └── LandingPage.jsx       Marketing homepage shown to logged-out visitors
+│   │   │   │
+│   │   │   ├── overlays/            Full-screen loading states shown during async operations
+│   │   │   │   ├── ProcessStageOverlay.jsx   Shown while OCR + extraction is running
+│   │   │   │   ├── SaveStageOverlay.jsx      Shown while saving form data to backend
+│   │   │   │   └── UpgradeStageOverlay.jsx   Shown while Stripe checkout is processing
+│   │   │   │
+│   │   │   └── signature/           Digital signature capture and application UI
+│   │   │       ├── NoSignaturePrompt.jsx     Prompt shown when user has no saved signature
+│   │   │       ├── SignatureModal.jsx        Draw pad or upload to capture digital signature
+│   │   │       └── UseSignaturePrompt.jsx    Prompt to apply the saved signature to current form
+│   │   │
+│   │   ├── config/
+│   │   │   └── constants.js         Frontend constants: API base URL, plan limits, feature flags
+│   │   │
+│   │   ├── hooks/                   Custom React hooks encapsulating stateful logic
+│   │   │   ├── useAuth.js           Manages auth state: current user, token, login/logout actions
+│   │   │   ├── useSignature.js      Fetches, saves, and applies signature; owns signature state
+│   │   │   └── useUpgradePolling.js Polls backend every N seconds until plan upgrade is confirmed
+│   │   │
+│   │   ├── styles/
+│   │   │   └── injected.js          Runtime CSS-in-JS styles injected dynamically into DOM
+│   │   │
+│   │   ├── utils/
+│   │   │   └── formatters.js        Formats dates, currency, policy numbers for display
+│   │   │
+│   │   ├── App.css                  Global scoped styles for the App component
+│   │   ├── App.jsx                  Root component: sets up routing, auth context, global state
+│   │   ├── index.css                CSS reset + base typography applied to entire app
+│   │   └── main.jsx                 React DOM entry: mounts App into index.html
+│   │
+│   ├── .env                         Frontend local env: VITE_API_URL, VITE_GOOGLE_CLIENT_ID
+│   ├── .env.example                 Template listing required frontend env vars
+│   ├── eslint.config.js             ESLint rules: React hooks, unused vars, import order
+│   ├── feature1.webp                Landing page screenshot/feature image 1
+│   ├── feature2.webp                Landing page screenshot/feature image 2
+│   ├── feature3.webp                Landing page screenshot/feature image 3
+│   ├── index.html                   HTML shell Vite injects the React bundle into
+│   ├── package.json                 NPM dependencies and scripts (dev, build, preview)
+│   ├── package-lock.json            Locked dependency tree for reproducible installs
+│   ├── quote-image.webp             Testimonial/quote image on landing page
+│   └── vite.config.js              Vite config: dev proxy to backend, aliases, build output
+│
+├── .gitignore                       Excludes venv, .env, storage, node_modules, __pycache__
+├── ACORD Forms Decision Tree Only.docx   Business doc: logic for selecting the right ACORD form
+├── CLAUDE.md                        Project instructions and context for Claude Code AI
+├── Dockerfile                       Root-level Docker build (alternative/combined build)
+├── EXTENSIBILITY.md                 Guide for adding a new ACORD form to the platform
+├── SYSTEM ARCHITECTURE.txt          Narrative architecture overview written by team
+└── verify_production.sh             Shell script that checks deployment readiness before going live
+High-Level Design
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                            BROWSER (React SPA)                              ║
+║                                                                              ║
+║  LandingPage  →  AuthModal  →  AcordModal  →  PDFJsViewer                  ║
+║                                    │                                         ║
+║                         ┌──────────┼──────────┐                             ║
+║                     formApi    arqApi      stripeApi                        ║
+╚════════════════════════════════════╤═════════════════════════════════════════╝
+                                     │  HTTPS / JWT
+╔════════════════════════════════════▼═════════════════════════════════════════╗
+║                         FASTAPI APPLICATION (main.py)                        ║
+║                                                                              ║
+║   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐    ║
+║   │auth_     │ │form_     │ │download_ │ │stripe_   │ │arq_  │ audit_│    ║
+║   │routes    │ │routes    │ │routes    │ │routes    │ │routes│ routes│    ║
+║   └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └──────────────┘    ║
+║        │            │            │             │                            ║
+║   ┌────▼────┐  ┌────▼────┐  ┌───▼────┐  ┌────▼────┐                       ║
+║   │auth_    │  │form_    │  │pdf_    │  │stripe_  │                       ║
+║   │service  │  │service  │  │service │  │service  │                       ║
+║   └────┬────┘  └────┬────┘  └───┬────┘  └─────────┘                       ║
+║        │            │           │                                           ║
+║   ┌────▼────┐  ┌────▼────────────────────────┐                             ║
+║   │user_    │  │      EXTRACTION PIPELINE     │                             ║
+║   │repo     │  │                              │                             ║
+║   └────┬────┘  │  pipeline_router             │                             ║
+║        │       │       ↓                      │                             ║
+║        │       │  ocr_service ─────────────── │──→ Textract / EasyOCR      ║
+║        │       │       ↓                      │    / Google Vision          ║
+║        │       │  text_cleaner                │                             ║
+║        │       │       ↓                      │                             ║
+║        │       │  extraction_service ────────  │──→  Groq LLM               ║
+║        │       │       ↓                      │                             ║
+║        │       │  fact_registry               │                             ║
+║        │       │       ↓                      │                             ║
+║        │       │  form_service (validate)      │                             ║
+║        │       └──────────────────────────────┘                             ║
+╚════════════════════════════════════╤═════════════════════════════════════════╝
+                                     │
+              ┌──────────────────────┼────────────────────────┐
+              │                      │                         │
+╔═════════════▼════╗   ╔═════════════▼══════════╗   ╔════════▼═══════╗
+║   PostgreSQL DB   ║   ║   JOB QUEUE + WORKER   ║   ║    STORAGE     ║
+║                   ║   ║                        ║   ║                ║
+║  users            ║   ║  job_queue.py          ║   ║  uploads/      ║
+║  sessions         ║   ║  (Redis / SQS / local) ║   ║  (source PDFs) ║
+║  jobs             ║   ║         ↓              ║   ║                ║
+║  signatures       ║   ║  worker.py             ║   ║  generated/    ║
+║  audit_log        ║   ║  (OCR + extract + fill)║   ║  (filled PDFs) ║
+║                   ║   ║         ↓              ║   ║                ║
+║  (Alembic for     ║   ║  pdf_service           ║   ║  templates/    ║
+║   migrations)     ║   ║  (output PDF)          ║   ║  (blank forms) ║
+╚═══════════════════╝   ╚════════════════════════╝   ╚════════════════╝
+                                     │
+              ┌──────────────────────┼────────────────────────┐
+              │                      │                         │
+╔═════════════▼════╗   ╔═════════════▼══════════╗   ╔════════▼═══════╗
+║  SCHEDULER        ║   ║  EMAIL SERVICE          ║   ║  STRIPE        ║
+║  (APScheduler)    ║   ║  (transactional)        ║   ║  (payments)    ║
+║                   ║   ║                         ║   ║                ║
+║  cleanup jobs     ║   ║  job complete           ║   ║  checkout      ║
+║  retry stale jobs ║   ║  client ARQ link        ║   ║  webhooks      ║
+║  audit flushing   ║   ║  alerts                 ║   ║  subscriptions ║
+╚═══════════════════╝   ╚═════════════════════════╝   ╚════════════════╝
+Data Flow: Core Document Processing
+
+User uploads PDF
+      │
+      ▼
+form_routes → saves to storage/uploads
+      │
+      ▼
+job_queue  → enqueues extraction job
+      │
+      ▼ (async)
+worker.py
+   ├─ pipeline_router  → picks correct ACORD pipeline
+   ├─ ocr_service      → extracts raw text (Textract/EasyOCR/Vision)
+   ├─ text_cleaner     → normalizes OCR noise
+   ├─ extraction_service + Groq LLM → maps text to ACORD fields
+   ├─ fact_registry    → accumulates all extracted facts
+   ├─ form_service     → validates against JSON schema
+   └─ pdf_service      → fills blank template → saves to storage/generated
+      │
+      ▼
+job_routes → frontend polls for DONE status
+      │
+      ▼
+download_routes → user downloads filled PDF
+Key Architectural Properties
+Property	Implementation
+Stateless API	FastAPI with JWT — no server-side session
+Async jobs	Queue + worker process — API never blocks on OCR
+Multi-provider OCR	Single abstraction (ocr_service.py) — swap provider via env var
+Schema-driven forms	JSON definitions drive extraction, validation, and PDF fill
+Storage abstraction	s3_service.py speaks S3 API — works with AWS S3, R2, MinIO
+Audit trail	Every sensitive action written to audit log via audit_service.py
+Encryption at rest	crypto.py handles signatures and PII fields

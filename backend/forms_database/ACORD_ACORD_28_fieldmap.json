@@ -21,13 +21,13 @@
   "NamedInsured_MailingAddress_StateOrProvinceCode_A": "_addr_state",
   "NamedInsured_MailingAddress_PostalCode_A": "_addr_zip",
   "NamedInsured_FullName_B": "applicant_name",
-  "Insurer_FullName_A": "prior_carrier",
+  "Insurer_FullName_A": "carrier_name",
   "Insurer_MailingAddress_AddressLineOne_A": null,
   "Insurer_MailingAddress_AddressLineTwo_A": null,
   "Insurer_MailingAddress_CityName_A": null,
   "Insurer_MailingAddress_StateOrProvinceCode_A": null,
   "Insurer_MailingAddress_PostalCode_A": null,
-  "Insurer_NAICCode_A": "naics_code",
+  "Insurer_NAICCode_A": "carrier_naic",
   "Policy_TypeDescription_A": null,
   "AdditionalInterest_AccountNumberIdentifier_A": null,
   "Policy_PolicyNumberIdentifier_A": "policy_number",
@@ -157,5 +157,7 @@
   "AdditionalInterest_MailingAddress_CityName_B": "_addr_city",
   "AdditionalInterest_MailingAddress_StateOrProvinceCode_B": "_addr_state",
   "AdditionalInterest_MailingAddress_PostalCode_B": "_addr_zip",
-  "Producer_AuthorizedRepresentative_Signature_A": null
+  "Producer_AuthorizedRepresentative_Signature_A": null,
+  "__schema_version__": "v5",
+  "__ai_mapped__": []
 }

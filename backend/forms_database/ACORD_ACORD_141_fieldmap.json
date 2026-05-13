@@ -7,8 +7,8 @@
   "Producer_FullName_A": "producer_name",
   "Policy_PolicyNumberIdentifier_A": "policy_number",
   "Policy_EffectiveDate_A": "effective_date",
-  "Insurer_FullName_A": "prior_carrier",
-  "Insurer_NAICCode_A": "naics_code",
+  "Insurer_FullName_A": "carrier_name",
+  "Insurer_NAICCode_A": "carrier_naic",
   "NamedInsured_FullName_A": "applicant_name",
   "CrimeCoverage_CoverageBasis_DiscoveryIndicator_A": null,
   "CrimeCoverage_CoverageBasis_LossSustainedIndicator_A": null,
@@ -362,5 +362,7 @@
   "Producer_StateLicenseIdentifier_A": null,
   "NamedInsured_Signature_A": null,
   "NamedInsured_SignatureDate_A": null,
-  "Producer_NationalIdentifier_A": null
+  "Producer_NationalIdentifier_A": null,
+  "__schema_version__": "v5",
+  "__ai_mapped__": []
 }

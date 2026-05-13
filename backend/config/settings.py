@@ -4,7 +4,6 @@ import os
 
 import httpx
 import stripe
-from circuitbreaker import CircuitBreaker
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -39,16 +38,6 @@ MAX_UPLOAD_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 MAX_FILES_PER_UPLOAD  = int(os.getenv("MAX_FILES_PER_UPLOAD", "10"))
 
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
-
-# Sync Groq client — kept for use inside executor threads (ocr_service, legacy paths)
-from groq import Groq, AsyncGroq
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-
-# Async Groq client with 30-second HTTP timeout — used from async code
-_groq_async = AsyncGroq(
-    api_key=os.getenv("GROQ_API_KEY"),
-    http_client=httpx.AsyncClient(timeout=30.0),
-)
 
 SOFT_BUFFER_PCT    = 0.05
 STRIPE_CURRENCY    = "usd"
@@ -93,6 +82,11 @@ ADMIN_EMAILS: set = {
 
 DEV_ROUTES_ENABLED: bool = os.getenv("DEV_ROUTES_ENABLED", "false").lower() == "true"
 
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+_llm_secret_key = "OPENAI_API_KEY"
+_llm_secret_val = os.getenv(_llm_secret_key, "")
+
 _REQUIRED_PRODUCTION_SECRETS = {
     "DATABASE_URL":           DATABASE_URL,
     # SECRET_KEY removed: it is read from env but never consumed by any application
@@ -102,7 +96,7 @@ _REQUIRED_PRODUCTION_SECRETS = {
     "STRIPE_SECRET_KEY":      os.getenv("STRIPE_SECRET_KEY", ""),
     "STRIPE_WEBHOOK_SECRET":  STRIPE_WEBHOOK_SECRET,
     "GOOGLE_CLIENT_ID":       GOOGLE_CLIENT_ID,
-    "GROQ_API_KEY":           os.getenv("GROQ_API_KEY", ""),
+    _llm_secret_key:          _llm_secret_val,
     "FIELD_ENCRYPTION_KEY":   os.getenv("FIELD_ENCRYPTION_KEY", ""),
 }
 
@@ -129,10 +123,8 @@ def validate_production_config() -> None:
         )
 
 
-_LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
-
-# Circuit breakers for external LLM/AI services
-_groq_cb = CircuitBreaker(failure_threshold=3, recovery_timeout=60, name="groq")
+if not os.getenv("OPENAI_API_KEY"):
+    logger.warning("OPENAI_API_KEY not set — all LLM calls will fail.")
 
 
 # ASYNC-SAFE
@@ -141,57 +133,10 @@ async def groq_chat(
     messages: list,
     temperature: float = 0,
     max_tokens: int = 4096,
-    _retries: int = 2,
+    _retries: int = 4,
 ) -> str:
-    """
-    Async provider-dispatching LLM wrapper. Controlled by LLM_PROVIDER env var.
-    All retry waits use asyncio.sleep — never blocks the event loop.
-    Circuit-broken for Groq; falls back to empty string when open.
-    """
-    if _LLM_PROVIDER == "claude":
-        return await _claude_chat(model, messages, temperature, max_tokens, _retries)
-    if _LLM_PROVIDER == "openai":
-        return await _openai_chat(model, messages, temperature, max_tokens, _retries)
-    # Groq path — guarded by circuit breaker
-    if _groq_cb.opened:
-        logger.warning("groq_chat: circuit breaker OPEN — returning empty fallback")
-        return ""
-    return await _groq_chat(model, messages, temperature, max_tokens, _retries)
-
-
-# ASYNC-SAFE
-async def _groq_chat(
-    model: str,
-    messages: list,
-    temperature: float,
-    max_tokens: int,
-    _retries: int,
-) -> str:
-    last_ex = None
-    for attempt in range(_retries + 1):
-        try:
-            # call_async records success (via reset()) or failure (via __call_failed())
-            # on the circuit breaker depending on whether an exception is raised.
-            r = await _groq_cb.call_async(
-                _groq_async.chat.completions.create,
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            return (r.choices[0].message.content or "").strip()
-        except Exception as ex:
-            last_ex = ex
-            status = getattr(ex, "status_code", None)
-            if attempt < _retries and status in (429, 500, 502, 503, 504):
-                wait = 2 ** attempt
-                logger.warning(
-                    f"Groq {status} on attempt {attempt+1}, retrying in {wait}s: {ex}"
-                )
-                await asyncio.sleep(wait)  # non-blocking
-            else:
-                break
-    raise last_ex
+    """OpenAI LLM wrapper. Name kept for backwards compatibility with callers."""
+    return await _openai_chat(model, messages, temperature, max_tokens, _retries)
 
 
 # ASYNC-SAFE

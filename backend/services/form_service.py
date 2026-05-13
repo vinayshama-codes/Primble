@@ -341,13 +341,6 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              trigger_weight=0.95,
              trigger_reason="has_property_coverage flag detected")
 
-    if flags.get("has_property_coverage") and flags.get("has_multiple_locations"):
-        _add("ACORD_141",
-             "ACORD 141 - Property Schedule",
-             trigger_weight=0.95,
-             trigger_reason="has_property_coverage and has_multiple_locations flags detected",
-             template_pending=True)
-
     if flags.get("has_certificate_request") or flags.get("is_certificate_doc"):
         _add("ACORD_25",
              "ACORD 25 - Certificate of Liability Insurance",
@@ -365,23 +358,28 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
     _crime_kw = {
         "crime", "employee dishonesty", "money and securities",
         "forgery", "theft", "fidelity", "erisa", "employee theft",
+        "burglary", "robbery", "commercial crime", "fidelity bond",
+        "money orders", "counterfeit", "computer fraud", "funds transfer fraud",
     }
-    if any(kw in search for kw in _crime_kw):
+    if flags.get("has_crime") or any(kw in search for kw in _crime_kw):
         _add("ACORD_137",
              "ACORD 137 - Commercial Crime Application",
              trigger_weight=0.85,
-             trigger_reason="crime / dishonesty keywords detected in operations or lines of business")
+             trigger_reason="crime / dishonesty flag or keywords detected")
 
     _cyber_kw = {
         "cyber", "data breach", "network security", "phi", "pci",
         "ransomware", "privacy liability", "e-commerce", "cloud",
-        "personally identifiable", "hipaa",
+        "personally identifiable", "hipaa", "cyber liability",
+        "network liability", "data privacy", "breach response",
+        "mfa", "multi-factor", "cloud services", "saas",
+        "third-party vendor", "vendor risk", "it security",
     }
-    if any(kw in search for kw in _cyber_kw):
+    if flags.get("has_cyber") or any(kw in search for kw in _cyber_kw):
         _add("ACORD_138",
              "ACORD 138 - Cyber / Network Security Application",
              trigger_weight=0.85,
-             trigger_reason="cyber / data breach keywords detected in operations or lines of business")
+             trigger_reason="cyber / data breach flag or keywords detected")
 
     # ACORD 101 — Additional Remarks (complex trigger logic unchanged)
     _101_reasons: List[str] = []
@@ -418,24 +416,40 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              trigger_reason="; ".join(_101_reasons),
              template_pending=True)
 
-    _133_kw = {"builder", "builders risk", "under construction", "renovation", "project value", "completion date"}
+    _133_kw = {
+        "builder", "builders risk", "under construction", "renovation",
+        "project value", "completion date", "construction loan",
+        "project cost", "ground-up construction", "new construction",
+        "builder's risk", "construction project", "contract value",
+    }
     if flags.get("has_builders_risk") or any(kw in text for kw in _133_kw):
         _add("ACORD_133",
              "ACORD 133 - Builders Risk Application",
              trigger_weight=0.85,
-             trigger_reason="builders risk / construction keywords detected in document text",
+             trigger_reason="builders risk flag or construction keywords detected",
              template_pending=True)
 
-    _160_kw = {"floater", "inland marine", "contractor's equipment", "cargo", "motor truck", "transit"}
+    _160_kw = {
+        "floater", "inland marine", "contractor's equipment", "cargo",
+        "motor truck", "transit", "equipment schedule", "motor truck cargo",
+        "installation floater", "accounts receivable", "serial number",
+        "scheduled equipment", "contractors equipment", "tool floater",
+        "installation risk", "equipment breakdown",
+    }
     if flags.get("has_inland_marine") or any(kw in text for kw in _160_kw):
         _add("ACORD_160",
              "ACORD 160 - Inland Marine Application",
              trigger_weight=0.85,
-             trigger_reason="inland marine / equipment / cargo keywords detected in document text",
+             trigger_reason="inland marine flag or equipment / cargo keywords detected",
              template_pending=True)
 
-    # ACORD 186 keyword path — only if not already flag-matched above
-    _186_kw = {"contractor", "subcontract", "roofing", "demolition", "scaffolding", "blasting"}
+    # ACORD 186 — flag-matched above; keyword fallback for GL-present submissions
+    _186_kw = {
+        "contractor", "subcontract", "roofing", "demolition", "scaffolding",
+        "blasting", "general contractor", "subcontractor", "licensed contractor",
+        "excavation", "underground", "crane", "rigging", "pile driving",
+        "residential construction", "commercial construction",
+    }
     if (not _already_matched("ACORD_186")
             and flags.get("has_general_liability")
             and any(kw in ops for kw in _186_kw)):
@@ -444,15 +458,39 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              trigger_weight=0.85,
              trigger_reason="GL coverage with contractor-type operations keywords detected")
 
+    # ACORD 141 — property + valuation/coinsurance detail or multiple locations
+    _141_kw = {
+        "agreed value", "coinsurance", "replacement cost value", "rcv", "acv",
+        "actual cash value", "scheduled property", "property schedule",
+        "period of restoration", "business income limit", "wind/hail deductible",
+        "flood deductible", "earthquake deductible",
+    }
+    if (not _already_matched("ACORD_141")
+            and flags.get("has_property_coverage")
+            and (flags.get("has_multiple_locations") or any(kw in text for kw in _141_kw))):
+        _add("ACORD_141",
+             "ACORD 141 - Property Schedule",
+             trigger_weight=0.90,
+             trigger_reason="property coverage with multiple locations or detailed valuation/coinsurance data detected",
+             template_pending=True)
+
     # ACORD 25 keyword path — only if not already flag-matched above
-    _25_kw = {"certificate holder", "certificate of liability", "coi"}
+    _25_kw = {
+        "certificate holder", "certificate of liability", "coi",
+        "proof of insurance", "evidence of liability", "acord 25",
+        "liability certificate", "additional insured certificate",
+    }
     if not _already_matched("ACORD_25") and any(kw in text for kw in _25_kw):
         _add("ACORD_25",
              "ACORD 25 - Certificate of Liability Insurance",
              trigger_weight=0.85,
              trigger_reason="certificate keywords detected in document text")
 
-    _28_kw = {"mortgagee", "evidence of insurance", "loss payee"}
+    _28_kw = {
+        "mortgagee", "evidence of insurance", "loss payee",
+        "evidence of property", "lender evidence", "acord 28",
+        "property certificate", "lender requirement", "mortgage lender",
+    }
     if flags.get("has_property_coverage") and any(kw in text for kw in _28_kw):
         _add("ACORD_28",
              "ACORD 28 - Evidence of Commercial Property Insurance",
@@ -504,7 +542,12 @@ def match_forms(facts: dict, flags: dict, all_forms: List[dict], text: str = "")
 def process_single_form(form_meta: dict, session: dict) -> dict:
     tpl              = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
     schema           = extract_form_schema(tpl, form_id=form_meta["form_id"])
-    mapped, confidence = map_facts_to_form(session["facts"], schema, form_id=form_meta["form_id"])
+    raw_text         = " ".join(d.get("text", "") for d in session.get("docs", []))
+    mapped, confidence = map_facts_to_form(
+        session["facts"], schema,
+        form_id=form_meta["form_id"],
+        raw_text=raw_text,
+    )
 
     hard_stops, soft_stops = run_field_validations(mapped)
     if hard_stops:

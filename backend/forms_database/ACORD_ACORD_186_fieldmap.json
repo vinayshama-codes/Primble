@@ -5,13 +5,13 @@
   "Producer_FullName_A": "producer_name",
   "Policy_PolicyNumberIdentifier_A": "policy_number",
   "Policy_EffectiveDate_A": "effective_date",
-  "Insurer_FullName_A": "prior_carrier",
-  "Insurer_NAICCode_A": "naics_code",
+  "Insurer_FullName_A": "carrier_name",
+  "Insurer_NAICCode_A": "carrier_naic",
   "NamedInsured_FullName_A": "applicant_name",
   "ContractorsUnderwriting_ContractorTypeDescription_A": null,
   "ContractorsUnderwriting_YearsExperienceCount_A": null,
-  "BusinessInformation_FullTimeEmployeeCount_A": null,
-  "BusinessInformation_PartTimeEmployeeCount_A": null,
+  "BusinessInformation_FullTimeEmployeeCount_A": "num_employees",
+  "BusinessInformation_PartTimeEmployeeCount_A": "num_employees",
   "ContractorsUnderwriting_LicenseNumberIdentifier_A": null,
   "ContractorsUnderwriting_LicenseHolder_OwnerIndicator_A": null,
   "ContractorsUnderwriting_LicenseHolder_OfficerIndicator_A": null,
@@ -130,5 +130,7 @@
   "ContractorsUnderwriting_RoofingResidentialPercent_A": null,
   "Contractors_Question_KCECode_A": null,
   "Contractors_Question_KCFCode_A": null,
-  "ContractorsUnderwriting_RemarkText_A": null
+  "ContractorsUnderwriting_RemarkText_A": null,
+  "__schema_version__": "v5",
+  "__ai_mapped__": []
 }

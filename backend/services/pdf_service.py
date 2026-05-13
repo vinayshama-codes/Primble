@@ -11,9 +11,229 @@ from fastapi import HTTPException
 
 from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_SCHEMAS_DIR, groq_chat
 from utils.helpers import _parse_address
-from services.extraction_service import _fv
+from typing import NamedTuple
+from services.extraction_service import _fv, ACTIVE_MODEL
+from services.fact_registry import FACT_REGISTRY
 
 logger = logging.getLogger(__name__)
+
+# ── GPT model config — env-driven so any OpenAI model is selectable with zero code changes ──
+GPT_MODEL       = os.getenv("GPT_MODEL",       "gpt-4o-mini")
+GPT_BATCH_SIZE  = int(os.getenv("GPT_BATCH_SIZE",  "80"))
+GPT_TEMPERATURE = float(os.getenv("GPT_TEMPERATURE", "0.0"))
+
+# ── Dedicated OpenAI client for form-fill GPT pass (lazy-initialised) ────────
+# Client is created on first use so Pass 1 deterministic fills work without
+# OPENAI_API_KEY being present.
+try:
+    from openai import AsyncOpenAI as _AsyncOpenAI
+    _HAS_OPENAI = True
+except ImportError:
+    _HAS_OPENAI = False
+    logger.warning("openai package not installed — GPT form fill pass disabled")
+
+_openai_form_fill_client = None
+
+
+def _get_openai_form_fill_client():
+    global _openai_form_fill_client
+    if _openai_form_fill_client is None:
+        if not _HAS_OPENAI:
+            raise RuntimeError("openai package not installed — install it with: pip install openai")
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        if not api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY not set — GPT form-fill pass unavailable. "
+                "Set OPENAI_API_KEY in your .env file."
+            )
+        _openai_form_fill_client = _AsyncOpenAI(api_key=api_key)
+    return _openai_form_fill_client
+
+# ── PII fields excluded from LLM prompts (SOC2 / data minimisation) ──────────
+# These fields are handled deterministically by Pass 1 (_ACORD_FIELD_RULES +
+# _resolve_special) and must never be forwarded to external LLM providers.
+# mailing_address / physical_address are decomposed by _resolve_special() into
+# line1/line2/city/state/zip — GPT has no need for the raw concatenated string.
+_PII_EXCLUDE_KEYS: frozenset = frozenset({
+    "fein",              # federal tax ID — highest-sensitivity financial identifier
+    "contact_phone",     # personal phone number
+    "contact_email",     # personal email address
+    "mailing_address",   # full street address — decomposed by Pass 1
+    "physical_address",  # full street address — decomposed by Pass 1
+})
+
+# ── Canonical valid fact-key set (full registry, not just current document) ───
+# Used to validate GPT-returned new_mappings keys and reject hallucinations.
+# A key absent from the CURRENT document's facts is still a valid structural
+# mapping (e.g. wc_payroll is valid even in a GL-only submission).
+_FULL_REGISTRY_KEYS: frozenset = frozenset(FACT_REGISTRY.keys()) | frozenset({
+    "_addr_line1", "_addr_line2", "_addr_city", "_addr_state", "_addr_zip",
+    "_loc_line1",  "_loc_line2",  "_loc_city",  "_loc_state",  "_loc_zip",
+})
+
+# ── Schedule row expansion ────────────────────────────────────────────────────
+# Maps AcroForm field base-name prefixes to the list fact that backs them.
+# Fields with row suffix _A/_B/..._N are resolved to list[idx] automatically.
+
+_ROW_LETTER_TO_IDX: Dict[str, int] = {chr(ord("A") + i): i for i in range(14)}
+
+_SCHED_SKIP = object()  # sentinel: not a schedule field → fall through to regular rules
+
+
+class _ScheduleDef(NamedTuple):
+    list_key: str            # fact dict key that holds the list
+    sub_key: Optional[str]   # dict sub-key to extract; None = use item directly
+    row_offset: int = 0      # subtract from letter-index before list lookup
+
+
+_SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
+    # ── Vehicles (ACORD 127) ────────────────────────────────────────────────
+    "Vehicle_ModelYear":             _ScheduleDef("auto_vin_schedule", "year"),
+    "Vehicle_Year":                  _ScheduleDef("auto_vin_schedule", "year"),
+    "Vehicle_Make":                  _ScheduleDef("auto_vin_schedule", "make"),
+    "Vehicle_Model":                 _ScheduleDef("auto_vin_schedule", "model"),
+    "Vehicle_VINNumber":             _ScheduleDef("auto_vin_schedule", "vin"),
+    "Vehicle_VIN":                   _ScheduleDef("auto_vin_schedule", "vin"),
+    "Vehicle_BodyStyle":             _ScheduleDef("auto_vin_schedule", "body_type"),
+    "Vehicle_BodyType":              _ScheduleDef("auto_vin_schedule", "body_type"),
+    "Vehicle_GrossVehicleWeight":    _ScheduleDef("auto_vin_schedule", "gvw"),
+    "Vehicle_GVW":                   _ScheduleDef("auto_vin_schedule", "gvw"),
+    "Vehicle_GaragingAddress":       _ScheduleDef("auto_garaging_addresses", None),
+
+    # ── Drivers (ACORD 127) ─────────────────────────────────────────────────
+    "Driver_FullName":               _ScheduleDef("auto_drivers", "name"),
+    "Driver_GivenName":              _ScheduleDef("auto_drivers", "name"),
+    "Driver_BirthDate":              _ScheduleDef("auto_drivers", "dob"),
+    "Driver_LicenseNumber":          _ScheduleDef("auto_drivers", "license_number"),
+    "Driver_LicenseStateOrProvince": _ScheduleDef("auto_drivers", "license_state"),
+
+    # ── WC Class Codes (ACORD 130) ──────────────────────────────────────────
+    "WorkersCompensation_ClassCode":        _ScheduleDef("wc_class_codes", "code"),
+    "WorkersCompensation_ClassDescription": _ScheduleDef("wc_class_codes", "description"),
+    "WorkersCompensation_ClassPayroll":     _ScheduleDef("wc_class_codes", "payroll"),
+    "WorkersCompensation_ClassState":       _ScheduleDef("wc_class_codes", "state"),
+    "WorkersCompensation_ClassRate":        _ScheduleDef("wc_class_codes", "rate"),
+
+    # ── WC Officers / Owners (ACORD 130, 138) ───────────────────────────────
+    "Officer_FullName":              _ScheduleDef("wc_officers", "name"),
+    "Officer_Title":                 _ScheduleDef("wc_officers", "title"),
+    "Officer_OwnershipPercent":      _ScheduleDef("wc_officers", "ownership_pct"),
+    "Officer_IncludeIndicator":      _ScheduleDef("wc_officers", "include"),
+    "Officer_ExcludeIndicator":      _ScheduleDef("wc_officers", "exclude"),
+    "Owner_FullName":                _ScheduleDef("wc_officers", "name"),
+    "Owner_Title":                   _ScheduleDef("wc_officers", "title"),
+    "Owner_OwnershipPercent":        _ScheduleDef("wc_officers", "ownership_pct"),
+
+    # ── Additional Named Insureds (ACORD 125) ────────────────────────────────
+    # row_offset=1: _A is the primary insured scalar, _B onward are additional
+    "AdditionalInsured_FullName":    _ScheduleDef("additional_named_insureds", None),
+
+    # ── Underlying Policies (ACORD 131) ─────────────────────────────────────
+    "UnderlyingPolicy_TypeOfInsurance":  _ScheduleDef("underlying_policies", "line"),
+    "UnderlyingPolicy_Line":             _ScheduleDef("underlying_policies", "line"),
+    "UnderlyingPolicy_LimitAmount":      _ScheduleDef("underlying_policies", "limit"),
+    "UnderlyingPolicy_Limit":            _ScheduleDef("underlying_policies", "limit"),
+    "UnderlyingPolicy_InsuranceCarrier": _ScheduleDef("underlying_policies", "carrier"),
+    "UnderlyingPolicy_Carrier":          _ScheduleDef("underlying_policies", "carrier"),
+    "UnderlyingPolicy_PolicyNumber":     _ScheduleDef("underlying_policies", "policy_no"),
+
+    # ── Loss History (ACORD 125) ─────────────────────────────────────────────
+    "LossHistory_OccurrenceDate":    _ScheduleDef("loss_history", "date"),
+    "LossHistory_LossDescription":   _ScheduleDef("loss_history", "description"),
+    "LossHistory_Description":       _ScheduleDef("loss_history", "description"),
+    "LossHistory_TotalIncurred":     _ScheduleDef("loss_history", "amount"),
+    "LossHistory_AmountPaid":        _ScheduleDef("loss_history", "paid"),
+    "LossHistory_ClaimNumber":       _ScheduleDef("loss_history", "claim_number"),
+    "LossHistory_OpenIndicator":     _ScheduleDef("loss_history", "open"),
+
+    # ── Prior Coverage by Line (ACORD 125/126/127/130) ───────────────────────
+    "PriorCoverage_TypeOfInsurance": _ScheduleDef("prior_coverage_by_line", "line"),
+    "PriorCoverage_InsuranceCarrier":_ScheduleDef("prior_coverage_by_line", "carrier"),
+    "PriorCoverage_PolicyNumber":    _ScheduleDef("prior_coverage_by_line", "policy_no"),
+    "PriorCoverage_EffectiveDate":   _ScheduleDef("prior_coverage_by_line", "effective"),
+    "PriorCoverage_ExpirationDate":  _ScheduleDef("prior_coverage_by_line", "expiration"),
+    "PriorCoverage_Premium":         _ScheduleDef("prior_coverage_by_line", "premium"),
+
+    # ── Property Locations (ACORD 140) ──────────────────────────────────────
+    "PropertyLocation_StreetAddress":    _ScheduleDef("property_locations", "address"),
+    "PropertyLocation_BuildingValue":    _ScheduleDef("property_locations", "building_value"),
+    "PropertyLocation_BPPValue":         _ScheduleDef("property_locations", "bpp_value"),
+    "PropertyLocation_ConstructionType": _ScheduleDef("property_locations", "construction_type"),
+    "PropertyLocation_YearBuilt":        _ScheduleDef("property_locations", "year_built"),
+
+    # ── GL Class Codes by Location (ACORD 126) ───────────────────────────────
+    "GL_LocationClassCode":          _ScheduleDef("gl_class_codes_by_location", "codes"),
+    "GL_ClassCode":                  _ScheduleDef("gl_class_codes_by_location", "codes"),
+    "GL_Location":                   _ScheduleDef("gl_class_codes_by_location", "location"),
+
+    # ── Inland Marine Items (ACORD 160) ─────────────────────────────────────
+    "InlandMarine_ItemDescription":  _ScheduleDef("inland_marine_items", "description"),
+    "InlandMarine_ItemValue":        _ScheduleDef("inland_marine_items", "value"),
+    "InlandMarine_SerialNumber":     _ScheduleDef("inland_marine_items", "serial_number"),
+}
+
+_SCHED_ROW_RE = re.compile(r"^(.+)_([A-N])$")
+
+
+def _resolve_schedule_row(field_name: str, facts: dict):
+    """Resolve a repeating-row field (e.g. Vehicle_Year_B) to its list-indexed value.
+
+    Returns _SCHED_SKIP  — not a schedule field; caller falls through to regular rules.
+    Returns None         — schedule field but list is shorter than row index (leave blank).
+    Returns str          — resolved value for this row.
+    """
+    m = _SCHED_ROW_RE.match(field_name)
+    if not m:
+        return _SCHED_SKIP
+
+    base   = m.group(1)
+    letter = m.group(2)
+    idx    = _ROW_LETTER_TO_IDX[letter]
+
+    # Exact base match first, then longest-prefix match in registry
+    defn = _SCHEDULE_REGISTRY.get(base)
+    if defn is None:
+        for prefix, d in _SCHEDULE_REGISTRY.items():
+            if base == prefix or base.startswith(prefix + "_") or base.endswith("_" + prefix):
+                defn = d
+                break
+
+    if defn is None:
+        return _SCHED_SKIP
+
+    list_idx = idx - defn.row_offset
+    if list_idx < 0:
+        return _SCHED_SKIP  # this letter belongs to scalar rules (row_offset guard)
+
+    items = _fv(facts, defn.list_key)
+    if not isinstance(items, list) or list_idx >= len(items):
+        logger.debug(
+            f"schedule_row: field={field_name!r} list={defn.list_key!r} "
+            f"idx={list_idx} list_len={len(items) if isinstance(items, list) else 0} — blank"
+        )
+        return None  # list shorter than requested row → leave blank
+
+    item = items[list_idx]
+    if defn.sub_key is None:
+        return str(item) if item is not None else None
+    if isinstance(item, dict):
+        val = item.get(defn.sub_key)
+        if isinstance(val, bool):
+            return "Yes" if val else "No"
+        return str(val) if val is not None else None
+    return str(item) if item is not None else None
+
+
+def _is_schedule_field(field_name: str) -> bool:
+    """Return True if this field belongs to _resolve_schedule_row() — not GPT.
+
+    Reuses the exact same detection logic as Pass 1 so the two stays in sync.
+    With empty facts the schedule resolver returns _SCHED_SKIP (not a schedule
+    field) or None (out-of-range row) — either way, _SCHED_SKIP means GPT-eligible.
+    """
+    result = _resolve_schedule_row(field_name, {})
+    return result is not _SCHED_SKIP
+
 
 _ACORD_FIELD_RULES = [
     # ── Producer ────────────────────────────────────────────────────────────
@@ -53,6 +273,40 @@ _ACORD_FIELD_RULES = [
     ("NamedInsured_PhysicalAddress_CityName",              "_loc_city"),
     ("NamedInsured_PhysicalAddress_StateOrProv",           "_loc_state"),
     ("NamedInsured_PhysicalAddress_PostalCode",            "_loc_zip"),
+    ("NamedInsured_PhoneNumber",                           "contact_phone"),
+    ("NamedInsured_Primary_PhoneNumber",                   "contact_phone"),
+    ("NamedInsured_EmailAddress",                          "contact_email"),
+    ("NamedInsured_WebsiteAddress",                        None),
+    ("NamedInsured_BusinessStartDate",                     "years_in_business"),
+    ("NamedInsured_NumberOfEmployees",                     "num_employees"),
+    ("NamedInsured_AnnualRevenue",                         "total_revenue"),
+    ("NamedInsured_AnnualPayroll",                         "total_payroll"),
+
+    # ── Prior / previous coverage — MUST map to prior_* keys, NOT current policy keys ──
+    ("PriorCarrier_FullName",                              "prior_carrier"),
+    ("PriorCoverage_InsuranceCarrierName",                 "prior_carrier"),
+    ("PriorCoverage_PolicyNumberIdentifier",               "prior_policy_number"),
+    ("PriorCoverage_EffectiveDate",                        "prior_effective_date"),
+    ("PriorCoverage_ExpirationDate",                       "prior_expiration_date"),
+    ("PriorCoverage_NAICCode",                             "prior_carrier_naic"),
+    ("PreviousCarrier_FullName",                           "prior_carrier"),
+    ("PreviousPolicy_PolicyNumber",                        "prior_policy_number"),
+    ("PreviousPolicy_EffectiveDate",                       "prior_effective_date"),
+    ("PreviousPolicy_ExpirationDate",                      "prior_expiration_date"),
+
+    # ── Business information ─────────────────────────────────────────────────
+    ("BusinessInformation_NAICSCode",                      "naics_code"),
+    ("BusinessInformation_SICCode",                        "sic_code"),
+    ("BusinessInformation_YearsInBusiness",                "years_in_business"),
+    ("BusinessInformation_NumberOfEmployees",              "num_employees"),
+    ("BusinessInformation_FullTimeEmployeeCount",          "num_employees"),
+    ("BusinessInformation_PartTimeEmployeeCount",          "num_employees"),
+    ("BusinessInformation_AnnualRevenue",                  "total_revenue"),
+    ("CommercialPolicy_OperationsDescription",             "operations_description"),
+    ("CommercialPolicy_AuditPeriod",                       "audit_period"),
+    ("CommercialPolicy_BillingPlan",                       "billing_plan"),
+    ("Policy_AuditPeriod",                                 "audit_period"),
+    ("Policy_BillingPlan",                                 "billing_plan"),
 
     # ── Policy / form header ─────────────────────────────────────────────────
     ("Policy_PolicyNumberIdentifier",                      "policy_number"),
@@ -77,11 +331,15 @@ _ACORD_FIELD_RULES = [
     ("CertificateOfInsurance_RevisionNumber",              None),
 
     # ── Insurer ──────────────────────────────────────────────────────────────
-    ("Insurer_FullName",                                   "prior_carrier"),
-    ("Insurer_NAICCode",                                   "naics_code"),
+    ("Insurer_FullName",                                   "carrier_name"),
+    ("Insurer_NAICCode",                                   "carrier_naic"),
     ("_InsurerLetterCode",                                 None),
 
-    # ── General liability ─────────────────────────────────────────────────────
+    # ── General liability — most-specific rules FIRST to prevent prefix shadowing ──
+    ("GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount", "gl_fire_damage_limit"),
+    ("GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount", "gl_products_aggregate"),
+    ("GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount", "gl_personal_advertising_injury"),
+    ("GeneralLiability_MedicalExpense_EachPersonLimitAmount",     "gl_medical_expense"),
     ("GeneralLiability_EachOccurrence_LimitAmount",        "gl_each_occurrence"),
     ("GeneralLiability_EachOccurrence",                    "gl_each_occurrence"),
     ("EachOccurrence",                                     "gl_each_occurrence"),
@@ -89,9 +347,6 @@ _ACORD_FIELD_RULES = [
     ("GeneralLiability_GeneralAggregate",                  "gl_aggregate"),
     ("GeneralLiability_Aggregate",                         "gl_aggregate"),
     ("GeneralAggregate",                                   "gl_aggregate"),
-    ("GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount", "gl_aggregate"),
-    ("GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount", "gl_limits"),
-    ("GeneralLiability_MedicalExpense_EachPersonLimitAmount",     "gl_limits"),
     ("GeneralLiability_OtherCoverageLimitAmount",          "gl_deductible"),
     ("GeneralLiability_PropertyDamage_DeductibleAmount",   "gl_deductible"),
     ("GeneralLiability_BodilyInjury_DeductibleAmount",     "gl_deductible"),
@@ -99,6 +354,7 @@ _ACORD_FIELD_RULES = [
     ("GeneralLiability_ClaimsMadeIndicator",               "gl_form_type"),
     ("GeneralLiability_OccurrenceIndicator",               "gl_form_type"),
     ("GeneralLiability_ClaimsMade_ProposedRetroactiveDate","retro_date"),
+    ("GeneralLiability_ClaimsMade_UninterruptedCoverageEntryDate", "retro_date"),
     ("GeneralLiability_RetroactiveDate",                   "retro_date"),
     ("GeneralLiability_EmployeeBenefits_EmployeeCount",    "num_employees"),
     # GL indicators / admin checkboxes → null
@@ -265,8 +521,18 @@ _ACORD_FIELD_RULES = [
     ("WorkersCompensation_Payroll",                        "wc_payroll"),
     ("WorkersCompensation_ExperienceModification",         "wc_xmod"),
     ("WorkersCompensation_ExperienceMod",                  "wc_xmod"),
-    ("WorkersCompensationEmployersLiability_EmployersLiability_EachAccident", "employers_liability_limits"),
-    ("WorkersCompensationEmployersLiability_EmployersLiability_Disease",      "employers_liability_limits"),
+    # Most-specific patterns first — DiseaseEachEmployee before Disease alone
+    ("WorkersCompensationEmployersLiability_EmployersLiability_EachAccident",           "wc_el_each_accident"),
+    ("WorkersCompensationEmployersLiability_EmployersLiability_DiseaseEachEmployee",    "wc_el_disease_each_employee"),
+    ("WorkersCompensationEmployersLiability_EmployersLiability_Disease",                "wc_el_disease_policy_limit"),
+    ("WorkersCompensationEmployersLiability_EmployersLiability_EachEmployee",           "wc_el_disease_each_employee"),
+    ("WorkersCompensation_EmployersLiability_EachAccident",                             "wc_el_each_accident"),
+    ("WorkersCompensation_EmployersLiability_DiseaseEachEmployee",                      "wc_el_disease_each_employee"),
+    ("WorkersCompensation_EmployersLiability_EachEmployee",                             "wc_el_disease_each_employee"),
+    ("WorkersCompensation_EmployersLiability_PolicyLimit",                              "wc_el_disease_policy_limit"),
+    ("EmployersLiability_EachAccident",                                                 "wc_el_each_accident"),
+    ("EmployersLiability_Disease_EachEmployee",                                         "wc_el_disease_each_employee"),
+    ("EmployersLiability_Disease_PolicyLimit",                                          "wc_el_disease_policy_limit"),
     ("WorkersCompensationEmployersLiability_OtherCoverage",                   None),
     ("WorkersCompensationEmployersLiability_InsurerLetterCode",               None),
 
@@ -541,6 +807,11 @@ def fill_pdf(template_path: str, data: dict, confidence: Optional[dict] = None) 
             return f.read()
 
 
+# Increment when new fact keys are added to extraction schema — forces fieldmap regen.
+# Must match FIELDMAP_SCHEMA_VERSION in scripts/generate_fieldmaps.py.
+_FIELDMAP_SCHEMA_VERSION = "v5"
+
+
 def _load_fieldmap(form_id: str) -> tuple:
     """Load persisted {field_name: fact_key} map and AI-mapped field set.
 
@@ -556,14 +827,15 @@ def _load_fieldmap(form_id: str) -> tuple:
     try:
         with open(path) as f:
             data = json.load(f)
-        # Legacy fieldmap without AI-mapping metadata — delete to force fresh
-        # LLM run so __ai_mapped__ gets populated and pink highlights work.
-        if "__ai_mapped__" not in data:
+        # Delete fieldmap if schema version changed or __ai_mapped__ is missing —
+        # forces fresh LLM run with new fact keys.
+        if data.get("__schema_version__") != _FIELDMAP_SCHEMA_VERSION or "__ai_mapped__" not in data:
             try:
                 os.remove(path)
             except Exception:
                 pass
             return {}, set()
+        data.pop("__schema_version__", None)
         ai_set = set(data.pop("__ai_mapped__", []))
         return data, ai_set
     except Exception:
@@ -577,12 +849,54 @@ def _save_fieldmap(form_id: str, fieldmap: dict, ai_set: set = None):
     path = os.path.join(FORMS_DB_DIR, f"ACORD_{form_id}_fieldmap.json")
     try:
         data = dict(fieldmap)
+        data["__schema_version__"] = _FIELDMAP_SCHEMA_VERSION
         if ai_set:
             data["__ai_mapped__"] = sorted(ai_set)
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
     except Exception as ex:
         logger.warning(f"Could not save fieldmap for {form_id}: {ex}")
+
+
+def migrate_fieldmaps_to_v5() -> None:
+    """One-time startup migration: stamp all on-disk fieldmaps to schema version v5.
+
+    All 15 fieldmaps shipped at v4. The runtime rejects v4 files (deletes them and
+    rebuilds from zero), destroying the pre-generated non-null mappings. This function
+    reads each file, sets __schema_version__ = "v5", adds __ai_mapped__ if missing,
+    and writes it back — preserving every existing field→fact_key entry.
+
+    Idempotent: safe to call on every boot (already-v5 files are untouched).
+    """
+    import glob as _glob
+    pattern = os.path.join(FORMS_DB_DIR, "ACORD_ACORD_*_fieldmap.json")
+    files   = _glob.glob(pattern)
+    if not files:
+        logger.warning("migrate_fieldmaps_to_v5: no fieldmap files found in %s", FORMS_DB_DIR)
+        return
+
+    migrated = 0
+    for path in files:
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            current_ver = data.get("__schema_version__")
+            if current_ver == _FIELDMAP_SCHEMA_VERSION:
+                continue                                   # already correct — skip
+            data["__schema_version__"] = _FIELDMAP_SCHEMA_VERSION
+            if "__ai_mapped__" not in data:
+                data["__ai_mapped__"] = []
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+            migrated += 1
+            logger.info(
+                "migrate_fieldmaps_to_v5: %s %s → %s",
+                os.path.basename(path), current_ver or "missing", _FIELDMAP_SCHEMA_VERSION,
+            )
+        except Exception as ex:
+            logger.warning("migrate_fieldmaps_to_v5: skipped %s — %s", os.path.basename(path), ex)
+
+    logger.info("migrate_fieldmaps_to_v5: done — %d/%d files updated", migrated, len(files))
 
 
 def _resolve_special(key: str, facts: dict, prefix: str) -> str:
@@ -604,12 +918,91 @@ def _resolve_special(key: str, facts: dict, prefix: str) -> str:
     return parsed.get(suffix, "") or ""
 
 
-# Valid fact key set — used to validate LLM-returned keys.
-_VALID_FACT_KEYS: set = set()  # populated lazily on first map_facts_to_form call
 _SPECIAL_PREFIXES = {"_addr", "_loc"}
 
 
+_INDICATOR_RULES: Dict[str, Tuple[str, str]] = {
+    # field_substring: (fact_key, truthy_value_to_match)
+    # GL form type
+    "GeneralLiability_OccurrenceIndicator":    ("gl_form_type", "occurrence"),
+    "GeneralLiability_ClaimsMadeIndicator":    ("gl_form_type", "claims"),
+    # Named insured entity type — longer/more-specific substrings first
+    "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator": ("entity_type", "llc"),
+    "NamedInsured_LegalEntity_SubchapterSCorporationIndicator": ("entity_type", "s-corp"),
+    "NamedInsured_LegalEntity_CorporationIndicator": ("entity_type", "corporation"),
+    "NamedInsured_LegalEntity_PartnershipIndicator": ("entity_type", "partnership"),
+    "NamedInsured_LegalEntity_IndividualIndicator":  ("entity_type", "individual"),
+    "NamedInsured_LegalEntity_NotForProfitIndicator": ("entity_type", "non-profit"),
+    "NamedInsured_LegalEntity_TrustIndicator": ("entity_type", "trust"),
+    "NamedInsured_LegalEntity_JointVentureIndicator": ("entity_type", "joint venture"),
+    "NamedInsured_LegalEntity_OtherIndicator": ("entity_type", "other"),
+    # Lines of business — ACORD 125
+    "Policy_LineOfBusiness_BusinessAutoIndicator": ("lines_of_business", "auto"),
+    "Policy_LineOfBusiness_CommercialGeneralLiability": ("lines_of_business", "gl"),
+    "Policy_LineOfBusiness_CommercialProperty": ("lines_of_business", "property"),
+    "Policy_LineOfBusiness_UmbrellaIndicator": ("lines_of_business", "umbrella"),
+    "Policy_LineOfBusiness_WorkersCompensation": ("lines_of_business", "workers comp"),
+    "Policy_LineOfBusiness_BusinessOwnersIndicator": ("lines_of_business", "bop"),
+    "Policy_LineOfBusiness_CrimeIndicator": ("lines_of_business", "crime"),
+    "Policy_LineOfBusiness_GarageAndDealersIndicator": ("lines_of_business", "garage"),
+    # Hired/non-owned auto
+    "Vehicle_HiredIndicator":    ("hired_auto_indicator", "yes"),
+    "Vehicle_HiredAutosIndicator": ("hired_auto_indicator", "yes"),
+    "Vehicle_NonOwnedIndicator": ("non_owned_auto_indicator", "yes"),
+    "Vehicle_NonOwnedAutosIndicator": ("non_owned_auto_indicator", "yes"),
+    # Property valuation
+    "ValuationCode_ReplacementCostIndicator": ("valuation_method", "rcv"),
+    "ValuationCode_ActualCashValueIndicator": ("valuation_method", "acv"),
+    # Loss history
+    "LossHistory_NoPriorLossesIndicator": ("num_claims", "0"),
+    # New / renewal
+    "CommercialPolicy_NewBusinessIndicator": ("is_renewal", "no"),
+    "CommercialPolicy_RenewalIndicator":     ("is_renewal", "yes"),
+    # Umbrella form type
+    "ExcessUmbrella_OccurrenceIndicator": ("gl_form_type", "occurrence"),
+    "ExcessUmbrella_ClaimsMadeIndicator": ("gl_form_type", "claims"),
+    # WC statutory limits indicator
+    "WorkersCompensationEmployersLiability_WorkersCompensationStatutoryLimitIndicator": ("wc_el_each_accident", "statutory"),
+}
+
+
+def _resolve_bool_indicator(val) -> str:
+    """Convert any fact value to 'Yes' or 'No' for /Btn checkbox fields."""
+    if isinstance(val, bool):
+        return "Yes" if val else "No"
+    s = str(val).strip().lower()
+    return "Yes" if s in {"yes", "y", "true", "1", "on"} else "No"
+
+
+def _derive_indicator(field_name: str, facts: dict) -> Optional[str]:
+    """Return 'Yes'/'No' for indicator/checkbox fields based on extracted facts.
+
+    Covers both fields with 'Indicator' in the name and LOB checkboxes like
+    Policy_LineOfBusiness_CommercialGeneralLiability_A (no 'Indicator' suffix).
+    """
+    fn_lower = field_name.lower()
+    for substr, (fact_key, match_val) in _INDICATOR_RULES.items():
+        if substr.lower() in fn_lower:
+            raw = _fv(facts, fact_key)
+            if raw is None:
+                return None
+            if isinstance(raw, bool):
+                # Direct boolean fact: treat match_val=="yes"/"true" as "truthy expected"
+                expected_true = match_val.lower() in {"yes", "true", "1"}
+                return "Yes" if (raw == expected_true) else "No"
+            val_str = str(raw).lower()
+            if match_val.lower() in val_str:
+                return "Yes"
+            return "No"
+    return None
+
+
 def _deterministic_map(field_name: str, facts: dict):
+    # ── Schedule row resolution (highest priority) ───────────────────────────
+    sched = _resolve_schedule_row(field_name, facts)
+    if sched is not _SCHED_SKIP:
+        return sched  # None means blank; any string is the resolved value
+
     # Layer: Location\d+_SubField  →  facts["locations"][N-1] or sub-key lookup
     loc_m = re.match(r"Location(\d+)[_]?(.*)", field_name)
     if loc_m:
@@ -633,8 +1026,19 @@ def _deterministic_map(field_name: str, facts: dict):
                 return _resolve_special(fact_key, facts, "_" + fact_key.split("_")[1]) or None
             val = _fv(facts, fact_key)   # unwrap OCR-confidence envelope
             if isinstance(val, list):
+                # For indicator fields, check if the relevant value exists in the list
+                if "Indicator" in field_name and isinstance(val, list):
+                    ind = _derive_indicator(field_name, facts)
+                    return ind
                 return str(val[0]) if val else None
             return str(val) if val is not None else None
+
+    # Try indicator derivation — also handles LOB checkboxes without "Indicator"
+    # in the field name (e.g. Policy_LineOfBusiness_CommercialGeneralLiability_A).
+    ind = _derive_indicator(field_name, facts)
+    if ind is not None:
+        return ind
+
     return "UNMATCHED"
 
 
@@ -645,6 +1049,8 @@ def _apply_fact_key(fact_key: str, facts: dict):
     if fact_key.startswith("_"):
         return _resolve_special(fact_key, facts, "_" + fact_key.split("_")[1]) or None
     val = _fv(facts, fact_key)
+    if isinstance(val, bool):
+        return _resolve_bool_indicator(val)
     if isinstance(val, list):
         return str(val[0]) if val else None
     return str(val) if val is not None else None
@@ -879,24 +1285,422 @@ def apply_acord125_missing_field_highlights(
     return confidence
 
 
-def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dict, dict]:
+_RAW_TEXT_SKIP_PATTERNS = [
+    "Indicator", "Signature", "InsurerLetterCode",
+    "Attachment_", "Hazard_", "Premium", "Rate_", "Revision",
+    "EditionIdentifier", "_Sig", "NeedAppearances",
+]
+
+
+def _run_coro_sync(coro):
+    """Run an async coroutine from synchronous code.
+
+    Uses the running loop if one exists (FastAPI request context), otherwise
+    creates a new event loop. Never calls asyncio.run() which fails when called
+    inside an already-running loop.
+    """
+    import asyncio as _asyncio
+    try:
+        loop = _asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures as _cf
+            with _cf.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_asyncio.run, coro)
+                return future.result()
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        return _asyncio.run(coro)
+
+
+def _fill_empty_from_raw_text(
+    mapped: dict,
+    schema: dict,
+    raw_text: str,
+    form_id: str,
+    filled_set: set,
+) -> None:
+    """DEPRECATED: replaced by _fill_unmatched_with_gpt(). Kept for rollback only. Do NOT call this function.
+
+    Full-document LLM fill for fields still empty after fact-key mapping.
+
+    Sends the COMPLETE OCR text (every word from every uploaded document) plus
+    detailed field metadata from the form schema to the LLM.  The LLM reads the
+    entire document and extracts exact values for each empty field.
+
+    Designed for GPT-4o / Claude (large context windows).  Results are never
+    cached in the fieldmap — they are document-specific values, not structural
+    mappings.  Fields filled here are added to *filled_set* so the UI shows
+    pink highlights for broker review.
+    """
+    empty_fields = [
+        f for f in schema
+        if mapped.get(f) is None or str(mapped.get(f, "")).strip() in ("", "null", "None")
+    ]
+    if not empty_fields:
+        return
+
+    text_fields = [
+        f for f in empty_fields
+        if not any(p in f for p in _RAW_TEXT_SKIP_PATTERNS)
+    ]
+    if not text_fields:
+        return
+
+    # Always send the FULL extracted text — the system is designed for GPT/Claude.
+    # On Groq the call may fail if context is too long; that's caught below and
+    # logged — partial filling is acceptable until the provider is upgraded.
+    doc_text = raw_text  # no truncation
+
+    # Batch size: GPT-4o / Claude handle 40+ fields per call comfortably.
+    # Groq will likely fail on large docs — but that's acceptable at this stage.
+    BATCH = 40
+
+    # Pick the model name based on provider
+    if ACTIVE_MODEL == "claude":
+        llm_model = "claude-haiku-4-5-20251001"   # fast + large context
+    else:
+        llm_model = "gpt-4o-mini"
+
+    for start in range(0, len(text_fields), BATCH):
+        batch = text_fields[start : start + BATCH]
+
+        # Build rich field descriptions using form schema metadata
+        field_specs = []
+        for f in batch:
+            info = schema.get(f, {})
+            if isinstance(info, dict):
+                tu   = info.get("tu", "")[:120]   # PDF tooltip / field label
+                ft   = info.get("ft", "")          # field type (/Tx text, /Btn checkbox, /Ch dropdown)
+                req  = " [REQUIRED]" if info.get("required") else ""
+                desc = f"  - {f}{req}"
+                if tu:
+                    desc += f": {tu}"
+                if "/Ch" in ft:
+                    desc += " (dropdown)"
+            else:
+                desc = f"  - {f}"
+            field_specs.append(desc)
+
+        fields_block = "\n".join(field_specs)
+
+        prompt = (
+            f"You are an insurance form completion expert filling ACORD form {form_id}.\n"
+            "Your task: read the COMPLETE insurance document text below and extract the exact "
+            "value for each listed form field.\n\n"
+            "Rules:\n"
+            "  1. Read the ENTIRE document — values appear anywhere across all pages.\n"
+            "  2. Extract the EXACT value as written in the document. Do not paraphrase.\n"
+            "  3. Return null for any field whose value is genuinely absent from the document.\n"
+            "  4. Return short scalar values only: names, dates, dollar amounts, addresses, codes.\n"
+            "  5. Do NOT invent, estimate, or carry over values from other fields.\n"
+            "  6. For date fields: use the format as found in the document (MM/DD/YYYY or similar).\n"
+            "  7. For dollar amounts: include the $ sign and commas as found (e.g. $1,000,000).\n\n"
+            "Return ONLY a single JSON object: {\"FieldName\": \"extracted_value_or_null\"}\n\n"
+            f"=== FORM FIELDS TO FILL ({form_id}) ===\n{fields_block}\n\n"
+            f"=== COMPLETE INSURANCE DOCUMENT TEXT ===\n{doc_text}\n\n"
+            "JSON Output:"
+        )
+        try:
+            _coro    = groq_chat(llm_model, [{"role": "user", "content": prompt}])
+            raw_resp = _run_coro_sync(_coro)
+            if raw_resp.startswith("```"):
+                raw_resp = raw_resp.replace("```json", "").replace("```", "").strip()
+            s, e = raw_resp.find("{"), raw_resp.rfind("}")
+            if s != -1 and e != -1:
+                result = json.loads(raw_resp[s : e + 1])
+                for field, value in result.items():
+                    if value and str(value).strip() not in ("", "null", "None"):
+                        mapped[field] = str(value).strip()
+                        filled_set.add(field)
+                logger.info(
+                    f"raw_text_fill form={form_id} batch_start={start} "
+                    f"fields_sent={len(batch)} fields_filled={len(filled_set)}"
+                )
+        except Exception as ex:
+            logger.warning(f"Raw-text fill batch failed (form={form_id}, start={start}): {ex}")
+
+
+# Chunk size for raw_text in form-fill pass. OpenAI gpt-4o-mini supports 128k
+# tokens (~512k chars). We use 40k chars per chunk — leaves ample room for the
+# fields block and structured facts in the same prompt.
+_FORM_FILL_RAW_CHUNK_CHARS = int(os.getenv("FORM_FILL_RAW_CHUNK_CHARS", str(40_000)))
+# Max retries per batch call
+_FORM_FILL_BATCH_RETRIES = int(os.getenv("FORM_FILL_BATCH_RETRIES", "3"))
+
+
+def _fill_unmatched_with_gpt(
+    unmatched_fields: dict,
+    facts: dict,
+    form_id: str,
+    model: str = None,
+    raw_text: str = "",
+) -> dict:
+    """GPT form-fill: fills unmatched fields from structured facts + full raw document text.
+
+    Uses a dedicated AsyncOpenAI client. Form-fill always uses OpenAI regardless
+    of LLM_PROVIDER (extraction provider).
+
+    Architecture — chunked full-coverage pass:
+      STEP A: raw_text is split into semantic chunks of _FORM_FILL_RAW_CHUNK_CHARS.
+              Every character is covered — no truncation.
+      STEP B: Each chunk is sent independently to the LLM with the fields block
+              and structured facts. Candidate values are collected per chunk.
+      STEP C: Per-field conflict resolution: structured-facts values win; for
+              raw-text-sourced values the most-frequent candidate across chunks wins.
+      STEP D: Final merged field map returned.
+
+    Source priority:
+      SOURCE 1 — PII-filtered structured facts (stable, doc-independent mappings)
+      SOURCE 2 — Raw OCR text chunks (full coverage, no truncation)
+
+    Returns:
+        {
+            "filled_values":   {field_name: value_string, ...},
+            "new_mappings":    {field_name: fact_key_or_null, ...},
+            "raw_text_fields": {field_name},
+            "model_used":      str,
+        }
+    """
+    if not unmatched_fields:
+        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": model or GPT_MODEL}
+
+    try:
+        _client = _get_openai_form_fill_client()
+    except RuntimeError as _e:
+        logger.warning("gpt_fill: %s — skipping GPT form fill pass", _e)
+        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": model or GPT_MODEL}
+
+    llm_model = model or GPT_MODEL
+
+    # ── PII-filtered facts for LLM prompt ────────────────────────────────────
+    facts_for_llm = {
+        k: str(_fv(facts, k))[:120]
+        for k in facts
+        if k not in _PII_EXCLUDE_KEYS
+        and _fv(facts, k) is not None
+        and not isinstance(_fv(facts, k), (list, dict))
+    }
+
+    # ── Split raw_text into chunks — ZERO truncation ─────────────────────────
+    # Every character of every uploaded document participates in form-fill.
+    raw_text_used = bool(raw_text and raw_text.strip())
+    if raw_text_used:
+        # Split on paragraph/line boundaries to avoid mid-sentence cuts.
+        raw_chunks: List[str] = []
+        remaining = raw_text
+        while remaining:
+            if len(remaining) <= _FORM_FILL_RAW_CHUNK_CHARS:
+                raw_chunks.append(remaining)
+                break
+            # Find last paragraph break before the limit so we don't split mid-sentence.
+            split_at = remaining.rfind("\n\n", 0, _FORM_FILL_RAW_CHUNK_CHARS)
+            if split_at == -1:
+                split_at = remaining.rfind("\n", 0, _FORM_FILL_RAW_CHUNK_CHARS)
+            if split_at == -1:
+                split_at = _FORM_FILL_RAW_CHUNK_CHARS
+            raw_chunks.append(remaining[:split_at])
+            remaining = remaining[split_at:].lstrip("\n")
+        logger.info(
+            "gpt_fill: form=%s raw_text_chars=%d raw_chunks=%d chunk_size=%d",
+            form_id, len(raw_text), len(raw_chunks), _FORM_FILL_RAW_CHUNK_CHARS,
+        )
+    else:
+        raw_chunks = [""]  # single empty chunk — facts-only pass
+
+    # ── Filter out schedule fields and skip-pattern fields ───────────────────
+    eligible_fields = {
+        f: meta
+        for f, meta in unmatched_fields.items()
+        if not _is_schedule_field(f)
+        and not any(p in f for p in _RAW_TEXT_SKIP_PATTERNS)
+    }
+
+    if not eligible_fields:
+        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": llm_model}
+
+    field_list = list(eligible_fields.keys())
+
+    # Accumulate per-field candidates: {field: {value_str: count}}
+    candidate_counts: Dict[str, Dict[str, int]] = {f: {} for f in field_list}
+    # Track whether a structured-facts mapping was found (persisted to fieldmap cache)
+    all_mappings: Dict[str, Optional[str]] = {}
+    # Track which fields were sourced from raw_text (not cached as structural mappings)
+    all_raw_fields: set = set()
+
+    fact_lines   = [f'  "{k}": "{v}"' for k, v in facts_for_llm.items()]
+    fact_context = "{\n" + ",\n".join(fact_lines) + "\n}"
+
+    # ── STEP B: send each (batch × chunk) combination to the LLM ─────────────
+    for chunk_idx, raw_chunk in enumerate(raw_chunks):
+        raw_text_section = (
+            f"\n\n=== SOURCE 2: RAW DOCUMENT TEXT (chunk {chunk_idx + 1}/{len(raw_chunks)}) ===\n{raw_chunk}"
+            if raw_text_used and raw_chunk.strip() else ""
+        )
+
+        for batch_start in range(0, len(field_list), GPT_BATCH_SIZE):
+            batch_keys = field_list[batch_start : batch_start + GPT_BATCH_SIZE]
+            batch_meta = {k: eligible_fields[k] for k in batch_keys}
+
+            field_specs = []
+            for f in batch_keys:
+                info = batch_meta[f] if isinstance(batch_meta[f], dict) else {}
+                tu   = info.get("tu", "")[:80]
+                ft   = info.get("ft", "")
+                req  = " [REQUIRED]" if info.get("required") else ""
+                spec = f"  - {f}{req}"
+                if tu:
+                    spec += f": {tu}"
+                if "/Ch" in ft:
+                    spec += " (dropdown)"
+                elif "/Btn" in ft:
+                    spec += " (checkbox — Yes/No)"
+                field_specs.append(spec)
+
+            fields_block = "\n".join(field_specs)
+
+            prompt = (
+                f"You are filling ACORD form {form_id} for an insurance submission.\n"
+                "You have TWO data sources. Use SOURCE 1 (structured facts) first. "
+                "Fall back to SOURCE 2 (raw document text) only when SOURCE 1 has no answer.\n\n"
+                "Return two JSON objects:\n"
+                '  "values":   {FieldName: "exact_value_or_null"}  — value to write into each field\n'
+                '  "mappings": {FieldName: "fact_key_or_null"}     — fact key from SOURCE 1 only\n'
+                '  "raw_text_sourced": [FieldName, ...]            — fields whose value came from SOURCE 2\n\n'
+                "Rules for values:\n"
+                "  1. Extract the EXACT value — do not paraphrase or invent.\n"
+                "  2. Use null if no source has the answer. Prefer null over a wrong value.\n"
+                "  3. For checkbox fields (Yes/No): return 'Yes' or 'No' only.\n"
+                "  4. For dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
+                "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n\n"
+                "Rules for mappings:\n"
+                "  1. Use ONLY exact key names from SOURCE 1 extracted_facts.\n"
+                "  2. A mapping is the structural field→fact relationship — not document-specific.\n"
+                "  3. Use null if no single fact key cleanly maps to this field.\n"
+                "  4. NEVER set a mapping for fields in raw_text_sourced — those are null.\n\n"
+                f"=== SOURCE 1: EXTRACTED FACTS ===\n{fact_context}\n\n"
+                f"Fields to fill ({form_id}):\n{fields_block}"
+                f"{raw_text_section}\n\n"
+                'Return ONLY valid JSON: {"values": {...}, "mappings": {...}, "raw_text_sourced": [...]}'
+            )
+
+            # Per-batch retry
+            batch_success = False
+            for attempt in range(_FORM_FILL_BATCH_RETRIES):
+                try:
+                    async def _call_openai(_prompt=prompt):
+                        resp = await _client.chat.completions.create(
+                            model=llm_model,
+                            messages=[{"role": "user", "content": _prompt}],
+                            temperature=GPT_TEMPERATURE,
+                            response_format={"type": "json_object"},
+                        )
+                        return resp.choices[0].message.content or ""
+
+                    raw_resp = _run_coro_sync(_call_openai())
+
+                    result            = json.loads(raw_resp)
+                    batch_values      = result.get("values",          {}) or {}
+                    batch_mappings    = result.get("mappings",        {}) or {}
+                    batch_raw_sourced = set(result.get("raw_text_sourced", []) or [])
+
+                    # Validate mapping keys against full registry (reject hallucinations)
+                    for field, fact_key in batch_mappings.items():
+                        if field in batch_raw_sourced:
+                            fact_key = None
+                        elif fact_key is not None and fact_key not in _FULL_REGISTRY_KEYS:
+                            logger.debug(
+                                "gpt_fill: rejected hallucinated fact_key=%r field=%r form=%s",
+                                fact_key, field, form_id,
+                            )
+                            fact_key = None
+                        # Only set mapping on first (facts-pass) chunk — it's doc-independent
+                        if chunk_idx == 0 and field not in all_mappings:
+                            all_mappings[field] = fact_key
+
+                    # Accumulate per-field candidate counts for conflict resolution
+                    for field, value in batch_values.items():
+                        if value and str(value).strip() not in ("", "null", "None"):
+                            vstr = str(value).strip()
+                            candidate_counts[field][vstr] = candidate_counts[field].get(vstr, 0) + 1
+                            if field in batch_raw_sourced:
+                                all_raw_fields.add(field)
+
+                    logger.info(
+                        "gpt_fill: form=%s chunk=%d/%d batch_start=%d sent=%d filled=%d raw_sourced=%d",
+                        form_id, chunk_idx + 1, len(raw_chunks),
+                        batch_start, len(batch_keys),
+                        sum(1 for v in batch_values.values() if v and str(v).strip() not in ("", "null", "None")),
+                        len(batch_raw_sourced),
+                    )
+                    batch_success = True
+                    break  # success — no more retries needed
+
+                except Exception as ex:
+                    if attempt < _FORM_FILL_BATCH_RETRIES - 1:
+                        import time as _time
+                        wait = 2 ** attempt
+                        logger.warning(
+                            "gpt_fill: batch failed form=%s chunk=%d batch_start=%d attempt=%d/%d "
+                            "retrying in %ds — %s",
+                            form_id, chunk_idx + 1, batch_start,
+                            attempt + 1, _FORM_FILL_BATCH_RETRIES, wait, ex,
+                        )
+                        _time.sleep(wait)
+                    else:
+                        logger.warning(
+                            "gpt_fill: batch permanently failed form=%s chunk=%d batch_start=%d — %s",
+                            form_id, chunk_idx + 1, batch_start, ex,
+                        )
+
+    # ── STEP C: conflict resolution — pick winner per field ──────────────────
+    # Structured-facts values (SOURCE 1) always win over raw-text values.
+    # Among raw-text values, the most-frequent candidate across chunks wins.
+    all_filled: dict = {}
+    for field, candidates in candidate_counts.items():
+        if not candidates:
+            continue
+        # SOURCE 1 check: if there's a mapping AND facts have a non-empty value, prefer it.
+        fact_key = all_mappings.get(field)
+        if fact_key and _fv(facts, fact_key) is not None:
+            src1_val = str(_fv(facts, fact_key)).strip()
+            if src1_val and src1_val.lower() not in ("", "null", "none"):
+                all_filled[field] = src1_val
+                continue
+        # SOURCE 2: pick the highest-frequency candidate (most chunks agreed)
+        winner = max(candidates, key=lambda v: candidates[v])
+        all_filled[field] = winner
+
+    # ── STEP D: audit log ─────────────────────────────────────────────────────
+    for field, value in all_filled.items():
+        logger.info(
+            "FIELD_SOURCE_AUDIT field=%s source=ai model=%s form_id=%s "
+            "fact_key=%s raw_text_used=%s chunks_agreed=%s",
+            field, llm_model, form_id,
+            all_mappings.get(field) or "none",
+            str(field in all_raw_fields).lower(),
+            candidate_counts.get(field, {}).get(value, 1),
+        )
+
+    logger.info(
+        "gpt_fill DONE: form=%s fields_filled=%d/%d raw_chunks=%d model=%s",
+        form_id, len(all_filled), len(eligible_fields), len(raw_chunks), llm_model,
+    )
+
+    return {
+        "filled_values":   all_filled,
+        "new_mappings":    all_mappings,
+        "raw_text_fields": all_raw_fields,
+        "model_used":      llm_model,
+    }
+
+
+def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: str = "") -> Tuple[dict, dict]:
     if not schema:
         return {}, {}
 
-    BATCH      = 80
     mapped     = {}
     unmatched  = {}
     confidence = {}
-
-    # Build valid fact-key set for LLM response validation (lazy, one-time).
-    global _VALID_FACT_KEYS
-    if not _VALID_FACT_KEYS:
-        _VALID_FACT_KEYS = set(facts.keys()) | {
-            "_addr_line1", "_addr_line2", "_addr_city", "_addr_state", "_addr_zip",
-            "_loc_line1",  "_loc_line2",  "_loc_city",  "_loc_state",  "_loc_zip",
-        }
-    else:
-        _VALID_FACT_KEYS.update(facts.keys())
 
     # Load persisted field→fact_key map and the set of fields that were originally
     # AI-mapped. The ai_set persists across runs so those fields keep "low_confidence".
@@ -906,7 +1710,15 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
 
     for field in schema.keys():
         if field in cached_fieldmap:
-            mapped[field] = _apply_fact_key(cached_fieldmap[field], facts)
+            # Schedule fields cached with a list-fact-key must re-resolve by row index
+            # each call (different documents have different list lengths).
+            sched = _resolve_schedule_row(field, facts)
+            if sched is not _SCHED_SKIP:
+                if sched is not None:
+                    mapped[field] = sched
+                # sched==None means row out-of-range → leave mapped[field] unset (blank)
+            else:
+                mapped[field] = _apply_fact_key(cached_fieldmap[field], facts)
         else:
             result = _deterministic_map(field, facts)
             if result == "UNMATCHED":
@@ -920,59 +1732,32 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
                         break
 
     if unmatched:
-        unmatched_keys = list(unmatched.keys())
-        ai_mapped: dict = {}  # {field: fact_key_or_null}
-        facts_plain = {k: _fv(facts, k) for k in facts}  # strip envelopes for LLM
+        gpt_result       = _fill_unmatched_with_gpt(unmatched, facts, form_id, raw_text=raw_text)
+        gpt_values       = gpt_result["filled_values"]
+        gpt_mappings     = gpt_result["new_mappings"]
+        gpt_raw_fields   = gpt_result.get("raw_text_fields", set())
+        gpt_filled_set   = set(gpt_values.keys())
 
-        for batch_start in range(0, len(unmatched_keys), BATCH):
-            batch_keys  = unmatched_keys[batch_start : batch_start + BATCH]
-            batch_hints = []
-            for k in batch_keys:
-                info = unmatched[k] if isinstance(unmatched[k], dict) else {}
-                tu   = info.get("tu", "")[:60] if info else ""
-                batch_hints.append(k + (f"  # {tu}" if tu else ""))
-            prompt = (
-                "Map these PDF AcroForm field names to insurance fact keys.\n"
-                "Return ONLY a JSON object: {\"FieldName\": \"fact_key_or_null\"}.\n"
-                "Rules:\n"
-                "  - Use null if no fact key applies.\n"
-                "  - Use ONLY exact fact key names from the list below — do NOT invent keys.\n"
-                "  - Prefer null over a wrong key.\n\n"
-                f"Available fact keys:\n{json.dumps(list(facts_plain.keys()))}\n\n"
-                f"Fields to map:\n{json.dumps(batch_hints)}\n\nOutput:"
-            )
-            try:
-                raw = groq_chat("llama-3.1-8b-instant", [{"role": "user", "content": prompt}])
-                if raw.startswith("```"):
-                    raw = raw.replace("```json", "").replace("```", "").strip()
-                s, e = raw.find("{"), raw.rfind("}")
-                if s != -1 and e != -1:
-                    ai_mapped.update(json.loads(raw[s : e + 1]))
-            except Exception as ex:
-                logger.warning(f"AI batch failed: {ex}")
-
-        # Apply LLM results and always persist (even null) → 0 LLM calls on repeat runs.
-        for field, fact_key in ai_mapped.items():
-            # Validate key: reject hallucinated keys not in our known fact set.
-            if fact_key is not None and fact_key not in _VALID_FACT_KEYS:
-                logger.debug(f"LLM returned unknown fact key '{fact_key}' for {field} — treating as null")
-                fact_key = None
-            new_fieldmap[field] = fact_key   # always cache, even None
-            mapped[field]       = _apply_fact_key(fact_key, facts)
-            if fact_key is not None:
-                new_ai_set.add(field)         # persist that this field is AI-mapped
-
-        # Fields in unmatched that the LLM didn't return → save as null so we skip next run.
-        for field in unmatched_keys:
-            if field not in ai_mapped:
-                new_fieldmap[field] = None
+        # Apply GPT values and update fieldmap cache.
+        # Raw-text-sourced fields get fact_key=None so they are never cached as
+        # structural mappings (values are document-specific, not reusable).
+        for field in unmatched:
+            fact_key = None if field in gpt_raw_fields else gpt_mappings.get(field)
+            new_fieldmap[field] = fact_key               # always cache, even None
+            if field in gpt_values:
+                mapped[field] = gpt_values[field]
+            else:
                 mapped.setdefault(field, None)
+            if fact_key is not None:
+                new_ai_set.add(field)
 
         _save_fieldmap(form_id, new_fieldmap, new_ai_set)
 
-    elif new_fieldmap != cached_fieldmap:
-        # Deterministic pass added new entries — persist them even with no LLM batch.
-        _save_fieldmap(form_id, new_fieldmap, new_ai_set)
+    else:
+        gpt_filled_set = set()
+        if new_fieldmap != cached_fieldmap:
+            # Deterministic pass added new entries — persist even with no GPT batch.
+            _save_fieldmap(form_id, new_fieldmap, new_ai_set)
 
     # On the very first run (no cached fieldmap) every filled field is unreviewed,
     # so mark them all low_confidence so pink highlights appear immediately.
@@ -984,7 +1769,7 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
         val       = mapped.get(field)
         has_value = val is not None and str(val).strip() not in ("", "null", "None")
         is_req    = meta.get("required", False) if isinstance(meta, dict) else False
-        was_ai    = first_run or (field in unmatched) or (field in cached_ai_set)
+        was_ai    = first_run or (field in unmatched) or (field in cached_ai_set) or (field in gpt_filled_set)
         if has_value:
             confidence[field] = "low_confidence" if was_ai else "filled"
         elif is_req:
@@ -994,8 +1779,25 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "") -> Tuple[dic
 
     confidence = apply_acord125_missing_field_highlights(form_id, facts, mapped, confidence)
 
-    total_filled = sum(1 for v in mapped.values() if v is not None and str(v).strip() not in ("", "null", "None"))
-    logger.info(f"Mapped {total_filled}/{len(schema)} fields (form_id={form_id or 'unknown'})")
+    # Fill-rate: exclude fields whose fieldmap entry is explicitly null (carrier_computed /
+    # not_fillable) — they are not theoretically fillable from a declaration page.
+    fillable_fields = [f for f, v in new_fieldmap.items() if not f.startswith("__")]
+    fillable_count  = len(fillable_fields) if fillable_fields else len(schema)
+    total_filled    = sum(1 for v in mapped.values() if v is not None and str(v).strip() not in ("", "null", "None"))
+    logger.info(f"Mapped {total_filled}/{fillable_count} fields (form_id={form_id or 'unknown'})")
+
+    # Log every field that has a mapped fact_key but ended up empty — these are
+    # extraction gaps that need investigation.
+    for field, fact_key in new_fieldmap.items():
+        if field.startswith("__") or fact_key is None:
+            continue
+        val = mapped.get(field)
+        if val is None or str(val).strip() in ("", "null", "None"):
+            logger.warning(
+                f"FILL_MISS form={form_id or 'unknown'} field={field!r} "
+                f"fact_key={fact_key!r} — fact value was empty/missing"
+            )
+
     return mapped, confidence
 
 

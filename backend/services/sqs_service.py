@@ -958,7 +958,7 @@ def calculate_sqs(
                 "priority": 2,
             })
 
-    elif fid == "ACORD_140":
+    elif fid in ("ACORD_140", "ACORD_141"):
         min_cope = [
             bool(_fv(facts, "locations")),
             bool(_fv(facts, "occupancy_type")),
@@ -967,32 +967,31 @@ def calculate_sqs(
         ]
         if not all(min_cope):
             struct = 0
-            issues.append("Minimum Viable COPE incomplete")
+            issues.append("Minimum Viable COPE incomplete — hard stop")
             recommendations.append({
                 "rec_id": "rec_min_cope",
                 "field": "locations",
                 "component": "property_integrity",
-                "message": "Required: street address, occupancy, construction type, building/BPP value",
+                "message": "Required: street address, occupancy, construction type, and building or BPP value",
                 "type": "hard_stop",
                 "score_impact": 0,
                 "priority": 1,
             })
         else:
-            carrier_cope = [bool(_fv(facts, k)) for k in [
-                "year_built", "roof_year", "sprinkler_system",
-                "fire_protection_class", "valuation_method", "coinsurance_percentage",
-            ]]
-            struct = int(60 + (sum(carrier_cope) / len(carrier_cope)) * 40)
-            mc = [
-                (l, f) for l, ok, f in zip(
-                    ["year built", "roof year", "sprinkler system",
-                     "fire protection class", "valuation method", "coinsurance %"],
-                    carrier_cope,
-                    ["year_built", "roof_year", "sprinkler_system",
-                     "fire_protection_class", "valuation_method", "coinsurance_percentage"]
-                )
-                if not ok
+            carrier_cope_fields = [
+                ("year_built",           "year built"),
+                ("roof_year",            "roof year"),
+                ("sprinkler_system",     "sprinkler system"),
+                ("fire_protection_class","fire protection class"),
+                ("valuation_method",     "valuation method (RCV/ACV)"),
+                ("coinsurance_percentage","coinsurance %"),
+                ("business_income_limit","business income limit"),
+                ("period_of_restoration","period of restoration"),
+                ("property_deductible_aop","AOP deductible"),
             ]
+            carrier_cope = [bool(_fv(facts, k)) for k, _ in carrier_cope_fields]
+            struct = int(60 + (sum(carrier_cope) / len(carrier_cope)) * 40)
+            mc = [(lbl, fk) for (fk, lbl), ok in zip(carrier_cope_fields, carrier_cope) if not ok]
             for label, field_name in mc:
                 recommendations.append({
                     "rec_id": f"rec_{field_name}",
@@ -1003,6 +1002,163 @@ def calculate_sqs(
                     "score_impact": 6,
                     "priority": 2,
                 })
+    elif fid == "ACORD_133":
+        # Builders Risk: project address + project cost + completion date are hard gates
+        br_required = [
+            ("builders_risk_project_address", "project address"),
+            ("builders_risk_project_cost",    "project cost / contract value"),
+            ("builders_risk_completion_date", "anticipated completion date"),
+        ]
+        br_chks = [bool(_fv(facts, k)) for k, _ in br_required]
+        if not all(br_chks):
+            struct = 0
+            for (fk, lbl), ok in zip(br_required, br_chks):
+                if not ok:
+                    issues.append(f"Builders Risk missing required field: {lbl}")
+                    recommendations.append({
+                        "rec_id": f"rec_{fk}",
+                        "field": fk,
+                        "component": "structural_completeness",
+                        "message": f"Builders Risk requires {lbl}",
+                        "type": "hard_stop",
+                        "score_impact": 0,
+                        "priority": 1,
+                    })
+        else:
+            br_optional = [bool(_fv(facts, k)) for k in [
+                "builders_risk_construction_type",
+                "builders_risk_owner_name",
+                "builders_risk_contractor_name",
+                "builders_risk_insured_interest",
+            ]]
+            struct = int(70 + (sum(br_optional) / len(br_optional)) * 30)
+
+    elif fid == "ACORD_137":
+        # Crime: limit is the key field
+        crime_chks = [
+            bool(_fv(facts, "crime_limit")),
+            bool(_fv(facts, "crime_deductible")),
+        ]
+        struct = int(sum(crime_chks) / len(crime_chks) * 100)
+        if not _fv(facts, "crime_limit"):
+            issues.append("Crime limit not specified")
+            recommendations.append({
+                "rec_id": "rec_crime_limit",
+                "field": "crime_limit",
+                "component": "structural_completeness",
+                "message": "Provide crime coverage limit per insuring agreement",
+                "type": "missing_field",
+                "score_impact": 20,
+                "priority": 1,
+            })
+        for fk, lbl in [("crime_employee_count", "employee count"),
+                         ("crime_locations_count", "locations count")]:
+            if not _fv(facts, fk):
+                recommendations.append({
+                    "rec_id": f"rec_{fk}",
+                    "field": fk,
+                    "component": "exposure_consistency",
+                    "message": f"Crime application missing: {lbl}",
+                    "type": "suggestion",
+                    "score_impact": 8,
+                    "priority": 2,
+                })
+
+    elif fid == "ACORD_138":
+        # Cyber: limit is required; controls are carrier-grade
+        cyber_chks = [
+            bool(_fv(facts, "cyber_limit")),
+            bool(_fv(facts, "cyber_retention")),
+        ]
+        struct = int(sum(cyber_chks) / len(cyber_chks) * 100)
+        if not _fv(facts, "cyber_limit"):
+            issues.append("Cyber coverage limit not specified")
+            recommendations.append({
+                "rec_id": "rec_cyber_limit",
+                "field": "cyber_limit",
+                "component": "structural_completeness",
+                "message": "Provide cyber liability coverage limit",
+                "type": "missing_field",
+                "score_impact": 20,
+                "priority": 1,
+            })
+        for fk, lbl in [
+            ("cyber_controls_mfa",    "MFA controls"),
+            ("cyber_controls_backups","backup controls"),
+            ("cyber_prior_incidents", "prior incidents disclosure"),
+        ]:
+            if not _fv(facts, fk):
+                recommendations.append({
+                    "rec_id": f"rec_{fk}",
+                    "field": fk,
+                    "component": "exposure_consistency",
+                    "message": f"Cyber application missing: {lbl}",
+                    "type": "suggestion",
+                    "score_impact": 8,
+                    "priority": 2,
+                })
+
+    elif fid == "ACORD_160":
+        # Inland Marine: item schedule or total value required
+        im_has_value = bool(_fv(facts, "inland_marine_total_value"))
+        im_has_items = bool(_fv(facts, "inland_marine_items"))
+        if not im_has_value and not im_has_items:
+            struct = 0
+            issues.append("Inland Marine missing item schedule and total value")
+            recommendations.append({
+                "rec_id": "rec_im_schedule",
+                "field": "inland_marine_items",
+                "component": "structural_completeness",
+                "message": "Provide inland marine item schedule or total insured value",
+                "type": "hard_stop",
+                "score_impact": 0,
+                "priority": 1,
+            })
+        else:
+            struct = 60 if (im_has_value or im_has_items) else 0
+            if im_has_value and im_has_items:
+                struct = 90
+            if _fv(facts, "inland_marine_transit_limit"):
+                struct = min(100, struct + 10)
+
+    elif fid == "ACORD_186":
+        # Contractors Supplemental: type and subcontract % are required
+        contr_chks = [
+            bool(_fv(facts, "contractor_type")),
+            bool(_fv(facts, "percent_subcontracted")),
+        ]
+        struct = int(sum(contr_chks) / len(contr_chks) * 100)
+        for fk, lbl in [
+            ("contractor_type",          "contractor type"),
+            ("percent_subcontracted",    "% work subcontracted"),
+        ]:
+            if not _fv(facts, fk):
+                issues.append(f"Contractors Supplement missing: {lbl}")
+                recommendations.append({
+                    "rec_id": f"rec_{fk}",
+                    "field": fk,
+                    "component": "structural_completeness",
+                    "message": f"ACORD 186 requires {lbl}",
+                    "type": "missing_field",
+                    "score_impact": 15,
+                    "priority": 1,
+                })
+        for fk, lbl in [
+            ("contractor_residential_pct", "residential/commercial work split"),
+            ("contractor_high_hazard_ops", "high-hazard operations list"),
+            ("contractor_license_number",  "contractor license number"),
+        ]:
+            if not _fv(facts, fk):
+                recommendations.append({
+                    "rec_id": f"rec_{fk}",
+                    "field": fk,
+                    "component": "exposure_consistency",
+                    "message": f"Contractors Supplement: add {lbl}",
+                    "type": "suggestion",
+                    "score_impact": 6,
+                    "priority": 2,
+                })
+
     else:
         struct = conf_rate
 
@@ -1082,36 +1238,72 @@ def calculate_sqs(
     _prop_hard = False
     _prop_soft = False
 
-    if fid == "ACORD_140":
+    if fid in ("ACORD_140", "ACORD_141"):
         prop = struct
-        if flags.get("property_has_bi_coverage") and _fv(facts, "business_income_limit") and not _fv(facts, "period_of_restoration"):
-            prop = max(0, prop - 8)
+        # BI coverage: BI limit present but period of restoration missing → hard stop per document
+        if _fv(facts, "business_income_limit") and not _fv(facts, "period_of_restoration"):
+            _prop_hard = True
+            issues.append("Business income limit present but period of restoration not specified")
             recommendations.append({
                 "rec_id": "rec_period_of_restoration",
                 "field": "period_of_restoration",
                 "component": "property_integrity",
-                "message": "Add Period of Restoration",
-                "type": "suggestion",
+                "message": "Provide Period of Restoration for Business Income coverage",
+                "type": "hard_stop",
+                "score_impact": 0,
+                "priority": 1,
+            })
+        # Valuation method soft block
+        if not _fv(facts, "valuation_method"):
+            _prop_soft = True
+            issues.append("Property valuation method (RCV/ACV) not specified")
+            recommendations.append({
+                "rec_id": "rec_valuation_method_prop",
+                "field": "valuation_method",
+                "component": "property_integrity",
+                "message": "Select valuation method: Replacement Cost Value (RCV) or Actual Cash Value (ACV)",
+                "type": "soft_warning",
                 "score_impact": 8,
-                "priority": 2,
+                "priority": 1,
             })
         if flags.get("property_has_peril_deductibles"):
-            d = sum(bool(_fv(facts, f)) for f in [
-                "property_deductible_wind", "property_deductible_earthquake", "property_deductible_flood",
-            ])
-            if d == 0:
-                prop = max(0, prop - 10)
+            missing_perils = [
+                (f, lbl) for f, lbl in [
+                    ("property_deductible_wind",       "wind/hail"),
+                    ("property_deductible_earthquake", "earthquake"),
+                    ("property_deductible_flood",      "flood"),
+                ]
+                if not _fv(facts, f)
+            ]
+            if missing_perils:
+                _prop_hard = True
+                for fk, lbl in missing_perils:
+                    issues.append(f"Peril-specific {lbl} deductible referenced but not defined")
                 recommendations.append({
                     "rec_id": "rec_peril_deductibles",
                     "field": "property_deductible_wind",
                     "component": "property_integrity",
-                    "message": "Define peril deductibles",
-                    "type": "soft_warning",
-                    "score_impact": 10,
+                    "message": "Define peril deductibles: " + ", ".join(l for _, l in missing_perils),
+                    "type": "hard_stop",
+                    "score_impact": 0,
                     "priority": 1,
                 })
+        # Coinsurance: if value present but coinsurance missing → soft block
+        if (_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")) and \
+                not _fv(facts, "coinsurance_percentage") and not _fv(facts, "agreed_value_endorsement"):
+            _prop_soft = True
+            issues.append("Coinsurance percentage not specified for insured property")
+            recommendations.append({
+                "rec_id": "rec_coinsurance",
+                "field": "coinsurance_percentage",
+                "component": "property_integrity",
+                "message": "Provide coinsurance percentage or confirm agreed value endorsement",
+                "type": "soft_warning",
+                "score_impact": 6,
+                "priority": 2,
+            })
 
-    elif flags.get("has_property_coverage"):
+    elif fid not in ("ACORD_140", "ACORD_141") and flags.get("has_property_coverage"):
         min_ok = all([
             bool(_fv(facts, "locations")),
             bool(_fv(facts, "occupancy_type")),
@@ -1130,8 +1322,8 @@ def calculate_sqs(
     else:
         prop = 100
 
-    # Property delta penalties
-    if fid == "ACORD_140" or flags.get("has_property_coverage"):
+    # Property delta penalties (non-140/141 forms that have property exposure)
+    if fid not in ("ACORD_140", "ACORD_141") and flags.get("has_property_coverage"):
         if not _fv(facts, "valuation_method"):
             prop = max(0, prop - 5)
 
@@ -1218,7 +1410,7 @@ def calculate_sqs(
     raw_score = int(sum(breakdown[k] * w for k, w in weights.items()))
 
     # ── Cap gates ─────────────────────────────────────────────────────────────
-    cope_hard = fid == "ACORD_140" and breakdown["property_integrity"] == 0
+    cope_hard = fid in ("ACORD_140", "ACORD_141", "ACORD_133") and breakdown["property_integrity"] == 0
     umb_fail = flags.get("has_umbrella") and umbrella_score == 0
 
     if hard_stops or cope_hard or umb_fail or _prop_hard:
@@ -1289,7 +1481,7 @@ async def generate_sqs_narrative(
     score = sqs_result.get("sqs_score") or sqs_result.get("package_sqs_score")
     tier  = sqs_result.get("tier")
     try:
-        from config.settings import groq_chat
+        from config.settings import groq_chat, LLM_MODEL
 
         breakdown    = sqs_result.get("breakdown", {})
         risk_drivers = sqs_result.get("risk_drivers", [])
@@ -1303,7 +1495,7 @@ Resolved: {', '.join(resolved_recs) if resolved_recs else 'none'} | Ignored: {',
 One paragraph only. State the score tier, the main gap, and the single most impactful next action."""
 
         raw = await groq_chat(
-            "llama-3.3-70b-versatile",
+            LLM_MODEL,
             [{"role": "user", "content": prompt}]
         )
         return raw.strip()

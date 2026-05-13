@@ -22,6 +22,10 @@ import json
 import os
 import sys
 
+# Must match _FIELDMAP_SCHEMA_VERSION in pdf_service.py — bump both together
+# whenever new fact keys are added to the extraction schema.
+FIELDMAP_SCHEMA_VERSION = "v4"
+
 # ---------------------------------------------------------------------------
 # Canonical field→fact_key rules
 # Must be an exact superset of _ACORD_FIELD_RULES in pdf_service.py.
@@ -88,11 +92,15 @@ RULES = [
     ("CertificateOfInsurance_RevisionNumber",               None),
 
     # ── Insurer ──────────────────────────────────────────────────────────────
-    ("Insurer_FullName",                                    "prior_carrier"),
-    ("Insurer_NAICCode",                                    "naics_code"),
+    ("Insurer_FullName",                                    "carrier_name"),
+    ("Insurer_NAICCode",                                    "carrier_naic"),
     ("_InsurerLetterCode",                                  None),
 
-    # ── General Liability ─────────────────────────────────────────────────────
+    # ── General Liability — most-specific rules FIRST to prevent prefix shadowing ──
+    ("GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount", "gl_fire_damage_limit"),
+    ("GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount", "gl_products_aggregate"),
+    ("GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount", "gl_personal_advertising_injury"),
+    ("GeneralLiability_MedicalExpense_EachPersonLimitAmount",     "gl_medical_expense"),
     ("GeneralLiability_EachOccurrence_LimitAmount",         "gl_each_occurrence"),
     ("GeneralLiability_EachOccurrence",                     "gl_each_occurrence"),
     ("EachOccurrence",                                      "gl_each_occurrence"),
@@ -100,9 +108,6 @@ RULES = [
     ("GeneralLiability_GeneralAggregate",                   "gl_aggregate"),
     ("GeneralLiability_Aggregate",                          "gl_aggregate"),
     ("GeneralAggregate",                                    "gl_aggregate"),
-    ("GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount", "gl_aggregate"),
-    ("GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount", "gl_limits"),
-    ("GeneralLiability_MedicalExpense_EachPersonLimitAmount",     "gl_limits"),
     ("GeneralLiability_OtherCoverageLimitAmount",           "gl_deductible"),
     ("GeneralLiability_PropertyDamage_DeductibleAmount",    "gl_deductible"),
     ("GeneralLiability_BodilyInjury_DeductibleAmount",      "gl_deductible"),
@@ -323,8 +328,18 @@ RULES = [
     ("WorkersCompensation_PriorCarrier",                    "wc_prior_carrier"),
     ("WorkersCompensation_PayrollPeriod",                   "wc_payroll_period"),
     ("WorkersCompensation_OfficerExclusions",               "wc_officer_exclusions"),
-    ("WorkersCompensationEmployersLiability_EmployersLiability_EachAccident", "employers_liability_limits"),
-    ("WorkersCompensationEmployersLiability_EmployersLiability_Disease",      "employers_liability_limits"),
+    # Most-specific patterns first — DiseaseEachEmployee before Disease alone
+    ("WorkersCompensationEmployersLiability_EmployersLiability_EachAccident",           "wc_el_each_accident"),
+    ("WorkersCompensationEmployersLiability_EmployersLiability_DiseaseEachEmployee",    "wc_el_disease_each_employee"),
+    ("WorkersCompensationEmployersLiability_EmployersLiability_Disease",                "wc_el_disease_policy_limit"),
+    ("WorkersCompensationEmployersLiability_EmployersLiability_EachEmployee",           "wc_el_disease_each_employee"),
+    ("WorkersCompensation_EmployersLiability_EachAccident",                             "wc_el_each_accident"),
+    ("WorkersCompensation_EmployersLiability_DiseaseEachEmployee",                      "wc_el_disease_each_employee"),
+    ("WorkersCompensation_EmployersLiability_EachEmployee",                             "wc_el_disease_each_employee"),
+    ("WorkersCompensation_EmployersLiability_PolicyLimit",                              "wc_el_disease_policy_limit"),
+    ("EmployersLiability_EachAccident",                                                 "wc_el_each_accident"),
+    ("EmployersLiability_Disease_EachEmployee",                                         "wc_el_disease_each_employee"),
+    ("EmployersLiability_Disease_PolicyLimit",                                          "wc_el_disease_policy_limit"),
     ("WorkersCompensationEmployersLiability_OtherCoverage",                   None),
     ("WorkersCompensationEmployersLiability_InsurerLetterCode",               None),
 
@@ -340,8 +355,6 @@ RULES = [
     ("ExcessUmbrella_OtherCoverageLimitAmount",             None),
     ("ExcessUmbrella_InsurerLetterCode",                    None),
     ("UnderlyingPolicies_",                                 "underlying_policies"),
-    ("EmployersLiability_EachAccident",                     "employers_liability_limits"),
-    ("EmployersLiability_Disease",                          "employers_liability_limits"),
 
     # ── Contractors ──────────────────────────────────────────────────────────
     ("Contractors_WorkSubcontractedPercent",                "percent_subcontracted"),
@@ -358,13 +371,78 @@ RULES = [
     ("ProductAndCompletedOperations_PrincipalComponents",   None),
     ("ProductAndCompletedOperations_ProductName",           None),
 
+    # ── Prior / previous coverage block ─────────────────────────────────────
+    # These fields MUST map to prior_* keys — NEVER to the current policy keys.
+    ("PriorCarrier_FullName",                               "prior_carrier"),
+    ("PriorCoverage_InsuranceCarrierName",                  "prior_carrier"),
+    ("PriorCoverage_PolicyNumberIdentifier",                "prior_policy_number"),
+    ("PriorCoverage_EffectiveDate",                         "prior_effective_date"),
+    ("PriorCoverage_ExpirationDate",                        "prior_expiration_date"),
+    ("PriorCoverage_NAICCode",                              "prior_carrier_naic"),
+    ("PreviousCarrier_FullName",                            "prior_carrier"),
+    ("PreviousPolicy_PolicyNumber",                         "prior_policy_number"),
+    ("PreviousPolicy_EffectiveDate",                        "prior_effective_date"),
+    ("PreviousPolicy_ExpirationDate",                       "prior_expiration_date"),
+
+    # ── Named insured phone / email / website ────────────────────────────────
+    ("NamedInsured_PhoneNumber",                            "contact_phone"),
+    ("NamedInsured_Primary_PhoneNumber",                    "contact_phone"),
+    ("NamedInsured_EmailAddress",                           "contact_email"),
+    ("NamedInsured_WebsiteAddress",                         None),
+    ("NamedInsured_BusinessStartDate",                      "years_in_business"),
+    ("NamedInsured_NumberOfEmployees",                      "num_employees"),
+    ("NamedInsured_AnnualRevenue",                          "total_revenue"),
+    ("NamedInsured_AnnualPayroll",                          "total_payroll"),
+
+    # ── Producer / agency additional fields ─────────────────────────────────
+    ("Producer_AgencyName",                                 "producer_name"),
+    ("Producer_PhoneNumber",                                "contact_phone"),
+    ("Producer_EmailAddress",                               "contact_email"),
+    ("Producer_LicenseNumber",                              None),
+    ("Producer_NationalIdentifier",                         None),
+    ("Producer_StateLicenseIdentifier",                     None),
+
+    # ── Policy meta ──────────────────────────────────────────────────────────
+    ("Policy_AuditPeriod",                                  "audit_period"),
+    ("Policy_BillingPlan",                                  "billing_plan"),
+    ("CommercialPolicy_AuditPeriod",                        "audit_period"),
+    ("CommercialPolicy_BillingPlan",                        "billing_plan"),
+    ("CommercialPolicy_OperationsDescription",              "operations_description"),
+    ("BusinessInformation_NAICSCode",                       "naics_code"),
+    ("BusinessInformation_SICCode",                         "sic_code"),
+    ("BusinessInformation_YearsInBusiness",                 "years_in_business"),
+    ("BusinessInformation_NumberOfEmployees",               "num_employees"),
+    ("BusinessInformation_FullTimeEmployeeCount",           "num_employees"),
+    ("BusinessInformation_PartTimeEmployeeCount",           "num_employees"),
+    ("BusinessInformation_AnnualRevenue",                   "total_revenue"),
+
     # ── Loss history ─────────────────────────────────────────────────────────
     ("LossHistory_NumClaims",                               "num_claims"),
     ("LossHistory_TotalIncurred",                           "total_incurred"),
     ("LossHistory_TotalPaid",                               "total_paid"),
     ("LossHistory_OpenClaims",                              "open_claims_count"),
     ("LossHistory_Years",                                   "loss_history_years"),
-    ("PriorCarrier_FullName",                               "prior_carrier"),
+    ("LossHistory_NoPriorLossesIndicator",                  "num_claims"),
+    ("LossHistory_OccurrenceDate",                          None),
+    ("LossHistory_LineOfBusiness",                          None),
+    ("LossHistory_OccurrenceDescription",                   None),
+    ("LossHistory_ClaimDate",                               None),
+    ("LossHistory_PaidAmount",                              None),
+    ("LossHistory_ReservedAmount",                          None),
+    ("LossHistory_ClaimStatus",                             None),
+    ("LossHistory_InformationYearCount",                    "loss_history_years"),
+
+    # ── WC state / additional ────────────────────────────────────────────────
+    ("WorkersCompensation_State",                           None),
+    ("WorkersCompensation_AllStates",                       None),
+    ("WorkersCompensation_OtherStates",                     None),
+
+    # ── Signature / admin — always null ──────────────────────────────────────
+    ("NamedInsured_Signature",                              None),
+    ("NamedInsured_SignatureDate",                          None),
+    ("GeneralLiability_OtherCoverageLimitDescription",      None),
+    ("GeneralLiability_OtherDeductibleDescription",         None),
+    ("AdditionalInterest_WorkersCompensationCarriedCode",   None),
 
     # ── Miscellaneous null fields ─────────────────────────────────────────────
     ("Alarm_Burglar_",                                      None),
@@ -448,11 +526,14 @@ for form_id in TARGET_FORMS:
         continue
 
     # Load existing fieldmap — never overwrite manual review edits.
+    # Strip internal bookkeeping keys before processing.
     existing: dict = {}
     if os.path.exists(fieldmap_path):
         try:
             with open(fieldmap_path) as f:
-                existing = json.load(f)
+                raw_existing = json.load(f)
+            existing = {k: v for k, v in raw_existing.items()
+                        if not k.startswith("__")}
         except Exception as ex:
             print(f"  {form_id}: WARNING — could not read existing fieldmap: {ex}")
 
@@ -471,8 +552,12 @@ for form_id in TARGET_FORMS:
             fieldmap[field] = result
             newly_matched  += 1
 
+    # Write fieldmap with version tag so pdf_service._load_fieldmap accepts it.
+    output = dict(fieldmap)
+    output["__schema_version__"] = FIELDMAP_SCHEMA_VERSION
+    output["__ai_mapped__"] = []   # script-generated maps are deterministic
     with open(fieldmap_path, "w") as f:
-        json.dump(fieldmap, f, indent=2)
+        json.dump(output, f, indent=2)
 
     total_fields  = len(schema)
     mapped_count  = sum(1 for v in fieldmap.values() if v is not None)
@@ -485,7 +570,7 @@ for form_id in TARGET_FORMS:
         f"{null_count} explicit nulls | "
         f"+{newly_matched} new matches | "
         f"+{newly_null} new nulls | "
-        f"→ {fieldmap_path}"
+        f"-> {fieldmap_path}"
     )
     total_matched   += newly_matched
     total_unmatched += null_count

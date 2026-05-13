@@ -45,10 +45,28 @@
       "Bash(grep -Ev \"^\\(os|sys|json|time|hashlib|hmac|uuid|base64|asyncio|math|urllib|http|tempfile|signal|traceback|zipfile|pathlib|typing|collections|abc|logging|ssl|socket|inspect|email|csv|secrets|random|threading|subprocess|struct|shutil|operator|types|warnings|io|dataclasses|functools\\)$\")",
       "Bash(cat)",
       "Bash(bash /tmp/check_imports.sh)",
-      "Bash(pip list *)"
+      "Bash(pip list *)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -c \"import json; s=json.load\\(open\\('backend/forms_schemas/ACORD_126_schema.json'\\)\\); print\\(len\\(s\\), 'fields'\\); print\\(list\\(s.keys\\(\\)\\)[:50]\\)\")",
+      "Bash(python -c \"import json; s=json.load\\(open\\('backend/forms_schemas/ACORD_126_schema.json'\\)\\); print\\(len\\(s\\), 'fields'\\); print\\(list\\(s.keys\\(\\)\\)[:50]\\)\")",
+      "Bash(py -c \"import json; s=json.load\\(open\\('backend/forms_schemas/ACORD_126_schema.json'\\)\\); print\\(len\\(s\\), 'fields'\\); print\\(list\\(s.keys\\(\\)\\)[:50]\\)\")",
+      "Bash(py -c \"import json; s=json.load\\(open\\('backend/forms_schemas/ACORD_126_schema.json'\\)\\); print\\('\\\\n'.join\\(list\\(s.keys\\(\\)\\)\\)\\)\")",
+      "Bash(py -c ' *)",
+      "Bash(cd /d c:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2)",
+      "Bash(python backend/scripts/generate_fieldmaps.py)",
+      "Bash(python -c \"import json; d = json.load\\(open\\('backend/forms_database/ACORD_ACORD_125_fieldmap.json'\\)\\); print\\('schema_version:', d.get\\('__schema_version__'\\)\\)\")",
+      "Bash(python -c \"from services.fact_registry import FACT_REGISTRY; print\\(f'Registry has {len\\(FACT_REGISTRY\\)} fact keys'\\); dupes = []; seen = set\\(\\); [seen.add\\(k\\) for k in FACT_REGISTRY]; print\\('No duplicate keys detected'\\)\")",
+      "Read(//mnt/c/Users/lenovo/Desktop/ACORD-PY-VERSION2/backend/**)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('services/pdf_service.py'\\).read\\(\\)\\); print\\('pdf_service.py: OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('config/settings.py'\\).read\\(\\)\\); print\\('settings.py: OK'\\)\")",
+      "Bash(env)",
+      "Bash(\"C:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\\\\venv311\\\\Scripts\\\\python.exe\" -c \"import openai; print\\(openai.__version__\\)\")",
+      "Bash(\"C:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -c \"import openai; print\\(openai.__version__\\)\")",
+      "Bash(printenv HTTP_PROXY HTTPS_PROXY ALL_PROXY)"
     ],
     "additionalDirectories": [
-      "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend"
+      "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",
+      "C:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend\\forms_database"
     ]
   }
 }

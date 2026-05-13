@@ -7,17 +7,12 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Tuple, Optional
 
 import httpx
-from groq import AsyncGroq
+import openai
 
 from config.database import get_pool
 from config.settings import FRONTEND_URL
 
 logger = logging.getLogger(__name__)
-
-_arq_groq_async = AsyncGroq(
-    api_key=os.getenv("GROQ_API_KEY"),
-    http_client=httpx.AsyncClient(timeout=30.0),
-)
 
 # ---------------------------------------------------------------------------
 # Answer format validators
@@ -354,7 +349,7 @@ def _clean_duplicate_words(text: str) -> str:
 
 
 # ASYNC-SAFE
-async def _humanize_fields_with_groq(field_names: list[str]) -> dict[str, str]:
+async def _humanize_fields_with_openai(field_names: list[str]) -> dict[str, str]:
     uncached = [f for f in field_names if f not in _HUMANIZED_CACHE]
     if not uncached:
         return {f: _HUMANIZED_CACHE[f] for f in field_names}
@@ -381,8 +376,12 @@ Fields:
 {numbered_lines}"""
 
     try:
-        response = await _arq_groq_async.chat.completions.create(
-            model="llama-3.1-8b-instant",
+        client = openai.AsyncOpenAI(
+            api_key=os.getenv("OPENAI_API_KEY", ""),
+            http_client=httpx.AsyncClient(timeout=30.0),
+        )
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
             max_tokens=1500,
@@ -401,7 +400,7 @@ Fields:
                 _HUMANIZED_CACHE[field_name] = f"Please provide your {readable_map[field_name]}."
 
     except Exception as ex:
-        logger.warning(f"ARQ: Groq humanization failed ({ex}), using readable fallback for {len(uncached)} fields")
+        logger.warning(f"ARQ: OpenAI humanization failed ({ex}), using readable fallback for {len(uncached)} fields")
         for field_name in uncached:
             _HUMANIZED_CACHE[field_name] = f"Please provide your {readable_map[field_name]}."
 
@@ -557,7 +556,7 @@ async def generate_arq_questions(
     seen_field_names = set()
     group_counts: dict[str, int] = {}
 
-    groq_needed = []
+    llm_needed = []
     for field_name in missing_fields:
         if field_name in _FIELD_QUESTION_MAP:
             continue
@@ -570,10 +569,10 @@ async def generate_arq_questions(
         if any(lower.startswith(p) or base_lower.startswith(p) for p, _, __ in _FIELD_PREFIX_MAP):
             continue
         if field_name not in _HUMANIZED_CACHE:
-            groq_needed.append(field_name)
+            llm_needed.append(field_name)
 
-    if groq_needed:
-        await _humanize_fields_with_groq(groq_needed)
+    if llm_needed:
+        await _humanize_fields_with_openai(llm_needed)
 
     for field_name, form_ids in missing_fields.items():
         if field_name in seen_field_names:

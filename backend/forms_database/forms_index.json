@@ -1,20 +1,22 @@
 {
   "version": "1.1.0",
-  "last_updated": "2026-04-16",
-  "total_forms": 13,
+  "last_updated": "2026-05-08",
+  "total_forms": 15,
   "forms": [
-    { "form_id": "ACORD_125", "template_file": "ACORD_125.pdf", "detail_file": "ACORD_125.json" },
-    { "form_id": "ACORD_25",  "template_file": "ACORD_25.pdf",  "detail_file": "ACORD_25.json"  },
-    { "form_id": "ACORD_126", "template_file": "ACORD_126.pdf", "detail_file": "ACORD_126.json" },
-    { "form_id": "ACORD_127", "template_file": "ACORD_127.pdf", "detail_file": "ACORD_127.json", "template_pending": true },
-    { "form_id": "ACORD_130", "template_file": "ACORD_130.pdf", "detail_file": "ACORD_130.json", "template_pending": true },
-    { "form_id": "ACORD_131", "template_file": "ACORD_131.pdf", "detail_file": "ACORD_131.json", "template_pending": true },
-    { "form_id": "ACORD_140", "template_file": "ACORD_140.pdf", "detail_file": "ACORD_140.json" },
-    { "form_id": "ACORD_141", "template_file": "ACORD_141.pdf", "detail_file": "ACORD_141.json", "template_pending": true },
-    { "form_id": "ACORD_101", "template_file": "",              "detail_file": "ACORD_101.json" },
-    { "form_id": "ACORD_133", "template_file": "",              "detail_file": "ACORD_133.json" },
-    { "form_id": "ACORD_160", "template_file": "",              "detail_file": "ACORD_160.json" },
-    { "form_id": "ACORD_186", "template_file": "",              "detail_file": "ACORD_186.json" },
-    { "form_id": "ACORD_28",  "template_file": "",              "detail_file": "ACORD_28.json"  }
+    { "form_id": "ACORD_125", "template_file": "ACORD_125.pdf", "detail_file": "ACORD_125_schema.json" },
+    { "form_id": "ACORD_25",  "template_file": "ACORD_25.pdf",  "detail_file": "ACORD_25_schema.json"  },
+    { "form_id": "ACORD_126", "template_file": "ACORD_126.pdf", "detail_file": "ACORD_126_schema.json" },
+    { "form_id": "ACORD_127", "template_file": "ACORD_127.pdf", "detail_file": "ACORD_127_schema.json"},
+    { "form_id": "ACORD_130", "template_file": "ACORD_130.pdf", "detail_file": "ACORD_130_schema.json"},
+    { "form_id": "ACORD_131", "template_file": "ACORD_131.pdf", "detail_file": "ACORD_131_schema.json" },
+    { "form_id": "ACORD_140", "template_file": "ACORD_140.pdf", "detail_file": "ACORD_140_schema.json" },
+    { "form_id": "ACORD_141", "template_file": "ACORD_141.pdf", "detail_file": "ACORD_141_schema.json"},
+    { "form_id": "ACORD_101", "template_file": "ACORD_101.pdf", "detail_file": "ACORD_101_schema.json" },
+    { "form_id": "ACORD_133", "template_file": "ACORD_133.pdf", "detail_file": "ACORD_133_schema.json" },
+    { "form_id": "ACORD_160", "template_file": "ACORD_160.pdf", "detail_file": "ACORD_160_schema.json" },
+    { "form_id": "ACORD_186", "template_file": "ACORD_186.pdf", "detail_file": "ACORD_186_schema.json" },
+    { "form_id": "ACORD_28",  "template_file": "ACORD_28.pdf",  "detail_file": "ACORD_28_schema.json"  },
+    { "form_id": "ACORD_137", "template_file": "ACORD_137.pdf", "detail_file": "ACORD_137_schema.json" },
+    { "form_id": "ACORD_138", "template_file": "ACORD_138.pdf", "detail_file": "ACORD_138_schema.json" }
   ]
 }

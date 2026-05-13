@@ -205,6 +205,64 @@ FACT_REGISTRY: dict[str, dict] = {
         "validate":    None,
         "format_hint": None,
     },
+    "carrier_name": {
+        "forms":       {"ACORD_125", "ACORD_126"},
+        "question":    "What is the name of the insurance carrier?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "carrier_naic": {
+        "forms":       {"ACORD_125", "ACORD_126"},
+        "question":    "What is the carrier's NAIC code?",
+        "tier": None, "required": False,
+        "validate":    lambda v: bool(re.match(r'^\d{4,6}$', v.strip())),
+        "format_hint": "4-6 digit NAIC code",
+    },
+    "prior_carrier_naic": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is the prior carrier's NAIC code?",
+        "tier": None, "required": False,
+        "validate":    lambda v: bool(re.match(r'^\d{4,6}$', v.strip())),
+        "format_hint": "4-6 digit NAIC code",
+    },
+    "audit_period": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is the audit period for this policy?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "billing_plan": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is the billing plan for this policy?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    # Prior/previous policy — distinct namespace from current policy keys
+    # (policy_number / effective_date / expiration_date are for the CURRENT policy)
+    "prior_policy_number": {
+        "forms":       {"ACORD_125"},
+        "question":    "What was the policy number on your most recent prior policy?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "prior_effective_date": {
+        "forms":       {"ACORD_125"},
+        "question":    "When did your prior policy become effective? (MM/DD/YYYY)",
+        "tier": None, "required": False,
+        "validate":    _is_date,
+        "format_hint": "Date in MM/DD/YYYY format",
+    },
+    "prior_expiration_date": {
+        "forms":       {"ACORD_125"},
+        "question":    "When did your prior policy expire? (MM/DD/YYYY)",
+        "tier": None, "required": False,
+        "validate":    _is_date,
+        "format_hint": "Date in MM/DD/YYYY format",
+    },
     "naics_code": {
         "forms":       {"ACORD_125"},
         "question":    "Do you know your business's NAICS code?",
@@ -297,6 +355,48 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount (e.g. $1,000,000)",
+    },
+    "gl_products_aggregate": {
+        "forms":       {"ACORD_126"},
+        "question":    "What is the Products & Completed Operations aggregate limit?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $2,000,000)",
+    },
+    "gl_personal_advertising_injury": {
+        "forms":       {"ACORD_126"},
+        "question":    "What is the Personal & Advertising Injury limit?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $1,000,000)",
+    },
+    "gl_fire_damage_limit": {
+        "forms":       {"ACORD_126"},
+        "question":    "What is the Damage to Rented Premises (Fire Damage) limit?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $100,000)",
+    },
+    "gl_medical_expense": {
+        "forms":       {"ACORD_126"},
+        "question":    "What is the Medical Expense limit (per person)?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $5,000)",
+    },
+    "hired_auto_indicator": {
+        "forms":       {"ACORD_127"},
+        "question":    "Do employees drive hired or rented vehicles for business purposes?",
+        "tier": None, "required": False,
+        "validate":    lambda v: v.strip().lower() in {"yes", "no", "true", "false"},
+        "format_hint": "Yes or No",
+    },
+    "non_owned_auto_indicator": {
+        "forms":       {"ACORD_127"},
+        "question":    "Do employees drive their own personal vehicles for business purposes?",
+        "tier": None, "required": False,
+        "validate":    lambda v: v.strip().lower() in {"yes", "no", "true", "false"},
+        "format_hint": "Yes or No",
     },
     "gl_each_occurrence": {
         "forms":       {"ACORD_126"},
@@ -485,6 +585,27 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,
+    },
+    "wc_el_each_accident": {
+        "forms":       {"ACORD_130"},
+        "question":    "What is the Employer's Liability limit per accident?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $1,000,000)",
+    },
+    "wc_el_disease_each_employee": {
+        "forms":       {"ACORD_130"},
+        "question":    "What is the Employer's Liability disease limit per employee?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $1,000,000)",
+    },
+    "wc_el_disease_policy_limit": {
+        "forms":       {"ACORD_130"},
+        "question":    "What is the Employer's Liability disease policy limit?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $1,000,000)",
     },
     "wc_prior_carrier": {
         "forms":       {"ACORD_130"},
@@ -758,6 +879,374 @@ FACT_REGISTRY: dict[str, dict] = {
         "validate":    None,
         "format_hint": None,
     },
+
+    # ── Auto — additional fields ─────────────────────────────────────────────
+    "auto_garaging_addresses": {
+        "forms":       {"ACORD_127"},
+        "question":    "Where are your business vehicles primarily kept overnight?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "auto_covered_symbols": {
+        "forms":       {"ACORD_127"},
+        "question":    "Which vehicle coverage symbols apply?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "auto_um_uim_limit": {
+        "forms":       {"ACORD_127"},
+        "question":    "Do you want UM/UIM coverage? If yes, what limit?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $1,000,000)",
+    },
+    "auto_med_pay_limit": {
+        "forms":       {"ACORD_127"},
+        "question":    "Do you want Medical Payments or PIP coverage? If yes, what limit?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    # ── Loss history / claims ────────────────────────────────────────────────
+    "loss_run_age_days": {
+        "forms":       {"ACORD_125"},
+        "question":    "How old are your most recent loss runs (in days)?",
+        "tier": None, "required": False,
+        "validate":    _is_positive_int,
+        "format_hint": "Whole number of days",
+    },
+
+    # ── BOP — ACORD 160 ──────────────────────────────────────────────────────
+    "bop_liability_limit": {
+        "forms":       {"ACORD_160"},
+        "question":    "What is your BOP liability limit?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    "bop_property_limit": {
+        "forms":       {"ACORD_160"},
+        "question":    "What is your BOP property limit?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    "bop_deductible": {
+        "forms":       {"ACORD_160"},
+        "question":    "What is your BOP deductible?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+
+    # ── Builders Risk — ACORD 133 ────────────────────────────────────────────
+    "builders_risk_project_address": {
+        "forms":       {"ACORD_133"},
+        "question":    "What is the full address of the construction or renovation project?",
+        "tier": 1, "required": True,
+        "validate":    lambda v: len(v.strip()) >= 10,
+        "format_hint": "Full project address including street, city, state, ZIP",
+    },
+    "builders_risk_project_cost": {
+        "forms":       {"ACORD_133"},
+        "question":    "What is the total project cost or contract value?",
+        "tier": 1, "required": True,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $2,500,000)",
+    },
+    "builders_risk_completion_date": {
+        "forms":       {"ACORD_133"},
+        "question":    "What is the anticipated project completion date?",
+        "tier": 1, "required": True,
+        "validate":    _is_date,
+        "format_hint": "Date in MM/DD/YYYY format",
+    },
+    "builders_risk_construction_type": {
+        "forms":       {"ACORD_133"},
+        "question":    "What is the construction type for this project (Frame, Masonry, Steel, etc.)?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "builders_risk_owner_name": {
+        "forms":       {"ACORD_133"},
+        "question":    "Who is the project owner?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "builders_risk_contractor_name": {
+        "forms":       {"ACORD_133"},
+        "question":    "Who is the general contractor on this project?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "builders_risk_insured_interest": {
+        "forms":       {"ACORD_133"},
+        "question":    "What is the insured's interest in this project (Owner, Contractor, or Lender)?",
+        "tier": None, "required": False,
+        "validate":    lambda v: v.strip().lower() in {"owner", "contractor", "lender", "other"},
+        "format_hint": "Owner, Contractor, or Lender",
+    },
+
+    # ── Crime — ACORD 137 ────────────────────────────────────────────────────
+    "crime_limit": {
+        "forms":       {"ACORD_137"},
+        "question":    "What is the crime coverage limit per insuring agreement?",
+        "tier": 1, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $250,000)",
+    },
+    "crime_deductible": {
+        "forms":       {"ACORD_137"},
+        "question":    "What is the crime policy deductible?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    "crime_employee_count": {
+        "forms":       {"ACORD_137"},
+        "question":    "How many employees are covered under the crime policy?",
+        "tier": None, "required": False,
+        "validate":    _is_positive_int,
+        "format_hint": "Whole number",
+    },
+    "crime_locations_count": {
+        "forms":       {"ACORD_137"},
+        "question":    "How many locations does the crime policy cover?",
+        "tier": None, "required": False,
+        "validate":    _is_positive_int,
+        "format_hint": "Whole number",
+    },
+
+    # ── Cyber / Network Security — ACORD 138 ─────────────────────────────────
+    "cyber_limit": {
+        "forms":       {"ACORD_138"},
+        "question":    "What is the cyber liability coverage limit?",
+        "tier": 1, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $1,000,000)",
+    },
+    "cyber_retention": {
+        "forms":       {"ACORD_138"},
+        "question":    "What is the cyber policy retention or deductible?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    "cyber_prior_incidents": {
+        "forms":       {"ACORD_138"},
+        "question":    "Has the business experienced any prior cyber incidents or data breaches? (Yes or No)",
+        "tier": None, "required": False,
+        "validate":    lambda v: v.strip().lower() in {"yes", "no", "true", "false"},
+        "format_hint": "Yes or No",
+    },
+    "cyber_controls_mfa": {
+        "forms":       {"ACORD_138"},
+        "question":    "Does the business use multi-factor authentication (MFA) across all critical systems?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "cyber_controls_backups": {
+        "forms":       {"ACORD_138"},
+        "question":    "Does the business maintain regular offline or offsite data backups?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "cyber_pii_records_count": {
+        "forms":       {"ACORD_138"},
+        "question":    "Approximately how many PII records does the business store or process?",
+        "tier": None, "required": False,
+        "validate":    _is_positive_int,
+        "format_hint": "Number of records",
+    },
+    "cyber_third_party_vendors": {
+        "forms":       {"ACORD_138"},
+        "question":    "Does the business use third-party vendors with access to its systems or customer data?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+
+    # ── Inland Marine — ACORD 160 ────────────────────────────────────────────
+    "inland_marine_total_value": {
+        "forms":       {"ACORD_160"},
+        "question":    "What is the total insured value of all scheduled inland marine items?",
+        "tier": 1, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $500,000)",
+    },
+    "inland_marine_transit_limit": {
+        "forms":       {"ACORD_160"},
+        "question":    "What is the in-transit or motor truck cargo coverage limit?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    "inland_marine_items": {
+        "forms":       {"ACORD_160"},
+        "question":    "Please list each scheduled inland marine item: description, value, and serial number if available.",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+
+    # ── Contractors Supplemental additions — ACORD 186 ───────────────────────
+    "contractor_residential_pct": {
+        "forms":       {"ACORD_186"},
+        "question":    "What percentage of your contracting work is residential?",
+        "tier": None, "required": False,
+        "validate":    _is_percent,
+        "format_hint": "Percentage 0–100 (e.g. 30)",
+    },
+    "contractor_commercial_pct": {
+        "forms":       {"ACORD_186"},
+        "question":    "What percentage of your contracting work is commercial?",
+        "tier": None, "required": False,
+        "validate":    _is_percent,
+        "format_hint": "Percentage 0–100 (e.g. 70)",
+    },
+    "contractor_high_hazard_ops": {
+        "forms":       {"ACORD_186"},
+        "question":    "Does your business perform any high-hazard operations such as blasting, demolition, roofing, scaffolding, or underwater work? List all that apply.",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "contractor_license_number": {
+        "forms":       {"ACORD_186"},
+        "question":    "What is the contractor's license number and the state that issued it?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+
+    # ── Certificate of Liability additions — ACORD 25 ────────────────────────
+    "certificate_holder_address": {
+        "forms":       {"ACORD_25"},
+        "question":    "What is the certificate holder's full mailing address?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "certificate_description_of_operations": {
+        "forms":       {"ACORD_25"},
+        "question":    "What description of operations, locations, or vehicles should appear on the certificate?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+
+    # ── Evidence of Property Insurance — ACORD 28 ────────────────────────────
+    "loss_payee_name": {
+        "forms":       {"ACORD_28"},
+        "question":    "Who is the loss payee on the property policy (lender, leasing company, or other interested party)?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+
+    # ── Additional Remarks — ACORD 101 ───────────────────────────────────────
+    "additional_remarks_text": {
+        "forms":       {"ACORD_101"},
+        "question":    "Please provide any additional remarks, explanations, or narrative to attach to the submission (e.g. claims context, operations detail, conflict resolution).",
+        "tier": None, "required": False,
+        "validate":    lambda v: len(v.strip()) >= 10,
+        "format_hint": "Free-text explanation (at least 10 characters)",
+    },
+
+    # ── Loss History Schedule ─────────────────────────────────────────────────
+    "loss_history": {
+        "forms":       {"ACORD_125", "ACORD_186"},
+        "question":    "Provide the loss history schedule (date, description, amount, paid, claim number, open/closed for each claim).",
+        "tier": 2, "required": False,
+        "validate":    None,
+        "format_hint": "List of loss run records",
+    },
+
+    # ── Prior Coverage by Line ────────────────────────────────────────────────
+    "prior_coverage_by_line": {
+        "forms":       {"ACORD_125", "ACORD_126", "ACORD_127", "ACORD_130", "ACORD_131"},
+        "question":    "List prior coverage by line of business (carrier, policy number, effective and expiration dates, premium).",
+        "tier": 2, "required": False,
+        "validate":    None,
+        "format_hint": "List of prior policy records per line",
+    },
+
+    # ── WC Officers / Owners ──────────────────────────────────────────────────
+    "wc_officers": {
+        "forms":       {"ACORD_130", "ACORD_138"},
+        "question":    "List all officers and owners subject to workers compensation (name, title, ownership %, include/exclude).",
+        "tier": 2, "required": False,
+        "validate":    None,
+        "format_hint": "List of officer/owner records",
+    },
+
+    # ── Garage / Dealers (ACORD 137) ─────────────────────────────────────────
+    "garage_operations_type": {
+        "forms":       {"ACORD_137"},
+        "question":    "What type of garage operations does the insured conduct (Dealers, Service, Parking, etc.)?",
+        "tier": 2, "required": False,
+        "validate":    None,
+        "format_hint": "e.g. Dealers, Service, Parking",
+    },
+    "garage_liability_limit": {
+        "forms":       {"ACORD_137"},
+        "question":    "What is the garage liability coverage limit?",
+        "tier": 2, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    "garage_deductible": {
+        "forms":       {"ACORD_137"},
+        "question":    "What is the garage liability deductible?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    "garagekeeper_liability_limit": {
+        "forms":       {"ACORD_137"},
+        "question":    "What is the garagekeepers liability coverage limit?",
+        "tier": 2, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    "garagekeeper_comp_deductible": {
+        "forms":       {"ACORD_137"},
+        "question":    "What is the garagekeepers comprehensive deductible?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    "garagekeeper_coll_deductible": {
+        "forms":       {"ACORD_137"},
+        "question":    "What is the garagekeepers collision deductible?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+    "auto_dealers_inventory_value": {
+        "forms":       {"ACORD_137"},
+        "question":    "What is the total inventory value for the auto dealers operation?",
+        "tier": 2, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount",
+    },
+
+    # ── WC Description of Operations (ACORD 138) ──────────────────────────────
+    "wc_description_of_operations": {
+        "forms":       {"ACORD_138"},
+        "question":    "Provide a description of operations for the workers compensation application.",
+        "tier": 2, "required": False,
+        "validate":    None,
+        "format_hint": "Free-text operations description",
+    },
+
 }
 
 # ---------------------------------------------------------------------------

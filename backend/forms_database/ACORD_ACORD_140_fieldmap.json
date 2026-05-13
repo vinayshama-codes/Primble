@@ -5,8 +5,8 @@
   "Producer_FullName_A": "producer_name",
   "Policy_PolicyNumberIdentifier_A": "policy_number",
   "Policy_EffectiveDate_A": "effective_date",
-  "Insurer_FullName_A": "prior_carrier",
-  "Insurer_NAICCode_A": "naics_code",
+  "Insurer_FullName_A": "carrier_name",
+  "Insurer_NAICCode_A": "carrier_naic",
   "NamedInsured_FullName_A": "applicant_name",
   "CommercialProperty_Summary_BlanketNumberIdentifier_A": null,
   "CommercialProperty_Summary_BlanketLimitAmount_A": null,
@@ -98,7 +98,7 @@
   "Construction_ConstructionCode_A": "construction_type",
   "BuildingFireProtection_HydrantDistanceFeetCount_A": "distance_to_hydrant",
   "BuildingFireProtection_FireStationDistanceMileCount_A": null,
-  "BuildingFireProtection_FireDistrictName_A": null,
+  "BuildingFireProtection_FireDistrictName_A": "fire_department_type",
   "BuildingFireProtection_FireDistrictCode_A": null,
   "BuildingFireProtection_ProtectionClassCode_A": "fire_protection_class",
   "Construction_StoreyCount_A": null,
@@ -262,7 +262,7 @@
   "Construction_ConstructionCode_B": "construction_type",
   "BuildingFireProtection_HydrantDistanceFeetCount_B": "distance_to_hydrant",
   "BuildingFireProtection_FireStationDistanceMileCount_B": null,
-  "BuildingFireProtection_FireDistrictName_B": null,
+  "BuildingFireProtection_FireDistrictName_B": "fire_department_type",
   "BuildingFireProtection_FireDistrictCode_B": null,
   "BuildingFireProtection_ProtectionClassCode_B": "fire_protection_class",
   "Construction_StoreyCount_B": null,
@@ -354,5 +354,7 @@
   "Producer_StateLicenseIdentifier_A": null,
   "NamedInsured_Signature_A": null,
   "NamedInsured_SignatureDate_A": null,
-  "Producer_NationalIdentifier_A": null
+  "Producer_NationalIdentifier_A": null,
+  "__schema_version__": "v5",
+  "__ai_mapped__": []
 }

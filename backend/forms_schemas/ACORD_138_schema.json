@@ -1,0 +1,772 @@
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer / agency. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number. ",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). ",
+    "required": false
+  },
+  "Vehicle_MedicalPaymentsOption_AutomobileIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy coverage includes automobile.  Note that both automobile and premises operations coverages can apply. ",
+    "required": false
+  },
+  "Vehicle_MedicalPaymentsOption_PremisesOperationsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy coverage includes premises operations.  Note that both automobile and premises operations coverages can apply. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyOneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates any auto is covered. As used here, Garage or Dealers policies use numeric symbols on the policy declarations to indicate the type(s) of vehicles for which coverage is in effect.  Be sure to check the appropriate box for each type of coverage.  Only those symbols specified for a coverage may be used.  Symbols 21 through 26 provide fleet automatic coverage.  Symbol 21 includes Hired and Non-Owned auto coverage.  If symbol 21 is not used and Hired Auto (symbol 28) or Non-Owned Auto (symbol 29) coverage is desired, those symbols must be checked. \n\n The symbols indicate the automobiles to which each coverage applies. The symbol \"triggers\"\" the coverage. For exact policy definitions of the symbols, please refer to the company's policy declarations page.",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyTwoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyThreeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyFourIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentySevenIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyEightIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyNineIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates non-owned autos used in garage business are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "Vehicle_LiabilityAutoOnly_PerAccidentLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The liability each accident limit for garage operations auto only.  For Dealers, use this field to enter the Policy Combined Single Limit. ",
+    "required": false
+  },
+  "Vehicle_LiabilityOtherThanAutoOnly_PerAccidentLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The liability each accident limit for garage operations other than auto only. ",
+    "required": false
+  },
+  "Vehicle_LiabilityOtherThanAutoOnly_AggregateLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The liability aggregate limit for garage operations other than auto only. ",
+    "required": false
+  },
+  "Vehicle_LiabilityOption_DealersOnlyLimitedIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the liability coverage is limited for dealers. ",
+    "required": false
+  },
+  "Vehicle_LiabilityOption_DealersOnlyUnlimitedIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the liability coverage is unlimited for dealers. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyOneIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates any auto is covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyTwoIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyThreeIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyFourIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentySevenIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyEightIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyNineIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates non-owned autos used in garage business are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "Vehicle_MedicalPayments_PerPersonLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The medical payments per person limit. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyTwoIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyThreeIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyFourIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentySixIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos subject to a compulsory uninsured motorists law are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentySevenIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "Vehicle_CombinedSingleLimit_LimitIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is for combined single limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_EachPersonLimitIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is the bodily injury each person limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_BodilyInjuryPerPersonLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists bodily injury per person limit.  The use of this limit varies by state.  (in some states this may contain the combined single limit per accident limit amount.) ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_BodilyInjuryPerAccidentLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists bodily injury per accident limit (in some states this may contain the uninsured motorists combined single limit per accident limit).  The use of this limit varies by state. ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_PropertyDamagePerAccidentLimit_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists property damage per accident amount.  The use of this limit varies by state. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamage_ComprehensiveIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the physical damage is comprehensive/other than collision. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamage_SpecifiedPerilsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the physical damage coverage is for specified perils. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamage_SpecifiedPerilsDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The codes associated with specified perils coverage.  The codes are:  F - Fire, F&T - Fire and Theft, FTW - Fire, Theft and Wind, LSP - Limited Specified Perils, SP - Specified Perils. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyTwoIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyThreeIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyFourIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentySevenIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyEightIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_ThirtyOneIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates autos on consignment and dealer autos are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_ProducerLocationIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location. The location number for the physical damage coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The physical damage comprehensive/other than collision or specified perils limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_PerAutoDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The physical damage comprehensive/other than collision or specified perils per auto deductible amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_MaximumPerLossDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The physical damage comprehensive/other than collision or specified perils maximum deductible per loss amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_ProducerLocationIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location. The location number for the physical damage coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The physical damage comprehensive/other than collision or specified perils limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_PerAutoDeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The physical damage comprehensive/other than collision or specified perils per auto deductible amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_MaximumPerLossDeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The physical damage comprehensive/other than collision or specified perils maximum deductible per loss amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_ProducerLocationIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location. The location number for the physical damage coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_LimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The physical damage comprehensive/other than collision or specified perils limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_PerAutoDeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The physical damage comprehensive/other than collision or specified perils per auto deductible amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageComprehensive_MaximumPerLossDeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The physical damage comprehensive/other than collision or specified perils maximum deductible per loss amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageCollision_DeductibleWaiverIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the waiver of collision deductible. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyTwoIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyThreeIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyFourIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentySevenIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_TwentyEightIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_ThirtyOneIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates autos on consignment and dealer autos are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageCollision_ProducerLocationIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location.  The location number for the physical damage coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageCollision_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The physical damage collision limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageCollision_PerAutoDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The physical damage collision per auto deductible amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageCollision_ProducerLocationIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location.  The location number for the physical damage coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageCollision_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The physical damage collision limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageCollision_PerAutoDeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The physical damage collision per auto deductible amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageCollision_ProducerLocationIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location.  The location number for the physical damage coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageCollision_LimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The physical damage collision limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamageCollision_PerAutoDeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The physical damage collision per auto deductible amount. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount of the coverage. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepers_LegalLiabilityIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is to be written on a legal liability basis. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepers_DirectBasisIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is to be written on a direct basis. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepers_PrimaryIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates this policy is the primary coverage. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepers_ExcessIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates this policy is for excess coverage. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepers_ComprehensiveIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the garage keepers coverage is comprehensive / other than collision. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepers_SpecifiedPerilsIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the garage keepers coverage is for specified perils. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepers_SpecifiedPerilsDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The codes associated with specified perils coverage.  The codes are:  F - Fire, F&T - Fire and Theft, FTW - Fire, Theft and Wind, LSP - Limited Specified Perils, SP - Specified Perils. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_ThirtyIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates autos left with you for service, repair, storage or safekeeping are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_ProducerLocationIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location.  The location number for the garage keepers coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The garage keepers comprehensive / other than collision or specified perils limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_VehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of vehicles located on the premises. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_PerAutoDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The garage keepers comprehensive / other than collision or specified perils per auto deductible amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_MaximumPerLossDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The garage keepers comprehensive / other than collision or specified perils maximum deductible per loss amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_ProducerLocationIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location.  The location number for the garage keepers coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The garage keepers comprehensive / other than collision or specified perils limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_VehicleCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of vehicles located on the premises. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_PerAutoDeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The garage keepers comprehensive / other than collision or specified perils per auto deductible amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_MaximumPerLossDeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The garage keepers comprehensive / other than collision or specified perils maximum deductible per loss amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_ProducerLocationIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location.  The location number for the garage keepers coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_LimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The garage keepers comprehensive / other than collision or specified perils limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_VehicleCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of vehicles located on the premises. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_PerAutoDeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The garage keepers comprehensive / other than collision or specified perils per auto deductible amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersComprehensive_MaximumPerLossDeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The garage keepers comprehensive / other than collision or specified perils maximum deductible per loss amount. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_ThirtyIndicator_I": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates autos left with you for service, repair, storage or safekeeping are covered. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolIndicator_I": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_GarageAndDealersSymbol_OtherSymbolCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_ProducerLocationIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location.  The location number for the garage keepers coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The garage keepers collision limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_VehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of vehicles located on the premises. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_PerAutoDeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The garage keepers collision per auto deductible amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_ProducerLocationIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location.  The location number for the garage keepers coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The garage keepers collision limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_VehicleCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of vehicles located on the premises. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_PerAutoDeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The garage keepers collision per auto deductible amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_ProducerLocationIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The producer assigned number for the location.  The location number for the garage keepers coverages should correspond to a location number documented on the ACORD 125. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_LimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The garage keepers collision limit amount. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_VehicleCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of vehicles located on the premises. ",
+    "required": false
+  },
+  "GarageAndDealers_GarageKeepersCollision_PerAutoDeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The garage keepers collision per auto deductible amount. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "CommercialStructure_Location_ProducerIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The location number for the premises. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_VehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of vehicles located on the premises. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_DeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount of the coverage. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamage_ReportingPeriodDescription_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The timing of the reporting period if the policy will be on a Reporting basis.  Examples: Monthly, Quarterly, Semi-Annual. ",
+    "required": false
+  },
+  "GarageAndDealers_PhysicalDamage_NonReportingIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the policy is on a non-reporting basis. ",
+    "required": false
+  },
+  "GarageAndDealers_DealerPlateCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of sets of dealer or repairer plates issued to the named insured. ",
+    "required": false
+  },
+  "GarageAndDealers_TransportationPlateCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The total number of sets of transportation plates issued to the applicant. ",
+    "required": false
+  },
+  "GarageAndDealers_TemporaryLocation_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for covered autos stored temporarily off premises. ",
+    "required": false
+  },
+  "GarageAndDealers_Transit_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit for covered autos in transit. ",
+    "required": false
+  },
+  "GarageAndDealersLineOfBusiness_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the Garage and Dealers line of business.  Enter any endorsements that apply. Be sure to include the form numbers and the required information for attaching the endorsement.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "GarageAndDealersLineOfBusiness_RemarkText_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the Garage and Dealers line of business.  Enter any endorsements that apply. Be sure to include the form numbers and the required information for attaching the endorsement.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "NamedInsured_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. As used here, the applicant should read and understand the Fair Credit Reporting Act, the Privacy Act (where applicable), the Applicant's Statement, and any other disclosure information on the form before personally signing the application.",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  },
+  "Producer_NationalIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number. ",
+    "required": false
+  }
+}

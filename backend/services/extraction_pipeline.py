@@ -34,6 +34,7 @@ from services.ocr_service import extract_text
 from services.extraction_service import (
     extract_facts_long, identify_doc_type, merge_facts, select_primary_truth,
 )
+from utils.table_extractor import extract_tables_from_pdf
 from services.form_service import (
     filter_available_forms, load_all_forms, match_forms, score_extra_forms,
 )
@@ -100,6 +101,27 @@ def _validate_extraction_output(raw: dict, doc_type: str) -> dict:
         ) from exc
 
 
+def _format_tables_as_text(tables: list) -> str:
+    """Convert pdfplumber/camelot table rows into a readable block for the LLM.
+
+    Each table row is rendered as pipe-separated cells so the LLM can
+    identify repeating-row schedules (vehicles, WC class codes, locations).
+    This text is appended to the OCR output — the LLM sees both raw OCR
+    and the structured table data and can reconcile them.
+    """
+    if not tables:
+        return ""
+    lines = ["\n\n=== STRUCTURED TABLE DATA (extracted from PDF layout) ==="]
+    for idx, tbl in enumerate(tables, 1):
+        lines.append(f"\n--- Table {idx} (page {tbl.get('page', '?')}, source: {tbl.get('source', '?')}) ---")
+        for row in (tbl.get("rows") or []):
+            cells = [str(c).strip() if c is not None else "" for c in row]
+            if any(c for c in cells):  # skip fully-empty rows
+                lines.append(" | ".join(cells))
+    lines.append("\n=== END TABLE DATA ===")
+    return "\n".join(lines)
+
+
 async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
     """Run OCR, extraction, validation, and form-matching for *file_paths*.
 
@@ -114,6 +136,22 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
         if len(text) < 30:
             continue
         all_low_conf += low_conf
+
+        # Append structured table data so the LLM sees schedule rows as proper
+        # row-by-row data rather than unstructured OCR noise.  Only attempted for
+        # PDFs; non-fatal if pdfplumber/camelot is unavailable.
+        if path.lower().endswith(".pdf"):
+            try:
+                tables = extract_tables_from_pdf(path)
+                if tables:
+                    text = text + _format_tables_as_text(tables)
+                    logger.info(
+                        "table_extractor: %d table(s) appended for %s",
+                        len(tables), os.path.basename(path),
+                    )
+            except Exception as _tbl_err:
+                logger.warning("table_extractor: skipped %s — %s", os.path.basename(path), _tbl_err)
+
         doc_type  = identify_doc_type(text)
         raw       = await extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
         extracted = _validate_extraction_output(raw, doc_type)
