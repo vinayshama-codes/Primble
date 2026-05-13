@@ -48,8 +48,10 @@ async def create_pool() -> None:
         DATABASE_URL,
         min_size=_POOL_MIN,
         max_size=_POOL_MAX,
-        command_timeout=60,
-        max_inactive_connection_lifetime=_POOL_MAX_INACTIVE_LIFETIME,
+        command_timeout=120,
+        # Recycle idle connections after this many seconds so stale TCP sockets
+        # (reset by OS after long GPT/PDF runs) are never handed to callers.
+        max_inactive_connection_lifetime=min(_POOL_MAX_INACTIVE_LIFETIME, 120),
         init=_init_conn,
     )
     logger.info(f"asyncpg pool created (min={_POOL_MIN}, max={_POOL_MAX})")

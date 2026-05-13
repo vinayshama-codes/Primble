@@ -679,19 +679,56 @@ def extract_form_schema(path: str, form_id: str = "") -> dict:
         return {}
 
 
+def _get_checkbox_on_state(item) -> str:
+    """Return the non-Off appearance state name for a /Btn widget (usually '/Yes').
+
+    Reads the widget's /AP /N dictionary and returns the first key that is not
+    '/Off'.  Falls back to '/Yes' if the appearance dict is absent or has no
+    non-Off entry.
+    """
+    try:
+        ap = item.get("/AP")
+        if ap is not None:
+            n = ap.get("/N")
+            if n is not None:
+                for k in n.keys():
+                    k_str = str(k)
+                    if k_str.lstrip("/") not in ("Off", "off", "OFF"):
+                        return k_str if k_str.startswith("/") else f"/{k_str}"
+    except Exception:
+        pass
+    return "/Yes"
+
+
 def _fill_and_highlight(arr, data: dict, confidence: dict, counter: list):
     for item in arr:
         try:
             t    = item.get("/T", None)
             kids = item.get("/Kids", None)
             if t:
-                name = str(t)
-                val  = data.get(name)
+                name  = str(t)
+                val   = data.get(name)
                 if val is not None and str(val).strip() not in ("", "null", "None"):
-                    item["/V"] = pikepdf.String(str(val))
-                    if "/AP" in item:
-                        del item["/AP"]
-                    counter[0] += 1
+                    ft = str(item.get("/FT", ""))
+                    if "/Btn" in ft:
+                        # Checkbox: set /V and /AS to the export name (e.g. /Yes or /Off)
+                        val_str   = str(val).strip()
+                        is_checked = val_str.lower() in ("yes", "true", "1", "on", "x")
+                        if is_checked:
+                            on_state = _get_checkbox_on_state(item)
+                            item["/V"]  = pikepdf.Name(on_state)
+                            item["/AS"] = pikepdf.Name(on_state)
+                        else:
+                            item["/V"]  = pikepdf.Name("/Off")
+                            item["/AS"] = pikepdf.Name("/Off")
+                        if "/AP" in item:
+                            del item["/AP"]
+                        counter[0] += 1
+                    else:
+                        item["/V"] = pikepdf.String(str(val))
+                        if "/AP" in item:
+                            del item["/AP"]
+                        counter[0] += 1
             if kids:
                 _fill_and_highlight(kids, data, confidence, counter)
         except Exception:
@@ -1285,10 +1322,18 @@ def apply_acord125_missing_field_highlights(
     return confidence
 
 
+# Fields that should NEVER be sent to GPT:
+#  - Signature / approval fields (legal, must not be synthesised)
+#  - Pure carrier-computed fields (Premium, Rate, Revision — underwriter fills these)
+#  - Admin / form-metadata fields
+# NOTE: "Indicator" is intentionally NOT here.  Business-logic checkbox/indicator
+# fields (LOB, entity type, GL occurrence, WC statutory, etc.) ARE GPT-eligible so
+# that Layer 2 can tick the right boxes from the raw document text.
 _RAW_TEXT_SKIP_PATTERNS = [
-    "Indicator", "Signature", "InsurerLetterCode",
+    "Signature", "_Sig", "InsurerLetterCode",
     "Attachment_", "Hazard_", "Premium", "Rate_", "Revision",
-    "EditionIdentifier", "_Sig", "NeedAppearances",
+    "EditionIdentifier", "NeedAppearances",
+    "Underwriter", "CarrierCode", "PolicyNumber_Carrier",
 ]
 
 
@@ -1420,12 +1465,29 @@ def _fill_empty_from_raw_text(
             logger.warning(f"Raw-text fill batch failed (form={form_id}, start={start}): {ex}")
 
 
-# Chunk size for raw_text in form-fill pass. OpenAI gpt-4o-mini supports 128k
-# tokens (~512k chars). We use 40k chars per chunk — leaves ample room for the
-# fields block and structured facts in the same prompt.
-_FORM_FILL_RAW_CHUNK_CHARS = int(os.getenv("FORM_FILL_RAW_CHUNK_CHARS", str(40_000)))
-# Max retries per batch call
+# ── Form-fill LLM budget constants ───────────────────────────────────────────
+# gpt-4o-mini: 128k token context (~512k chars). We target 80k tokens per call
+# so there is comfortable headroom for the system prompt, facts block, fields
+# block, and the model's JSON reply.
+#
+# PROMPT BREAKDOWN (approximate):
+#   fixed skeleton + rules  ~  1 500 chars
+#   facts block             ~  5 000 chars  (varies by submission)
+#   fields block            ~    100 chars per field
+#   raw text section        = raw_chunk chars
+#   reply headroom          ~ 30 000 chars  (JSON with ~350 fields)
+#
+# We budget: total_prompt_chars ≤ _GPT_CALL_BUDGET_CHARS per call.
+# Raw-text chunks are sized so that (fixed_overhead + fields_block + chunk) ≤ budget.
+
+_GPT_CALL_BUDGET_CHARS   = int(os.getenv("GPT_CALL_BUDGET_CHARS",  str(280_000)))  # ~70k tokens
+_GPT_REPLY_RESERVE_CHARS = int(os.getenv("GPT_REPLY_RESERVE_CHARS", str(30_000)))   # output headroom
+# Max retries per individual LLM call
 _FORM_FILL_BATCH_RETRIES = int(os.getenv("FORM_FILL_BATCH_RETRIES", "3"))
+
+# Legacy constant — kept so existing env-var overrides still work but no longer
+# used as the primary chunk size (it's derived dynamically from the budget above).
+_FORM_FILL_RAW_CHUNK_CHARS = int(os.getenv("FORM_FILL_RAW_CHUNK_CHARS", str(40_000)))
 
 
 def _fill_unmatched_with_gpt(
@@ -1481,33 +1543,12 @@ def _fill_unmatched_with_gpt(
         and not isinstance(_fv(facts, k), (list, dict))
     }
 
-    # ── Split raw_text into chunks — ZERO truncation ─────────────────────────
-    # Every character of every uploaded document participates in form-fill.
-    raw_text_used = bool(raw_text and raw_text.strip())
-    if raw_text_used:
-        # Split on paragraph/line boundaries to avoid mid-sentence cuts.
-        raw_chunks: List[str] = []
-        remaining = raw_text
-        while remaining:
-            if len(remaining) <= _FORM_FILL_RAW_CHUNK_CHARS:
-                raw_chunks.append(remaining)
-                break
-            # Find last paragraph break before the limit so we don't split mid-sentence.
-            split_at = remaining.rfind("\n\n", 0, _FORM_FILL_RAW_CHUNK_CHARS)
-            if split_at == -1:
-                split_at = remaining.rfind("\n", 0, _FORM_FILL_RAW_CHUNK_CHARS)
-            if split_at == -1:
-                split_at = _FORM_FILL_RAW_CHUNK_CHARS
-            raw_chunks.append(remaining[:split_at])
-            remaining = remaining[split_at:].lstrip("\n")
-        logger.info(
-            "gpt_fill: form=%s raw_text_chars=%d raw_chunks=%d chunk_size=%d",
-            form_id, len(raw_text), len(raw_chunks), _FORM_FILL_RAW_CHUNK_CHARS,
-        )
-    else:
-        raw_chunks = [""]  # single empty chunk — facts-only pass
+    fact_lines   = [f'  "{k}": "{v}"' for k, v in facts_for_llm.items()]
+    fact_context = "{\n" + ",\n".join(fact_lines) + "\n}"
 
-    # ── Filter out schedule fields and skip-pattern fields ───────────────────
+    raw_text_used = bool(raw_text and raw_text.strip())
+
+    # ── Filter out schedule/admin fields ─────────────────────────────────────
     eligible_fields = {
         f: meta
         for f, meta in unmatched_fields.items()
@@ -1520,157 +1561,240 @@ def _fill_unmatched_with_gpt(
 
     field_list = list(eligible_fields.keys())
 
-    # Accumulate per-field candidates: {field: {value_str: count}}
-    candidate_counts: Dict[str, Dict[str, int]] = {f: {} for f in field_list}
-    # Track whether a structured-facts mapping was found (persisted to fieldmap cache)
-    all_mappings: Dict[str, Optional[str]] = {}
-    # Track which fields were sourced from raw_text (not cached as structural mappings)
-    all_raw_fields: set = set()
+    # ── Helper: build a field-spec block for a given list of field names ──────
+    def _build_fields_block(fields: List[str]) -> str:
+        specs = []
+        for f in fields:
+            info = eligible_fields.get(f) or {}
+            info = info if isinstance(info, dict) else {}
+            tu   = info.get("tu", "")[:80]
+            ft   = info.get("ft", "")
+            req  = " [REQUIRED]" if info.get("required") else ""
+            spec = f"  - {f}{req}"
+            if tu:
+                spec += f": {tu}"
+            if "/Ch" in ft:
+                spec += " (dropdown)"
+            elif "/Btn" in ft:
+                spec += " (checkbox — Yes/No)"
+            specs.append(spec)
+        return "\n".join(specs)
 
-    fact_lines   = [f'  "{k}": "{v}"' for k, v in facts_for_llm.items()]
-    fact_context = "{\n" + ",\n".join(fact_lines) + "\n}"
-
-    # ── STEP B: send each (batch × chunk) combination to the LLM ─────────────
-    for chunk_idx, raw_chunk in enumerate(raw_chunks):
-        raw_text_section = (
-            f"\n\n=== SOURCE 2: RAW DOCUMENT TEXT (chunk {chunk_idx + 1}/{len(raw_chunks)}) ===\n{raw_chunk}"
-            if raw_text_used and raw_chunk.strip() else ""
+    # ── Helper: build prompt and call LLM, return parsed result dict ──────────
+    def _build_prompt(fields_block: str, raw_text_section: str) -> str:
+        return (
+            f"You are filling ACORD form {form_id} for an insurance submission.\n"
+            "You have TWO data sources. Use SOURCE 1 (structured facts) first. "
+            "Fall back to SOURCE 2 (raw document text) only when SOURCE 1 has no answer.\n\n"
+            "Return three keys:\n"
+            '  "values":          {FieldName: "exact_value_or_null"}\n'
+            '  "mappings":        {FieldName: "fact_key_or_null"}\n'
+            '  "raw_text_sourced":[FieldName, ...]\n\n'
+            "Rules for values:\n"
+            "  1. Extract the EXACT value — do not paraphrase or invent.\n"
+            "  2. Use null if neither source has the answer. Prefer null over a wrong value.\n"
+            "  3. For checkbox fields (Yes/No): return 'Yes' or 'No' only.\n"
+            "  4. For dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
+            "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n\n"
+            "Rules for mappings:\n"
+            "  1. Use ONLY exact key names from SOURCE 1 extracted_facts.\n"
+            "  2. A mapping is the structural field→fact relationship — not document-specific.\n"
+            "  3. Use null if no single fact key cleanly maps to this field.\n"
+            "  4. NEVER set a mapping for fields in raw_text_sourced.\n\n"
+            f"=== SOURCE 1: EXTRACTED FACTS ===\n{fact_context}\n\n"
+            f"Fields to fill ({form_id}):\n{fields_block}"
+            f"{raw_text_section}\n\n"
+            'Return ONLY valid JSON: {"values": {...}, "mappings": {...}, "raw_text_sourced": [...]}'
         )
 
-        for batch_start in range(0, len(field_list), GPT_BATCH_SIZE):
-            batch_keys = field_list[batch_start : batch_start + GPT_BATCH_SIZE]
-            batch_meta = {k: eligible_fields[k] for k in batch_keys}
+    def _call_llm_sync(prompt: str) -> dict:
+        """Call OpenAI synchronously and return the parsed JSON result dict."""
+        async def _inner(_p=prompt):
+            resp = await _client.chat.completions.create(
+                model=llm_model,
+                messages=[{"role": "user", "content": _p}],
+                temperature=GPT_TEMPERATURE,
+                response_format={"type": "json_object"},
+            )
+            return resp.choices[0].message.content or ""
 
-            field_specs = []
-            for f in batch_keys:
-                info = batch_meta[f] if isinstance(batch_meta[f], dict) else {}
-                tu   = info.get("tu", "")[:80]
-                ft   = info.get("ft", "")
-                req  = " [REQUIRED]" if info.get("required") else ""
-                spec = f"  - {f}{req}"
-                if tu:
-                    spec += f": {tu}"
-                if "/Ch" in ft:
-                    spec += " (dropdown)"
-                elif "/Btn" in ft:
-                    spec += " (checkbox — Yes/No)"
-                field_specs.append(spec)
+        import time as _time
+        for attempt in range(_FORM_FILL_BATCH_RETRIES):
+            try:
+                raw = _run_coro_sync(_inner())
+                return json.loads(raw)
+            except Exception as ex:
+                if attempt < _FORM_FILL_BATCH_RETRIES - 1:
+                    wait = 2 ** attempt
+                    logger.warning("gpt_fill: LLM call failed attempt=%d/%d retrying in %ds — %s",
+                                   attempt + 1, _FORM_FILL_BATCH_RETRIES, wait, ex)
+                    _time.sleep(wait)
+                else:
+                    logger.warning("gpt_fill: LLM call permanently failed — %s", ex)
+                    return {}
 
-            fields_block = "\n".join(field_specs)
+    # ── Helper: process one LLM result dict, accumulate into shared state ─────
+    def _absorb_result(
+        result: dict,
+        sent_fields: List[str],
+        candidate_counts: Dict[str, Dict[str, int]],
+        all_mappings: Dict[str, Optional[str]],
+        all_raw_fields: set,
+        is_facts_pass: bool,   # True on the facts-only pass (chunk_idx == 0 equiv.)
+    ) -> None:
+        batch_values      = result.get("values",          {}) or {}
+        batch_mappings    = result.get("mappings",        {}) or {}
+        batch_raw_sourced = set(result.get("raw_text_sourced", []) or [])
 
-            prompt = (
-                f"You are filling ACORD form {form_id} for an insurance submission.\n"
-                "You have TWO data sources. Use SOURCE 1 (structured facts) first. "
-                "Fall back to SOURCE 2 (raw document text) only when SOURCE 1 has no answer.\n\n"
-                "Return two JSON objects:\n"
-                '  "values":   {FieldName: "exact_value_or_null"}  — value to write into each field\n'
-                '  "mappings": {FieldName: "fact_key_or_null"}     — fact key from SOURCE 1 only\n'
-                '  "raw_text_sourced": [FieldName, ...]            — fields whose value came from SOURCE 2\n\n'
-                "Rules for values:\n"
-                "  1. Extract the EXACT value — do not paraphrase or invent.\n"
-                "  2. Use null if no source has the answer. Prefer null over a wrong value.\n"
-                "  3. For checkbox fields (Yes/No): return 'Yes' or 'No' only.\n"
-                "  4. For dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
-                "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n\n"
-                "Rules for mappings:\n"
-                "  1. Use ONLY exact key names from SOURCE 1 extracted_facts.\n"
-                "  2. A mapping is the structural field→fact relationship — not document-specific.\n"
-                "  3. Use null if no single fact key cleanly maps to this field.\n"
-                "  4. NEVER set a mapping for fields in raw_text_sourced — those are null.\n\n"
-                f"=== SOURCE 1: EXTRACTED FACTS ===\n{fact_context}\n\n"
-                f"Fields to fill ({form_id}):\n{fields_block}"
-                f"{raw_text_section}\n\n"
-                'Return ONLY valid JSON: {"values": {...}, "mappings": {...}, "raw_text_sourced": [...]}'
+        for field, fact_key in batch_mappings.items():
+            if field not in sent_fields:
+                continue
+            if field in batch_raw_sourced:
+                fact_key = None
+            elif fact_key is not None and fact_key not in _FULL_REGISTRY_KEYS:
+                logger.debug("gpt_fill: rejected hallucinated fact_key=%r field=%r", fact_key, field)
+                fact_key = None
+            if is_facts_pass and field not in all_mappings:
+                all_mappings[field] = fact_key
+
+        for field, value in batch_values.items():
+            if field not in sent_fields:
+                continue
+            if value and str(value).strip() not in ("", "null", "None"):
+                vstr = str(value).strip()
+                candidate_counts[field][vstr] = candidate_counts[field].get(vstr, 0) + 1
+                if field in batch_raw_sourced:
+                    all_raw_fields.add(field)
+
+        logger.info(
+            "gpt_fill: pass=%s sent=%d filled=%d raw_sourced=%d",
+            "facts" if is_facts_pass else "rawtext",
+            len(sent_fields),
+            sum(1 for v in batch_values.values() if v and str(v).strip() not in ("", "null", "None")),
+            len(batch_raw_sourced),
+        )
+
+    # ────────────────────────────────────────────────────────────────────────
+    # TWO-PASS STRATEGY
+    # ────────────────────────────────────────────────────────────────────────
+    # PASS 1 — facts-only (no raw text): one call covers ALL fields.
+    #   Structured facts are compact (~5k chars) so even 400+ fields fit easily.
+    #   This is always a single call regardless of document size.
+    #
+    # PASS 2 — raw-text (only fields still empty after Pass 1):
+    #   Raw text is split into chunks sized so that:
+    #     chunk_chars ≤ _GPT_CALL_BUDGET_CHARS − fixed_overhead − fields_block_chars
+    #   Only the STILL-UNFILLED fields are sent in each chunk call, so the
+    #   fields block shrinks as values are resolved, leaving more room for text.
+    #   For small docs (e.g. 8k chars) this is a single call.
+    #   For large docs (500k tokens) it fans out across many chunks but each
+    #   call carries only the necessary fields — no redundant re-sending.
+    # ────────────────────────────────────────────────────────────────────────
+
+    candidate_counts: Dict[str, Dict[str, int]] = {f: {} for f in field_list}
+    all_mappings:     Dict[str, Optional[str]]  = {}
+    all_raw_fields:   set                       = set()
+    raw_chunks:       List[str]                 = []
+    remaining_fields: List[str]                 = []
+
+    # ── PASS 1: structured facts — single call, all eligible fields ───────────
+    fields_block_p1 = _build_fields_block(field_list)
+    prompt_p1       = _build_prompt(fields_block_p1, "")
+    logger.info(
+        "gpt_fill PASS1 (facts-only): form=%s fields=%d prompt_chars=%d",
+        form_id, len(field_list), len(prompt_p1),
+    )
+    result_p1 = _call_llm_sync(prompt_p1)
+    _absorb_result(result_p1, field_list, candidate_counts, all_mappings, all_raw_fields,
+                   is_facts_pass=True)
+
+    # ── PASS 2: raw-text chunks — only for fields still unfilled ─────────────
+    if raw_text_used:
+        # Determine which fields are still empty after the facts pass.
+        def _still_empty(fields: List[str]) -> List[str]:
+            return [f for f in fields if not candidate_counts[f]]
+
+        remaining_fields = _still_empty(field_list)
+        logger.info(
+            "gpt_fill PASS2 start: form=%s fields_remaining=%d/%d raw_text_chars=%d",
+            form_id, len(remaining_fields), len(field_list), len(raw_text),
+        )
+
+        if remaining_fields:
+            # Compute how many raw-text chars we can fit alongside the fields block.
+            # We recalculate this each chunk because the fields block shrinks as fields
+            # get resolved, freeing up budget for more text per call.
+            _FIXED_OVERHEAD = len(fact_context) + 3_000   # prompt skeleton + facts
+
+            def _chunk_budget(fields: List[str]) -> int:
+                fields_chars = sum(len(f) + 60 for f in fields)  # ~60 chars per spec
+                return max(10_000, _GPT_CALL_BUDGET_CHARS - _GPT_REPLY_RESERVE_CHARS
+                           - _FIXED_OVERHEAD - fields_chars)
+
+            # Split raw_text into chunks sized to the initial remaining-fields budget.
+            # We use the initial budget for splitting (conservative) — individual calls
+            # may send slightly more text if fields are resolved, but that's fine.
+            initial_budget  = _chunk_budget(remaining_fields)
+            raw_chunks: List[str] = []
+            rest = raw_text
+            while rest:
+                if len(rest) <= initial_budget:
+                    raw_chunks.append(rest)
+                    break
+                split_at = rest.rfind("\n\n", 0, initial_budget)
+                if split_at == -1:
+                    split_at = rest.rfind("\n", 0, initial_budget)
+                if split_at == -1:
+                    split_at = initial_budget
+                raw_chunks.append(rest[:split_at])
+                rest = rest[split_at:].lstrip("\n")
+
+            logger.info(
+                "gpt_fill PASS2: form=%s raw_chunks=%d initial_chunk_budget=%d",
+                form_id, len(raw_chunks), initial_budget,
             )
 
-            # Per-batch retry
-            batch_success = False
-            for attempt in range(_FORM_FILL_BATCH_RETRIES):
-                try:
-                    async def _call_openai(_prompt=prompt):
-                        resp = await _client.chat.completions.create(
-                            model=llm_model,
-                            messages=[{"role": "user", "content": _prompt}],
-                            temperature=GPT_TEMPERATURE,
-                            response_format={"type": "json_object"},
-                        )
-                        return resp.choices[0].message.content or ""
+            for chunk_idx, raw_chunk in enumerate(raw_chunks):
+                # Refresh remaining fields — drop any resolved in earlier chunks.
+                remaining_fields = _still_empty(field_list)
+                if not remaining_fields:
+                    logger.info("gpt_fill PASS2: all fields resolved — stopping at chunk %d/%d",
+                                chunk_idx + 1, len(raw_chunks))
+                    break
 
-                    raw_resp = _run_coro_sync(_call_openai())
+                raw_text_section = (
+                    f"\n\n=== SOURCE 2: RAW DOCUMENT TEXT "
+                    f"(chunk {chunk_idx + 1}/{len(raw_chunks)}) ===\n{raw_chunk}"
+                )
+                fields_block_p2 = _build_fields_block(remaining_fields)
+                prompt_p2       = _build_prompt(fields_block_p2, raw_text_section)
 
-                    result            = json.loads(raw_resp)
-                    batch_values      = result.get("values",          {}) or {}
-                    batch_mappings    = result.get("mappings",        {}) or {}
-                    batch_raw_sourced = set(result.get("raw_text_sourced", []) or [])
+                logger.info(
+                    "gpt_fill PASS2 chunk %d/%d: form=%s fields=%d prompt_chars=%d",
+                    chunk_idx + 1, len(raw_chunks), form_id,
+                    len(remaining_fields), len(prompt_p2),
+                )
+                result_p2 = _call_llm_sync(prompt_p2)
+                _absorb_result(result_p2, remaining_fields, candidate_counts,
+                               all_mappings, all_raw_fields, is_facts_pass=False)
 
-                    # Validate mapping keys against full registry (reject hallucinations)
-                    for field, fact_key in batch_mappings.items():
-                        if field in batch_raw_sourced:
-                            fact_key = None
-                        elif fact_key is not None and fact_key not in _FULL_REGISTRY_KEYS:
-                            logger.debug(
-                                "gpt_fill: rejected hallucinated fact_key=%r field=%r form=%s",
-                                fact_key, field, form_id,
-                            )
-                            fact_key = None
-                        # Only set mapping on first (facts-pass) chunk — it's doc-independent
-                        if chunk_idx == 0 and field not in all_mappings:
-                            all_mappings[field] = fact_key
-
-                    # Accumulate per-field candidate counts for conflict resolution
-                    for field, value in batch_values.items():
-                        if value and str(value).strip() not in ("", "null", "None"):
-                            vstr = str(value).strip()
-                            candidate_counts[field][vstr] = candidate_counts[field].get(vstr, 0) + 1
-                            if field in batch_raw_sourced:
-                                all_raw_fields.add(field)
-
-                    logger.info(
-                        "gpt_fill: form=%s chunk=%d/%d batch_start=%d sent=%d filled=%d raw_sourced=%d",
-                        form_id, chunk_idx + 1, len(raw_chunks),
-                        batch_start, len(batch_keys),
-                        sum(1 for v in batch_values.values() if v and str(v).strip() not in ("", "null", "None")),
-                        len(batch_raw_sourced),
-                    )
-                    batch_success = True
-                    break  # success — no more retries needed
-
-                except Exception as ex:
-                    if attempt < _FORM_FILL_BATCH_RETRIES - 1:
-                        import time as _time
-                        wait = 2 ** attempt
-                        logger.warning(
-                            "gpt_fill: batch failed form=%s chunk=%d batch_start=%d attempt=%d/%d "
-                            "retrying in %ds — %s",
-                            form_id, chunk_idx + 1, batch_start,
-                            attempt + 1, _FORM_FILL_BATCH_RETRIES, wait, ex,
-                        )
-                        _time.sleep(wait)
-                    else:
-                        logger.warning(
-                            "gpt_fill: batch permanently failed form=%s chunk=%d batch_start=%d — %s",
-                            form_id, chunk_idx + 1, batch_start, ex,
-                        )
-
-    # ── STEP C: conflict resolution — pick winner per field ──────────────────
-    # Structured-facts values (SOURCE 1) always win over raw-text values.
-    # Among raw-text values, the most-frequent candidate across chunks wins.
+    # ── Conflict resolution — pick winner per field ───────────────────────────
+    # SOURCE 1 (structured facts) always beats SOURCE 2 (raw text).
+    # Among raw-text candidates the most-frequent value across chunks wins.
     all_filled: dict = {}
     for field, candidates in candidate_counts.items():
         if not candidates:
             continue
-        # SOURCE 1 check: if there's a mapping AND facts have a non-empty value, prefer it.
         fact_key = all_mappings.get(field)
         if fact_key and _fv(facts, fact_key) is not None:
             src1_val = str(_fv(facts, fact_key)).strip()
             if src1_val and src1_val.lower() not in ("", "null", "none"):
                 all_filled[field] = src1_val
                 continue
-        # SOURCE 2: pick the highest-frequency candidate (most chunks agreed)
         winner = max(candidates, key=lambda v: candidates[v])
         all_filled[field] = winner
 
-    # ── STEP D: audit log ─────────────────────────────────────────────────────
+    # ── Audit log ─────────────────────────────────────────────────────────────
     for field, value in all_filled.items():
         logger.info(
             "FIELD_SOURCE_AUDIT field=%s source=ai model=%s form_id=%s "
@@ -1681,9 +1805,10 @@ def _fill_unmatched_with_gpt(
             candidate_counts.get(field, {}).get(value, 1),
         )
 
+    raw_chunks_used = len(raw_chunks)
     logger.info(
-        "gpt_fill DONE: form=%s fields_filled=%d/%d raw_chunks=%d model=%s",
-        form_id, len(all_filled), len(eligible_fields), len(raw_chunks), llm_model,
+        "gpt_fill DONE: form=%s fields_filled=%d/%d pass1_calls=1 pass2_chunks=%d model=%s",
+        form_id, len(all_filled), len(eligible_fields), raw_chunks_used, llm_model,
     )
 
     return {
@@ -1692,6 +1817,22 @@ def _fill_unmatched_with_gpt(
         "raw_text_fields": all_raw_fields,
         "model_used":      llm_model,
     }
+
+
+def _is_nonfillable_field(field: str) -> bool:
+    """Return True when a field is carrier-computed or administrative and should
+    never be retried via GPT even when its cached fact_key is None.
+
+    These match _RAW_TEXT_SKIP_PATTERNS but are checked by name so we can keep
+    Indicator fields OUT of this list (they ARE fillable business fields).
+    """
+    _NONFILLABLE_SUBSTRINGS = (
+        "Signature", "_Sig", "InsurerLetterCode",
+        "Attachment_", "Hazard_", "Premium", "Rate_", "Revision",
+        "EditionIdentifier", "NeedAppearances",
+        "Underwriter", "CarrierCode", "PolicyNumber_Carrier",
+    )
+    return any(s in field for s in _NONFILLABLE_SUBSTRINGS)
 
 
 def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: str = "") -> Tuple[dict, dict]:
@@ -1708,30 +1849,75 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
     new_fieldmap = dict(cached_fieldmap)
     new_ai_set   = set(cached_ai_set)
 
+    # Counters for detailed pipeline logging
+    cnt_schema          = len(schema)
+    cnt_cached_hit      = 0   # fields resolved from cached fact_key (non-null)
+    cnt_cached_null_skip = 0  # cached-null entries that are truly non-fillable → skipped
+    cnt_cached_null_retry = 0 # cached-null entries for fillable fields → retried via GPT
+    cnt_deterministic   = 0   # fields resolved by deterministic rules (not cached)
+
     for field in schema.keys():
         if field in cached_fieldmap:
+            cached_key = cached_fieldmap[field]
+
             # Schedule fields cached with a list-fact-key must re-resolve by row index
             # each call (different documents have different list lengths).
             sched = _resolve_schedule_row(field, facts)
             if sched is not _SCHED_SKIP:
                 if sched is not None:
                     mapped[field] = sched
+                    cnt_cached_hit += 1
                 # sched==None means row out-of-range → leave mapped[field] unset (blank)
+            elif cached_key is None:
+                # Cached None means GPT previously found no mapping OR the field was
+                # explicitly classified non-fillable. We only accept the cached null when
+                # the field is truly non-fillable (carrier-computed / admin / signature).
+                # For all other fields we retry via GPT so a fresh raw-text pass can fill them.
+                if _is_nonfillable_field(field):
+                    mapped[field] = None          # accepted: truly non-fillable
+                    cnt_cached_null_skip += 1
+                else:
+                    # Fillable field whose GPT pass previously returned null — retry.
+                    # First try deterministic indicator derivation; if that returns a
+                    # value we accept it and DON'T need GPT. Only unresolved fields go
+                    # into the unmatched bucket.
+                    ind = _derive_indicator(field, facts)
+                    if ind is not None:
+                        mapped[field] = ind
+                        cnt_cached_hit += 1
+                    else:
+                        unmatched[field] = schema[field]
+                        cnt_cached_null_retry += 1
             else:
-                mapped[field] = _apply_fact_key(cached_fieldmap[field], facts)
+                val = _apply_fact_key(cached_key, facts)
+                mapped[field] = val
+                cnt_cached_hit += 1
         else:
             result = _deterministic_map(field, facts)
             if result == "UNMATCHED":
                 unmatched[field] = schema[field]
             else:
                 mapped[field] = result
+                cnt_deterministic += 1
                 # Persist the matched fact_key so this field is free next run.
                 for pattern, fact_key in _ACORD_FIELD_RULES:
                     if pattern in field:
                         new_fieldmap[field] = fact_key
                         break
 
+    logger.info(
+        "map_facts PIPELINE form=%s | schema=%d cached_hit=%d det=%d "
+        "null_skip=%d null_retry=%d unmatched_gpt=%d",
+        form_id or "unknown",
+        cnt_schema, cnt_cached_hit, cnt_deterministic,
+        cnt_cached_null_skip, cnt_cached_null_retry, len(unmatched),
+    )
+
     if unmatched:
+        logger.info(
+            "map_facts GPT_ELIGIBLE form=%s | fields=%d raw_text_chars=%d",
+            form_id or "unknown", len(unmatched), len(raw_text),
+        )
         gpt_result       = _fill_unmatched_with_gpt(unmatched, facts, form_id, raw_text=raw_text)
         gpt_values       = gpt_result["filled_values"]
         gpt_mappings     = gpt_result["new_mappings"]
@@ -1739,11 +1925,22 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
         gpt_filled_set   = set(gpt_values.keys())
 
         # Apply GPT values and update fieldmap cache.
-        # Raw-text-sourced fields get fact_key=None so they are never cached as
-        # structural mappings (values are document-specific, not reusable).
+        # Raw-text-sourced fields get fact_key=None — document-specific, not reusable.
+        # For cached-null-retry fields: only persist a new None mapping if GPT
+        # also returned null AND the field is non-fillable; otherwise leave the
+        # existing cached None so we retry again on the next run.
         for field in unmatched:
             fact_key = None if field in gpt_raw_fields else gpt_mappings.get(field)
-            new_fieldmap[field] = fact_key               # always cache, even None
+            gpt_returned_null = field not in gpt_values
+            was_cached_null   = field in cached_fieldmap and cached_fieldmap[field] is None
+
+            if was_cached_null and gpt_returned_null:
+                # GPT still can't fill it — keep the cached null so it retries next
+                # time (don't overwrite with another null that would look fresh).
+                pass
+            else:
+                new_fieldmap[field] = fact_key   # cache non-null key or confirmed null
+
             if field in gpt_values:
                 mapped[field] = gpt_values[field]
             else:
@@ -1751,6 +1948,10 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
             if fact_key is not None:
                 new_ai_set.add(field)
 
+        logger.info(
+            "map_facts GPT_DONE form=%s | gpt_filled=%d/%d",
+            form_id or "unknown", len(gpt_filled_set), len(unmatched),
+        )
         _save_fieldmap(form_id, new_fieldmap, new_ai_set)
 
     else:

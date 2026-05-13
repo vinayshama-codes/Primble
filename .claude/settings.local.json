@@ -62,7 +62,9 @@
       "Bash(env)",
       "Bash(\"C:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\\\\venv311\\\\Scripts\\\\python.exe\" -c \"import openai; print\\(openai.__version__\\)\")",
       "Bash(\"C:\\\\Users\\\\lenovo\\\\Desktop\\\\ACORD-PY-VERSION2\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -c \"import openai; print\\(openai.__version__\\)\")",
-      "Bash(printenv HTTP_PROXY HTTPS_PROXY ALL_PROXY)"
+      "Bash(printenv HTTP_PROXY HTTPS_PROXY ALL_PROXY)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",

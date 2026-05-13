@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -192,40 +193,70 @@ async def upd_processing_session(sid: str, updates: dict) -> None:
     if "generated_forms" in updates:
         await _save_pdf_bytes(sid, updates["generated_forms"])
 
-    async with get_pool().acquire() as conn:
-        async with conn.transaction():
-            row = await conn.fetchrow(
-                "SELECT data, version FROM processing_sessions WHERE id = $1 FOR UPDATE",
-                sid,
+    # Phase 2: short read-modify-write transaction.
+    # After GPT fill (which can take 3+ minutes) the pool may hand us a connection
+    # whose underlying TCP socket was reset by the OS or PG server.  We retry once
+    # with a fresh connection before surfacing the error.
+    _MAX_RETRIES = 2
+    last_exc: Exception = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            async with get_pool().acquire() as conn:
+                async with conn.transaction():
+                    row = await conn.fetchrow(
+                        "SELECT data, version FROM processing_sessions WHERE id = $1 FOR UPDATE",
+                        sid,
+                    )
+                    if not row:
+                        raise HTTPException(404, f"Processing session {sid} not found")
+
+                    current = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
+                    current = _decrypt_facts(current)
+                    version = row["version"]
+
+                    if "generated_forms" in updates:
+                        existing_gen = current.get("generated_forms", {})
+                        for fid, form_data in updates["generated_forms"].items():
+                            if fid not in existing_gen:
+                                existing_gen[fid] = form_data
+                            else:
+                                existing_gen[fid].update(form_data)
+                        current["generated_forms"] = existing_gen
+
+                    for k, v in updates.items():
+                        if k != "generated_forms":
+                            current[k] = v
+
+                    clean = _session_to_db(_encrypt_facts(current))
+                    now   = datetime.now(timezone.utc).isoformat()
+                    await conn.execute(
+                        "UPDATE processing_sessions"
+                        " SET data=$1, updated_at=$2, version=$3"
+                        " WHERE id=$4",
+                        clean, now, version + 1, sid,
+                    )
+            return  # success
+        except HTTPException:
+            raise
+        except Exception as exc:
+            last_exc = exc
+            # Only retry on connection-level errors (reset socket, closed interface, etc.)
+            exc_str = str(exc).lower()
+            is_conn_err = (
+                "connection" in exc_str
+                or "interface" in exc_str
+                or "closed" in exc_str
+                or "broken pipe" in exc_str
+                or isinstance(exc, (OSError, ConnectionResetError))
             )
-            if not row:
-                raise HTTPException(404, f"Processing session {sid} not found")
-
-            current = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
-            current = _decrypt_facts(current)
-            version = row["version"]
-
-            if "generated_forms" in updates:
-                existing_gen = current.get("generated_forms", {})
-                for fid, form_data in updates["generated_forms"].items():
-                    if fid not in existing_gen:
-                        existing_gen[fid] = form_data
-                    else:
-                        existing_gen[fid].update(form_data)
-                current["generated_forms"] = existing_gen
-
-            for k, v in updates.items():
-                if k != "generated_forms":
-                    current[k] = v
-
-            clean = _session_to_db(_encrypt_facts(current))
-            now   = datetime.now(timezone.utc).isoformat()
-            await conn.execute(
-                "UPDATE processing_sessions"
-                " SET data=$1, updated_at=$2, version=$3"
-                " WHERE id=$4",
-                clean, now, version + 1, sid,
-            )
+            if is_conn_err and attempt < _MAX_RETRIES - 1:
+                logger.warning(
+                    "upd_processing_session: connection error on attempt %d/%d for sid=%s — retrying: %s",
+                    attempt + 1, _MAX_RETRIES, sid, exc,
+                )
+                await asyncio.sleep(0.5)
+                continue
+            raise
 
 
 def _mask_ssn(value: str | None) -> str | None:
