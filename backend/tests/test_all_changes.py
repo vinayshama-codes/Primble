@@ -318,25 +318,25 @@ try:
         "operations_description": {"value": "General contractor", "ocr_confident": True},
     }
     flags = {"has_general_liability": True}
+    facts["mailing_address"] = {"value": "100 Main St, Los Angeles, CA 90012", "ocr_confident": True}
 
-    # "cyber" only in raw text, NOT in ops/lobs → must trigger ACORD_138 variants
+    # "business auto" only in raw text, NOT in ops/lobs -> must trigger California ACORD_137
     raw_text = (
-        "This policy includes cyber liability and data breach coverage "
-        "for network security events"
+        "This policy includes business auto liability, physical damage, "
+        "and uninsured motorist coverage"
     )
     matches = match_forms_deterministic(facts, flags, text=raw_text)
     form_ids = [m["form_id"] for m in matches]
-    cyber_138_found = any(fid in form_ids for fid in ("ACORD_138_CA", "ACORD_138_CO"))
-    assert cyber_138_found, \
-        f"ACORD_138 CA/CO not triggered by raw text. Got: {form_ids}"
+    assert "ACORD_137_CA" in form_ids, \
+        f"ACORD_137_CA not triggered by California auto raw text. Got: {form_ids}"
 
-    # "employee dishonesty" only in raw text → must trigger ACORD_137 variants
-    raw_text2 = "employee dishonesty and money and securities coverage requested"
+    # "garage keepers" only in raw text -> must trigger Colorado ACORD_138
+    facts["mailing_address"] = {"value": "200 Market St, Denver, CO 80202", "ocr_confident": True}
+    raw_text2 = "garage keepers and auto dealer physical damage coverage requested"
     matches2 = match_forms_deterministic(facts, flags, text=raw_text2)
     form_ids2 = [m["form_id"] for m in matches2]
-    crime_137_found = any(fid in form_ids2 for fid in ("ACORD_137_CA", "ACORD_137_CO"))
-    assert crime_137_found, \
-        f"ACORD_137 CA/CO not triggered by raw text. Got: {form_ids2}"
+    assert "ACORD_138_CO" in form_ids2, \
+        f"ACORD_138_CO not triggered by Colorado garage/dealers raw text. Got: {form_ids2}"
 
     _record("form_raw_text_matching", True)
 except AssertionError as e:

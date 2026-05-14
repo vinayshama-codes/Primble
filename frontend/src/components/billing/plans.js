@@ -14,7 +14,7 @@ export const PLANS = [
       "Submission Quality Scoring (SQS)",
       "Cross-form validation",
       "Client-in-the-Loop™ remediation",
-      "Coversheet & submittable narrative",
+      "Coversheet",
       "Unlimited users",
     ],
     missing: [],

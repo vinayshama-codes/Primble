@@ -1,7 +1,7 @@
 {
   "version": "1.1.0",
-  "last_updated": "2026-05-08",
-  "total_forms": 15,
+  "last_updated": "2026-05-14",
+  "total_forms": 17,
   "forms": [
     { "form_id": "ACORD_125", "template_file": "ACORD_125.pdf", "detail_file": "ACORD_125_schema.json" },
     { "form_id": "ACORD_25",  "template_file": "ACORD_25.pdf",  "detail_file": "ACORD_25_schema.json"  },
@@ -16,7 +16,9 @@
     { "form_id": "ACORD_160", "template_file": "ACORD_160.pdf", "detail_file": "ACORD_160_schema.json" },
     { "form_id": "ACORD_186", "template_file": "ACORD_186.pdf", "detail_file": "ACORD_186_schema.json" },
     { "form_id": "ACORD_28",  "template_file": "ACORD_28.pdf",  "detail_file": "ACORD_28_schema.json"  },
-    { "form_id": "ACORD_137", "template_file": "ACORD_137.pdf", "detail_file": "ACORD_137_schema.json" },
-    { "form_id": "ACORD_138", "template_file": "ACORD_138.pdf", "detail_file": "ACORD_138_schema.json" }
+    { "form_id": "ACORD_137_CA", "template_file": "ACORD_137_CA.pdf", "detail_file": "ACORD_137_CA_schema.json" },
+    { "form_id": "ACORD_137_CO", "template_file": "ACORD_137_CO.pdf", "detail_file": "ACORD_137_CO_schema.json" },
+    { "form_id": "ACORD_138_CA", "template_file": "ACORD_138_CA.pdf", "detail_file": "ACORD_138_CA_schema.json" },
+    { "form_id": "ACORD_138_CO", "template_file": "ACORD_138_CO.pdf", "detail_file": "ACORD_138_CO_schema.json" }
   ]
 }

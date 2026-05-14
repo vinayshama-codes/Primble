@@ -385,14 +385,14 @@ FACT_REGISTRY: dict[str, dict] = {
         "format_hint": "Dollar amount (e.g. $5,000)",
     },
     "hired_auto_indicator": {
-        "forms":       {"ACORD_127"},
+        "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
         "question":    "Do employees drive hired or rented vehicles for business purposes?",
         "tier": None, "required": False,
         "validate":    lambda v: v.strip().lower() in {"yes", "no", "true", "false"},
         "format_hint": "Yes or No",
     },
     "non_owned_auto_indicator": {
-        "forms":       {"ACORD_127"},
+        "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
         "question":    "Do employees drive their own personal vehicles for business purposes?",
         "tier": None, "required": False,
         "validate":    lambda v: v.strip().lower() in {"yes", "no", "true", "false"},
@@ -443,28 +443,28 @@ FACT_REGISTRY: dict[str, dict] = {
 
     # ── Commercial Auto — ACORD 127 ─────────────────────────────────────────
     "auto_liability_limit": {
-        "forms":       {"ACORD_127"},
+        "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
         "question":    "How much liability coverage are you looking for on your business vehicles?",
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount (e.g. $1,000,000)",
     },
     "auto_liability_structure": {
-        "forms":       {"ACORD_127"},
+        "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
         "question":    "Is your auto liability CSL or split limits?",
         "tier": None, "required": False,
         "validate":    lambda v: v.strip().upper() in {"CSL", "SPLIT", "SPLIT LIMITS", "COMBINED SINGLE LIMIT"},
         "format_hint": "CSL or Split Limits",
     },
     "auto_deductible_comp": {
-        "forms":       {"ACORD_127"},
+        "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
         "question":    "How much would you pay out of pocket for non-collision vehicle damage?",
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount",
     },
     "auto_deductible_collision": {
-        "forms":       {"ACORD_127"},
+        "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
         "question":    "How much would you pay out of pocket if a business vehicle is in a collision?",
         "tier": None, "required": False,
         "validate":    _is_currency,
@@ -508,28 +508,28 @@ FACT_REGISTRY: dict[str, dict] = {
         "format_hint": "Actual Cash Value, Agreed Value, or Stated Amount",
     },
     "auto_covered_symbols": {
-        "forms":       {"ACORD_127"},
+        "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
         "question":    "Which vehicle coverage symbols apply?",
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,
     },
     "auto_um_uim_limit": {
-        "forms":       {"ACORD_127"},
+        "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
         "question":    "Do you want UM/UIM coverage? If yes, what limit?",
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount (e.g. $1,000,000)",
     },
     "auto_med_pay_limit": {
-        "forms":       {"ACORD_127"},
+        "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
         "question":    "Do you want Medical Payments or PIP coverage? If yes, what limit?",
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount",
     },
     "auto_hired_nonowned": {
-        "forms":       {"ACORD_127"},
+        "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
         "question":    "Do employees drive rented or personally-owned vehicles for business?",
         "tier": None, "required": False,
         "validate":    lambda v: v.strip().lower() in {"yes", "no"},
@@ -992,81 +992,81 @@ FACT_REGISTRY: dict[str, dict] = {
         "format_hint": "Owner, Contractor, or Lender",
     },
 
-    # ── Crime — ACORD 137 ────────────────────────────────────────────────────
+    # ── Crime coverage facts (no ACORD 137/138 mapping) ─────────────────────
     "crime_limit": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       set(),
         "question":    "What is the crime coverage limit per insuring agreement?",
         "tier": 1, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount (e.g. $250,000)",
     },
     "crime_deductible": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       set(),
         "question":    "What is the crime policy deductible?",
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount",
     },
     "crime_employee_count": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       set(),
         "question":    "How many employees are covered under the crime policy?",
         "tier": None, "required": False,
         "validate":    _is_positive_int,
         "format_hint": "Whole number",
     },
     "crime_locations_count": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       set(),
         "question":    "How many locations does the crime policy cover?",
         "tier": None, "required": False,
         "validate":    _is_positive_int,
         "format_hint": "Whole number",
     },
 
-    # ── Cyber / Network Security — ACORD 138 ─────────────────────────────────
+    # ── Cyber / Network Security facts (no ACORD 137/138 mapping) ───────────
     "cyber_limit": {
-        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
+        "forms":       set(),
         "question":    "What is the cyber liability coverage limit?",
         "tier": 1, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount (e.g. $1,000,000)",
     },
     "cyber_retention": {
-        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
+        "forms":       set(),
         "question":    "What is the cyber policy retention or deductible?",
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount",
     },
     "cyber_prior_incidents": {
-        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
+        "forms":       set(),
         "question":    "Has the business experienced any prior cyber incidents or data breaches? (Yes or No)",
         "tier": None, "required": False,
         "validate":    lambda v: v.strip().lower() in {"yes", "no", "true", "false"},
         "format_hint": "Yes or No",
     },
     "cyber_controls_mfa": {
-        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
+        "forms":       set(),
         "question":    "Does the business use multi-factor authentication (MFA) across all critical systems?",
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,
     },
     "cyber_controls_backups": {
-        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
+        "forms":       set(),
         "question":    "Does the business maintain regular offline or offsite data backups?",
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,
     },
     "cyber_pii_records_count": {
-        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
+        "forms":       set(),
         "question":    "Approximately how many PII records does the business store or process?",
         "tier": None, "required": False,
         "validate":    _is_positive_int,
         "format_hint": "Number of records",
     },
     "cyber_third_party_vendors": {
-        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
+        "forms":       set(),
         "question":    "Does the business use third-party vendors with access to its systems or customer data?",
         "tier": None, "required": False,
         "validate":    None,
@@ -1180,67 +1180,67 @@ FACT_REGISTRY: dict[str, dict] = {
 
     # ── WC Officers / Owners ──────────────────────────────────────────────────
     "wc_officers": {
-        "forms":       {"ACORD_130", "ACORD_138_CA", "ACORD_138_CO"},
+        "forms":       {"ACORD_130"},
         "question":    "List all officers and owners subject to workers compensation (name, title, ownership %, include/exclude).",
         "tier": 2, "required": False,
         "validate":    None,
         "format_hint": "List of officer/owner records",
     },
 
-    # ── Garage / Dealers (ACORD 137) ─────────────────────────────────────────
+    # ── Garage / Dealers (ACORD 138) ─────────────────────────────────────────
     "garage_operations_type": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
         "question":    "What type of garage operations does the insured conduct (Dealers, Service, Parking, etc.)?",
         "tier": 2, "required": False,
         "validate":    None,
         "format_hint": "e.g. Dealers, Service, Parking",
     },
     "garage_liability_limit": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
         "question":    "What is the garage liability coverage limit?",
         "tier": 2, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount",
     },
     "garage_deductible": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
         "question":    "What is the garage liability deductible?",
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount",
     },
     "garagekeeper_liability_limit": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
         "question":    "What is the garagekeepers liability coverage limit?",
         "tier": 2, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount",
     },
     "garagekeeper_comp_deductible": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
         "question":    "What is the garagekeepers comprehensive deductible?",
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount",
     },
     "garagekeeper_coll_deductible": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
         "question":    "What is the garagekeepers collision deductible?",
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount",
     },
     "auto_dealers_inventory_value": {
-        "forms":       {"ACORD_137_CA", "ACORD_137_CO"},
+        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
         "question":    "What is the total inventory value for the auto dealers operation?",
         "tier": 2, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount",
     },
 
-    # ── WC Description of Operations (ACORD 138) ──────────────────────────────
+    # ── WC Description of Operations (ACORD 130) ──────────────────────────────
     "wc_description_of_operations": {
-        "forms":       {"ACORD_138_CA", "ACORD_138_CO"},
+        "forms":       {"ACORD_130"},
         "question":    "Provide a description of operations for the workers compensation application.",
         "tier": 2, "required": False,
         "validate":    None,

@@ -388,14 +388,14 @@ if flags.get("is_contractor") or "construction" in (ops + lobs).lower():
 
 ---
 
-### ACORD 137 - Crime (State-Specific Variants)
+### ACORD 137 - Commercial Auto Coverages / Limits (State-Specific Variants)
 
-**Spec Location:** Lines 380-395  
-**Code Location:** `backend/services/form_service.py:397-429`
+**Spec Location:** State-specific ACORD 137 CA/CO templates  
+**Code Location:** `backend/services/form_service.py`
 
 #### Spec Trigger
 ```
-IF dec_page.contains(crime_terms) THEN add ACORD_137
+IF dec_page.contains(commercial_auto_terms) THEN add ACORD_137_CA or ACORD_137_CO
 ```
 
 #### Implementation (NEW v2.1.0)
@@ -403,12 +403,12 @@ IF dec_page.contains(crime_terms) THEN add ACORD_137
 **State-Aware Selection:**
 ```python
 # form_service.py, lines 397-429
-if flags.get("has_crime") or any(kw in search for kw in _crime_kw):
+if has_137_auto_signal:
     primary_state = _infer_primary_state(facts)
     if primary_state in ("CA", "CO"):
         form_id = f"ACORD_137_{primary_state}"
         _add(form_id, ...)  # Add specific state form
-    else:
+    elif primary_state is None:
         _add("ACORD_137_CA", ...)  # Fallback: offer both
         _add("ACORD_137_CO", ...)
 ```
@@ -417,19 +417,20 @@ if flags.get("has_crime") or any(kw in search for kw in _crime_kw):
 - Extracts state from mailing_address
 - Falls back to locations list
 - Falls back to wc_payroll_by_state
+- State codes are interpreted as CA = California and CO = Colorado
 
 **Status:** ✅ COMPLIANT (with state variant awareness)
 
 ---
 
-### ACORD 138 - Cyber (State-Specific Variants)
+### ACORD 138 - Garage and Dealers Coverages / Limits (State-Specific Variants)
 
-**Spec Location:** Lines 396-410  
-**Code Location:** `backend/services/form_service.py:431-463`
+**Spec Location:** State-specific ACORD 138 CA/CO templates  
+**Code Location:** `backend/services/form_service.py`
 
 #### Spec Trigger
 ```
-IF dec_page.requests(cyber_coverage) OR business.handles(PHI/PCI) THEN add ACORD_138
+IF dec_page.contains(garage_or_dealers_terms) THEN add ACORD_138_CA or ACORD_138_CO
 ```
 
 #### Implementation (NEW v2.1.0)
@@ -437,12 +438,12 @@ IF dec_page.requests(cyber_coverage) OR business.handles(PHI/PCI) THEN add ACORD
 **State-Aware Selection:**
 ```python
 # form_service.py, lines 431-463
-if flags.get("has_cyber") or any(kw in search for kw in _cyber_kw):
+if has_138_garage_signal:
     primary_state = _infer_primary_state(facts)
     if primary_state in ("CA", "CO"):
         form_id = f"ACORD_138_{primary_state}"
         _add(form_id, ...)
-    else:
+    elif primary_state is None:
         _add("ACORD_138_CA", ...)  # Fallback
         _add("ACORD_138_CO", ...)
 ```

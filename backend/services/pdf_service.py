@@ -114,7 +114,7 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     "WorkersCompensation_ClassState":       _ScheduleDef("wc_class_codes", "state"),
     "WorkersCompensation_ClassRate":        _ScheduleDef("wc_class_codes", "rate"),
 
-    # ── WC Officers / Owners (ACORD 130, 138) ───────────────────────────────
+    # ── WC Officers / Owners (ACORD 130) ───────────────────────────────────
     "Officer_FullName":              _ScheduleDef("wc_officers", "name"),
     "Officer_Title":                 _ScheduleDef("wc_officers", "title"),
     "Officer_OwnershipPercent":      _ScheduleDef("wc_officers", "ownership_pct"),
@@ -528,6 +528,16 @@ _ACORD_FIELD_RULES = [
     ("CertificateHolder_MailingAddress_PostalCode",        "_addr_zip"),
 
     # ── Auto ─────────────────────────────────────────────────────────────────
+    ("Vehicle_LiabilityAutoOnly_PerAccidentLimitAmount",          "garage_liability_limit"),
+    ("Vehicle_LiabilityOtherThanAutoOnly_PerAccidentLimitAmount", "garage_liability_limit"),
+    ("Vehicle_LiabilityOtherThanAutoOnly_AggregateLimitAmount",   "garage_liability_limit"),
+    ("GarageAndDealers_GarageKeepersComprehensive_LimitAmount",   "garagekeeper_liability_limit"),
+    ("GarageAndDealers_GarageKeepersCollision_LimitAmount",       "garagekeeper_liability_limit"),
+    ("GarageAndDealers_GarageKeepersComprehensive_PerAutoDeductibleAmount", "garagekeeper_comp_deductible"),
+    ("GarageAndDealers_GarageKeepersCollision_PerAutoDeductibleAmount", "garagekeeper_coll_deductible"),
+    ("GarageAndDealers_PhysicalDamageComprehensive_LimitAmount",  "auto_dealers_inventory_value"),
+    ("GarageAndDealers_PhysicalDamageCollision_LimitAmount",      "auto_dealers_inventory_value"),
+    ("Vehicle_CombinedSingleLimit_LimitIndicator",         "auto_liability_structure"),
     ("AutoLiability_CombinedSingleLimit",                  "auto_liability_limit"),
     ("Vehicle_CombinedSingleLimit",                        "auto_liability_limit"),
     ("Vehicle_BodilyInjury_PerPerson",                     "auto_liability_limit"),

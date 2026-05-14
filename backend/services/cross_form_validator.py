@@ -551,15 +551,15 @@ def _check_crime_silent_exposure(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
     """
-    If there is significant cash/financial handling exposure but no ACORD 137
-    (Crime), surface an advisory.
+    If there is significant cash/financial handling exposure but no crime
+    coverage, surface an advisory.
 
     Spec: "If company has high internal cash handling but no crime coverage
     → flag silent exposure."
     """
     issues: List[dict] = []
 
-    if any(fid in triggered_ids for fid in ("ACORD_137_CA", "ACORD_137_CO")):
+    if flags.get("has_crime") or _fv(facts, "crime_limit"):
         return issues
 
     ops = (_fv(facts, "operations_description") or "").lower()
@@ -574,10 +574,10 @@ def _check_crime_silent_exposure(
             "crime_silent_exposure",
             (
                 "The business description indicates potential employee dishonesty or "
-                "cash-handling exposure but no Crime coverage (ACORD 137) is "
-                "included. Consider adding crime coverage."
+                "cash-handling exposure but no Crime coverage is included. "
+                "Consider adding crime coverage."
             ),
-            ["ACORD_137_CA", "ACORD_137_CO"],
+            [],
         ))
 
     return issues
@@ -587,14 +587,14 @@ def _check_cyber_silent_exposure(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
     """
-    If business handles PHI/PCI/digital assets but no ACORD 138 (Cyber)
-    is included, surface an advisory.
+    If business handles PHI/PCI/digital assets but no Cyber coverage is
+    included, surface an advisory.
 
     Spec: "If business stores PHI/PCI and no cyber limits listed → soft-warning."
     """
     issues: List[dict] = []
 
-    if any(fid in triggered_ids for fid in ("ACORD_138_CA", "ACORD_138_CO")):
+    if flags.get("has_cyber") or _fv(facts, "cyber_limit"):
         return issues
 
     ops = (_fv(facts, "operations_description") or "").lower()
@@ -609,10 +609,10 @@ def _check_cyber_silent_exposure(
             "cyber_silent_exposure",
             (
                 "Business operations indicate digital assets, customer data, or "
-                "e-commerce exposure but no Cyber Liability coverage (ACORD 138) "
-                "is included. Consider adding cyber coverage."
+                "e-commerce exposure but no Cyber Liability coverage is included. "
+                "Consider adding cyber coverage."
             ),
-            ["ACORD_138_CA", "ACORD_138_CO"],
+            [],
         ))
 
     return issues

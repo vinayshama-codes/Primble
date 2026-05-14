@@ -1,18 +1,23 @@
 {
   "form_id": "ACORD_138_CA",
-  "form_name": "ACORD 138 CA - Cyber / Network Security Application",
-  "form_type": "cyber_liability",
+  "form_name": "ACORD 138 CA (2022/10) - California Garage and Dealers Coverages / Limits Section",
+  "form_type": "state_supplement",
   "template_file": "ACORD_138_CA.pdf",
-  "description": "Captures garage and auto dealer coverage information including garage liability, garage keepers coverage, dealer plate coverage, physical damage, and dealer operations exposures.",
+  "description": "California-specific supplement attached to ACORD 128 for garage and dealer policies. Captures garage liability, dealers liability, physical damage, garage keepers coverage, covered auto symbols, uninsured motorist selections, dealer plates, transportation plates, temporary location, and transit limits.",
   "always_include": false,
   "matching_flags": [
-    "is_commercial_policy",
+    "is_california",
     "has_garage_operations",
     "has_auto_dealer_exposure",
-    "has_garagekeepers_coverage"
+    "has_garagekeepers_coverage",
+    "has_garage_coverage",
+    "has_dealers_coverage",
+    "has_garage_liability",
+    "has_garage_keepers"
   ],
   "matching_keywords": [
     "garage liability",
+    "California",
     "garage keepers",
     "auto dealer",
     "dealer plates",
@@ -28,10 +33,21 @@
   ],
   "coverage_types": [
     "garage_liability",
+    "dealers_liability",
+    "physical_damage",
     "garagekeepers",
-    "commercial_auto"
+    "medical_payments",
+    "uninsured_motorist",
+    "collision",
+    "comp_otc",
+    "specified_perils"
   ],
   "policy_types": [
-    "commercial"
-  ]
+    "commercial",
+    "garage",
+    "dealers"
+  ],
+  "state": "CA",
+  "attach_to": "ACORD_128",
+  "pages": 2
 }

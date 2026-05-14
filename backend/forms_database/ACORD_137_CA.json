@@ -1,18 +1,26 @@
 {
   "form_id": "ACORD_137_CA",
-  "form_name": "ACORD 137 CA - Commercial Crime Application",
-  "form_type": "commercial_crime",
+  "form_name": "ACORD 137 CA (2023/01) - California Commercial Auto Coverages / Limits Section",
+  "form_type": "state_supplement",
   "template_file": "ACORD_137_CA.pdf",
-  "description": "Captures commercial auto, truckers, and motor carrier coverage details including liability limits, physical damage, hired/non-owned auto coverage, trailer interchange, and uninsured motorist coverage.",
+  "description": "California-specific commercial auto coverages and limits section attached to ACORD 127 and/or 132. Captures Business Auto, Truckers, and Motor Carrier liability, physical damage, medical payments, uninsured motorist selections, hired/borrowed liability, non-owned liability, and trailer interchange coverages.",
   "always_include": false,
   "matching_flags": [
-    "is_commercial_policy",
+    "has_auto_coverage",
     "has_commercial_auto",
+    "is_california",
     "has_business_vehicles",
-    "has_auto_liability"
+    "has_auto_liability",
+    "has_truckers_coverage",
+    "has_motor_carrier_coverage",
+    "has_uninsured_motorist",
+    "has_hired_borrowed_liability",
+    "has_non_owned_liability",
+    "has_trailer_interchange"
   ],
   "matching_keywords": [
     "commercial auto",
+    "California",
     "business auto",
     "truckers",
     "motor carrier",
@@ -28,11 +36,25 @@
     "acord 137"
   ],
   "coverage_types": [
-    "auto",
-    "commercial_auto",
-    "truckers"
+    "auto_liability",
+    "medical_payments",
+    "uninsured_motorist_bi",
+    "uninsured_motorist_pd",
+    "physical_damage_comp_otc",
+    "physical_damage_specified_causes",
+    "physical_damage_collision",
+    "towing_and_labor",
+    "hired_borrowed_liability",
+    "non_owned_liability",
+    "hired_physical_damage",
+    "trailer_interchange"
   ],
   "policy_types": [
-    "commercial"
-  ]
+    "commercial_auto",
+    "truckers",
+    "motor_carrier"
+  ],
+  "state": "CA",
+  "attach_to": ["ACORD_127", "ACORD_132"],
+  "pages": 3
 }

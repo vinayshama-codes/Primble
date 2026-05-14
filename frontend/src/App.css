@@ -43,7 +43,11 @@ body {
 .landing-container { background: var(--white); min-height: 100vh; }
 .landing-header {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 20px 56px; border-bottom: 1px solid var(--light-gray);
+  padding: 20px 56px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  background: #fff;
+  position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.13);
 }
 .header-left { display: flex; align-items: center; gap: 36px; }
 .logo { font-weight: 700; font-size: 40px; color: var(--primary); cursor: pointer; line-height: 1; }
@@ -296,35 +300,73 @@ body {
 .btn-dark:hover { background: var(--dark-medium); transform: translateY(-2px); }
 
 .hero {
-  text-align: center; padding: 90px 20px 60px;
-  max-width: 900px; margin: 0 auto;
+  text-align: center;
+  padding: 60px 20px 52px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+.hero-badge {
+  display: inline-block;
+  background: rgba(230, 27, 132, 0.08);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 6px 16px;
+  border-radius: var(--radius-full);
+  margin-bottom: 28px;
+  border: 1px solid rgba(230, 27, 132, 0.2);
 }
 .hero-h1 {
-  font-size: 64px; font-weight: 700;
-  margin-bottom: 14px; color: var(--text-primary);
+  font-size: 80px;
+  font-weight: 700;
+  line-height: 1.05;
+  margin-bottom: 24px;
+  color: #2d2d2d;
+  letter-spacing: -0.03em;
 }
 .hero-p {
-  max-width: 640px; margin: 0 auto 28px;
-  color: var(--text-secondary); font-size: 19px; line-height: 1.7;
+  max-width: 600px;
+  margin: 0 auto 36px;
+  color: var(--text-secondary);
+  font-size: 19px;
+  line-height: 1.75;
+}
+.hero-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.hero-trust {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.hero-trust-item {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 .btn-primary {
   background: var(--primary); color: var(--white);
   padding: 18px 44px; border-radius: var(--radius-full);
-  font-size: 18px; font-weight: 600; border: none;
+  font-size: 17px; font-weight: 700; border: none;
   cursor: pointer; transition: all 0.3s;
   box-shadow: 0 4px 16px rgba(230, 27, 132, 0.3);
+  letter-spacing: 0.01em;
 }
 .btn-primary:hover {
   background: var(--primary-dark);
   transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(230, 27, 132, 0.4);
+  box-shadow: 0 8px 28px rgba(230, 27, 132, 0.45);
 }
 .hero-link {
-  display: block; margin-top: 10px; font-size: 20px;
-  color: var(--primary); cursor: pointer; text-decoration: none;
-  transition: color 0.2s;
+  display: none;
 }
-.hero-link:hover { color: var(--primary-dark); }
 
 .features {
   display: grid; grid-template-columns: repeat(3, 1fr);
@@ -1451,10 +1493,18 @@ body {
     justify-content: center;
   }
   .hero {
-    padding: 60px 20px 40px;
+    padding: 40px 20px 32px;
   }
   .hero-h1 {
-    font-size: 36px;
+    font-size: 46px;
+  }
+  .hero-trust {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .pricing-section-h1 {
+    font-size: 28px;
+    white-space: normal;
   }
   .features {
     grid-template-columns: 1fr;
@@ -2355,9 +2405,18 @@ body {
 /* Hero */
 .mkt-hero {
   text-align: center;
-  padding: 60px 20px 16px;
+  padding: 48px 20px 16px;
   max-width: 860px;
   margin: 0 auto;
+}
+.pricing-section-h1 {
+  font-size: 42px;
+  font-weight: 700;
+  color: #2d2d2d;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin-bottom: 32px;
+  white-space: nowrap;
 }
 .mkt-hero-compact {
   padding-bottom: 48px;

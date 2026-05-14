@@ -13,9 +13,9 @@ would cause spec non-compliance in a production scenario:
    - Spec says: 5 named pillars (Structural, Exposure, Property, Loss History, Umbrella, Narrative)
    - Code implements: 5 DIFFERENTLY-NAMED pillars with DIFFERENT WEIGHTS
 
-2. ACORD 137/138 STATE VARIANTS NOT IN SPEC
-   - Spec specifies ACORD 137 (Crime) and ACORD_138 (Cyber) as standalone forms
-   - Code only supports CA and CO variants (forms deleted from main branch)
+2. ACORD 137/138 STATE VARIANTS
+   - Current code supports CA and CO variants for state-specific auto/garage forms
+   - CA is California; CO is Colorado
 
 3. MISSING FORM AUTO-SELECTION DECISION TREE
    - Spec describes detailed triggers for each form (e.g., "IF GL coverage detected...")
@@ -47,8 +47,8 @@ CURRENT IMPLEMENTATION (from forms_index.json):
 ✓ ACORD_130   (Workers Compensation)
 ✓ ACORD_131   (Umbrella / Excess Liability)
 ✓ ACORD_133   (Builders Risk)
-⚠️ ACORD_137   (Crime) - ONLY CA & CO STATE VARIANTS EXIST
-⚠️ ACORD_138   (Cyber) - ONLY CA & CO STATE VARIANTS EXIST
+⚠️ ACORD_137   (Commercial Auto Coverages / Limits) - CA & CO STATE VARIANTS EXIST
+⚠️ ACORD_138   (Garage and Dealers Coverages / Limits) - CA & CO STATE VARIANTS EXIST
 ✓ ACORD_140   (Commercial Property)
 ✓ ACORD_141   (Property Schedule)
 ✓ ACORD_160   (Inland Marine)
@@ -131,8 +131,8 @@ ACTUAL IMPLEMENTATION (form_service.py):
   - ACORD_131: trigger_weight=0.95 (if has_umbrella flag)
   - ACORD_140: trigger_weight=0.95 (if has_property_coverage flag)
   - ACORD_186: trigger_weight=0.95 (if is_contractor flag)
-  - ACORD_137: trigger_weight=0.85 (crime keywords)
-  - ACORD_138: trigger_weight=0.85 (cyber keywords)
+  - ACORD_137_CA / ACORD_137_CO: trigger_weight=0.85 (commercial auto keywords; CA = California, CO = Colorado)
+  - ACORD_138_CA / ACORD_138_CO: trigger_weight=0.85 (garage/dealers keywords; CA = California, CO = Colorado)
   - ACORD_133: trigger_weight=0.85 (builders risk flag/construction)
   - ACORD_160: trigger_weight=0.85 (inland marine flag/equipment keywords)
   - ACORD_25:  trigger_weight=0.95 (if has_certificate_request)

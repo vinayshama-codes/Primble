@@ -10,12 +10,61 @@ from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_INDEX
 from services.extraction_service import _fv, _is_empty
 from services.pdf_service import extract_form_schema, map_facts_to_form, fill_pdf
 from services.sqs_service import cross_validate, calculate_sqs
-from utils.validators import run_field_validations
+from utils.validators import US_STATES, run_field_validations
 
 logger = logging.getLogger(__name__)
 
 
 # ── State detection for ACORD 137/138 variants ──────────────────────────────
+
+_STATE_NAME_TO_CODE = {
+    "ALABAMA": "AL", "ALASKA": "AK", "ARIZONA": "AZ", "ARKANSAS": "AR",
+    "CALIFORNIA": "CA", "COLORADO": "CO", "CONNECTICUT": "CT",
+    "DELAWARE": "DE", "FLORIDA": "FL", "GEORGIA": "GA", "HAWAII": "HI",
+    "IDAHO": "ID", "ILLINOIS": "IL", "INDIANA": "IN", "IOWA": "IA",
+    "KANSAS": "KS", "KENTUCKY": "KY", "LOUISIANA": "LA", "MAINE": "ME",
+    "MARYLAND": "MD", "MASSACHUSETTS": "MA", "MICHIGAN": "MI",
+    "MINNESOTA": "MN", "MISSISSIPPI": "MS", "MISSOURI": "MO",
+    "MONTANA": "MT", "NEBRASKA": "NE", "NEVADA": "NV",
+    "NEW HAMPSHIRE": "NH", "NEW JERSEY": "NJ", "NEW MEXICO": "NM",
+    "NEW YORK": "NY", "NORTH CAROLINA": "NC", "NORTH DAKOTA": "ND",
+    "OHIO": "OH", "OKLAHOMA": "OK", "OREGON": "OR", "PENNSYLVANIA": "PA",
+    "RHODE ISLAND": "RI", "SOUTH CAROLINA": "SC", "SOUTH DAKOTA": "SD",
+    "TENNESSEE": "TN", "TEXAS": "TX", "UTAH": "UT", "VERMONT": "VT",
+    "VIRGINIA": "VA", "WASHINGTON": "WA", "WEST VIRGINIA": "WV",
+    "WISCONSIN": "WI", "WYOMING": "WY", "DISTRICT OF COLUMBIA": "DC",
+}
+
+_SUPPORTED_137_138_STATES = {"CA", "CO"}
+
+
+def _extract_state_code(value) -> Optional[str]:
+    text = str(value or "").upper().strip()
+    if not text:
+        return None
+    if text in US_STATES:
+        return text
+
+    for state_name, code in _STATE_NAME_TO_CODE.items():
+        if re.search(rf"\b{re.escape(state_name)}\b", text):
+            return code
+
+    zip_match = re.search(r"\b([A-Z]{2})\s+\d{5}(?:-\d{4})?\b", text)
+    if zip_match and zip_match.group(1) in US_STATES:
+        return zip_match.group(1)
+
+    comma_parts = [p.strip(" .") for p in text.split(",") if p.strip(" .")]
+    for part in reversed(comma_parts):
+        token = part.split()[0] if part.split() else ""
+        if token in US_STATES:
+            return token
+
+    tokens = [t.strip(".,") for t in text.split()]
+    if tokens and tokens[-1] in US_STATES and any(ch.isdigit() for ch in text):
+        return tokens[-1]
+
+    return None
+
 
 def _infer_primary_state(facts: dict) -> Optional[str]:
     """
@@ -23,34 +72,38 @@ def _infer_primary_state(facts: dict) -> Optional[str]:
     Returns a 2-letter state code (CA, CO, etc.) or None.
 
     Priority:
-    1. Extract from mailing_address or physical_address (last 2-char token)
+    1. Extract from mailing_address or physical_address using US address patterns
     2. Check first location in locations list
     3. Check wc_payroll_by_state (first/dominant state)
     """
-    # Try mailing address
-    addr = _fv(facts, "mailing_address") or _fv(facts, "physical_address")
-    if addr:
-        tokens = str(addr).upper().split()
-        for token in reversed(tokens):
-            if len(token) == 2 and token.isalpha():
-                return token
+    for key in ("mailing_address", "physical_address"):
+        state = _extract_state_code(_fv(facts, key))
+        if state:
+            return state
 
     # Try first location
     locs = _fv(facts, "locations")
     if locs and isinstance(locs, list) and locs:
-        first_loc = str(locs[0]).upper()
-        tokens = first_loc.split()
-        for token in reversed(tokens):
-            if len(token) == 2 and token.isalpha():
-                return token
+        state = _extract_state_code(locs[0])
+        if state:
+            return state
 
     # Try WC payroll by state
     wc_by_state = _fv(facts, "wc_payroll_by_state")
     if wc_by_state and isinstance(wc_by_state, dict):
-        states = list(wc_by_state.keys())
-        if states:
-            return states[0].upper() if len(states[0]) == 2 else None
+        for state in wc_by_state.keys():
+            code = _extract_state_code(state)
+            if code:
+                return code
 
+    return None
+
+
+def _infer_primary_state_from_flags(flags: dict) -> Optional[str]:
+    if flags.get("is_california"):
+        return "CA"
+    if flags.get("is_colorado"):
+        return "CO"
     return None
 
 
@@ -395,59 +448,74 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
 
     # ── Keyword / rule-based (trigger_weight 0.85) ────────────────────────────
 
-    # ACORD 137 — Crime (state-variant aware)
-    _crime_kw = {
-        "crime", "employee dishonesty", "money and securities",
-        "forgery", "theft", "fidelity", "erisa", "employee theft",
-        "burglary", "robbery", "commercial crime", "fidelity bond",
-        "money orders", "counterfeit", "computer fraud", "funds transfer fraud",
+    # ACORD 137 - Commercial Auto Coverages / Limits (state-variant aware)
+    _auto_137_kw = {
+        "commercial auto", "business auto", "truckers", "motor carrier",
+        "fleet", "vehicle schedule", "auto liability",
+        "hired auto", "hired autos", "non-owned", "non owned",
+        "trailer interchange", "uninsured motorist", "acord 137",
     }
-    if flags.get("has_crime") or any(kw in search for kw in _crime_kw):
-        primary_state = _infer_primary_state(facts)
-        if primary_state in ("CA", "CO"):
+    has_137_auto_signal = (
+        flags.get("has_auto_coverage")
+        or flags.get("has_commercial_auto")
+        or flags.get("has_auto_liability")
+        or flags.get("has_truckers_coverage")
+        or flags.get("has_motor_carrier_coverage")
+        or any(kw in search for kw in _auto_137_kw)
+    )
+    if has_137_auto_signal:
+        primary_state = _infer_primary_state(facts) or _infer_primary_state_from_flags(flags)
+        if primary_state in _SUPPORTED_137_138_STATES:
             form_id = f"ACORD_137_{primary_state}"
             _add(form_id,
-                 f"ACORD 137 {primary_state} - Commercial Crime Application",
+                 f"ACORD 137 {primary_state} - Commercial Auto Coverages / Limits Section",
                  trigger_weight=0.85,
-                 trigger_reason=f"crime / dishonesty flag or keywords detected (inferred state: {primary_state})")
-        else:
-            # Fallback: add both if state not clearly detected
+                 trigger_reason=f"commercial auto coverage signals detected (inferred state: {primary_state})")
+        elif primary_state is None:
             _add("ACORD_137_CA",
-                 "ACORD 137 CA - Commercial Crime Application",
-                 trigger_weight=0.85,
-                 trigger_reason="crime / dishonesty flag or keywords detected (state not detected, offering CA)")
-            _add("ACORD_137_CO",
-                 "ACORD 137 CO - Commercial Crime Application",
+                 "ACORD 137 CA - Commercial Auto Coverages / Limits Section",
                  trigger_weight=0.80,
-                 trigger_reason="crime / dishonesty flag or keywords detected (state not detected, offering CO as alternative)")
+                 trigger_reason="commercial auto coverage signals detected (state not detected, offering California variant)")
+            _add("ACORD_137_CO",
+                 "ACORD 137 CO - Commercial Auto Coverages / Limits Section",
+                 trigger_weight=0.80,
+                 trigger_reason="commercial auto coverage signals detected (state not detected, offering Colorado variant)")
 
-    # ACORD 138 — Cyber (state-variant aware)
-    _cyber_kw = {
-        "cyber", "data breach", "network security", "phi", "pci",
-        "ransomware", "privacy liability", "e-commerce", "cloud",
-        "personally identifiable", "hipaa", "cyber liability",
-        "network liability", "data privacy", "breach response",
-        "mfa", "multi-factor", "cloud services", "saas",
-        "third-party vendor", "vendor risk", "it security",
+    # ACORD 138 - Garage and Dealers Coverages / Limits (state-variant aware)
+    _garage_138_kw = {
+        "garage liability", "garage keepers", "garagekeepers",
+        "auto dealer", "auto dealership", "dealer plates", "dealers",
+        "repair shop", "service garage", "dealer operations",
+        "garage operations", "autos left for service", "safe keeping",
+        "transportation plates", "acord 138",
     }
-    if flags.get("has_cyber") or any(kw in search for kw in _cyber_kw):
-        primary_state = _infer_primary_state(facts)
-        if primary_state in ("CA", "CO"):
+    has_138_garage_signal = (
+        flags.get("has_garage_operations")
+        or flags.get("has_auto_dealer_exposure")
+        or flags.get("has_garagekeepers_coverage")
+        or flags.get("has_garage_coverage")
+        or flags.get("has_dealers_coverage")
+        or flags.get("has_garage_liability")
+        or flags.get("has_garage_keepers")
+        or any(kw in search for kw in _garage_138_kw)
+    )
+    if has_138_garage_signal:
+        primary_state = _infer_primary_state(facts) or _infer_primary_state_from_flags(flags)
+        if primary_state in _SUPPORTED_137_138_STATES:
             form_id = f"ACORD_138_{primary_state}"
             _add(form_id,
-                 f"ACORD 138 {primary_state} - Cyber / Network Security Application",
+                 f"ACORD 138 {primary_state} - Garage and Dealers Coverages / Limits Section",
                  trigger_weight=0.85,
-                 trigger_reason=f"cyber / data breach flag or keywords detected (inferred state: {primary_state})")
-        else:
-            # Fallback: add both if state not clearly detected
+                 trigger_reason=f"garage/dealers coverage signals detected (inferred state: {primary_state})")
+        elif primary_state is None:
             _add("ACORD_138_CA",
-                 "ACORD 138 CA - Cyber / Network Security Application",
-                 trigger_weight=0.85,
-                 trigger_reason="cyber / data breach flag or keywords detected (state not detected, offering CA)")
-            _add("ACORD_138_CO",
-                 "ACORD 138 CO - Cyber / Network Security Application",
+                 "ACORD 138 CA - Garage and Dealers Coverages / Limits Section",
                  trigger_weight=0.80,
-                 trigger_reason="cyber / data breach flag or keywords detected (state not detected, offering CO as alternative)")
+                 trigger_reason="garage/dealers coverage signals detected (state not detected, offering California variant)")
+            _add("ACORD_138_CO",
+                 "ACORD 138 CO - Garage and Dealers Coverages / Limits Section",
+                 trigger_weight=0.80,
+                 trigger_reason="garage/dealers coverage signals detected (state not detected, offering Colorado variant)")
 
     # ACORD 101 — Additional Remarks (complex trigger logic unchanged)
     _101_reasons: List[str] = []

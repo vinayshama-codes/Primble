@@ -347,7 +347,9 @@ export default function Header({
   return (
     <header className="landing-header">
       <div className="header-left">
-        <div className="logo" onClick={() => onHome ? onHome() : (window.location.href = "/")} style={{ cursor: "pointer", fontSize: "28px", fontWeight: "800", letterSpacing: "-0.5px", color: "var(--primary)" }}>primble</div>
+        <div className="logo" onClick={() => onHome ? onHome() : (window.location.href = "/")} style={{ cursor: "pointer" }}>
+          <img src="/primble-logo.webp" alt="Primble" style={{ height: "28px", width: "auto", display: "block" }} />
+        </div>
         <nav className="nav" style={{ display: "none" }}>
           <a onClick={() => onNavigate && onNavigate("about")} style={{ cursor: "pointer" }}>About</a>
           <a onClick={() => onNavigate && onNavigate("platform")} style={{ cursor: "pointer" }}>Platform</a>
@@ -374,7 +376,7 @@ export default function Header({
       ) : (
         <div className="user-menu" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={onLogIn} style={{ background: "none", border: "1.5px solid #e0e0e0", cursor: "pointer", fontSize: 15, fontWeight: 600, color: "#0f172a", padding: "9px 22px", borderRadius: 999, transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = "#E61B84"; e.currentTarget.style.color = "#E61B84"; }} onMouseLeave={e => { e.currentTarget.style.borderColor = "#e0e0e0"; e.currentTarget.style.color = "#0f172a"; }}>Log in</button>
-          <button onClick={onSignUp} style={{ background: "#E61B84", border: "none", cursor: "pointer", fontSize: 15, fontWeight: 600, color: "#fff", padding: "10px 26px", borderRadius: 999, boxShadow: "0 4px 14px rgba(230,27,132,0.3)", transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.transform = "translateY(-1px)"; }} onMouseLeave={e => { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.transform = "none"; }}>Get started</button>
+          <button onClick={onSignUp} style={{ background: "#E61B84", border: "none", cursor: "pointer", fontSize: 15, fontWeight: 600, color: "#fff", padding: "10px 26px", borderRadius: 999, boxShadow: "0 4px 14px rgba(230,27,132,0.3)", transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.transform = "translateY(-1px)"; }} onMouseLeave={e => { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.transform = "none"; }}>Upgrade</button>
         </div>
       )}
     </header>

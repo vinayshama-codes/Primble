@@ -465,27 +465,27 @@ Decision rule (pseudo):
 ________________
 
 
-ACORD 137 — Crime
-Full Context: Used for crime/employee dishonesty coverage. Trigger: If the dec page or supporting materials indicate a crime or fidelity policy (e.g. coverage for theft, forgery, employee dishonesty, ERISA bonds), include ACORD 137. The AI should watch for terms like “crime,” “money and securities,” “employee dishonesty,” etc. What it does: ACORD 137 captures coverages under a commercial crime policy (burglaries, robberies, employee theft, forgery, money orders, etc.), including limits and deductibles for each sub-limit. Difference: This is a highly specialized form. It supplements the core forms by detailing the various insuring agreements of a crime policy. If a declaration shows any crime coverage, the AI will suggest 137 to ensure all sections (parts A–E of crime coverage) are filled out.
-Purpose: Employee dishonesty, money & securities, ERISA bonds.
-Triggers: Dec page shows crime coverage, financial exposures, cashier/collections, or ERISA fiduciary mentions.
-Document cues / keywords: “Crime”, “employee dishonesty”, “money and securities”, “forgery”.
-Required variables: Limits by insuring agreement, deductible, locations, employee counts.
-Cross-form validations: If company has high internal cash handling but no crime coverage → flag silent exposure (soft warning).
-SQS effect: Absence of crime coverage when exposure exists → soft warning, reduced SQS.
+ACORD 137 — Commercial Auto Coverages / Limits (CA = California, CO = Colorado)
+Full Context: Used for state-specific commercial auto coverages and limits. Trigger: If the dec page or supporting materials indicate commercial auto, business auto, truckers, motor carrier, hired/non-owned auto, uninsured motorist, or trailer interchange coverage, include ACORD 137 CA for California or ACORD 137 CO for Colorado. What it does: ACORD 137 CA/CO captures Business Auto, Truckers, and Motor Carrier coverages and limits, including liability, physical damage, medical payments, uninsured motorist selections, hired/borrowed liability, non-owned liability, and trailer interchange.
+Purpose: State-specific commercial auto coverages and limits.
+Triggers: Dec page shows commercial auto, business auto, truckers, motor carrier, hired/non-owned auto, uninsured motorist, or trailer interchange coverage.
+Document cues / keywords: commercial auto, business auto, truckers, motor carrier, auto liability, physical damage, hired auto, non-owned auto, trailer interchange, uninsured motorist.
+Required variables: Auto liability limits, covered auto symbols, UM/UIM limits, medical payments, hired/non-owned selections, physical damage deductibles.
+Cross-form validations: Auto coverage symbols and limits should align with exposure.
+SQS effect: Missing auto limits/symbols for selected ACORD 137 CA/CO reduces SQS.
 
 
 ________________
 
 
-ACORD 138 — Cyber / Network Security
-Full Context: Used for cyber liability coverage. Trigger: If cyber insurance is requested or present (e.g. “Cyber Liability,” “Data Breach,” “Network Security”), include ACORD 138. The AI should detect any mention of first- or third-party cyber coverage in the dec page or submission. What it does: ACORD 138 collects cyber risk details: types of digital assets insured, network security measures, prior breaches, and limits. Difference: This form is specific to cyber exposures. It supplements the core application with cyber-specific questions (like triggers for breach response). In other words, if the dec page or questions indicate cyber coverage is needed, 138 is the form to record that information.
-Purpose: Cyber liability coverages: breach response, network security.
-Triggers: Dec page requests cyber coverage or business handles PHI/PCI/e-commerce.
-Document cues / keywords: “Cyber”, “Network Security”, “Data breach”, “PCI”, “PHI”, vendor/cloud use.
-Required variables: Limits, prior incidents, controls in place (MFA, backups), third-party vendor exposures.
-Cross-form validations: If business stores PHI/PCI and no cyber limits listed → soft-warning (recommend adding coverage).
-SQS effect: Missing cyber for clear cyber exposure → SQS reduction (recommendation, not block).
+ACORD 138 — Garage and Dealers Coverages / Limits (CA = California, CO = Colorado)
+Full Context: Used for state-specific garage and dealer coverages and limits. Trigger: If the dec page or supporting materials indicate garage liability, garage keepers, auto dealer, dealer plates, repair shop, service garage, or dealer operations, include ACORD 138 CA for California or ACORD 138 CO for Colorado. What it does: ACORD 138 CA/CO captures garage/dealers liability, physical damage, garage keepers coverage, covered auto symbols, dealer plates, transportation plates, temporary location, and transit limits.
+Purpose: State-specific garage and dealer coverages and limits.
+Triggers: Dec page shows garage/dealers operations, garage keepers, auto dealership, dealer plates, repair shop, service garage, or autos left for service.
+Document cues / keywords: garage liability, garage keepers, auto dealer, dealer plates, repair shop, service garage, dealer operations, garage operations.
+Required variables: Garage liability limits, garagekeepers limits/deductibles, operations type, dealer inventory value.
+Cross-form validations: Garage/dealers limits and symbols should align with exposure.
+SQS effect: Missing garage/dealers limits for selected ACORD 138 CA/CO reduces SQS.
 
 
 ________________

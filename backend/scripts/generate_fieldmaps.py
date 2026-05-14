@@ -24,7 +24,7 @@ import sys
 
 # Must match _FIELDMAP_SCHEMA_VERSION in pdf_service.py — bump both together
 # whenever new fact keys are added to the extraction schema.
-FIELDMAP_SCHEMA_VERSION = "v4"
+FIELDMAP_SCHEMA_VERSION = "v5"
 
 # ---------------------------------------------------------------------------
 # Canonical field→fact_key rules
@@ -301,6 +301,16 @@ RULES = [
     ("CertificateHolder_MailingAddress_PostalCode",         "_addr_zip"),
 
     # ── Auto ─────────────────────────────────────────────────────────────────
+    ("Vehicle_LiabilityAutoOnly_PerAccidentLimitAmount",          "garage_liability_limit"),
+    ("Vehicle_LiabilityOtherThanAutoOnly_PerAccidentLimitAmount", "garage_liability_limit"),
+    ("Vehicle_LiabilityOtherThanAutoOnly_AggregateLimitAmount",   "garage_liability_limit"),
+    ("GarageAndDealers_GarageKeepersComprehensive_LimitAmount",   "garagekeeper_liability_limit"),
+    ("GarageAndDealers_GarageKeepersCollision_LimitAmount",       "garagekeeper_liability_limit"),
+    ("GarageAndDealers_GarageKeepersComprehensive_PerAutoDeductibleAmount", "garagekeeper_comp_deductible"),
+    ("GarageAndDealers_GarageKeepersCollision_PerAutoDeductibleAmount", "garagekeeper_coll_deductible"),
+    ("GarageAndDealers_PhysicalDamageComprehensive_LimitAmount",  "auto_dealers_inventory_value"),
+    ("GarageAndDealers_PhysicalDamageCollision_LimitAmount",      "auto_dealers_inventory_value"),
+    ("Vehicle_CombinedSingleLimit_LimitIndicator",          "auto_liability_structure"),
     ("AutoLiability_CombinedSingleLimit",                   "auto_liability_limit"),
     ("Vehicle_CombinedSingleLimit",                         "auto_liability_limit"),
     ("Vehicle_BodilyInjury_PerPerson",                      "auto_liability_limit"),

@@ -1287,65 +1287,81 @@ def calculate_sqs(
             struct = int(70 + (sum(br_optional) / len(br_optional)) * 30)
 
     elif fid in ("ACORD_137_CA", "ACORD_137_CO"):
-        # Crime: limit is the key field
-        crime_chks = [
-            bool(_fv(facts, "crime_limit")),
-            bool(_fv(facts, "crime_deductible")),
+        # State commercial auto supplement: auto symbols and limits drive completeness.
+        auto_chks = [
+            bool(_fv(facts, "auto_liability_limit")),
+            bool(_fv(facts, "auto_covered_symbols")),
+            bool(_fv(facts, "auto_um_uim_limit")),
+            bool(_fv(facts, "auto_deductible_comp") or _fv(facts, "auto_deductible_collision")),
         ]
-        struct = int(sum(crime_chks) / len(crime_chks) * 100)
-        if not _fv(facts, "crime_limit"):
-            issues.append("Crime limit not specified")
+        struct = int(sum(auto_chks) / len(auto_chks) * 100)
+        if not _fv(facts, "auto_liability_limit"):
+            issues.append("Commercial auto liability limit not specified")
             recommendations.append({
-                "rec_id": "rec_crime_limit",
-                "field": "crime_limit",
+                "rec_id": "rec_auto_liability_limit",
+                "field": "auto_liability_limit",
                 "component": "structural_completeness",
-                "message": "Provide crime coverage limit per insuring agreement",
+                "message": "Provide commercial auto liability limit",
                 "type": "missing_field",
                 "score_impact": 20,
                 "priority": 1,
             })
-        for fk, lbl in [("crime_employee_count", "employee count"),
-                         ("crime_locations_count", "locations count")]:
-            if not _fv(facts, fk):
-                recommendations.append({
-                    "rec_id": f"rec_{fk}",
-                    "field": fk,
-                    "component": "exposure_consistency",
-                    "message": f"Crime application missing: {lbl}",
-                    "type": "suggestion",
-                    "score_impact": 8,
-                    "priority": 2,
-                })
-
-    elif fid in ("ACORD_138_CA", "ACORD_138_CO"):
-        # Cyber: limit is required; controls are carrier-grade
-        cyber_chks = [
-            bool(_fv(facts, "cyber_limit")),
-            bool(_fv(facts, "cyber_retention")),
-        ]
-        struct = int(sum(cyber_chks) / len(cyber_chks) * 100)
-        if not _fv(facts, "cyber_limit"):
-            issues.append("Cyber coverage limit not specified")
+        if not _fv(facts, "auto_covered_symbols"):
             recommendations.append({
-                "rec_id": "rec_cyber_limit",
-                "field": "cyber_limit",
-                "component": "structural_completeness",
-                "message": "Provide cyber liability coverage limit",
+                "rec_id": "rec_auto_covered_symbols",
+                "field": "auto_covered_symbols",
+                "component": "exposure_consistency",
+                "message": "Provide covered auto symbols for the selected coverage",
                 "type": "missing_field",
-                "score_impact": 20,
+                "score_impact": 12,
                 "priority": 1,
             })
         for fk, lbl in [
-            ("cyber_controls_mfa",    "MFA controls"),
-            ("cyber_controls_backups","backup controls"),
-            ("cyber_prior_incidents", "prior incidents disclosure"),
+            ("auto_um_uim_limit", "uninsured/underinsured motorist limit"),
+            ("auto_hired_nonowned", "hired/non-owned auto selection"),
         ]:
             if not _fv(facts, fk):
                 recommendations.append({
                     "rec_id": f"rec_{fk}",
                     "field": fk,
                     "component": "exposure_consistency",
-                    "message": f"Cyber application missing: {lbl}",
+                    "message": f"Commercial auto supplement missing: {lbl}",
+                    "type": "suggestion",
+                    "score_impact": 8,
+                    "priority": 2,
+                })
+
+    elif fid in ("ACORD_138_CA", "ACORD_138_CO"):
+        # State garage/dealers supplement: garage limits and operations drive completeness.
+        garage_chks = [
+            bool(_fv(facts, "garage_operations_type")),
+            bool(_fv(facts, "garage_liability_limit")),
+            bool(_fv(facts, "garagekeeper_liability_limit")),
+            bool(_fv(facts, "auto_dealers_inventory_value")),
+        ]
+        struct = int(sum(garage_chks) / len(garage_chks) * 100)
+        if not _fv(facts, "garage_liability_limit"):
+            issues.append("Garage liability limit not specified")
+            recommendations.append({
+                "rec_id": "rec_garage_liability_limit",
+                "field": "garage_liability_limit",
+                "component": "structural_completeness",
+                "message": "Provide garage/dealers liability limit",
+                "type": "missing_field",
+                "score_impact": 20,
+                "priority": 1,
+            })
+        for fk, lbl in [
+            ("garage_operations_type", "garage/dealer operations type"),
+            ("garagekeeper_liability_limit", "garagekeepers liability limit"),
+            ("auto_dealers_inventory_value", "dealer inventory value"),
+        ]:
+            if not _fv(facts, fk):
+                recommendations.append({
+                    "rec_id": f"rec_{fk}",
+                    "field": fk,
+                    "component": "exposure_consistency",
+                    "message": f"Garage/dealers supplement missing: {lbl}",
                     "type": "suggestion",
                     "score_impact": 8,
                     "priority": 2,
@@ -1795,6 +1811,26 @@ FORM_FIELD_INVENTORY: Dict[str, List[str]] = {
     "ACORD_130": [
         "wc_payroll", "wc_class_codes", "wc_xmod", "wc_officer_exclusions",
         "total_payroll", "num_employees", "applicant_name", "effective_date",
+    ],
+    "ACORD_137_CA": [
+        "auto_liability_limit", "auto_liability_structure", "auto_covered_symbols",
+        "auto_um_uim_limit", "auto_med_pay_limit", "auto_hired_nonowned",
+        "auto_deductible_comp", "auto_deductible_collision",
+    ],
+    "ACORD_137_CO": [
+        "auto_liability_limit", "auto_liability_structure", "auto_covered_symbols",
+        "auto_um_uim_limit", "auto_med_pay_limit", "auto_hired_nonowned",
+        "auto_deductible_comp", "auto_deductible_collision",
+    ],
+    "ACORD_138_CA": [
+        "garage_operations_type", "garage_liability_limit", "garage_deductible",
+        "garagekeeper_liability_limit", "garagekeeper_comp_deductible",
+        "garagekeeper_coll_deductible", "auto_dealers_inventory_value",
+    ],
+    "ACORD_138_CO": [
+        "garage_operations_type", "garage_liability_limit", "garage_deductible",
+        "garagekeeper_liability_limit", "garagekeeper_comp_deductible",
+        "garagekeeper_coll_deductible", "auto_dealers_inventory_value",
     ],
 }
 

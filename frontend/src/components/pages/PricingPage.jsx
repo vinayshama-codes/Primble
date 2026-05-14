@@ -27,7 +27,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
   };
 
   const getCtaLabel = (plan) => {
-    if (!token) return plan.id === "enterprise" ? "Contact sales" : "Get started";
+    if (!token) return plan.id === "enterprise" ? "Contact sales" : "Upgrade";
     const state = getPlanState(plan.id);
     if (state === "current") return "Current plan";
     if (plan.id === "enterprise") return "Contact sales";
@@ -71,11 +71,8 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
     <main className="mkt-page">
 
       {/* HERO */}
-      <section className="mkt-hero" style={{ paddingBottom: 16 }}>
-        <h1 className="mkt-hero-h1">
-          Transparent pricing.<br />
-          <span className="mkt-hero-accent">Clear mechanics.</span>
-        </h1>
+      <section className="mkt-hero" style={{ paddingTop: 0, paddingBottom: 16 }}>
+        <h1 className="pricing-section-h1">Choose the Plan That Fits Your Business</h1>
         {token && user?.subscription_tier && user.subscription_tier !== "free" && openBillingPortal && (
           <p style={{ fontSize: 13, color: "#64748b", marginTop: 8 }}>
             Need to update your payment method?{" "}

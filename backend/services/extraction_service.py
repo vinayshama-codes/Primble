@@ -198,11 +198,11 @@ _EXTRACT_SCHEMA = (
     '  "prior_coverage_by_line": [{"line": string, "carrier": string or null, '
     '"policy_no": string or null, "effective": string or null, '
     '"expiration": string or null, "premium": string or null}],\n'
-    # ── WC officers / owners (ACORD 130, 138) ────────────────────────────
+    # ── WC officers / owners (ACORD 130) ────────────────────────────────
     '  "wc_officers": [{"name": string, "title": string or null, '
     '"ownership_pct": string or null, "include": boolean, "exclude": boolean, '
     '"state": string or null}],\n'
-    # ── Garage / Dealers (ACORD 137) ─────────────────────────────────────
+    # ── Garage / Dealers (ACORD 138 CA/CO) ──────────────────────────────
     '  "garage_operations_type": string or null,\n'
     '  "garage_liability_limit": string or null,\n'
     '  "garage_deductible": string or null,\n'
@@ -210,7 +210,7 @@ _EXTRACT_SCHEMA = (
     '  "garagekeeper_comp_deductible": string or null,\n'
     '  "garagekeeper_coll_deductible": string or null,\n'
     '  "auto_dealers_inventory_value": string or null,\n'
-    # ── WC Application (ACORD 138) ────────────────────────────────────────
+    # ── WC Application (ACORD 130) ────────────────────────────────────────
     '  "wc_description_of_operations": string or null\n'
     '},\n\n'
     '"flags": {\n'
