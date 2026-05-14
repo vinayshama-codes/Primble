@@ -8,15 +8,17 @@ export function useUpgradePolling(shouldPoll, setUser, setUpgradeChecking, setUp
     setUpgradeChecking(true);
     setUpgradeFailed(false);
 
-    const MAX_POLL   = 12;
-    const POLL_DELAY = 2000;
-    let   attempts   = 0;
+    const MAX_POLL    = 12;
+    const BASE_DELAY  = 2000;
+    let   attempts    = 0;
 
     const isPlanReady = (tier) => {
       if (!tier || tier === "free") return false;
       if (expectedPlan) return tier === expectedPlan;
       return true;
     };
+
+    const backoffDelay = (attempt) => Math.min(BASE_DELAY * Math.pow(1.5, attempt), 15000);
 
     const pollMe = () => {
       attempts++;
@@ -28,13 +30,13 @@ export function useUpgradePolling(shouldPoll, setUser, setUpgradeChecking, setUp
           if (isPlanReady(data.subscription_tier)) {
             setUpgradeChecking(false);
           } else if (attempts < MAX_POLL) {
-            setTimeout(pollMe, POLL_DELAY);
+            setTimeout(pollMe, backoffDelay(attempts));
           } else {
             tryVerifyFallback();
           }
         })
         .catch(() => {
-          if (attempts < MAX_POLL) setTimeout(pollMe, POLL_DELAY);
+          if (attempts < MAX_POLL) setTimeout(pollMe, backoffDelay(attempts));
           else tryVerifyFallback();
         });
     };

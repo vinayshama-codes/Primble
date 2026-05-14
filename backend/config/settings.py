@@ -121,6 +121,12 @@ def validate_production_config() -> None:
             "Admin-gated endpoints will reject all requests without this. "
             "Set ADMIN_EMAILS=email1@example.com,email2@example.com in your .env"
         )
+    from urllib.parse import urlparse as _urlparse
+    _parsed = _urlparse(FRONTEND_URL)
+    if _parsed.scheme != "https":
+        raise RuntimeError(
+            f"FRONTEND_URL must use https:// in production. Got: {FRONTEND_URL!r}"
+        )
 
 
 if not os.getenv("OPENAI_API_KEY"):

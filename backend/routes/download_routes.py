@@ -195,9 +195,17 @@ async def download_pdf(
                     "UPDATE users SET downloads_used = downloads_used + 1 WHERE id = $1", fresh["id"]
                 )
             elif sub in ("professional", "business") and pkg_eval:
-                await conn.execute(
-                    "UPDATE users SET packages_used = packages_used + 1 WHERE id = $1", fresh["id"]
+                _pkgs_limit  = int(fresh.get("packages_limit", 0) or 0)
+                _soft_buffer = int(_pkgs_limit * 0.05) if _pkgs_limit > 0 else 0
+                _ceiling     = _pkgs_limit + _soft_buffer
+                updated = await conn.fetchval(
+                    "UPDATE users SET packages_used = packages_used + 1"
+                    " WHERE id = $1 AND packages_used < $2"
+                    " RETURNING packages_used",
+                    fresh["id"], _ceiling,
                 )
+                if updated is None:
+                    logger.warning("download_pdf: packages_used ceiling hit for user=%s", fresh["id"])
                 if pkg_eval["status"] == "overage":
                     stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
                     if stripe_queued:
@@ -304,9 +312,17 @@ async def download_all(
                     "UPDATE users SET downloads_used = downloads_used + 1 WHERE id = $1", fresh["id"]
                 )
             elif sub in ("professional", "business") and pkg_eval:
-                await conn.execute(
-                    "UPDATE users SET packages_used = packages_used + 1 WHERE id = $1", fresh["id"]
+                _pkgs_limit  = int(fresh.get("packages_limit", 0) or 0)
+                _soft_buffer = int(_pkgs_limit * 0.05) if _pkgs_limit > 0 else 0
+                _ceiling     = _pkgs_limit + _soft_buffer
+                updated = await conn.fetchval(
+                    "UPDATE users SET packages_used = packages_used + 1"
+                    " WHERE id = $1 AND packages_used < $2"
+                    " RETURNING packages_used",
+                    fresh["id"], _ceiling,
                 )
+                if updated is None:
+                    logger.warning("download_all: packages_used ceiling hit for user=%s", fresh["id"])
                 if pkg_eval["status"] == "overage":
                     stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
                     if stripe_queued:

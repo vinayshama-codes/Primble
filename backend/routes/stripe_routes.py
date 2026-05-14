@@ -39,22 +39,6 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
 
     customer_id = current_user.get("stripe_customer_id")
 
-    # If this customer already has active subscriptions (i.e. a plan change, not first signup),
-    # cancel them now before creating the new checkout. This prevents accumulating multiple active
-    # subs when the user switches plans. Safe to do here because only existing subscribers reach
-    # this path with a customer_id — brand-new users have no subs to lose.
-    if customer_id:
-        try:
-            for st in ("active", "past_due", "trialing"):
-                existing = stripe.Subscription.list(customer=customer_id, status=st, limit=10)
-                for sub in existing.auto_paging_iter():
-                    sid = getattr(sub, "id", None)
-                    if sid:
-                        stripe.Subscription.cancel(sid)
-                        logger.info(f"Pre-checkout: canceled subscription {sid} for customer {customer_id} before plan change to {plan}")
-        except stripe.error.StripeError as e:
-            logger.warning(f"Pre-checkout subscription cleanup failed: {e}")
-
     def _build_checkout_kwargs(cid: str | None) -> dict:
         kwargs = dict(
             payment_method_types=["card"],
@@ -119,6 +103,7 @@ async def stripe_webhook(request: Request):
 
     try:
         event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+        event = json.loads(str(event))
     except stripe.error.SignatureVerificationError:
         raise HTTPException(400, "Invalid webhook signature")
     except Exception:
@@ -144,7 +129,7 @@ async def stripe_webhook(request: Request):
         return uid
 
     if event["type"] == "checkout.session.completed":
-        obj = json.loads(str(event["data"]["object"]))
+        obj = event["data"]["object"]
         user_id = await _resolve_user(obj)
         metadata = obj.get("metadata", {})
 
@@ -232,6 +217,7 @@ async def stripe_webhook(request: Request):
                             """UPDATE users SET subscription_tier=$1, stripe_subscription_id=$2,
                                 packages_limit=$3, packages_used=0, billing_cycle=$4, billing_period_start=$5,
                                 overage_rate=$6, payment_status='ok', payment_failed_at=NULL,
+                                payment_email_sent_day=0,
                                 overage_packages_pending=0, overage_packages_invoiced=0 WHERE id=$7""",
                             plan, sub_id, cfg["packages"], cycle, now, cfg["overage_rate"], user_id,
                         )
@@ -272,7 +258,7 @@ async def stripe_webhook(request: Request):
             try:
                 invoices = stripe.Invoice.list(customer=customer_id, status="open", limit=5)
                 for invoice in invoices.auto_paging_iter():
-                    invoice_id = getattr(invoice, "id", None) or invoice.get("id")
+                    invoice_id = getattr(invoice, "id", None)
                     if not invoice_id:
                         continue
                     try:
@@ -289,7 +275,7 @@ async def stripe_webhook(request: Request):
                 logger.warning(f"Could not list/retry invoices: {e}")
 
     elif event["type"] in ("invoice.paid", "invoice.payment_succeeded"):
-        obj = json.loads(str(event["data"]["object"]))
+        obj = event["data"]["object"]
         sub_id = obj.get("subscription")
         if not sub_id:
             parent = obj.get("parent") or {}
@@ -311,18 +297,26 @@ async def stripe_webhook(request: Request):
                     await conn.execute(
                         """UPDATE users SET packages_used=0, billing_period_start=$1,
                             payment_status='ok', payment_failed_at=NULL,
+                            payment_email_sent_day=0,
                             overage_packages_pending=0, overage_packages_invoiced=0
                             WHERE stripe_subscription_id=$2""",
                         now, sub_id,
                     )
 
     elif event["type"] == "invoice.payment_failed":
-        obj = json.loads(str(event["data"]["object"]))
+        obj = event["data"]["object"]
+
+        # Stripe API v2026: subscription moved to parent.subscription_details.subscription
         sub_id = obj.get("subscription")
         if not sub_id:
             parent = obj.get("parent") or {}
             sub_id = (parent.get("subscription_details") or {}).get("subscription")
-        if sub_id:
+        customer_id_from_invoice = obj.get("customer")
+        logger.info(f"invoice.payment_failed: sub_id={sub_id!r} customer={customer_id_from_invoice!r} event={event_id}")
+
+        if not sub_id:
+            logger.warning(f"invoice.payment_failed: no subscription ID found in event {event_id} — cannot update user")
+        else:
             now = datetime.now(timezone.utc).isoformat()
             async with get_pool().acquire() as conn:
                 async with conn.transaction():
@@ -343,31 +337,54 @@ async def stripe_webhook(request: Request):
                         now, sub_id,
                     )
                     row = await conn.fetchrow(
-                        "SELECT id, email, full_name, stripe_customer_id, payment_failed_at FROM users WHERE stripe_subscription_id = $1",
+                        "SELECT id, email, full_name, stripe_customer_id, payment_failed_at, "
+                        "COALESCE(payment_email_sent_day, 0) AS payment_email_sent_day "
+                        "FROM users WHERE stripe_subscription_id = $1",
                         sub_id,
                     )
-            if row:
+                    # Fallback: look up by stripe_customer_id if sub_id not stored yet
+                    if not row and customer_id_from_invoice:
+                        logger.warning(f"invoice.payment_failed: no user found by sub_id={sub_id!r}, trying customer_id={customer_id_from_invoice!r}")
+                        row = await conn.fetchrow(
+                            "SELECT id, email, full_name, stripe_customer_id, payment_failed_at, "
+                            "COALESCE(payment_email_sent_day, 0) AS payment_email_sent_day "
+                            "FROM users WHERE stripe_customer_id = $1",
+                            customer_id_from_invoice,
+                        )
+                        if row:
+                            await conn.execute(
+                                "UPDATE users SET payment_status='failed',"
+                                " payment_failed_at=COALESCE(payment_failed_at,$1),"
+                                " stripe_subscription_id=$2"
+                                " WHERE id=$3",
+                                now, sub_id, dict(row)["id"],
+                            )
+
+            if not row:
+                logger.error(f"invoice.payment_failed: no user found for sub_id={sub_id!r} customer={customer_id_from_invoice!r} — DB NOT updated, email NOT sent")
+            else:
                 await write_audit_log(
                     {"id": row["id"], "email": row["email"], "stripe_customer_id": row.get("stripe_customer_id", "")},
                     "payment.failed",
                     session_id=sub_id,
                 )
                 row = dict(row)
-                failed_at_val = row.get("payment_failed_at")
-                if failed_at_val is not None:
-                    failed_at_str = (
-                        failed_at_val.isoformat()
-                        if hasattr(failed_at_val, "isoformat")
-                        else str(failed_at_val)
-                    )
+                logger.info(f"invoice.payment_failed: user={row['id']} email={row['email']} payment_email_sent_day={row.get('payment_email_sent_day')}")
+                if int(row.get("payment_email_sent_day") or 0) < 1:
+                    sent_ok = _send_payment_failed_email(row["email"], row.get("full_name", ""), day=1)
+                    if sent_ok:
+                        async with get_pool().acquire() as conn:
+                            await conn.execute(
+                                "UPDATE users SET payment_email_sent_day=1 WHERE id=$1",
+                                row["id"],
+                            )
+                    else:
+                        logger.error(f"invoice.payment_failed: day-1 email send returned False for user={row['id']} — will retry on next webhook/lifecycle run")
                 else:
-                    failed_at_str = ""
-                is_first_failure = failed_at_str.startswith(now[:16])
-                if is_first_failure:
-                    _send_payment_failed_email(row["email"], row.get("full_name", ""), day=1)
+                    logger.info(f"invoice.payment_failed: day-1 email already sent for user={row['id']}, skipping")
 
     elif event["type"] == "customer.subscription.deleted":
-        obj = json.loads(str(event["data"]["object"]))
+        obj = event["data"]["object"]
         sub_id = obj.get("id")
         customer_id = obj.get("customer")
         if sub_id:
@@ -417,7 +434,7 @@ async def stripe_webhook(request: Request):
                 logger.info(f"Subscription deleted: user downgraded to free for sub {sub_id}")
 
     elif event["type"] == "customer.subscription.updated":
-        obj = json.loads(str(event["data"]["object"]))
+        obj = event["data"]["object"]
         sub_id = obj.get("id")
         cancel_at_period_end = obj.get("cancel_at_period_end", False)
         status = obj.get("status", "")
@@ -461,8 +478,10 @@ async def stripe_webhook(request: Request):
                         )
                     elif status == "active" and not cancel_at_period_end:
                         await conn.execute(
-                            "UPDATE users SET payment_status='ok', payment_failed_at=NULL"
-                            " WHERE stripe_subscription_id=$1 AND payment_status='canceling'",
+                            "UPDATE users SET payment_status='ok', payment_failed_at=NULL,"
+                            " payment_email_sent_day=0"
+                            " WHERE stripe_subscription_id=$1"
+                            " AND payment_status IN ('canceling','failed','soft_locked','suspended')",
                             sub_id,
                         )
 
@@ -519,7 +538,8 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
                         """UPDATE users SET subscription_tier=$1, stripe_subscription_id=$2,
                             stripe_customer_id=$3, packages_limit=$4, billing_cycle=$5,
                             billing_period_start=$6, overage_rate=$7,
-                            payment_status='ok', payment_failed_at=NULL WHERE id=$8""",
+                            payment_status='ok', payment_failed_at=NULL,
+                            payment_email_sent_day=0 WHERE id=$8""",
                         plan, sub_id, customer.id, cfg["packages"], cycle,
                         now, cfg["overage_rate"], user_id,
                     )

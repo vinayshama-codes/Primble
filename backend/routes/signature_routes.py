@@ -12,6 +12,7 @@ from repositories.session_repository import get_processing_session, upd_processi
 from services.auth_service import get_current_user
 from services.pdf_service import _is_signature_field, inject_signature_into_pdf
 from utils.crypto import decrypt_field, encrypt_field
+from utils.helpers import safe_join
 
 router = APIRouter(tags=["signature"])
 logger = logging.getLogger(__name__)
@@ -78,7 +79,10 @@ async def apply_signature(
         raise HTTPException(404, f"Form '{form_id}' not found in session")
 
     r   = generated[form_id]
-    tpl = os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
+    try:
+        tpl = safe_join(TEMPLATE_DIR, r["form"]["template_file"])
+    except ValueError:
+        raise HTTPException(400, "Invalid template path")
 
     if not os.path.exists(tpl):
         raise HTTPException(404, f"Template not found: {r['form']['template_file']}")

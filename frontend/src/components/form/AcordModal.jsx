@@ -884,7 +884,7 @@ export default function AcordModal({
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []);
       setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
       setRecommendations(data.recommendations || []); setAllAvailableForms(data.all_available_forms || []);
-      setCheckedFormIds(new Set((data.recommendations || []).map(r => r.form_id)));
+      setCheckedFormIds(new Set());
       setStep(user?.subscription_tier === "essentials" ? "lite" : "recommendations");
     } catch (e) { setError("Upload failed: " + e.message); }
     finally { setLoading(false); setShowUploadOverlay(false); }
@@ -1492,7 +1492,7 @@ export default function AcordModal({
           <div className="modal-step modal-step-wide">
             <div className="step-header">
               <h2 className="step-title" style={{ color: "#1e293b" }}>Select Forms to Generate</h2>
-              <p className="step-subtitle">All recommended forms are pre-selected. Uncheck any you don't need, then generate all at once.</p>
+              <p className="step-subtitle">Select the forms you need, then generate all at once.</p>
             </div>
             <div className="doc-summary">
               <div className="doc-summary-title">DOCUMENTS PROCESSED</div>

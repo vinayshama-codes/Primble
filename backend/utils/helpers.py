@@ -1,6 +1,16 @@
+import os
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
+
+
+def safe_join(base: str, name: str) -> str:
+    """Join base + name and raise ValueError if the result escapes base."""
+    resolved = os.path.realpath(os.path.join(base, name))
+    base_real = os.path.realpath(base)
+    if not (resolved == base_real or resolved.startswith(base_real + os.sep)):
+        raise ValueError(f"Unsafe path: '{name}' escapes base directory")
+    return resolved
 
 
 def generate_verification_code() -> str:

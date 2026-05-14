@@ -6,7 +6,7 @@ export default function LandingPage({ user, onGetStarted, token, onError, openBi
       <section className="hero">
         <div className="hero-badge">ACORD® Automation Platform</div>
         <h1 className="hero-h1">
-          Intelligent submissions<br />start <span style={{ color: "var(--primary)" }}>here</span>
+          ACORD made easy
         </h1>
 
         <div className="hero-actions">

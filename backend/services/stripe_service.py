@@ -43,7 +43,9 @@ def create_overage_invoice_item(user: dict, overage_rate_cents: int) -> bool:
     if not stripe.api_key:
         logger.warning(f"Stripe not configured — overage not billed for user={user['id']}")
         return False
-    customer_id = None  # caller must resolve customer_id separately if needed
+    if not user.get("stripe_customer_id"):
+        logger.warning(f"No stripe_customer_id for user={user['id']} — overage not billed")
+        return False
     sub        = user.get("subscription_tier", "")
     tier_label = "Essentials" if sub == "essentials" else "Professional"
     try:

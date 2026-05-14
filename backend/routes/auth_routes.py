@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import secrets
 import uuid
 import logging
@@ -31,7 +32,7 @@ logger = logging.getLogger(__name__)
 import os as _os
 _IS_PRODUCTION  = _os.getenv("ENVIRONMENT", "development").lower() == "production"
 _COOKIE_SECURE  = _IS_PRODUCTION          # False on localhost (http), True on prod (https)
-_COOKIE_SAMESITE = "lax"
+_COOKIE_SAMESITE = "none" if _IS_PRODUCTION else "lax"
 
 _NONCE_TTL = 300  # seconds
 
@@ -183,10 +184,13 @@ def _set_session_cookie(response: JSONResponse, token: str) -> None:
         path="/",
     )
 
-
 def _clear_session_cookie(response: JSONResponse) -> None:
-    response.delete_cookie(key="acordly_session", path="/")
-
+    response.delete_cookie(
+        key="acordly_session",
+        path="/",
+        secure=_COOKIE_SECURE,
+        samesite=_COOKIE_SAMESITE,
+    )
 
 # ── Auth endpoints ────────────────────────────────────────────────────────────
 
@@ -417,12 +421,13 @@ async def forgot_password(request: Request):
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
         if row:
-            user    = dict(row)
-            code    = generate_verification_code()
-            expires = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+            user      = dict(row)
+            code      = generate_verification_code()
+            code_hash = hashlib.sha256(code.encode()).hexdigest()
+            expires   = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
             await conn.execute(
                 "UPDATE users SET verification_code=$1, verification_expires=$2 WHERE email=$3",
-                code, expires, email,
+                code_hash, expires, email,
             )
             provider       = user.get("auth_provider", "email") or "email"
             is_google_only = provider == "google" and not user.get("password_hash")
@@ -460,7 +465,8 @@ async def reset_password(request: Request):
         user           = dict(row)
         stored_code    = user.get("verification_code", "")
         stored_expires = user.get("verification_expires", "")
-        if not stored_code or stored_code != code:
+        submitted_hash = hashlib.sha256(code.encode()).hexdigest()
+        if not stored_code or not hmac.compare_digest(stored_code, submitted_hash):
             raise HTTPException(400, "Invalid reset code")
         try:
             if datetime.fromisoformat(stored_expires) < datetime.now(timezone.utc):
@@ -475,6 +481,10 @@ async def reset_password(request: Request):
         )
 
     await revoke_all_sessions(user["id"])
+    await write_audit_log(
+        user, "user.password_reset",
+        ip_address=request.client.host if request.client else None,
+    )
 
     # Notify the user that their password was changed (SOC 2 CC6.1)
     try:
@@ -518,7 +528,7 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
             raise HTTPException(400, "OAuth nonce fingerprint mismatch")
 
         cid    = GOOGLE_CLIENT_ID
-        idinfo = id_token.verify_oauth2_token(req.credential, google_requests.Request(), cid, clock_skew_in_seconds=10)
+        idinfo = id_token.verify_oauth2_token(req.credential, google_requests.Request(), cid, clock_skew_in_seconds=5)
         if idinfo.get("iss") not in ["accounts.google.com", "https://accounts.google.com"]:
             raise ValueError("Invalid issuer")
         if idinfo.get("aud") != cid:

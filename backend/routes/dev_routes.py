@@ -69,6 +69,35 @@ async def run_payment_lifecycle(
     }
 
 
+@router.post("/api/dev/run-lifecycle-local")
+async def run_lifecycle_local(request: Request):
+    """No-auth lifecycle trigger — only works from localhost, never mounted in production."""
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Only accessible from localhost")
+    await run_daily_payment_lifecycle()
+    return {"processed": True, "checked_at": datetime.now(timezone.utc).isoformat()}
+
+
+@router.post("/api/dev/reset-payment-state-local")
+async def reset_payment_state_local(request: Request):
+    """No-auth payment-state reset for local testing. Body: {"email": "..."}. Resets every flag that controls email delivery."""
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Only accessible from localhost")
+    body  = await request.json()
+    email = (body.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(400, "email required")
+    async with get_pool().acquire() as conn:
+        result = await conn.execute(
+            "UPDATE users SET payment_status='ok', payment_failed_at=NULL,"
+            " payment_email_sent_day=0 WHERE email=$1",
+            email,
+        )
+    return {"reset": True, "email": email, "rows": result}
+
+
 @router.post("/api/dev/test-email")
 async def test_email(
     request: Request,
@@ -114,22 +143,36 @@ async def simulate_payment_failure(
     else:
         final_status = "failed"
 
+    body_email = body.get("email", "").strip().lower()
+
     async with get_pool().acquire() as conn:
+        if body_email and body_email != admin_user["email"].lower():
+            target = await conn.fetchrow("SELECT id, email, full_name FROM users WHERE email = $1", body_email)
+            if not target:
+                raise HTTPException(404, f"User not found: {body_email}")
+            target_id    = target["id"]
+            target_email = target["email"]
+            target_name  = target.get("full_name", "")
+        else:
+            target_id    = admin_user["id"]
+            target_email = admin_user["email"]
+            target_name  = admin_user.get("full_name", "")
+
         await conn.execute(
-            "UPDATE users SET payment_status=$1, payment_failed_at=$2 WHERE id=$3",
-            final_status, fake_dt, admin_user["id"],
+            "UPDATE users SET payment_status=$1, payment_failed_at=$2, payment_email_sent_day=0 WHERE id=$3",
+            final_status, fake_dt, target_id,
         )
 
     await write_audit_log(
         user=admin_user,
         action="admin.simulate_payment_failure",
         ip_address=request.client.host if request.client else None,
-        form_name=f"days_ago={days_ago} status_set={final_status}",
+        form_name=f"days_ago={days_ago} status_set={final_status} target={target_email}",
     )
 
     logger.info(
         f"DEV: simulated payment failure {days_ago} days ago "
-        f"→ {final_status} for user={admin_user['id']}"
+        f"→ {final_status} for user={target_id} ({target_email})"
     )
 
     email_day = (
@@ -138,18 +181,15 @@ async def simulate_payment_failure(
         else 7  if days_ago >= 7
         else 1
     )
-    sent = _send_payment_failed_email(
-        admin_user["email"],
-        admin_user.get("full_name", ""),
-        day=email_day,
-    )
+    sent = _send_payment_failed_email(target_email, target_name, day=email_day)
     logger.info(
         f"DEV simulate: sent day={email_day} email "
-        f"to {admin_user['email']}: {'ok' if sent else 'FAILED'}"
+        f"to {target_email}: {'ok' if sent else 'FAILED'}"
     )
 
     return {
         "success":           True,
+        "target_email":      target_email,
         "payment_failed_at": fake_dt,
         "days_ago":          days_ago,
         "status_set":        final_status,

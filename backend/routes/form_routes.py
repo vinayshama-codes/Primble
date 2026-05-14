@@ -13,6 +13,7 @@ from config.database import get_pool
 from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING
 from utils.crypto import decrypt_field
 from utils.json_logging import get_trace_id
+from utils.helpers import safe_join
 from services.job_queue import get_job_queue, JOB_TYPE_EXTRACTION, JOB_TYPE_FORM_GENERATION, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED
 from models.schemas import BulkFormSelectionRequest, FormSelectionRequest, PDFUpdateRequest
 from repositories.session_repository import (
@@ -349,7 +350,11 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
             if not form_meta:
                 continue
-            tpl = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
+            try:
+                tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
+            except ValueError:
+                logger.warning("form_routes: unsafe template path blocked for form %s", form_id)
+                continue
             if not os.path.exists(tpl):
                 continue
             try:
@@ -462,7 +467,11 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
         if not form_meta:
             continue
-        tpl = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
+        try:
+            tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
+        except ValueError:
+            logger.warning("form_routes: unsafe template path blocked for form %s", form_id)
+            continue
         if not os.path.exists(tpl):
             continue
         try:
@@ -513,7 +522,10 @@ async def get_form_fields(
     if form_id not in generated:
         raise HTTPException(404, f"Form '{form_id}' not found")
     r   = generated[form_id]
-    tpl = os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
+    try:
+        tpl = safe_join(TEMPLATE_DIR, r["form"]["template_file"])
+    except ValueError:
+        raise HTTPException(400, "Invalid template path")
     if not os.path.exists(tpl):
         raise HTTPException(404, "Template not found")
     _loop   = asyncio.get_event_loop()
@@ -686,7 +698,10 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         new_pdf_bytes   = None
         new_sig_applied = False
 
-        tpl = os.path.join(TEMPLATE_DIR, r["form"]["template_file"])
+        try:
+            tpl = safe_join(TEMPLATE_DIR, r["form"]["template_file"])
+        except ValueError:
+            raise HTTPException(400, "Invalid template path")
         _pdf_loop = asyncio.get_event_loop()
         if os.path.exists(tpl):
             new_pdf_bytes = await _pdf_loop.run_in_executor(None, fill_pdf, tpl, current_state, confidence)
@@ -872,7 +887,7 @@ async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depen
     else:
         raise HTTPException(404, f"Form '{form_id}' not found")
 
-    logger.info(f"EPIC EXPORT: form={form_id} session={session_id[:8]} user={current_user.get('email')}\n{json.dumps(epic_payload, indent=2, default=str)}")
+    logger.info("EPIC EXPORT: form=%s session=%s forms=%d", form_id, session_id[:8], len(epic_payload.get("forms", {epic_payload.get("form_id"): 1})))
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
@@ -915,7 +930,7 @@ async def send_to_vertafore(session_id: str, form_id: str, current_user: dict = 
     else:
         raise HTTPException(404, f"Form '{form_id}' not found")
 
-    logger.info(f"VERTAFORE EXPORT: form={form_id} session={session_id[:8]} user={current_user.get('email')}\n{json.dumps(payload, indent=2, default=str)}")
+    logger.info("VERTAFORE EXPORT: form=%s session=%s forms=%d", form_id, session_id[:8], len(payload.get("forms", {payload.get("form_id"): 1})))
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()

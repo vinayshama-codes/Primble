@@ -7,7 +7,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 
 _SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 if _SENTRY_DSN:
@@ -161,12 +160,6 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TraceIDMiddleware)
 app.add_middleware(InFlightMiddleware)
 
-if _IS_PROD:
-    # Redirects HTTP → HTTPS at the application layer.
-    # If a load balancer handles TLS termination and performs the redirect upstream,
-    # remove this middleware and document that control in your infra runbook instead.
-    app.add_middleware(HTTPSRedirectMiddleware)
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -289,6 +282,15 @@ async def startup():
         )
     except Exception as _e:
         logger.warning(f"GPT config logging failed (non-fatal): {_e}")
+
+    _email_provider = os.getenv("EMAIL_PROVIDER", "").lower()
+    if _email_provider not in ("resend", "sendgrid", "smtp"):
+        logger.error(
+            f"EMAIL_PROVIDER='{_email_provider}' is not set or unrecognised — "
+            "payment failure emails will NOT be sent. Set EMAIL_PROVIDER=resend in your .env"
+        )
+    else:
+        logger.info(f"Email provider: {_email_provider}")
 
     if _SCHEDULER_ENABLED:
         start_scheduler()

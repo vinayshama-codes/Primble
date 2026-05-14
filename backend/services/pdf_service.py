@@ -1713,6 +1713,15 @@ def _fill_unmatched_with_gpt(
     # ── Build a field-spec line for the prompt ───────────────────────────────
     _ROW_SUFFIX_RE = re.compile(r"^(.+)_([A-N])$")
 
+    # Pre-compute total slot count per base name across the eligible field list.
+    # e.g. {"NamedInsured_MailingAddress_LineOne": 3} when _A/_B/_C all appear.
+    _slot_counts: Dict[str, int] = {}
+    for _f in eligible_fields:
+        _m = _ROW_SUFFIX_RE.match(_f)
+        if _m:
+            _base = _m.group(1)
+            _slot_counts[_base] = _slot_counts.get(_base, 0) + 1
+
     def _field_spec(f: str) -> str:
         info = eligible_fields.get(f) or {}
         info = info if isinstance(info, dict) else {}
@@ -1726,12 +1735,14 @@ def _fill_unmatched_with_gpt(
             spec += " (dropdown)"
         elif "/Btn" in ft:
             spec += " (checkbox — Yes/No)"
-        # Annotate row-suffixed fields so GPT knows this is occurrence N of a list
+        # Annotate row-suffixed fields with slot index and total so the LLM knows
+        # exactly how many distinct values to search for.
         m = _ROW_SUFFIX_RE.match(f)
         if m:
+            base    = m.group(1)
             row_idx = ord(m.group(2)) - ord("A") + 1
-            if row_idx > 1:
-                spec += f" [occurrence #{row_idx} — must be a DIFFERENT value from occurrence #1]"
+            total   = _slot_counts.get(base, 1)
+            spec += f" [slot {row_idx} of {total} — find the {row_idx}{'st' if row_idx == 1 else 'nd' if row_idx == 2 else 'rd' if row_idx == 3 else 'th'} distinct value for '{base}'; leave null if fewer than {row_idx} distinct values exist]"
         return spec
 
     # ── Prompt builder ───────────────────────────────────────────────────────
@@ -1761,10 +1772,14 @@ def _fill_unmatched_with_gpt(
         "  6. mappings: use ONLY exact fact keys from SOURCE 1. null if no clean match.\n"
         "  7. NEVER put raw_text_sourced fields in mappings.\n"
         "  8. Fields ending in _A, _B, _C ... are SEPARATE row slots for DIFFERENT entries.\n"
-        "     Search the entire document for each row independently. If the document lists\n"
-        "     multiple values of the same type (e.g. two phone numbers, two fax numbers,\n"
-        "     two insurers), assign each distinct value to its own _A/_B/_C slot in order.\n"
-        "     Do NOT copy the _A value into _B/_C — only fill a row if a distinct value exists.\n\n"
+        "     Each such field is annotated '[slot N of T]' telling you there are T slots for\n"
+        "     that field type. Your job:\n"
+        "       a) Count how many DISTINCT values of that type appear in the document.\n"
+        "       b) Assign the 1st distinct value to _A, 2nd to _B, etc.\n"
+        "       c) If the document has fewer distinct values than slots, leave the extra\n"
+        "          slots null — do NOT duplicate a value to fill empty slots.\n"
+        "     Example: 3 slots for NamedInsured_Phone but only 2 phone numbers found →\n"
+        "       _A = first number, _B = second number, _C = null.\n\n"
     )
     _SKELETON_CHARS = len(_PROMPT_SKELETON)
     _FACTS_CHARS    = len(fact_context)

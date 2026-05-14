@@ -25,7 +25,8 @@ async def run_daily_payment_lifecycle():
         now = datetime.now(timezone.utc)
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, email, full_name, payment_failed_at, payment_status, stripe_customer_id "
+                "SELECT id, email, full_name, payment_failed_at, payment_status, stripe_customer_id, "
+                "COALESCE(payment_email_sent_day, 0) AS payment_email_sent_day "
                 "FROM users WHERE payment_failed_at IS NOT NULL"
             )
         rows = [dict(r) for r in rows]
@@ -35,10 +36,11 @@ async def run_daily_payment_lifecycle():
                 failed_at = _safe_parse_dt(row["payment_failed_at"])
                 if failed_at is None:
                     continue
-                days_since     = (now - failed_at).days
-                current_status = row.get("payment_status", "failed") or "failed"
-                new_status     = current_status
-                email_day      = None
+                days_since         = (now - failed_at).days
+                current_status     = row.get("payment_status", "failed") or "failed"
+                new_status         = current_status
+                email_day          = None
+                email_already_sent = int(row.get("payment_email_sent_day") or 0)
 
                 if days_since in (2, 4, 6) and current_status == "failed":
                     customer_id = row.get("stripe_customer_id")
@@ -46,7 +48,7 @@ async def run_daily_payment_lifecycle():
                         try:
                             invoices = stripe.Invoice.list(customer=customer_id, status="open", limit=5)
                             for invoice in invoices.auto_paging_iter():
-                                invoice_id = getattr(invoice, "id", None) or invoice.get("id")
+                                invoice_id = getattr(invoice, "id", None)
                                 if not invoice_id:
                                     continue
                                 try:
@@ -61,15 +63,19 @@ async def run_daily_payment_lifecycle():
 
                 if days_since >= 60 and current_status != "archived":
                     new_status = "archived"
-                    email_day  = 60
+                    if email_already_sent < 60:
+                        email_day = 60
                 elif days_since >= 21 and current_status not in ("suspended", "archived"):
                     new_status = "suspended"
-                    email_day  = 21
+                    if email_already_sent < 21:
+                        email_day = 21
                 elif days_since >= 10 and current_status not in ("soft_locked", "suspended", "archived"):
                     new_status = "soft_locked"
-                    email_day  = 10
+                    if email_already_sent < 10:
+                        email_day = 10
                 elif 7 <= days_since < 10 and current_status == "failed":
-                    email_day  = 7
+                    if email_already_sent < 7:
+                        email_day = 7
 
                 if new_status != current_status:
                     async with get_pool().acquire() as conn:
@@ -80,7 +86,15 @@ async def run_daily_payment_lifecycle():
                     logger.info(f"Lifecycle: user={row['id']} {current_status} → {new_status} (day {days_since})")
 
                 if email_day:
-                    _send_payment_failed_email(row["email"], row.get("full_name", ""), day=email_day)
+                    sent_ok = _send_payment_failed_email(row["email"], row.get("full_name", ""), day=email_day)
+                    if sent_ok:
+                        async with get_pool().acquire() as conn:
+                            await conn.execute(
+                                "UPDATE users SET payment_email_sent_day=$1 WHERE id=$2",
+                                email_day, row["id"],
+                            )
+                    else:
+                        logger.error(f"Lifecycle: day-{email_day} email send returned False for user={row['id']} — will retry tomorrow")
 
             except Exception as ex:
                 logger.error(f"Lifecycle error user={row['id']}: {ex}")
@@ -205,15 +219,15 @@ async def run_audit_log_retention():
         async with get_pool().acquire() as conn:
             async with conn.transaction():
                 r_audit = await conn.execute(
-                    "DELETE FROM acord_audit_log WHERE created_at < $1",
+                    "DELETE FROM acord_audit_log WHERE timestamp < $1",
                     cutoff,
                 )
                 r_field = await conn.execute(
-                    "DELETE FROM field_source_audit WHERE created_at < $1",
+                    "DELETE FROM field_source_audit WHERE changed_at < $1",
                     cutoff,
                 )
                 r_sqs = await conn.execute(
-                    "DELETE FROM sqs_recommendation_audit WHERE created_at < $1",
+                    "DELETE FROM sqs_recommendation_audit WHERE presented_at < $1",
                     cutoff,
                 )
 

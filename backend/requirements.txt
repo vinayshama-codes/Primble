@@ -64,10 +64,7 @@ google-cloud-vision==3.4.0
 # Text cleaning
 ftfy==6.1.0
 
-# Table extraction (camelot fallback; cv extra pulls opencv)
- camelot-py==0.11.0
-
-# Add these instead:
+# Table extraction
 pdfplumber>=0.11.0
 pypdf>=4.0.0
 

@@ -44,6 +44,8 @@ async def _init_conn(conn: asyncpg.Connection) -> None:
 # ASYNC-SAFE
 async def create_pool() -> None:
     global _pool
+    _env = os.getenv("ENVIRONMENT", "development").lower()
+    _ssl = "require" if _env == "production" else None
     _pool = await asyncpg.create_pool(
         DATABASE_URL,
         min_size=_POOL_MIN,
@@ -52,9 +54,10 @@ async def create_pool() -> None:
         # Recycle idle connections after this many seconds so stale TCP sockets
         # (reset by OS after long GPT/PDF runs) are never handed to callers.
         max_inactive_connection_lifetime=min(_POOL_MAX_INACTIVE_LIFETIME, 120),
+        ssl=_ssl,
         init=_init_conn,
     )
-    logger.info(f"asyncpg pool created (min={_POOL_MIN}, max={_POOL_MAX})")
+    logger.info(f"asyncpg pool created (min={_POOL_MIN}, max={_POOL_MAX}, ssl={_ssl})")
 
 
 # ASYNC-SAFE
@@ -125,6 +128,7 @@ async def init_db() -> None:
             ("stripe_customer_id",           "TEXT"),
             ("overage_packages_pending",     "INTEGER DEFAULT 0"),
             ("overage_packages_invoiced",    "INTEGER DEFAULT 0"),
+            ("payment_email_sent_day",       "INTEGER DEFAULT 0"),
         ]:
             if not (_SAFE_IDENT.match(col) and _SAFE_DEF.match(definition)):
                 raise ValueError(f"Unsafe DDL identifier blocked: {col!r} {definition!r}")

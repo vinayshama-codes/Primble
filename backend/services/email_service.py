@@ -1,9 +1,16 @@
 import os
 import json
 import logging
-from config.settings import STRIPE_BILLING_PORTAL_URL, FRONTEND_URL
+from config.settings import FRONTEND_URL
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_header(value: str) -> str:
+    """Strip CR/LF characters that could inject additional SMTP headers."""
+    if not value:
+        return ""
+    return value.replace("\r", "").replace("\n", "").replace("\0", "")
 
 
 def send_verification_email(email: str, code: str) -> bool:
@@ -223,33 +230,58 @@ def _send_generic_email(
     if from_addr is None:
         from_addr = os.getenv("EMAIL_FROM", "noreply@acordly.ai")
 
+    logger.info(f"Sending email provider={provider!r} to={to_email} subject={subject!r}")
+
     if provider == "resend":
+        api_key = os.getenv("RESEND_API_KEY", "")
+        if not api_key:
+            logger.error("RESEND_API_KEY is not set — email not sent")
+            return False
+
         def _do_resend():
-            import urllib.request
-            api_key = os.getenv("RESEND_API_KEY", "")
-            if not api_key:
-                raise ValueError("RESEND_API_KEY not set")
-            payload = json.dumps({"from": from_addr, "to": [to_email], "subject": subject, "html": body_html, "text": body_txt}).encode()
+            import urllib.request, urllib.error
+            payload = json.dumps({
+                "from": from_addr, "to": [to_email],
+                "subject": subject, "html": body_html, "text": body_txt,
+            }).encode()
             req = urllib.request.Request(
                 "https://api.resend.com/emails", data=payload,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, method="POST",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "acordly-backend/1.0",
+                },
+                method="POST",
             )
-            with urllib.request.urlopen(req, timeout=10):
-                return True
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.status
+            except urllib.error.HTTPError as he:
+                body = ""
+                try:
+                    body = he.read().decode("utf-8", errors="replace")[:500]
+                except Exception:
+                    pass
+                raise ValueError(f"Resend HTTP {he.code} from={from_addr}: {body}") from he
+
         try:
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(_do_resend).result(timeout=15)
+                pool.submit(_do_resend).result(timeout=15)
+            logger.info(f"Resend: email sent to {to_email} from={from_addr}")
+            return True
         except Exception as ex:
-            logger.error(f"Resend email failed: {ex}")
+            logger.error(f"Resend email FAILED to={to_email} from={from_addr}: {ex}")
             return False
 
     elif provider == "sendgrid":
+        api_key = os.getenv("SENDGRID_API_KEY", "")
+        if not api_key:
+            logger.error("SENDGRID_API_KEY is not set — email not sent")
+            return False
+
         def _do_sendgrid():
             import urllib.request
-            api_key = os.getenv("SENDGRID_API_KEY", "")
-            if not api_key:
-                raise ValueError("SENDGRID_API_KEY not set")
             payload = json.dumps({
                 "personalizations": [{"to": [{"email": to_email}]}],
                 "from": {"email": from_addr},
@@ -261,13 +293,17 @@ def _send_generic_email(
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, method="POST",
             )
             with urllib.request.urlopen(req, timeout=10):
-                return True
+                pass
+            return True
+
         try:
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(_do_sendgrid).result(timeout=15)
+                result = pool.submit(_do_sendgrid).result(timeout=20)
+            logger.info(f"SendGrid: email sent to {to_email}")
+            return result
         except Exception as ex:
-            logger.error(f"SendGrid email failed: {ex}")
+            logger.error(f"SendGrid email failed to={to_email}: {ex}")
             return False
 
     elif provider == "smtp":
@@ -282,9 +318,9 @@ def _send_generic_email(
             if not user or not pw:
                 raise ValueError("SMTP_USER or SMTP_PASS not set")
             msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"]    = from_addr
-            msg["To"]      = to_email
+            msg["Subject"] = _sanitize_header(subject)
+            msg["From"]    = _sanitize_header(from_addr)
+            msg["To"]      = _sanitize_header(to_email)
             msg.attach(MIMEText(body_txt, "plain", "utf-8"))
             msg.attach(MIMEText(body_html, "html", "utf-8"))
             with smtplib.SMTP(host, port, timeout=30) as server:
@@ -294,21 +330,27 @@ def _send_generic_email(
                 server.login(user, pw)
                 server.sendmail(from_addr, [to_email], msg.as_string())
             return True
+
         try:
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                return pool.submit(_do_smtp).result(timeout=45)
+                result = pool.submit(_do_smtp).result(timeout=45)
+            logger.info(f"SMTP: email sent to {to_email}")
+            return result
         except Exception as ex:
-            logger.error(f"SMTP failed: {ex}")
+            logger.error(f"SMTP email failed to={to_email}: {ex}")
             return False
 
     else:
-        logger.warning(f"EMAIL_PROVIDER not set — email for {to_email} not sent")
-        return True
+        logger.error(
+            f"EMAIL_PROVIDER='{provider}' is not set or unrecognised — "
+            f"email to {to_email} was NOT sent. Set EMAIL_PROVIDER=resend in your .env"
+        )
+        return False
 
 
 def _send_payment_failed_email(email: str, name: str, day: int) -> bool:
-    portal = STRIPE_BILLING_PORTAL_URL
+    portal = FRONTEND_URL
     if day == 1:
         subject  = "Action required: Payment failed for your subscription"
         body_txt = (f"Hi {name or 'there'},\n\nWe could not process your payment. "
