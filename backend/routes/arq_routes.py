@@ -29,6 +29,7 @@ from services.arq_service import (
 from services.auth_service import get_current_user
 from services.email_service import send_arq_email, send_arq_submitted_notification
 from utils.rate_limiter import check_arq_public_rate_limit, check_arq_submit_rate_limit, check_arq_chat_rate_limit, get_client_ip
+from utils.helpers import check_payment_access
 
 router = APIRouter(prefix="/api/arq", tags=["arq"])
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ async def generate_questions(
 
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
 
     generated = proc_session.get("generated_forms", {})
     if not generated:
@@ -120,6 +122,7 @@ async def send_arq(
 
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "upload")
 
     guarded_questions = filter_arq_questions_for_session(
         proc_session.get("generated_forms", {}),
@@ -426,6 +429,7 @@ async def get_arq_status(
         raise HTTPException(404, "ARQ session not found")
     if arq["user_id"] != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
 
     return JSONResponse({
         "success":         True,
@@ -448,6 +452,7 @@ async def list_arqs(
     session_id: str,
     current_user: dict = Depends(get_current_user),
 ):
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
             "SELECT id, status, email, client_name, created_at, submitted_at, expires_at, reminder_count "
@@ -467,6 +472,7 @@ async def send_reminder(
         raise HTTPException(404, "ARQ session not found")
     if arq["user_id"] != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     if arq["status"] == "submitted":
         raise HTTPException(400, "Client has already submitted this questionnaire")
 
@@ -476,12 +482,14 @@ async def send_reminder(
 
 @router.get("/notifications")
 async def get_notifications(current_user: dict = Depends(get_current_user)):
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     notifs = await get_arq_notifications(current_user["id"])
     return JSONResponse({"success": True, "notifications": notifs})
 
 
 @router.post("/notifications/read")
 async def mark_read(current_user: dict = Depends(get_current_user)):
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     await mark_notifications_read(current_user["id"])
     return JSONResponse({"success": True})
 
@@ -494,5 +502,6 @@ async def get_client_filled(
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     fields = await get_client_filled_fields(session_id)
     return JSONResponse({"success": True, "client_filled_fields": fields})

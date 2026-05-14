@@ -93,6 +93,6 @@
   "Producer_AuthorizedRepresentative_Signature_A": null,
   "NamedInsured_Signature_A": null,
   "NamedInsured_SignatureDate_A": null,
-  "__schema_version__": "v5",
-  "__ai_mapped__": []
+  "Producer_AuthorizedRepresentative_FullName_A": "contact_name",
+  "__schema_version__": "v5"
 }

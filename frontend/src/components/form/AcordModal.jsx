@@ -631,6 +631,7 @@ export default function AcordModal({
   const [showEnterprisePopup, setShowEnterprisePopup] = useState(false);
   const [enterprisePopupPos, setEnterprisePopupPos] = useState({ top: 0, left: 0 });
   const [liteSqsData, setLiteSqsData] = useState(null);
+  const [liteGenerating, setLiteGenerating] = useState(false);
   const [liteCoverLoading, setLiteCoverLoading] = useState(false);
 
   // ── SQS enhancement state ──────────────────────────────────────────────────
@@ -645,10 +646,20 @@ export default function AcordModal({
 
   useEffect(() => {
     if (step !== "lite" || !sessionId) return;
+
+    // Generate the top recommended form and compute accurate SQS + ARQ in one call.
+    // Both buttons stay disabled until this completes so the user always sees
+    // form-based SQS and has ARQ questions ready the moment they click.
+    setLiteGenerating(true);
+    setLiteSqsData(null);
     fetch(`${API_BASE}/api/lite/generate-internal/${sessionId}`, { method: "POST", credentials: "include" })
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.success) setLiteSqsData(d); })
-      .catch(() => {});
+      .then(d => {
+        if (d?.success) setLiteSqsData(d);
+        else setError("Could not score submission. Please try again.");
+      })
+      .catch(() => setError("Could not score submission. Please try again."))
+      .finally(() => setLiteGenerating(false));
   }, [step, sessionId]); // eslint-disable-line
 
   useEffect(() => {
@@ -1160,6 +1171,7 @@ export default function AcordModal({
 
         {step === "lite" && (() => {
           const sqs = liteSqsData?.sqs;
+          const liteReady = !liteGenerating && !!sqs;
           const liteGradeColor = g => ({ A: "#10b981", B: "#22c55e", C: "#f59e0b", D: "#f97316", F: "#ef4444" }[g] || "#94a3b8");
           const liteGradeBg = g => ({ A: "rgba(16,185,129,0.08)", B: "rgba(34,197,94,0.08)", C: "rgba(245,158,11,0.08)", D: "rgba(249,115,22,0.08)", F: "rgba(239,68,68,0.08)" }[g] || "rgba(148,163,184,0.08)");
           const routingLabel = { auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Underwriter Review", hold: "Hold — Remediation Required" };
@@ -1180,7 +1192,7 @@ export default function AcordModal({
                   Essentials
                 </div>
                 <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: "0 0 6px", letterSpacing: "-0.3px" }}>Submission Analysis</h2>
-                <p style={{ fontSize: 13.5, color: "#64748b", margin: 0 }}>Your SQS score is ready. Use the tools below to complete your workflow.</p>
+                <p style={{ fontSize: 13.5, color: "#64748b", margin: 0 }}>{liteGenerating ? "Analyzing your submission — generating SQS and ARQ. This takes about 30–60 seconds…" : "Your SQS score is ready. Use the tools below to complete your workflow."}</p>
               </div>
 
               {/* ── SQS hero card ── */}
@@ -1188,8 +1200,8 @@ export default function AcordModal({
                 {!sqs ? (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 0", gap: 14 }}>
                     <span style={{ width: 40, height: 40, border: "3px solid #e2e8f0", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
-                    <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Scoring your submission…</div>
-                    <div style={{ fontSize: 12, color: "#94a3b8" }}>This typically takes a few seconds</div>
+                    <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Generating your full analysis…</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8" }}>Building SQS score and ARQ questions — this takes about 30–60 seconds</div>
                   </div>
                 ) : (
                   <div>
@@ -1275,11 +1287,11 @@ export default function AcordModal({
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Send to Client</div>
                   <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.55, flex: 1 }}>Client-in-the-Loop™ — send a targeted questionnaire to fill gaps and improve your score.</div>
-                  <button onClick={handleOpenARQ} disabled={arqLoadingQ}
-                    style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: arqLoadingQ ? "#e2e8f0" : "#E61B84", color: arqLoadingQ ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: arqLoadingQ ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
-                    onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
-                    onMouseLeave={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
-                    {arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client (ARQ)"}
+                  <button onClick={handleOpenARQ} disabled={!liteReady || arqLoadingQ}
+                    style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: (!liteReady || arqLoadingQ) ? "#e2e8f0" : "#E61B84", color: (!liteReady || arqLoadingQ) ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: (!liteReady || arqLoadingQ) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: (!liteReady || arqLoadingQ) ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
+                    onMouseEnter={e => { if (liteReady && !arqLoadingQ) { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
+                    onMouseLeave={e => { if (liteReady && !arqLoadingQ) { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
+                    {liteGenerating ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Preparing…</> : arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client (ARQ)"}
                   </button>
                   <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
                 </div>
@@ -1291,11 +1303,11 @@ export default function AcordModal({
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Cover Summary</div>
                   <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.55, flex: 1 }}>AI-generated SQS narrative cover sheet — submittable with any platform, ready to download.</div>
-                  <button onClick={handleLiteCoverSheet} disabled={liteCoverLoading}
-                    style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: liteCoverLoading ? "#e2e8f0" : "#E61B84", color: liteCoverLoading ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: liteCoverLoading ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: liteCoverLoading ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
-                    onMouseEnter={e => { if (!liteCoverLoading) { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
-                    onMouseLeave={e => { if (!liteCoverLoading) { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
-                    {liteCoverLoading ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Generating…</> : "Cover Summary"}
+                  <button onClick={handleLiteCoverSheet} disabled={!liteReady || liteCoverLoading}
+                    style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: (!liteReady || liteCoverLoading) ? "#e2e8f0" : "#E61B84", color: (!liteReady || liteCoverLoading) ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: (!liteReady || liteCoverLoading) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: (!liteReady || liteCoverLoading) ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
+                    onMouseEnter={e => { if (liteReady && !liteCoverLoading) { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
+                    onMouseLeave={e => { if (liteReady && !liteCoverLoading) { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
+                    {liteGenerating ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Preparing…</> : liteCoverLoading ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Generating…</> : "Cover Summary"}
                   </button>
                 </div>
               </div>

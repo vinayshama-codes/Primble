@@ -13,7 +13,7 @@ from config.database import get_pool
 from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING
 from utils.crypto import decrypt_field
 from utils.json_logging import get_trace_id
-from utils.helpers import safe_join
+from utils.helpers import safe_join, check_payment_access
 from services.job_queue import get_job_queue, JOB_TYPE_EXTRACTION, JOB_TYPE_FORM_GENERATION, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED
 from models.schemas import BulkFormSelectionRequest, FormSelectionRequest, PDFUpdateRequest
 from repositories.session_repository import (
@@ -455,8 +455,9 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
     session = await get_processing_session(session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     recommendations = session.get("recommendations", [])
-    form_ids = [r["form_id"] for r in recommendations]
+    form_ids = [r["form_id"] for r in recommendations][:1]  # essentials: top form only
 
     if not form_ids:
         raise HTTPException(400, "No recommended forms found in session.")
@@ -518,6 +519,7 @@ async def get_form_fields(
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     generated = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form '{form_id}' not found")
@@ -580,6 +582,7 @@ async def mark_client_filled(
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     generated = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form '{form_id}' not found")
@@ -602,6 +605,7 @@ async def get_pdf(
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     generated = proc_session.get("generated_forms", {})
     if form_id not in generated:
         raise HTTPException(404, f"Form {form_id} not generated")
@@ -622,6 +626,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
     session   = await get_processing_session(req.session_id)
     if session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     generated = session.get("generated_forms", {})
     active_id = session.get("active_form_id")
 
@@ -790,6 +795,7 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     generated = proc_session.get("generated_forms", {})
     # Omit the full `form` field data — it can be megabytes and is not needed to
     # restore the editor shell. The PDF viewer fetches form data lazily per-form.
@@ -801,6 +807,7 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
 
 @router.get("/api/sessions/stats")
 async def session_stats(current_user: dict = Depends(get_current_user)):
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -834,6 +841,8 @@ async def session_stats(current_user: dict = Depends(get_current_user)):
 
 @router.get("/api/sessions")
 async def list_sessions(current_user: dict = Depends(get_current_user)):
+    if (current_user.get("payment_status") or "ok") == "archived":
+        raise HTTPException(403, "Account archived due to non-payment. Contact support@acordly.ai to reactivate.")
     from repositories.session_repository import list_sessions_for_user
     sessions = await list_sessions_for_user(str(current_user["id"]))
     return JSONResponse({"success": True, "sessions": sessions})
@@ -842,6 +851,7 @@ async def list_sessions(current_user: dict = Depends(get_current_user)):
 # ASYNC-SAFE
 @router.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str, current_user: dict = Depends(get_current_user)):
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     async with get_pool().acquire() as conn:
         await conn.execute(
             "DELETE FROM processing_sessions WHERE id = $1 AND user_id = $2",
@@ -860,6 +870,7 @@ async def send_to_epic(session_id: str, form_id: str, current_user: dict = Depen
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     generated = proc_session.get("generated_forms", {})
     facts     = proc_session.get("facts", {})
     org_name  = current_user.get("organization_name") or current_user.get("full_name") or "Unknown Org"
@@ -903,6 +914,7 @@ async def send_to_vertafore(session_id: str, form_id: str, current_user: dict = 
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     generated = proc_session.get("generated_forms", {})
     facts     = proc_session.get("facts", {})
     org_name  = current_user.get("organization_name") or current_user.get("full_name") or "Unknown Org"
@@ -957,6 +969,7 @@ async def clarity_analyze(
     from services.arq_service import generate_arq_questions_from_facts
     from services.form_service import match_forms_deterministic
 
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     tier = current_user.get("subscription_tier", "free") or "free"
 
     if is_assembly(tier):
@@ -1073,6 +1086,7 @@ async def get_presigned_upload_url(
     if not _s3_ok():
         raise HTTPException(503, "S3 is not configured. Use the multipart upload endpoint instead.")
 
+    check_payment_access(current_user.get("payment_status", "ok"), "upload")
     check_upload_rate_limit(str(current_user["id"]))
 
     body     = await request.json()

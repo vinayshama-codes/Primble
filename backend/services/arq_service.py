@@ -704,6 +704,95 @@ async def generate_arq_questions(
 
 
 # ---------------------------------------------------------------------------
+# Clarity pipeline: facts-only ARQ generation (no generated_forms needed)
+# ---------------------------------------------------------------------------
+
+def generate_arq_questions_from_facts(
+    facts: dict,
+    flags: dict,
+    selected_form_ids: List[str],
+    hard_stops: List[str],
+    soft_stops: List[str],
+) -> List[dict]:
+    """
+    Synchronous ARQ question generator for the Clarity pipeline.
+
+    Instead of reading confidence/mapped data from generated PDF forms, it
+    consults FORM_FIELD_INVENTORY to know which fields each form requires and
+    then checks whether those fields are present in the extracted facts.
+    Fields that are missing or empty become ARQ questions for the client.
+    """
+    from services.sqs_service import FORM_FIELD_INVENTORY, _fact_is_filled
+
+    # Collect missing fields per form.  We deduplicate by field_name across
+    # forms so the client is never asked the same question twice.
+    missing_fields: dict[str, set] = {}
+
+    for fid in selected_form_ids:
+        inventory = FORM_FIELD_INVENTORY.get(fid, [])
+        for field_name in inventory:
+            if any(p in field_name.lower() for p in ["signature", "sig_", "_sig"]):
+                continue
+            val = facts.get(field_name)
+            if not _fact_is_filled(val):
+                if field_name not in missing_fields:
+                    missing_fields[field_name] = set()
+                missing_fields[field_name].add(fid)
+
+    questions: List[dict] = []
+    seen_field_names: set = set()
+    group_counts: dict[str, int] = {}
+
+    for field_name, form_ids in missing_fields.items():
+        if field_name in seen_field_names:
+            continue
+        seen_field_names.add(field_name)
+
+        base_question, group_label = _resolve_question(field_name)
+
+        if group_label is not None:
+            group_counts[group_label] = group_counts.get(group_label, 0) + 1
+            count = group_counts[group_label]
+            if count == 1:
+                question_text = base_question
+            else:
+                question_text = f"{base_question} ({_ordinal(count)} {group_label})"
+                if count == 2:
+                    for prev_q in questions:
+                        if prev_q.get("_group_label") == group_label:
+                            prev_q["question"] = f"{base_question} (1st {group_label})"
+                            break
+        else:
+            question_text = base_question
+
+        form_names_list = [fid.replace("ACORD_", "").replace("ACORD ", "") for fid in sorted(form_ids)]
+
+        hint = _FIELD_HINT_MAP.get(field_name, "")
+        if not hint:
+            base_fn = re.sub(r'[_\s]+[a-z]$', '', field_name)
+            base_fn = re.sub(r'[_\s]+\d+$', '', base_fn)
+            hint = _FIELD_HINT_MAP.get(base_fn, "")
+        if not hint and group_label:
+            hint = _PREFIX_HINT_MAP.get(group_label, "")
+
+        questions.append({
+            "field_name":    field_name,
+            "question":      question_text,
+            "hint":          hint,
+            "forms":         ", ".join(sorted(set(form_names_list))),
+            "form_ids":      list(form_ids),
+            "field_type":    "text",
+            "current_value": "",
+            "_group_label":  group_label,
+        })
+
+    for q in questions:
+        q.pop("_group_label", None)
+
+    return questions
+
+
+# ---------------------------------------------------------------------------
 # Cross-form conflict ARQ questions
 # ---------------------------------------------------------------------------
 

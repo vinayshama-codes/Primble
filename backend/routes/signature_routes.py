@@ -12,7 +12,7 @@ from repositories.session_repository import get_processing_session, upd_processi
 from services.auth_service import get_current_user
 from services.pdf_service import _is_signature_field, inject_signature_into_pdf
 from utils.crypto import decrypt_field, encrypt_field
-from utils.helpers import safe_join
+from utils.helpers import safe_join, check_payment_access
 
 router = APIRouter(tags=["signature"])
 logger = logging.getLogger(__name__)
@@ -73,6 +73,7 @@ async def apply_signature(
     proc_session = await get_processing_session(session_id, include_pdf=True)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     generated = proc_session.get("generated_forms", {})
 
     if form_id not in generated:

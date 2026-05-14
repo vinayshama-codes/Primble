@@ -191,9 +191,10 @@ async def _openai_chat(
     _retries: int,
 ) -> str:
     import openai as _openai
+    _timeout = float(os.getenv("LLM_REQUEST_TIMEOUT", "120"))
     client = _openai.AsyncOpenAI(
         api_key=os.getenv("OPENAI_API_KEY", ""),
-        http_client=httpx.AsyncClient(timeout=30.0),
+        http_client=httpx.AsyncClient(timeout=_timeout),
     )
     last_ex = None
     for attempt in range(_retries + 1):
@@ -208,10 +209,11 @@ async def _openai_chat(
         except Exception as ex:
             last_ex = ex
             status = getattr(ex, "status_code", None)
-            if attempt < _retries and status in (429, 500, 502, 503):
+            is_timeout = isinstance(ex, (_openai.APITimeoutError, httpx.TimeoutException))
+            if attempt < _retries and (status in (429, 500, 502, 503) or is_timeout):
                 wait = 2 ** attempt
                 logger.warning(
-                    f"OpenAI {status} on attempt {attempt+1}, retrying in {wait}s: {ex}"
+                    f"OpenAI {'timeout' if is_timeout else status} on attempt {attempt+1}, retrying in {wait}s: {ex}"
                 )
                 await asyncio.sleep(wait)  # non-blocking
             else:

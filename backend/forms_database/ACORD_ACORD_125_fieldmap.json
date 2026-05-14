@@ -228,9 +228,11 @@
   "Policy_Status_EffectiveTimePMIndicator_A": null,
   "LossHistory_TotalAmount_A": null,
   "Policy_Audit_FrequencyCode_A": "audit_period",
+  "BuildingOccupancy_OperationsDescription_B": "operations_description",
   "__schema_version__": "v5",
   "__ai_mapped__": [
     "BuildingOccupancy_OperationsDescription_A",
+    "BuildingOccupancy_OperationsDescription_B",
     "BusinessInformation_BusinessType_ServiceIndicator_A",
     "CommercialStructure_AnnualRevenueAmount_A",
     "Insurer_ProducerIdentifier_A",

@@ -20,6 +20,7 @@ from services.sqs_service import calculate_sqs
 from services import s3_service
 from utils.crypto import decrypt_field
 from utils.rate_limiter import check_download_rate_limit
+from utils.helpers import check_payment_access
 
 router = APIRouter(tags=["downloads"])
 logger = logging.getLogger(__name__)
@@ -115,8 +116,7 @@ async def download_pdf(
     sub  = fresh.get("subscription_tier", "free") or "free"
     used = int(fresh.get("downloads_used", 0) or 0)
 
-    if fresh.get("payment_status") == "suspended":
-        return JSONResponse({"success": False, "payment_locked": True, "message": "Account suspended."}, status_code=403)
+    check_payment_access(fresh.get("payment_status", "ok"), "form")
     if sub == "free" and used >= 3:
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
     if sub == "essentials":
@@ -187,25 +187,21 @@ async def download_pdf(
 
     zip_buf = await _loop.run_in_executor(None, _build_zip)
 
-    _ids_hash = hashlib.md5(form_id.encode()).hexdigest()[:8]
-    if _acquire_download_lock(fresh["id"], session_id, _ids_hash):
+    _ids_hash        = hashlib.md5(form_id.encode()).hexdigest()[:8]
+    _already_counted = bool(proc_session.get("package_counted_at"))
+    if not _already_counted and _acquire_download_lock(fresh["id"], session_id, _ids_hash):
+        _now_iso = datetime.now(timezone.utc).isoformat()
+        await upd_processing_session(session_id, {"package_counted_at": _now_iso})
         async with get_pool().acquire() as conn:
             if sub == "free":
                 await conn.execute(
-                    "UPDATE users SET downloads_used = downloads_used + 1 WHERE id = $1", fresh["id"]
+                    "UPDATE users SET downloads_used = COALESCE(downloads_used, 0) + 1 WHERE id = $1", fresh["id"]
                 )
             elif sub in ("professional", "business") and pkg_eval:
-                _pkgs_limit  = int(fresh.get("packages_limit", 0) or 0)
-                _soft_buffer = int(_pkgs_limit * 0.05) if _pkgs_limit > 0 else 0
-                _ceiling     = _pkgs_limit + _soft_buffer
-                updated = await conn.fetchval(
-                    "UPDATE users SET packages_used = packages_used + 1"
-                    " WHERE id = $1 AND packages_used < $2"
-                    " RETURNING packages_used",
-                    fresh["id"], _ceiling,
+                await conn.execute(
+                    "UPDATE users SET packages_used = COALESCE(packages_used, 0) + 1 WHERE id = $1",
+                    fresh["id"],
                 )
-                if updated is None:
-                    logger.warning("download_pdf: packages_used ceiling hit for user=%s", fresh["id"])
                 if pkg_eval["status"] == "overage":
                     stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
                     if stripe_queued:
@@ -219,7 +215,7 @@ async def download_pdf(
                             fresh["id"],
                         )
     else:
-        logger.info("download_pdf: duplicate download skipped for user=%s session=%s form=%s", fresh["id"], session_id, form_id)
+        logger.info("download_pdf: already counted — skipping for user=%s session=%s form=%s", fresh["id"], session_id, form_id)
 
     await write_audit_log(
         user=fresh, action="download", form_id=form_id, form_name=form_name,
@@ -255,8 +251,7 @@ async def download_all(
     sub  = fresh.get("subscription_tier", "free") or "free"
     used = int(fresh.get("downloads_used", 0) or 0)
 
-    if fresh.get("payment_status") == "suspended":
-        return JSONResponse({"success": False, "payment_locked": True, "message": "Account suspended."}, status_code=403)
+    check_payment_access(fresh.get("payment_status", "ok"), "form")
     if sub == "free" and used >= 3:
         return JSONResponse({"success": False, "upgrade_required": True, "message": "Free limit reached."}, status_code=403)
     if sub == "essentials":
@@ -304,25 +299,21 @@ async def download_all(
             zf.writestr(f"{fid}_FILLED.pdf", pb)
     zip_buf.seek(0)
 
-    _ids_hash = hashlib.md5((",".join(sorted(generated.keys()))).encode()).hexdigest()[:8]
-    if _acquire_download_lock(fresh["id"], session_id, _ids_hash):
+    _ids_hash        = hashlib.md5((",".join(sorted(generated.keys()))).encode()).hexdigest()[:8]
+    _already_counted = bool(proc_session.get("package_counted_at"))
+    if not _already_counted and _acquire_download_lock(fresh["id"], session_id, _ids_hash):
+        _now_iso = datetime.now(timezone.utc).isoformat()
+        await upd_processing_session(session_id, {"package_counted_at": _now_iso})
         async with get_pool().acquire() as conn:
             if sub == "free":
                 await conn.execute(
-                    "UPDATE users SET downloads_used = downloads_used + 1 WHERE id = $1", fresh["id"]
+                    "UPDATE users SET downloads_used = COALESCE(downloads_used, 0) + 1 WHERE id = $1", fresh["id"]
                 )
             elif sub in ("professional", "business") and pkg_eval:
-                _pkgs_limit  = int(fresh.get("packages_limit", 0) or 0)
-                _soft_buffer = int(_pkgs_limit * 0.05) if _pkgs_limit > 0 else 0
-                _ceiling     = _pkgs_limit + _soft_buffer
-                updated = await conn.fetchval(
-                    "UPDATE users SET packages_used = packages_used + 1"
-                    " WHERE id = $1 AND packages_used < $2"
-                    " RETURNING packages_used",
-                    fresh["id"], _ceiling,
+                await conn.execute(
+                    "UPDATE users SET packages_used = COALESCE(packages_used, 0) + 1 WHERE id = $1",
+                    fresh["id"],
                 )
-                if updated is None:
-                    logger.warning("download_all: packages_used ceiling hit for user=%s", fresh["id"])
                 if pkg_eval["status"] == "overage":
                     stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
                     if stripe_queued:
@@ -336,7 +327,7 @@ async def download_all(
                             fresh["id"],
                         )
     else:
-        logger.info("download_all: duplicate download skipped for user=%s session=%s", fresh["id"], session_id)
+        logger.info("download_all: already counted — skipping for user=%s session=%s", fresh["id"], session_id)
 
     await write_audit_log(
         user=fresh, action="download_zip",
@@ -364,6 +355,7 @@ async def download_all(
 async def lite_analyze(session_id: str, current_user: dict = Depends(get_current_user)):
     if current_user.get("subscription_tier") == "free":
         raise HTTPException(403, "Upgrade required to access submission scoring.")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
@@ -372,12 +364,21 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
     hard_stops  = proc_session.get("hard_stops", [])
     soft_stops  = proc_session.get("soft_stops", [])
     tier2_score = proc_session.get("tier2_score", 50)
-    sqs = calculate_sqs(
+
+    # Use session recommendations for form-aware scoring.
+    # calculate_sqs_from_facts uses FORM_FIELD_INVENTORY (no LLM, no PDF generation)
+    # so this returns in milliseconds.  Falls back to ACORD_125 if no recs exist.
+    from services.sqs_service import calculate_sqs_from_facts
+    recs             = proc_session.get("recommendations", [])
+    selected_ids     = [r["form_id"] for r in recs] if recs else ["ACORD_125"]
+    primary_form_id  = selected_ids[0]
+
+    sqs = calculate_sqs_from_facts(
         facts=facts, flags=flags,
-        mapped_data={}, form_schema={},
-        selected_form_ids=[],
+        selected_form_ids=selected_ids,
         hard_stops=hard_stops, soft_stops=soft_stops,
         tier2_score=tier2_score,
+        form_id=primary_form_id,
     )
     return JSONResponse({"success": True, "sqs": sqs, "hard_stops": hard_stops, "soft_stops": soft_stops, "flags": flags})
 
@@ -386,6 +387,13 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
 async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_current_user)):
     if current_user.get("subscription_tier") == "free":
         raise HTTPException(403, "Upgrade required to access cover sheet generation.")
+    check_payment_access(current_user.get("payment_status", "ok"), "form")
+
+    fresh = await _refresh_user(current_user["id"])
+    if not fresh:
+        raise HTTPException(401, "User not found")
+    sub = fresh.get("subscription_tier", "free") or "free"
+
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
@@ -394,7 +402,7 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
     hard_stops  = proc_session.get("hard_stops", [])
     soft_stops  = proc_session.get("soft_stops", [])
     tier2_score = proc_session.get("tier2_score", 50)
-    org_name    = current_user.get("organization_name") or current_user.get("full_name") or "Acordly User"
+    org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
 
     clarity_result  = proc_session.get("clarity_result", {})
     generated_forms = proc_session.get("generated_forms", {})
@@ -420,22 +428,58 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
     ai_content = await generate_lite_cover_narrative(
         facts=facts, flags=flags, sqs=sqs,
         hard_stops=hard_stops, soft_stops=soft_stops,
-        org_name=org_name, user=current_user,
+        org_name=org_name, user=fresh,
     )
     cover_pdf = build_cover_page_pdf(
         facts=facts, flags=flags, sqs_results=sqs_results, form_ids=[],
         org_name=org_name, narrative=ai_content["narrative"],
         ai_block=ai_content["ai_block"],
         sqs_reasoning=ai_content.get("sqs_reasoning", ""),
-        user=current_user,
+        user=fresh,
         hard_stops=hard_stops, soft_stops=soft_stops,
     )
+
+    # Essentials billing: cover sheet is the downloadable artifact for this tier.
+    # Count once per session (permanent flag), with rapid-double-click guard on top.
+    pkg_eval = None
+    if sub == "essentials":
+        _already_counted = bool(proc_session.get("package_counted_at"))
+        if not _already_counted:
+            pkg_eval = await evaluate_package_limit(fresh)
+            _ids_hash = hashlib.md5(b"cover").hexdigest()[:8]
+            if _acquire_download_lock(fresh["id"], session_id, _ids_hash):
+                _now_iso = datetime.now(timezone.utc).isoformat()
+                await upd_processing_session(session_id, {"package_counted_at": _now_iso})
+                async with get_pool().acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET packages_used = COALESCE(packages_used, 0) + 1 WHERE id = $1",
+                        fresh["id"],
+                    )
+                    if pkg_eval["status"] == "overage":
+                        stripe_queued = create_overage_invoice_item(fresh, pkg_eval["overage_rate_cents"])
+                        if stripe_queued:
+                            await conn.execute(
+                                "UPDATE users SET overage_packages_invoiced = COALESCE(overage_packages_invoiced,0) + 1 WHERE id = $1",
+                                fresh["id"],
+                            )
+                        else:
+                            await conn.execute(
+                                "UPDATE users SET overage_packages_pending = COALESCE(overage_packages_pending,0) + 1 WHERE id = $1",
+                                fresh["id"],
+                            )
+        else:
+            logger.info("lite_cover_sheet: already counted — skipping for user=%s session=%s", fresh["id"], session_id)
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
     })
 
+    extra_headers = {"Cache-Control": "no-cache"}
+    if pkg_eval:
+        extra_headers["X-Package-Status"]  = pkg_eval["status"]
+        extra_headers["X-Package-Message"] = pkg_eval.get("message", "")
+
     return Response(
         content=cover_pdf, media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=Acordly_SQS_Cover_Sheet.pdf"},
+        headers={"Content-Disposition": "attachment; filename=Acordly_SQS_Cover_Sheet.pdf", **extra_headers},
     )

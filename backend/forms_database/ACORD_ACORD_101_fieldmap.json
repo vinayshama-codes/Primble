@@ -1,7 +1,6 @@
 {
   "Form_EditionIdentifier_A": null,
   "Producer_CustomerIdentifier_A": "producer_name",
-  "Location_ProducerIdentifier_A": null,
   "Producer_FullName_A": "producer_name",
   "Policy_PolicyNumberIdentifier_A": "policy_number",
   "Insurer_FullName_A": "carrier_name",
@@ -11,6 +10,6 @@
   "NamedInsured_FullName_C": "applicant_name",
   "NamedInsured_FullName_D": "applicant_name",
   "Policy_EffectiveDate_A": "effective_date",
-  "__schema_version__": "v5",
-  "__ai_mapped__": []
+  "Location_ProducerIdentifier_A": null,
+  "__schema_version__": "v5"
 }

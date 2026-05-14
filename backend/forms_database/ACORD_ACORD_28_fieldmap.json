@@ -10,7 +10,7 @@
   "Producer_MailingAddress_PostalCode_A": "_addr_zip",
   "Producer_ContactPerson_PhoneNumber_A": "contact_phone",
   "Producer_ContactPerson_EmailAddress_A": "contact_email",
-  "Insurer_ProducerIdentifier_A": null,
+  "Insurer_ProducerIdentifier_A": "producer_name",
   "Insurer_SubProducerIdentifier_A": null,
   "Producer_CustomerIdentifier_A": "producer_name",
   "NamedInsured_FullName_A": "applicant_name",
@@ -39,6 +39,10 @@
   "AdditionalInterest_MailingAddress_StateOrProvinceCode_B": "_addr_state",
   "AdditionalInterest_MailingAddress_PostalCode_B": "_addr_zip",
   "Producer_AuthorizedRepresentative_Signature_A": null,
+  "EvidenceOfProperty_PriorEvidenceDate_A": "prior_effective_date",
   "__schema_version__": "v5",
-  "__ai_mapped__": []
+  "__ai_mapped__": [
+    "EvidenceOfProperty_PriorEvidenceDate_A",
+    "Insurer_ProducerIdentifier_A"
+  ]
 }
