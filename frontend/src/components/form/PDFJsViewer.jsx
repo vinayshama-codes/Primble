@@ -315,18 +315,29 @@ export default function PDFJsViewer({
       const isSigF = _isSigField(field.name);
 
       if (field.type === "checkbox") {
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.checked  = val === "Yes" || val === "true" || val === "1" || val === "On";
-        cb.disabled = !curEdit;
-        cb.style.cssText = `position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:${Math.min(ch*0.7,13)}px;height:${Math.min(ch*0.7,13)}px;margin:0;cursor:${curEdit?"pointer":"default"};accent-color:#4f7cff;opacity:${curEdit?1:0.5};`;
-        cb.addEventListener("change", e => {
-          const nextVal = e.target.checked ? "Yes" : "Off";
-          triggerSave(field.name, nextVal);
-          wrap.style.background = _highlightBg(_getHighlight(field.name, nextVal), curEdit);
-          updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
-        });
-        wrap.appendChild(cb);
+        const isChecked = val === "Yes" || val === "true" || val === "1" || val === "On";
+        if (curEdit) {
+          const cb = document.createElement("input");
+          cb.type    = "checkbox";
+          cb.checked = isChecked;
+          cb.style.cssText = `position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:${Math.min(ch*0.7,13)}px;height:${Math.min(ch*0.7,13)}px;margin:0;cursor:pointer;accent-color:#000;`;
+          cb.addEventListener("change", e => {
+            const nextVal = e.target.checked ? "Yes" : "Off";
+            triggerSave(field.name, nextVal);
+            wrap.style.background = _highlightBg(_getHighlight(field.name, nextVal), curEdit);
+            updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
+          });
+          wrap.appendChild(cb);
+        } else if (isChecked) {
+          // View mode: the backend removes /AP so the PDF canvas renders nothing
+          // inside the checkbox. Draw a solid black tick here so it's always
+          // visible and correctly coloured regardless of the PDF's appearance stream.
+          const mark = document.createElement("div");
+          const markSize = Math.min(ch * 0.78, 12);
+          mark.style.cssText = `position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:${markSize}px;line-height:1;color:#000;font-weight:900;font-family:Arial,sans-serif;user-select:none;pointer-events:none;`;
+          mark.textContent = "✓";
+          wrap.appendChild(mark);
+        }
       } else if (isSigF) {
         const thisCleared  = clearedSigFieldsRef.current.has(field.name);
         const showClearBtn = curEdit && isSignedLocalRef.current && !thisCleared;
@@ -545,7 +556,7 @@ export default function PDFJsViewer({
 
           <button onClick={handleSignClick} disabled={applyingSign}
             title={isSignedLocal ? "Signature applied — enter edit mode to remove" : savedSignature ? "Apply your saved signature" : "Set up a signature"}
-            style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${isSignedLocal ? "#10b981" : "rgba(230,0,122,0.4)"}`, background: isSignedLocal ? "rgba(16,185,129,0.1)" : "rgba(230,0,122,0.08)", color: isSignedLocal ? "#10b981" : "#e6007a", fontSize: 12, fontWeight: 600, cursor: applyingSign ? "wait" : "pointer", fontFamily: "inherit", opacity: applyingSign ? 0.7 : 1 }}>
+            style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${isSignedLocal ? "#10b981" : "rgba(230,0,122,0.4)"}`, background: isSignedLocal ? "rgba(16,185,129,0.1)" : "rgba(230,0,122,0.08)", color: isSignedLocal ? "#10b981" : "#E61B84", fontSize: 12, fontWeight: 600, cursor: applyingSign ? "wait" : "pointer", fontFamily: "inherit", opacity: applyingSign ? 0.7 : 1 }}>
             {applyingSign ? <><span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Signing…</> : isSignedLocal ? "✓ Signed" : "✍ Sign"}
           </button>
 

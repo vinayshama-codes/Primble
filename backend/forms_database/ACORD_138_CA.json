@@ -1,8 +1,8 @@
 {
-  "form_id": "ACORD_138",
-  "form_name": "ACORD 138 - Garage and Dealers Coverages / Limits Section",
-  "form_type": "garage_dealers_section",
-  "template_file": "ACORD_138.pdf",
+  "form_id": "ACORD_138_CA",
+  "form_name": "ACORD 138 CA - Cyber / Network Security Application",
+  "form_type": "cyber_liability",
+  "template_file": "ACORD_138_CA.pdf",
   "description": "Captures garage and auto dealer coverage information including garage liability, garage keepers coverage, dealer plate coverage, physical damage, and dealer operations exposures.",
   "always_include": false,
   "matching_flags": [

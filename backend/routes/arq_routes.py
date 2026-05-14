@@ -12,7 +12,9 @@ from services.arq_service import (
     apply_arq_answers_to_session,
     create_arq_notification,
     create_arq_session,
+    filter_arq_questions_for_session,
     generate_arq_questions,
+    generate_cross_form_arq_questions,
     get_arq_by_id,
     get_arq_by_token,
     get_arq_notifications,
@@ -66,6 +68,16 @@ async def generate_questions(
         soft_stops=proc_session.get("soft_stops", []),
     )
 
+    # Merge cross-form conflict questions — placed at the front so the client
+    # resolves structural conflicts before answering form-level missing fields.
+    cross_form_issues = proc_session.get("cross_form_issues", [])
+    if cross_form_issues:
+        cf_questions = generate_cross_form_arq_questions(cross_form_issues, generated)
+        # Deduplicate by field_name against per-form questions already in the list
+        existing_fields = {q["field_name"] for q in questions}
+        new_cf = [q for q in cf_questions if q["field_name"] not in existing_fields]
+        questions = new_cf + questions
+
     producer_full_name  = current_user.get("full_name", "") or current_user.get("email", "")
     producer_first_name = producer_full_name.split()[0] if producer_full_name else ""
 
@@ -109,8 +121,15 @@ async def send_arq(
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
 
+    guarded_questions = filter_arq_questions_for_session(
+        proc_session.get("generated_forms", {}),
+        questions,
+    )
+    if not guarded_questions:
+        raise HTTPException(400, "At least one valid question is required")
+
     clean_questions = []
-    for q in questions:
+    for q in guarded_questions:
         clean_questions.append({
             "field_name":    _sanitize_str(q.get("field_name", ""), 128),
             "question":      _sanitize_str(q.get("question", ""), 500),

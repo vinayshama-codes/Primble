@@ -529,6 +529,10 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
         if not email:
             raise ValueError("No email in token")
 
+        ok_email, email_msg = validate_work_email(email)
+        if not ok_email:
+            raise HTTPException(400, "Only organizational email accounts are supported. Please sign in with your work email.")
+
         async with get_pool().acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM users WHERE google_id = $1", google_id)
             if not row:

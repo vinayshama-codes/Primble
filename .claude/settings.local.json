@@ -69,11 +69,24 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('services/pdf_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('C:/Users/lenovo/Desktop/ACORD-PY-VERSION2/backend/services/s3_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(python -c \"import services.pdf_service; print\\('OK'\\)\")",
-      "Bash(python -c \"import services.form_service; print\\('OK'\\)\")"
+      "Bash(python -c \"import services.form_service; print\\('OK'\\)\")",
+      "Read(//c/tmp/**)",
+      "Read(//c/Users/lenovo/AppData/Local/Temp/**)",
+      "Read(//c/Users/lenovo/.claude/projects/c--Users-lenovo-Desktop-ACORD-PY-VERSION2/8491aa91-ad85-4a42-9984-4db0a7e7046a/tool-results/**)",
+      "Bash(xargs ls *)",
+      "Bash(npm run *)",
+      "Bash(node -c src/App.jsx)",
+      "Bash(python -m py_compile backend/services/sqs_service.py backend/services/form_service.py backend/services/cross_form_validator.py)",
+      "Bash(python -m pytest tests/test_all_changes.py -v --tb=short)",
+      "Bash(python -c \"from services.sqs_service import calculate_sqs, calculate_package_sqs_spec_compliant, generate_risk_transfer_enforcement_report; from services.form_service import match_forms_deterministic, _infer_primary_state; from services.cross_form_validator import run_cross_form_validation; print\\('✅ All modules imported successfully'\\)\")",
+      "Bash(python -c \"from services.sqs_service import calculate_sqs, calculate_package_sqs_spec_compliant, generate_risk_transfer_enforcement_report; from services.form_service import match_forms_deterministic, _infer_primary_state; from services.cross_form_validator import run_cross_form_validation; print\\('SUCCESS: All modules imported'\\)\")",
+      "Bash(xargs sed *)",
+      "Bash(grep -E '\\\\.env$|\\\\.env\\\\.')"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",
-      "C:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend\\forms_database"
+      "C:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend\\forms_database",
+      "C:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2"
     ]
   }
 }

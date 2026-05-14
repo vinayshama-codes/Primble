@@ -139,9 +139,9 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
                 onClick={() => { setMode(m); setUploadPreview(null); }}
                 style={{
                   flex: 1, padding: "8px", borderRadius: 8, border: "1.5px solid",
-                  borderColor: mode === m ? "#e6007a" : "#e2e8f0",
+                  borderColor: mode === m ? "#E61B84" : "#e2e8f0",
                   background: mode === m ? "rgba(230,0,122,0.06)" : "#fff",
-                  color: mode === m ? "#e6007a" : "#64748b",
+                  color: mode === m ? "#E61B84" : "#64748b",
                   fontWeight: mode === m ? 700 : 500, fontSize: 13, cursor: "pointer",
                 }}
               >

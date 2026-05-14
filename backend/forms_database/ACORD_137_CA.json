@@ -1,8 +1,8 @@
 {
-  "form_id": "ACORD_137",
-  "form_name": "ACORD 137 - Commercial Auto Coverages / Limits Section",
-  "form_type": "commercial_auto_section",
-  "template_file": "ACORD_137.pdf",
+  "form_id": "ACORD_137_CA",
+  "form_name": "ACORD 137 CA - Commercial Crime Application",
+  "form_type": "commercial_crime",
+  "template_file": "ACORD_137_CA.pdf",
   "description": "Captures commercial auto, truckers, and motor carrier coverage details including liability limits, physical damage, hired/non-owned auto coverage, trailer interchange, and uninsured motorist coverage.",
   "always_include": false,
   "matching_flags": [

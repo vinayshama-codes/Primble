@@ -112,22 +112,22 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
         <div style={{ padding: "24px 28px 0", flexShrink: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", marginBottom: 4, letterSpacing: "0.05em", textTransform: "uppercase" }}>Client Questionnaire</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#E61B84", marginBottom: 4, letterSpacing: "0.05em", textTransform: "uppercase" }}>Client Questionnaire</div>
               <h2 style={{ fontSize: 22, fontWeight: 700, color: "#0f172a", margin: 0 }}>Send to Client</h2>
               <p style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Client answers will auto-populate your ACORD forms.</p>
             </div>
-            <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid #e6007a", background: "rgba(230,0,122,0.08)", color: "#e6007a", fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.2s" }}
-              onMouseEnter={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.color = "#fff"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "rgba(230,0,122,0.08)"; e.currentTarget.style.color = "#e6007a"; }}>✕</button>
+            <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid #E61B84", background: "rgba(230,0,122,0.08)", color: "#E61B84", fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.2s" }}
+              onMouseEnter={e => { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.color = "#fff"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = "rgba(230,0,122,0.08)"; e.currentTarget.style.color = "#E61B84"; }}>✕</button>
           </div>
           {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 16, color: "#dc2626", fontSize: 13 }}>⚠️ {error}</div>}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
             <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Client Email <span style={{ color: "#e6007a" }}>*</span></label>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Client Email <span style={{ color: "#E61B84" }}>*</span></label>
               <input type="email" value={clientEmail}
                 onChange={e => { setClientEmail(e.target.value); setEmailTouched(true); }}
                 onBlur={e => { setEmailTouched(true); e.target.style.borderColor = "#e2e8f0"; }}
-                onFocus={e => e.target.style.borderColor = "#e6007a"}
+                onFocus={e => e.target.style.borderColor = "#E61B84"}
                 placeholder="client@company.com" maxLength={254}
                 style={{ width: "100%", padding: "9px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box" }} />
               {emailTouched && clientEmail && !isEmailValid && (
@@ -138,7 +138,7 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>First Name <span style={{ color: "#94a3b8", fontWeight: 400 }}>(optional)</span></label>
               <input type="text" value={clientName} onChange={e => setClientName(e.target.value)} placeholder="e.g. John" maxLength={100}
                 style={{ width: "100%", padding: "9px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 13, outline: "none", boxSizing: "border-box" }}
-                onFocus={e => e.target.style.borderColor = "#e6007a"} onBlur={e => e.target.style.borderColor = "#e2e8f0"} />
+                onFocus={e => e.target.style.borderColor = "#E61B84"} onBlur={e => e.target.style.borderColor = "#e2e8f0"} />
             </div>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid #f1f5f9" }}>
@@ -152,10 +152,10 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {questions.map((q, idx) => (
               <div key={idx} onClick={() => handleToggle(q.field_name)}
-                style={{ border: `1.5px solid ${selectedQuestions[q.field_name] ? "#e6007a" : "#e2e8f0"}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", background: selectedQuestions[q.field_name] ? "rgba(230,0,122,0.03)" : "#fafafa", display: "flex", alignItems: "flex-start", gap: 10, opacity: selectedQuestions[q.field_name] ? 1 : 0.5, transition: "all 0.15s" }}>
-                <input type="checkbox" checked={!!selectedQuestions[q.field_name]} onChange={() => handleToggle(q.field_name)} onClick={e => e.stopPropagation()} style={{ marginTop: 3, width: 15, height: 15, cursor: "pointer", accentColor: "#e6007a", flexShrink: 0 }} />
+                style={{ border: `1.5px solid ${selectedQuestions[q.field_name] ? "#E61B84" : "#e2e8f0"}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", background: selectedQuestions[q.field_name] ? "rgba(230,0,122,0.03)" : "#fafafa", display: "flex", alignItems: "flex-start", gap: 10, opacity: selectedQuestions[q.field_name] ? 1 : 0.5, transition: "all 0.15s" }}>
+                <input type="checkbox" checked={!!selectedQuestions[q.field_name]} onChange={() => handleToggle(q.field_name)} onClick={e => e.stopPropagation()} style={{ marginTop: 3, width: 15, height: 15, cursor: "pointer", accentColor: "#E61B84", flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "#e6007a", background: "#fdf2f8", padding: "1px 7px", borderRadius: 20, display: "inline-block", marginBottom: 4 }}>ACORD {q.forms}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", background: "#fdf2f8", padding: "1px 7px", borderRadius: 20, display: "inline-block", marginBottom: 4 }}>ACORD {q.forms}</span>
                   <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#0f172a", lineHeight: 1.45 }}>{q.question}</p>
                   {q.current_value && <p style={{ margin: "3px 0 0", fontSize: 11, color: "#94a3b8" }}>Current: {q.current_value}</p>}
                 </div>
@@ -165,7 +165,7 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
         </div>
         <div style={{ padding: "16px 28px 24px", flexShrink: 0, borderTop: "1px solid #f1f5f9", marginTop: 8 }}>
           <button onClick={handleSend} disabled={!canSend || sending}
-            style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: canSend && !sending ? "#e6007a" : "#e2e8f0", color: canSend && !sending ? "#fff" : "#94a3b8", fontSize: 14, fontWeight: 700, cursor: canSend && !sending ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 46 }}>
+            style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: canSend && !sending ? "#E61B84" : "#e2e8f0", color: canSend && !sending ? "#fff" : "#94a3b8", fontSize: 14, fontWeight: 700, cursor: canSend && !sending ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 46 }}>
             {sending ? <><span style={{ width: 14, height: 14, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Sending…</> : `Send ${selectedCount} Question${selectedCount !== 1 ? "s" : ""} to Client`}
           </button>
           {emailTouched && clientEmail && !isEmailValid && <p style={{ fontSize: 11, color: "#ef4444", textAlign: "center", marginTop: 8 }}>Please enter a valid email address.</p>}
@@ -317,7 +317,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
               placeholder="e.g. Client acknowledged gaps and approved submission as-is"
               rows={2}
               style={{ width: "100%", padding: "8px 10px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 12, resize: "vertical", outline: "none", fontFamily: "inherit", boxSizing: "border-box" }}
-              onFocus={e => e.target.style.borderColor = "#e6007a"}
+              onFocus={e => e.target.style.borderColor = "#E61B84"}
               onBlur={e => e.target.style.borderColor = "#e2e8f0"}
             />
           </div>
@@ -328,7 +328,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
             <button
               onClick={onProceed}
               disabled={loading}
-              style={{ flex: 2, padding: "9px 0", borderRadius: 8, border: "none", background: !loading ? "#e6007a" : "#e2e8f0", color: !loading ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 700, cursor: !loading ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              style={{ flex: 2, padding: "9px 0", borderRadius: 8, border: "none", background: !loading ? "#E61B84" : "#e2e8f0", color: !loading ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 700, cursor: !loading ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
               {loading ? <><span style={{ width: 11, height: 11, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Processing…</> : "Download Anyway"}
             </button>
           </div>
@@ -472,10 +472,10 @@ function DashboardStep({ token, onResume, onNewPackage }) {
                     <div key={s.session_id} className="session-card"
                       onClick={() => onResume(s.session_id)}
                       style={{ background: "#fff", border: "1.5px solid #e0e0e0", borderRadius: 18, cursor: "pointer", display: "flex", alignItems: "stretch", transition: "all 0.18s", position: "relative", boxShadow: "0 2px 8px rgba(0,0,0,0.06)", overflow: "hidden" }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#e6007a"; e.currentTarget.style.boxShadow = "0 8px 32px rgba(230,0,122,0.12)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = "#E61B84"; e.currentTarget.style.boxShadow = "0 8px 32px rgba(230,0,122,0.12)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
                       onMouseLeave={e => { e.currentTarget.style.borderColor = "#e0e0e0"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.06)"; e.currentTarget.style.transform = "none"; }}>
 
-                      <div style={{ width: 4, background: "#e6007a", flexShrink: 0 }} />
+                      <div style={{ width: 4, background: "#E61B84", flexShrink: 0 }} />
 
                       <div style={{ flex: 1, padding: "18px 22px", display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
 
@@ -503,11 +503,11 @@ function DashboardStep({ token, onResume, onNewPackage }) {
                           <div style={{ fontSize: 12, fontWeight: 600, color: "#6a6a6a" }}>{fmtDate(s.updated_at)}</div>
                         </div>
 
-                        <div style={{ width: 54, height: 54, borderRadius: "50%", background: avg != null ? "rgba(230,0,122,0.08)" : "rgba(148,163,184,0.08)", border: `2px solid ${avg != null ? "#e6007a55" : "#94a3b855"}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <div style={{ width: 54, height: 54, borderRadius: "50%", background: avg != null ? "rgba(230,0,122,0.08)" : "rgba(148,163,184,0.08)", border: `2px solid ${avg != null ? "#E61B8455" : "#94a3b855"}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                           {avg != null ? (
                             <>
-                              <span style={{ fontSize: 15, fontWeight: 800, color: "#e6007a", lineHeight: 1 }}>{avg}</span>
-                              <span style={{ fontSize: 9, fontWeight: 700, color: "#e6007a", opacity: 0.8, marginTop: 1 }}>{grade}</span>
+                              <span style={{ fontSize: 15, fontWeight: 800, color: "#E61B84", lineHeight: 1 }}>{avg}</span>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: "#E61B84", opacity: 0.8, marginTop: 1 }}>{grade}</span>
                             </>
                           ) : (
                             <span style={{ fontSize: 9, color: "#b5b5b5", fontWeight: 600, textAlign: "center", lineHeight: 1.3 }}>{"SQS\n—"}</span>
@@ -542,7 +542,7 @@ function DashboardStep({ token, onResume, onNewPackage }) {
               ].map((item, i) => (
                 <div key={i} className="db-metric-row" style={{ borderBottom: item.border ? "1px solid #f0f0f0" : "none" }}>
                   <span className="db-metric-label">{item.label}</span>
-                  <span className="db-metric-value" style={{ color: "#e6007a" }}>{item.value}</span>
+                  <span className="db-metric-value" style={{ color: "#E61B84" }}>{item.value}</span>
                 </div>
               ))}
             </div>
@@ -1052,7 +1052,7 @@ export default function AcordModal({
             </div>
             <button onClick={() => setShowEnterprisePopup(false)} style={{ flexShrink: 0, background: "none", border: "none", cursor: "pointer", color: "#be185d", fontSize: 15, lineHeight: 1, padding: "1px 3px", opacity: 0.6 }} onMouseEnter={e => e.currentTarget.style.opacity = "1"} onMouseLeave={e => e.currentTarget.style.opacity = "0.6"}>×</button>
           </div>
-          <div style={{ height: 3, background: "linear-gradient(90deg, #f9a8d4, #e6007a)" }} />
+          <div style={{ height: 3, background: "linear-gradient(90deg, #f9a8d4, #E61B84)" }} />
         </div>
       )}
       {showAcordModal && renderAcordLicenseModal()}
@@ -1131,7 +1131,7 @@ export default function AcordModal({
 
         {user && user.subscription_tier !== "free" && (() => {
           const ps = user.payment_status;
-          if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived — <a href="mailto:support@acordly.ai">Contact support</a> to restore.</div>;
+          if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived — <a href="mailto:support@primble.ai">Contact support</a> to restore.</div>;
           if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">🚫 Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
           if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">🔒 Account Disabled — Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
           if (ps === "failed") {
@@ -1176,7 +1176,7 @@ export default function AcordModal({
 
               {/* ── Page header ── */}
               <div style={{ marginBottom: 28 }}>
-                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: "#e6007a", letterSpacing: "0.08em", textTransform: "uppercase", background: "rgba(230,0,122,0.07)", padding: "3px 10px", borderRadius: 20, marginBottom: 10 }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: "#E61B84", letterSpacing: "0.08em", textTransform: "uppercase", background: "rgba(230,0,122,0.07)", padding: "3px 10px", borderRadius: 20, marginBottom: 10 }}>
                   Essentials
                 </div>
                 <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: "0 0 6px", letterSpacing: "-0.3px" }}>Submission Analysis</h2>
@@ -1187,7 +1187,7 @@ export default function AcordModal({
               <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 20, padding: "28px 36px", marginBottom: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
                 {!sqs ? (
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 0", gap: 14 }}>
-                    <span style={{ width: 40, height: 40, border: "3px solid #e2e8f0", borderTopColor: "#e6007a", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
+                    <span style={{ width: 40, height: 40, border: "3px solid #e2e8f0", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
                     <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Scoring your submission…</div>
                     <div style={{ fontSize: 12, color: "#94a3b8" }}>This typically takes a few seconds</div>
                   </div>
@@ -1271,14 +1271,14 @@ export default function AcordModal({
                 {/* Send to Client (ARQ) */}
                 <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 16, padding: "22px 24px 20px", display: "flex", flexDirection: "column", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
                   <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e6007a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Send to Client</div>
                   <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.55, flex: 1 }}>Client-in-the-Loop™ — send a targeted questionnaire to fill gaps and improve your score.</div>
                   <button onClick={handleOpenARQ} disabled={arqLoadingQ}
-                    style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: arqLoadingQ ? "#e2e8f0" : "#e6007a", color: arqLoadingQ ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: arqLoadingQ ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
-                    onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
-                    onMouseLeave={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
+                    style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: arqLoadingQ ? "#e2e8f0" : "#E61B84", color: arqLoadingQ ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: arqLoadingQ ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
+                    onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
+                    onMouseLeave={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
                     {arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client (ARQ)"}
                   </button>
                   <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
@@ -1287,14 +1287,14 @@ export default function AcordModal({
                 {/* Cover Summary */}
                 <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 16, padding: "22px 24px 20px", display: "flex", flexDirection: "column", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
                   <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e6007a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Cover Summary</div>
                   <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.55, flex: 1 }}>AI-generated SQS narrative cover sheet — submittable with any platform, ready to download.</div>
                   <button onClick={handleLiteCoverSheet} disabled={liteCoverLoading}
-                    style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: liteCoverLoading ? "#e2e8f0" : "#e6007a", color: liteCoverLoading ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: liteCoverLoading ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: liteCoverLoading ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
-                    onMouseEnter={e => { if (!liteCoverLoading) { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
-                    onMouseLeave={e => { if (!liteCoverLoading) { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
+                    style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: liteCoverLoading ? "#e2e8f0" : "#E61B84", color: liteCoverLoading ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: liteCoverLoading ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: liteCoverLoading ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
+                    onMouseEnter={e => { if (!liteCoverLoading) { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
+                    onMouseLeave={e => { if (!liteCoverLoading) { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
                     {liteCoverLoading ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Generating…</> : "Cover Summary"}
                   </button>
                 </div>
@@ -1327,9 +1327,9 @@ export default function AcordModal({
                 <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Free Limit Reached</h2>
                 <p style={{ fontSize: 15, color: "#64748b", marginBottom: 28, lineHeight: 1.6 }}>You've used all your free downloads. Upgrade to keep generating ACORD packages.</p>
                 <button onClick={onShowUpgrade}
-                  style={{ padding: "13px 36px", background: "#e6007a", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(230,0,122,0.3)" }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "#c00066"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "#e6007a"; e.currentTarget.style.transform = "none"; }}>
+                  style={{ padding: "13px 36px", background: "#E61B84", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(230,0,122,0.3)" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.transform = "none"; }}>
                   Upgrade Now
                 </button>
                 <div style={{ marginTop: 16 }}>
@@ -1372,7 +1372,7 @@ export default function AcordModal({
                     display: "block",
                     position: "relative",
                     padding: dragging ? "52px 32px" : "44px 32px",
-                    border: `2px dashed ${dragging ? "#e6007a" : "#e2e8f0"}`,
+                    border: `2px dashed ${dragging ? "#E61B84" : "#e2e8f0"}`,
                     borderRadius: 14,
                     background: dragging ? "rgba(230,0,122,0.03)" : "#fafbfc",
                     transition: "all 0.18s ease",
@@ -1384,8 +1384,8 @@ export default function AcordModal({
                   <div style={{ marginBottom: 16, display: "flex", justifyContent: "center" }}>
                     <svg width="44" height="44" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ opacity: dragging ? 1 : 0.55, transition: "opacity 0.18s" }}>
                       <rect width="44" height="44" rx="12" fill={dragging ? "rgba(230,0,122,0.1)" : "#f1f5f9"} />
-                      <path d="M22 28V18M22 18L18 22M22 18L26 22" stroke={dragging ? "#e6007a" : "#64748b"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      <path d="M14 31h16" stroke={dragging ? "#e6007a" : "#64748b"} strokeWidth="2" strokeLinecap="round"/>
+                      <path d="M22 28V18M22 18L18 22M22 18L26 22" stroke={dragging ? "#E61B84" : "#64748b"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M14 31h16" stroke={dragging ? "#E61B84" : "#64748b"} strokeWidth="2" strokeLinecap="round"/>
                     </svg>
                   </div>
 
@@ -1393,7 +1393,7 @@ export default function AcordModal({
                     Drag & drop files
                   </p>
                   <p style={{ fontSize: 13.5, color: "#64748b", margin: "0 0 12px" }}>
-                    or <span style={{ color: "#e6007a", fontWeight: 600, textDecoration: "underline" }}>click to browse</span>
+                    or <span style={{ color: "#E61B84", fontWeight: 600, textDecoration: "underline" }}>click to browse</span>
                   </p>
                   <p style={{ fontSize: 11.5, color: "#94a3b8", margin: 0, letterSpacing: "0.01em" }}>
                     PDFs · Images (JPG, PNG, BMP, TIFF) · ZIP archives
@@ -1423,7 +1423,7 @@ export default function AcordModal({
                             <button
                               onClick={() => setFiles(prev => prev.filter((_, j) => j !== i))}
                               style={{ background: "none", border: "none", cursor: "pointer", color: "#cbd5e1", fontSize: 14, padding: "2px 4px", lineHeight: 1, borderRadius: 4, transition: "color 0.15s" }}
-                              onMouseEnter={e => e.currentTarget.style.color = "#e6007a"}
+                              onMouseEnter={e => e.currentTarget.style.color = "#E61B84"}
                               onMouseLeave={e => e.currentTarget.style.color = "#cbd5e1"}
                               title="Remove file"
                             >✕</button>
@@ -1444,7 +1444,7 @@ export default function AcordModal({
                       padding: "13px 0",
                       borderRadius: 12,
                       border: "none",
-                      background: loading ? "#cc006e" : "#e6007a",
+                      background: loading ? "#cc006e" : "#E61B84",
                       color: "#fff",
                       fontSize: 14.5,
                       fontWeight: 700,
@@ -1459,7 +1459,7 @@ export default function AcordModal({
                       opacity: uploadBlocked ? 0.6 : 1,
                     }}
                     onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "#cc006e"; }}
-                    onMouseLeave={e => { if (!loading) e.currentTarget.style.background = "#e6007a"; }}
+                    onMouseLeave={e => { if (!loading) e.currentTarget.style.background = "#E61B84"; }}
                   >
                     {loading && (
                       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}>
@@ -1611,7 +1611,7 @@ export default function AcordModal({
               <div style={{ padding: "14px 14px 12px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Generated Forms</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#e6007a", background: "rgba(230,0,122,0.08)", padding: "1px 7px", borderRadius: 20 }}>{formIdList.length}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#E61B84", background: "rgba(230,0,122,0.08)", padding: "1px 7px", borderRadius: 20 }}>{formIdList.length}</span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 130, overflowY: "auto" }}>
                   {formIdList.map(fid => {
@@ -1619,10 +1619,10 @@ export default function AcordModal({
                     const isActive = activeFormId === fid;
                     return (
                       <div key={fid} onClick={() => setActiveFormId(fid)}
-                        style={{ padding: "7px 9px", borderRadius: 7, cursor: "pointer", border: `1px solid ${isActive ? "#e6007a" : "transparent"}`, background: isActive ? "rgba(230,0,122,0.05)" : "transparent", transition: "all 0.15s" }}
+                        style={{ padding: "7px 9px", borderRadius: 7, cursor: "pointer", border: `1px solid ${isActive ? "#E61B84" : "transparent"}`, background: isActive ? "rgba(230,0,122,0.05)" : "transparent", transition: "all 0.15s" }}
                         onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = "#f8fafc"; }}
                         onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? "#e6007a" : "#1e293b" }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? "#E61B84" : "#1e293b" }}>
                           {fd?.form_name || fid}
                           {signedForms.has(fid) && <span style={{ color: "#10b981" }}> ✍</span>}
                           {pdfLoading[fid] ? <span style={{ color: "#f59e0b" }}> ⏳</span> : <span style={{ color: "#10b981" }}> ✓</span>}
@@ -1733,7 +1733,7 @@ export default function AcordModal({
                           <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em" }}>Package SQS</div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             {packageSqs.lob && packageSqs.lob !== "generic" && (
-                              <span style={{ fontSize: 9, fontWeight: 700, background: "rgba(230,0,122,0.08)", color: "#e6007a", borderRadius: 20, padding: "1px 6px", textTransform: "capitalize" }}>{packageSqs.lob}</span>
+                              <span style={{ fontSize: 9, fontWeight: 700, background: "rgba(230,0,122,0.08)", color: "#E61B84", borderRadius: 20, padding: "1px 6px", textTransform: "capitalize" }}>{packageSqs.lob}</span>
                             )}
                             <span style={{ fontSize: 16, fontWeight: 800, color: gradeColor(packageSqs.package_sqs_score >= 90 ? "A" : packageSqs.package_sqs_score >= 80 ? "B" : packageSqs.package_sqs_score >= 70 ? "C" : packageSqs.package_sqs_score >= 60 ? "D" : "F") }}>{packageSqs.package_sqs_score}</span>
                             <span style={{ fontSize: 9, color: "#94a3b8" }}>/100</span>
@@ -1766,7 +1766,7 @@ export default function AcordModal({
                         <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Top Risk Drivers</div>
                         {activeSqs.risk_drivers.map((d, i) => (
                           <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: i < activeSqs.risk_drivers.length - 1 ? "1px solid #f9a8d4" : "none" }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#e6007a", width: 16 }}>#{i + 1}</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>#{i + 1}</span>
                             <span style={{ flex: 1, fontSize: 11, color: "#000" }}>{d.component}</span>
                             <span style={{ fontSize: 11, fontWeight: 700, color: barColor(d.score) }}>{d.score}%</span>
                           </div>
@@ -1826,9 +1826,9 @@ export default function AcordModal({
                   {/* Toggle header */}
                   <button
                     onClick={() => setActionsOpen(o => !o)}
-                    style={{ width: "100%", padding: "12px 16px", background: "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit", fontSize: 13, fontWeight: 700, color: "#fff", letterSpacing: "0.02em", transition: "background 0.2s", gap: 0 }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; }}>
+                    style={{ width: "100%", padding: "12px 16px", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit", fontSize: 13, fontWeight: 700, color: "#fff", letterSpacing: "0.02em", transition: "background 0.2s", gap: 0 }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)"; }}>
                     <span style={{ width: 13, flexShrink: 0 }} />
                     <span style={{ flex: 1, textAlign: "center" }}>More Actions</span>
                     <svg width="13" height="13" viewBox="0 0 14 14" fill="none" style={{ transition: "transform 0.25s cubic-bezier(0.4,0,0.2,1)", transform: actionsOpen ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0 }}>
@@ -1845,9 +1845,9 @@ export default function AcordModal({
                         <div style={{ borderRadius: 9, overflow: "hidden", border: "1px solid #fce7f3" }}>
                           <button
                             onClick={() => setIntegrationsExpanded(o => !o)}
-                            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", border: "none", background: "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", textAlign: "left" }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; }}>
+                            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", border: "none", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", textAlign: "left" }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)"; }}>
                             <span>Integrations</span>
                             <svg width="11" height="11" viewBox="0 0 14 14" fill="none" style={{ transition: "transform 0.2s", transform: integrationsExpanded ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0 }}>
                               <path d="M2.5 5L7 9.5L11.5 5" stroke="rgba(255,255,255,0.85)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
@@ -1893,9 +1893,9 @@ export default function AcordModal({
                       <div style={{ borderRadius: 9, overflow: "hidden", border: "1px solid #fce7f3" }}>
                         <button
                           onClick={() => setDownloadExpanded(o => !o)}
-                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", border: "none", background: "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", textAlign: "left" }}
-                          onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; }}
-                          onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; }}>
+                          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", padding: "8px 12px", border: "none", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", textAlign: "left" }}
+                          onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)"; }}>
                           <span>Download</span>
                           <svg width="11" height="11" viewBox="0 0 14 14" fill="none" style={{ transition: "transform 0.2s", transform: downloadExpanded ? "rotate(180deg)" : "rotate(0deg)", flexShrink: 0 }}>
                             <path d="M2.5 5L7 9.5L11.5 5" stroke="rgba(255,255,255,0.85)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
@@ -1943,21 +1943,21 @@ export default function AcordModal({
 
                 {/* Primary CTA — Client-in-the-Loop™ */}
                 <button onClick={handleOpenARQ} disabled={arqLoadingQ}
-                  style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: arqLoadingQ ? 0.7 : 1, boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", letterSpacing: "0.02em", transition: "all 0.2s" }}
-                  onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}>
+                  style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: arqLoadingQ ? 0.7 : 1, boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", letterSpacing: "0.02em", transition: "all 0.2s" }}
+                  onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}>
                   {arqLoadingQ
                     ? <><span style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</>
-                    : <>Send to Client{arqNotifCount > 0 && <span style={{ background: "#fff", color: "#e6007a", borderRadius: 10, fontSize: 10, padding: "2px 7px", fontWeight: 800, marginLeft: 2 }}>{arqNotifCount}</span>}</>
+                    : <>Send to Client{arqNotifCount > 0 && <span style={{ background: "#fff", color: "#E61B84", borderRadius: 10, fontSize: 10, padding: "2px 7px", fontWeight: 800, marginLeft: 2 }}>{arqNotifCount}</span>}</>
                   }
                 </button>
                 <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
 
                 {/* Dashboard — return to recent forms */}
                 <button onClick={goToDashboard}
-                  style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #e6007a 0%, #c00066 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", letterSpacing: "0.02em", boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", transition: "all 0.2s" }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #c00066 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #e6007a 0%, #c00066 100%)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}>
+                  style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", letterSpacing: "0.02em", boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", transition: "all 0.2s" }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}>
                   Dashboard
                 </button>
 
@@ -1988,19 +1988,19 @@ export default function AcordModal({
 
         {step === "success" && (
           <div style={{ maxWidth: 480, margin: "0 auto", textAlign: "center", padding: "56px 24px" }}>
-            <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg, #e6007a, #c00066)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36, color: "#fff", margin: "0 auto 24px", boxShadow: "0 8px 28px rgba(230,0,122,0.3)", animation: "successPop 0.5s ease-out" }}>✓</div>
+            <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg, #E61B84, #C0157A)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 36, color: "#fff", margin: "0 auto 24px", boxShadow: "0 8px 28px rgba(230,0,122,0.3)", animation: "successPop 0.5s ease-out" }}>✓</div>
             <h2 style={{ fontSize: 26, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>Download Complete!</h2>
             <p style={{ fontSize: 15, color: "#64748b", marginBottom: 28, lineHeight: 1.6 }}>Your filled ACORD forms have been downloaded successfully.</p>
             {user && user.subscription_tier === "free" && (
               <div style={{ background: "rgba(230,0,122,0.05)", border: "1px solid rgba(230,0,122,0.15)", borderRadius: 10, padding: "12px 16px", marginBottom: 24, fontSize: 14, color: "#1e293b" }}>
-                You have <strong style={{ color: "#e6007a" }}>{Math.max(0, user.downloads_remaining)}</strong> free download{user.downloads_remaining !== 1 ? "s" : ""} remaining
+                You have <strong style={{ color: "#E61B84" }}>{Math.max(0, user.downloads_remaining)}</strong> free download{user.downloads_remaining !== 1 ? "s" : ""} remaining
               </div>
             )}
             <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
               <button onClick={() => setStep("editor")}
-                style={{ minWidth: 260, padding: "12px 0", borderRadius: 10, border: "none", background: "#e6007a", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(230,0,122,0.3)" }}
-                onMouseEnter={e => e.currentTarget.style.background = "#c00066"}
-                onMouseLeave={e => e.currentTarget.style.background = "#e6007a"}>
+                style={{ minWidth: 260, padding: "12px 0", borderRadius: 10, border: "none", background: "#E61B84", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 14px rgba(230,0,122,0.3)" }}
+                onMouseEnter={e => e.currentTarget.style.background = "#C0157A"}
+                onMouseLeave={e => e.currentTarget.style.background = "#E61B84"}>
                 ← Back to Form
               </button>
               <button onClick={goToDashboard}

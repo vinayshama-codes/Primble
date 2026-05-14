@@ -1,0 +1,2017 @@
+{
+  "Form_EditionIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
+    "required": false
+  },
+  "Producer_CustomerIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The customer's identification number assigned by the producer (e.g., agency or brokerage). ",
+    "required": false
+  },
+  "Form_CompletionDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date on which the form is completed.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The full name of the producer / agency. ",
+    "required": false
+  },
+  "Policy_PolicyNumberIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number. ",
+    "required": false
+  },
+  "Policy_EffectiveDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The effective date of the policy.  The date that the terms and conditions of the policy commence.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "NamedInsured_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
+    "required": false
+  },
+  "Insurer_FullName_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. ",
+    "required": false
+  },
+  "Insurer_NAICCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that any auto is covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_TwoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_ThreeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_FourIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_SevenIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_EightIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_NineIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "Vehicle_CombinedSingleLimit_LimitIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is for combined single limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_EachPersonLimitIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is the bodily injury each person limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_PerPersonLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, bodily injury per person limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_PerAccidentLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, bodily injury per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_PropertyDamage_PerAccidentLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, property damage per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_TwoIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_ThreeIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_FourIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_SevenIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_EightIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "Vehicle_MedicalPayments_PerPersonLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The medical payments per person limit. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_TwoIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_ThreeIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_FourIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_SixIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos subject to a compulsory uninsured motorists law are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_SevenIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "Vehicle_CombinedSingleLimit_LimitIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is for combined single limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_EachPersonLimitIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is the bodily injury each person limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_BodilyInjuryPerPersonLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists bodily injury per person limit.  The use of this limit varies by state.  (in some states this may contain the combined single limit per accident limit amount.) ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_BodilyInjuryPerAccidentLimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists bodily injury per accident limit (in some states this may contain the uninsured motorists combined single limit per accident limit).  The use of this limit varies by state. ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_PropertyDamagePerAccidentLimit_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists property damage per accident amount.  The use of this limit varies by state. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if hired / borrowed coverage applies. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired / borrowed coverage does not apply. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_HiredCostAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated amount it will cost to hire the vehicles. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_IfAnyBasisIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the rating basis is \"if any\".  Check this box if the exposure is minimal.  The actual exposure is determined at the time of audit. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_YesIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if non-owned coverage applies. As used here, enter state(s) where employees use their own autos in the operations of the applicant's business.",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_NoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned coverage does not apply. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_EmployeeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned liability coverage pertains to employees. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_EmployeeCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that use their own automobiles. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_VolunteerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned liability coverage pertains to volunteers. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_VolunteerCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of volunteers that use their own automobiles. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_PartnerIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned liability coverage pertains to partners. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_PartnerCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of partners that use their own automobiles. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_D": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_D": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_ThreeIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_SevenIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "Vehicle_TowingAndLabour_LimitAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The towing and labor limit amount. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_TwoIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_ThreeIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_FourIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_SevenIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_EightIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_TwoIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_ThreeIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_FourIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_SevenIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_EightIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_TwoIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_ThreeIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_FourIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos other than private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_SevenIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_EightIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_BusinessAutoSymbol_OtherSymbolCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage.  Use the symbols specified for a coverage, or enter a company-unique symbol if applicable. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_E": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_E": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_F": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_F": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_DayCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of days needed to rate Hired Physical Damage Coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_VehicleCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of vehicles needed to rate Hired Physical Damage Coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_ComprehensiveDeductibleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible is for comprehensive or other than collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Comprehensive_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The comprehensive or other than collision deductible amount. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossDeductibleIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the deductible is for specified causes of loss.  The Specified Cause of Loss Codes are:\n\nSCL        Specified Cause of Loss\nF            Fire\nF&T        Fire and Theft\nF,T&W    Fire, Theft and Wind\nLSP        Limited Specified Perils\nSP         Specified Perils ",
+    "required": false
+  },
+  "Vehicle_SpecifiedCauseOfLoss_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible associated with specified causes of loss coverage. As used here, enter the deductible only if it is applicable to all vehicles.",
+    "required": false
+  },
+  "Vehicle_Coverage_CollisionIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has collision coverage. ",
+    "required": false
+  },
+  "Vehicle_Collision_DeductibleAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The collision deductible amount. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_PrimaryIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if this coverage is on a primary basis. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_SecondaryIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if this coverage is on a secondary basis. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_RemarkText_A": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the commercial vehicle line of business.  Enter any endorsements that apply. Be sure to include the form numbers and the required information for attaching the endorsement.   ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "NamedInsured_Initials_B": {
+    "ft": "/Tx",
+    "tu": "Initial here: The named insured's initials. ",
+    "required": false
+  },
+  "NamedInsured_Signature_B": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_B": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_B": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  },
+  "Producer_NationalIdentifier_B": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyOneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that any auto is covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyTwoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyThreeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySixIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySevenIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FiftyIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_CombinedSingleLimit_LimitIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is for combined single limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_EachPersonLimitIndicator_D": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is the bodily injury each person limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_PerPersonLimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, bodily injury per person limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_PerAccidentLimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, bodily injury per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_PropertyDamage_PerAccidentLimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, property damage per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyTwoIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyThreeIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySixIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_MedicalPayments_PerPersonLimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The medical payments per person limit. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyTwoIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyThreeIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyFiveIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos subject to a compulsory uninsured motorist law are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySixIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_CombinedSingleLimit_LimitIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is for combined single limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_EachPersonLimitIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is the bodily injury each person limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_BodilyInjuryPerPersonLimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists bodily injury per person limit.  The use of this limit varies by state.  (in some states this may contain the combined single limit per accident limit amount.) ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_BodilyInjuryPerAccidentLimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists bodily injury per accident limit (in some states this may contain the uninsured motorists combined single limit per accident limit).  The use of this limit varies by state. ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_PropertyDamagePerAccidentLimit_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists property damage per accident amount.  The use of this limit varies by state. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_YesIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if hired / borrowed coverage applies. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_StateOrProvinceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_StateOrProvinceCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_NoIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired / borrowed coverage does not apply. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_HiredCostAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated amount it will cost to hire the vehicles. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_IfAnyBasisIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the rating basis is \"if any\".  Check this box if the exposure is minimal.  The actual exposure is determined at the time of audit. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_YesIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if truckers hired / borrowed coverage applies. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_NoIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that truckers hired / borrowed coverage does not apply. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_HiredCostAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated amount it will cost to hire the vehicles. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_IfAnyBasisIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the rating basis is \"if any\".  Check this box if the exposure is minimal.  The actual exposure is determined at the time of audit. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_YesIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if non-owned coverage applies. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_N": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_O": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_P": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_Q": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_R": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_S": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_NoIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned coverage does not apply. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_EmployeeIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned liability coverage pertains to employees. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_EmployeeCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that use their own automobiles. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_VolunteerIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned liability coverage pertains to volunteers. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_VolunteerCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of volunteers that use their own automobiles. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_PartnerIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned liability coverage pertains to partners. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_PartnerCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of partners that use their own automobiles. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_I": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_I": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_I": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_K": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_K": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyTwoIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyThreeIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySixIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySevenIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_Comprehensive_DeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The comprehensive or other than collision deductible amount. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyTwoIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyThreeIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySixIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySevenIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has specified cause of loss coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire and theft is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftWindstormIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire, theft and windstorm is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_LimitedSpecifiedPerilsIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates limited specified perils is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_SpecifiedCauseOfLoss_DeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible associated with specified causes of loss coverage. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyTwoIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyThreeIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySixIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySevenIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_Collision_DeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The collision deductible amount. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortySixIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_OtherSymbolCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_TowingAndLabour_LimitAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The towing and labor limit amount. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyEightIndicator_I": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that trailers in your possession under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyNineIndicator_I": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that your trailers in the possession of another trucker under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_TrailerCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of trailers operated by the insured under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_StateOrProvinceCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state of the farthest zone where trailer interchange coverage applies. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_DayCount_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of days during one year in which this exposure exists; that is, the number of days in which the insured pulls trailers that are in his possession under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_Radius_A": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in actual mileage within which trailers, covered by this policy, are pulled by other tractors. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyEightIndicator_J": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that trailers in your possession under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyNineIndicator_J": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that your trailers in the possession of another trucker under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_TrailerCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of trailers operated by the insured under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_StateOrProvinceCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state of the farthest zone where trailer interchange coverage applies. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_DayCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of days during one year in which this exposure exists; that is, the number of days in which the insured pulls trailers that are in his possession under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_Radius_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in actual mileage within which trailers, covered by this policy, are pulled by other tractors. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyEightIndicator_K": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that trailers in your possession under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_TruckersSymbol_FortyNineIndicator_K": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that your trailers in the possession of another trucker under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_TrailerCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of trailers operated by the insured under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_StateOrProvinceCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state of the farthest zone where trailer interchange coverage applies. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_DayCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of days during one year in which this exposure exists; that is, the number of days in which the insured pulls trailers that are in his possession under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_Radius_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in actual mileage within which trailers, covered by this policy, are pulled by other tractors. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchangeCollision_DeductibleAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount applicable to trailer interchange collision coverage. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_TrailerValueAmount_A": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The trailer value as assigned by the trailer interchange agreement. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_J": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_K": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_L": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_DayCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of days needed to rate Hired Physical Damage Coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_VehicleCount_B": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of vehicles needed to rate Hired Physical Damage Coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_PrimaryIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if this coverage is on a primary basis. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_SecondaryIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if this coverage is on a secondary basis. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_J": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_J": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_RemarkText_B": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the commercial vehicle line of business.  Enter any endorsements that apply. Be sure to include the form numbers and the required information for attaching the endorsement.   ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "NamedInsured_Initials_C": {
+    "ft": "/Tx",
+    "tu": "Initial here: The named insured's initials. ",
+    "required": false
+  },
+  "NamedInsured_Signature_C": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_C": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_C": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  },
+  "Producer_NationalIdentifier_C": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyOneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that any auto is covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyTwoIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyThreeIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyFourIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtySevenIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyEightIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SeventyOneIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolIndicator_A": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolCode_A": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_CombinedSingleLimit_LimitIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is for combined single limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_EachPersonLimitIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is the bodily injury each person limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_PerPersonLimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, bodily injury per person limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_PerAccidentLimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, bodily injury per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_PropertyDamage_PerAccidentLimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The vehicle policy, property damage per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyTwoIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyThreeIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyFourIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtySevenIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolIndicator_B": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolCode_B": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_MedicalPayments_PerPersonLimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The medical payments per person limit. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyTwoIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyThreeIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyFourIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtySixIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos subject to a compulsory uninsured motorist law are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtySevenIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolCode_C": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_CombinedSingleLimit_LimitIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is for combined single limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_BodilyInjury_EachPersonLimitIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the limit shown is the bodily injury each person limit on the coverage. ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_BodilyInjuryPerPersonLimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists bodily injury per person limit.  The use of this limit varies by state.  (in some states this may contain the combined single limit per accident limit amount.) ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_BodilyInjuryPerAccidentLimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists bodily injury per accident limit (in some states this may contain the uninsured motorists combined single limit per accident limit).  The use of this limit varies by state. ",
+    "required": false
+  },
+  "Vehicle_UninsuredMotorists_PropertyDamagePerAccidentLimit_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The uninsured motorists property damage per accident amount.  The use of this limit varies by state. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_YesIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if hired / borrowed coverage applies. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_StateOrProvinceCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_StateOrProvinceCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_StateOrProvinceCode_I": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_NoIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired / borrowed coverage does not apply. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_HiredCostAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated amount it will cost to hire the vehicles. ",
+    "required": false
+  },
+  "Vehicle_HiredBorrowed_IfAnyBasisIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the rating basis is \"if any\".  Check this box if the exposure is minimal.  The actual exposure is determined at the time of audit. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_YesIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if truckers hired / borrowed coverage applies. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_StateOrProvinceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_StateOrProvinceCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired or borrowed. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_NoIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that truckers hired / borrowed coverage does not apply. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_HiredCostAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The estimated amount it will cost to hire the vehicles. ",
+    "required": false
+  },
+  "Vehicle_TruckersHiredBorrowed_IfAnyBasisIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if the rating basis is \"if any\".  Check this box if the exposure is minimal.  The actual exposure is determined at the time of audit. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_YesIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if non-owned coverage applies. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_T": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_U": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_V": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_W": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_X": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_Y": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_Z": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_AA": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_StateOrProvinceCode_AB": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are non-owned. ",
+    "required": false
+  },
+  "Vehicle_NonOwned_NoIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned coverage does not apply. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_EmployeeIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned liability coverage pertains to employees. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_EmployeeCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of employees that use their own automobiles. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_VolunteerIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned liability coverage pertains to volunteers. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_VolunteerCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of volunteers that use their own automobiles. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_PartnerIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that non-owned liability coverage pertains to partners. ",
+    "required": false
+  },
+  "Vehicle_NonOwnedGroup_PartnerCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of partners that use their own automobiles. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_N": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_N": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_N": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyTwoIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyThreeIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyFourIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtySevenIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyEightIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolIndicator_E": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_Comprehensive_DeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The comprehensive or other than collision deductible amount. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyTwoIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyThreeIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyFourIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtySevenIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyEightIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolIndicator_F": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_SpecifiedCauseOfLossIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates the vehicle has specified cause of loss coverage. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire and theft is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_FireTheftWindstormIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates fire, theft and windstorm is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_Coverage_LimitedSpecifiedPerilsIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates limited specified perils is a specified cause of loss on this vehicle. ",
+    "required": false
+  },
+  "Vehicle_SpecifiedCauseOfLoss_DeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible associated with specified causes of loss coverage. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyTwoIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyThreeIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyFourIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned commercial autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtySevenIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyEightIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that hired autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolIndicator_G": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolCode_G": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_Collision_DeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The collision deductible amount. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyThreeIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that owned private passenger autos only are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtySevenIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that specifically described autos are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolIndicator_H": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that a symbol other than those listed should be used. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_OtherSymbolCode_H": {
+    "ft": "/Tx",
+    "tu": "Enter code: The symbol code for the coverage. ",
+    "required": false
+  },
+  "Vehicle_TowingAndLabour_LimitAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The towing and labor limit amount. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyNineIndicator_I": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that trailers in your possession under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SeventyIndicator_I": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that your trailers in the possession of another trucker under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_TrailerCount_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of trailers operated by the insured under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_StateOrProvinceCode_D": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state of the farthest zone where trailer interchange coverage applies. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_DayCount_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of days during one year in which this exposure exists; that is, the number of days in which the insured pulls trailers that are in his possession under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_Radius_D": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in actual mileage within which trailers, covered by this policy, are pulled by other tractors. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyNineIndicator_J": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that trailers in your possession under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SeventyIndicator_J": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that your trailers in the possession of another trucker under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_TrailerCount_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of trailers operated by the insured under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_StateOrProvinceCode_E": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state of the farthest zone where trailer interchange coverage applies. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_DayCount_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of days during one year in which this exposure exists; that is, the number of days in which the insured pulls trailers that are in his possession under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_Radius_E": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in actual mileage within which trailers, covered by this policy, are pulled by other tractors. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SixtyNineIndicator_K": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that trailers in your possession under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_MotorCarrierSymbol_SeventyIndicator_K": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates that your trailers in the possession of another trucker under a trailer interchange agreement are covered. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_TrailerCount_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of trailers operated by the insured under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_StateOrProvinceCode_F": {
+    "ft": "/Tx",
+    "tu": "Enter code: The state of the farthest zone where trailer interchange coverage applies. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_DayCount_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of days during one year in which this exposure exists; that is, the number of days in which the insured pulls trailers that are in his possession under a Trailer Interchange Agreement. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_Radius_F": {
+    "ft": "/Tx",
+    "tu": "Enter number: The radius in actual mileage within which trailers, covered by this policy, are pulled by other tractors. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchangeCollision_DeductibleAmount_C": {
+    "ft": "/Tx",
+    "tu": "Enter deductible: The deductible amount applicable to trailer interchange collision coverage. ",
+    "required": false
+  },
+  "Vehicle_TrailerInterchange_TrailerValueAmount_B": {
+    "ft": "/Tx",
+    "tu": "Enter amount: The trailer value as assigned by the trailer interchange agreement. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_M": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_N": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_O": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_P": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_Q": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_StateOrProvinceCode_R": {
+    "ft": "/Tx",
+    "tu": "Enter code: Indicates a state where autos are hired and have physical damage coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_DayCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of days needed to rate Hired Physical Damage Coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_VehicleCount_C": {
+    "ft": "/Tx",
+    "tu": "Enter number: The number of vehicles needed to rate Hired Physical Damage Coverage. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_PrimaryIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if this coverage is on a primary basis. ",
+    "required": false
+  },
+  "Vehicle_HiredPhysicalDamage_SecondaryIndicator_C": {
+    "ft": "/Btn",
+    "tu": "Check the box (if applicable): Indicates if this coverage is on a secondary basis. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverageDescription_O": {
+    "ft": "/Tx",
+    "tu": "Enter text: The description of other coverage (not the limit) on the vehicle policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_SymbolDescription_O": {
+    "ft": "/Tx",
+    "tu": "Enter text: The symbols that apply to the other coverage listed. ",
+    "required": false
+  },
+  "Vehicle_OtherCoverage_LimitAmount_O": {
+    "ft": "/Tx",
+    "tu": "Enter limit: The limit amount of the other coverage. ",
+    "required": false
+  },
+  "CommercialVehicleLineOfBusiness_RemarkText_C": {
+    "ft": "/Tx",
+    "tu": "Enter text: The remarks associated with the commercial vehicle line of business.  Enter any endorsements that apply. Be sure to include the form numbers and the required information for attaching the endorsement.   ACORD 101, Additional Remarks Schedule, may be attached if more space is required. ",
+    "required": false
+  },
+  "NamedInsured_Initials_A": {
+    "ft": "/Tx",
+    "tu": "Initial here: The named insured's initials. As used here, indicates the named insured has rejected uninsured motorists bodily injury coverage in its entirety.",
+    "required": false
+  },
+  "NamedInsured_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the applicant or named insured. ",
+    "required": false
+  },
+  "NamedInsured_SignatureDate_A": {
+    "ft": "/Tx",
+    "tu": "Enter date: The date the form was signed by the applicant or named insured.  (MM/DD/YYYY) ",
+    "required": false
+  },
+  "Producer_AuthorizedRepresentative_Signature_A": {
+    "ft": "/Tx",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
+    "required": false
+  },
+  "Producer_NationalIdentifier_A": {
+    "ft": "/Tx",
+    "tu": "Enter identifier: The National Producer Number (NPN) as defined in the National Insurance Producer Registry (NIPR).  Note: The NPN is not the same as the producer state license number. ",
+    "required": false
+  }
+}

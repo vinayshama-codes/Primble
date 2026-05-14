@@ -55,8 +55,8 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
         except stripe.error.StripeError as e:
             logger.warning(f"Pre-checkout subscription cleanup failed: {e}")
 
-    try:
-        checkout_kwargs = dict(
+    def _build_checkout_kwargs(cid: str | None) -> dict:
+        kwargs = dict(
             payment_method_types=["card"],
             line_items=[{"price_data": {"currency": "usd",
                 "product_data": {"name": plan_label},
@@ -71,13 +71,31 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
                 "metadata": {"plan": plan, "billing_cycle": cycle, "user_id": str(current_user["id"])}
             },
         )
-        if customer_id:
-            checkout_kwargs["customer"] = customer_id
+        if cid:
+            kwargs["customer"] = cid
         else:
-            checkout_kwargs["customer_email"] = current_user["email"]
+            kwargs["customer_email"] = current_user["email"]
+        return kwargs
 
-        session = stripe.checkout.Session.create(**checkout_kwargs)
+    try:
+        session = stripe.checkout.Session.create(**_build_checkout_kwargs(customer_id))
         return {"checkout_url": session.url}
+    except stripe.error.InvalidRequestError as e:
+        # Stale customer ID (deleted or wrong mode) — clear it and retry without it
+        if customer_id and "No such customer" in str(e):
+            logger.warning(f"Stale stripe_customer_id {customer_id} for user {current_user['id']}, clearing and retrying")
+            async with get_pool().acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET stripe_customer_id = NULL WHERE id = $1", current_user["id"]
+                )
+            try:
+                session = stripe.checkout.Session.create(**_build_checkout_kwargs(None))
+                return {"checkout_url": session.url}
+            except stripe.error.StripeError as inner_e:
+                logger.error(f"Stripe error after customer reset: {inner_e}")
+                raise HTTPException(500, detail="Payment processing failed. Please try again.")
+        logger.error(f"Stripe error: {e}")
+        raise HTTPException(500, detail="Payment processing failed. Please try again.")
     except stripe.error.AuthenticationError:
         raise HTTPException(500, "Stripe API key is invalid. Contact support.")
     except stripe.error.StripeError as e:
@@ -796,6 +814,13 @@ async def create_portal_session(user: dict = Depends(get_current_user)):
         )
         return {"url": session.url}
     except stripe.error.InvalidRequestError as ex:
+        if "No such customer" in str(ex):
+            logger.warning(f"Stale stripe_customer_id {user['stripe_customer_id']} for user {user['id']}, clearing it")
+            async with get_pool().acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET stripe_customer_id = NULL WHERE id = $1", user["id"]
+                )
+            raise HTTPException(400, "Your billing profile was reset. Please try again to set up a new subscription.")
         # Portal not configured in Stripe dashboard — fall back to setup-mode checkout
         logger.warning(f"Billing portal not configured, falling back to setup session: {ex}")
         try:

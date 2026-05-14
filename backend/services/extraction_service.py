@@ -27,7 +27,7 @@ SCHEMA_VERSION = "v6"
 # ── Model context config ──────────────────────────────────────────────────────
 _MODEL_CHUNK_CHARS: Dict[str, int] = {
     "claude": 28_000,
-    "openai": 40_000,
+    "openai": 100_000,
 }
 ACTIVE_MODEL = "openai"
 
@@ -2005,7 +2005,7 @@ async def _extract_any(
     All documents go through extract_facts() which enforces the full pipeline:
     LLM → _safe_json_parse → _validate_parsed → _annotate_facts.
     chunk_size is computed from the active provider's context budget via
-    _effective_chunk_size() — OpenAI gets 40k chars, Claude 28k.
+    _effective_chunk_size() — OpenAI gets 100k chars, Claude 28k.
     """
     chunk_size = _effective_chunk_size(ACTIVE_MODEL)
     cap = DOC_TYPE_CHUNK_LIMITS.get(doc_type, DOC_TYPE_CHUNK_LIMITS["default"])

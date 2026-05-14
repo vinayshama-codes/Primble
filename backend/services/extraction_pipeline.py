@@ -41,6 +41,7 @@ from services.form_service import (
 from services.sqs_service import (
     check_tier1, check_tier2, evaluate_stops, check_doc_consistency,
 )
+from services.cross_form_validator import run_cross_form_validation, split_cross_form_issues
 from repositories.session_repository import new_processing_session
 
 logger = logging.getLogger(__name__)
@@ -201,6 +202,15 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
     extra_forms_scored = score_extra_forms(merged_facts, triggered_ids, available_forms)
     unique_low_conf    = list(dict.fromkeys(all_low_conf))
 
+    # ── Cross-form validation ────────────────────────────────────────────────
+    cross_form_issues = run_cross_form_validation(merged_facts, mflags, triggered_ids)
+    cf_hard, cf_soft, cf_advisories = split_cross_form_issues(cross_form_issues)
+    if cf_hard:
+        logger.warning("Cross-form hard stops: %s", cf_hard)
+        hard_stops = list(hard_stops) + cf_hard
+    if cf_soft:
+        soft_stops = list(soft_stops) + cf_soft
+
     sid = await new_processing_session({
         "user_id":              user_id,
         "docs":                 processed_docs,
@@ -211,6 +221,7 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
         "tier2_missing":        tier2_missing,
         "hard_stops":           hard_stops,
         "soft_stops":           soft_stops,
+        "cross_form_issues":    cross_form_issues,
         "all_forms":            available_forms,
         "recommendations":      recommendations,
         "selected_form_ids":    [],
@@ -219,20 +230,21 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
     })
 
     return {
-        "session_id":        sid,
-        "processed_docs":    processed_docs,
-        "primary":           primary,
-        "merged_facts":      merged_facts,
-        "mflags":            mflags,
-        "tier1_ok":          tier1_ok,
-        "tier1_missing":     tier1_missing,
-        "tier2_score":       tier2_score,
-        "tier2_missing":     tier2_missing,
-        "hard_stops":        hard_stops,
-        "soft_stops":        soft_stops,
-        "doc_conflicts":     doc_conflicts,
-        "recommendations":   recommendations,
+        "session_id":         sid,
+        "processed_docs":     processed_docs,
+        "primary":            primary,
+        "merged_facts":       merged_facts,
+        "mflags":             mflags,
+        "tier1_ok":           tier1_ok,
+        "tier1_missing":      tier1_missing,
+        "tier2_score":        tier2_score,
+        "tier2_missing":      tier2_missing,
+        "hard_stops":         hard_stops,
+        "soft_stops":         soft_stops,
+        "doc_conflicts":      doc_conflicts,
+        "cross_form_issues":  cross_form_issues,
+        "recommendations":    recommendations,
         "extra_forms_scored": extra_forms_scored,
-        "unique_low_conf":   unique_low_conf,
-        "available_forms":   available_forms,
+        "unique_low_conf":    unique_low_conf,
+        "available_forms":    available_forms,
     }

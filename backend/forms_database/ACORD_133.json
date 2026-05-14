@@ -2,7 +2,7 @@
   "form_id": "ACORD_133",
   "form_name": "ACORD 133 - Builders Risk Application",
   "form_type": "application",
-  "template_file": "",
+  "template_file": "ACORD_133.pdf",
   "description": "Application for builders risk (course of construction) coverage. Required for properties under construction, renovation projects, or any submission mentioning project value or completion dates.",
   "always_include": false,
   "matching_flags": ["has_builders_risk"],

@@ -700,6 +700,7 @@ def extract_form_schema(path: str, form_id: str = "") -> dict:
         return {}
 
 
+
 def _get_checkbox_on_state(item) -> str:
     """Return the non-Off appearance state name for a /Btn widget (usually '/Yes').
 
@@ -1700,6 +1701,8 @@ def _fill_unmatched_with_gpt(
     all_raw_fields:   set                       = set()
 
     # ── Build a field-spec line for the prompt ───────────────────────────────
+    _ROW_SUFFIX_RE = re.compile(r"^(.+)_([A-N])$")
+
     def _field_spec(f: str) -> str:
         info = eligible_fields.get(f) or {}
         info = info if isinstance(info, dict) else {}
@@ -1713,6 +1716,12 @@ def _fill_unmatched_with_gpt(
             spec += " (dropdown)"
         elif "/Btn" in ft:
             spec += " (checkbox — Yes/No)"
+        # Annotate row-suffixed fields so GPT knows this is occurrence N of a list
+        m = _ROW_SUFFIX_RE.match(f)
+        if m:
+            row_idx = ord(m.group(2)) - ord("A") + 1
+            if row_idx > 1:
+                spec += f" [occurrence #{row_idx} — must be a DIFFERENT value from occurrence #1]"
         return spec
 
     # ── Prompt builder ───────────────────────────────────────────────────────
@@ -1740,7 +1749,12 @@ def _fill_unmatched_with_gpt(
         "  4. Dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
         "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n"
         "  6. mappings: use ONLY exact fact keys from SOURCE 1. null if no clean match.\n"
-        "  7. NEVER put raw_text_sourced fields in mappings.\n\n"
+        "  7. NEVER put raw_text_sourced fields in mappings.\n"
+        "  8. Fields ending in _A, _B, _C ... are SEPARATE row slots for DIFFERENT entries.\n"
+        "     Search the entire document for each row independently. If the document lists\n"
+        "     multiple values of the same type (e.g. two phone numbers, two fax numbers,\n"
+        "     two insurers), assign each distinct value to its own _A/_B/_C slot in order.\n"
+        "     Do NOT copy the _A value into _B/_C — only fill a row if a distinct value exists.\n\n"
     )
     _SKELETON_CHARS = len(_PROMPT_SKELETON)
     _FACTS_CHARS    = len(fact_context)
@@ -2068,7 +2082,10 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
         was_ai    = first_run or (field in unmatched) or (field in cached_ai_set) or (field in gpt_filled_set)
         if has_value:
             confidence[field] = "low_confidence" if was_ai else "filled"
-        elif is_req:
+        elif is_req and not _is_nonfillable_field(field):
+            # Only paint yellow for genuinely fillable required fields.
+            # Carrier-computed / admin / signature fields are never fillable so
+            # marking them missing_required creates phantom yellow highlights.
             confidence[field] = "missing_required"
         else:
             confidence[field] = "low_confidence"

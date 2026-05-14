@@ -152,7 +152,7 @@ async def download_pdf(
         else:
             pdf_bytes, ai_content = await asyncio.gather(
                 _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature),
-                _loop.run_in_executor(None, generate_ai_cover_narrative, facts, flags, sqs_results, [form_id], org_name, fresh),
+                generate_ai_cover_narrative(facts, flags, sqs_results, [form_id], org_name, fresh),
             )
             _COVER_CACHE[_ck] = ai_content
             logger.debug(f"cover narrative cached for key {_ck[:8]}")
@@ -282,7 +282,7 @@ async def download_all(
     _ck = _cover_cache_key(facts, list(generated.keys()), sqs_results, flags)
     ai_content = _COVER_CACHE.get(_ck)
     if ai_content is None:
-        ai_content = generate_ai_cover_narrative(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, user=fresh)
+        ai_content = await generate_ai_cover_narrative(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, user=fresh)
         _COVER_CACHE[_ck] = ai_content
         logger.debug(f"cover narrative cached for key {_ck[:8]}")
     else:
@@ -401,7 +401,7 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
     sqs_results = {"Pre-Submission Analysis": sqs}
 
     from services.cover_service import generate_lite_cover_narrative
-    ai_content = generate_lite_cover_narrative(
+    ai_content = await generate_lite_cover_narrative(
         facts=facts, flags=flags, sqs=sqs,
         hard_stops=hard_stops, soft_stops=soft_stops,
         org_name=org_name, user=current_user,

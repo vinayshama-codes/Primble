@@ -2,7 +2,7 @@
   "form_id": "ACORD_28",
   "form_name": "ACORD 28 - Evidence of Commercial Property Insurance",
   "form_type": "certificate",
-  "template_file": "",
+  "template_file": "ACORD_28.pdf",
   "description": "Evidence of property insurance issued to mortgagees, loss payees, or lenders with an insurable interest. Triggered when mortgagee or loss payee language is found alongside property coverage.",
   "always_include": false,
   "matching_flags": ["has_property_coverage"],

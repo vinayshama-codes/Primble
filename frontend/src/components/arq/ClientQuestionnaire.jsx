@@ -289,7 +289,7 @@ export default function ClientQuestionnaire({ token }) {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column', gap: 16 }}>
-        <div style={{ width: 40, height: 40, border: '3px solid #e2e8f0', borderTopColor: '#e6007a', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+        <div style={{ width: 40, height: 40, border: '3px solid #e2e8f0', borderTopColor: '#E61B84', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
         <p style={{ color: '#64748b' }}>Loading your questionnaire...</p>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
@@ -304,7 +304,7 @@ export default function ClientQuestionnaire({ token }) {
         <p style={{ fontSize: 16, color: '#475569', marginBottom: 24 }}>
           Your answers have been submitted successfully. Your insurance agent has been notified and the forms will be updated automatically.
         </p>
-        <button onClick={() => window.close()} style={{ padding: '12px 28px', background: '#e6007a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer', minWidth: 140 }}>
+        <button onClick={() => window.close()} style={{ padding: '12px 28px', background: '#E61B84', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer', minWidth: 140 }}>
           Close Window
         </button>
       </div>
@@ -349,7 +349,7 @@ export default function ClientQuestionnaire({ token }) {
               <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                 <svg width="56" height="56" viewBox="0 0 52 52">
                   <circle cx="26" cy="26" r={r} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="5" />
-                  <circle cx="26" cy="26" r={r} fill="none" stroke="#e6007a" strokeWidth="5"
+                  <circle cx="26" cy="26" r={r} fill="none" stroke="#E61B84" strokeWidth="5"
                     strokeDasharray={circ} strokeDashoffset={circ - (pct / 100) * circ}
                     strokeLinecap="round" transform="rotate(-90 26 26)"
                     style={{ transition: 'stroke-dashoffset 0.4s ease' }} />
@@ -435,9 +435,9 @@ export default function ClientQuestionnaire({ token }) {
                             onClick={() => setAnswers({ [q.field_name]: answers[q.field_name] === 'Yes' ? 'No' : 'Yes' })}
                             style={{
                               padding: '8px 18px', borderRadius: 20, border: '1px solid',
-                              borderColor: answers[q.field_name] === 'Yes' ? '#e6007a' : '#cbd5e1',
+                              borderColor: answers[q.field_name] === 'Yes' ? '#E61B84' : '#cbd5e1',
                               background: answers[q.field_name] === 'Yes' ? '#fdf2f8' : '#f8fafc',
-                              color: answers[q.field_name] === 'Yes' ? '#e6007a' : '#64748b',
+                              color: answers[q.field_name] === 'Yes' ? '#E61B84' : '#64748b',
                               fontWeight: 600, fontSize: 13, cursor: 'pointer', transition: 'all 0.15s',
                               minHeight: 40,
                             }}
@@ -497,7 +497,7 @@ export default function ClientQuestionnaire({ token }) {
           <footer style={{ marginTop: '16px', paddingTop: '12px', textAlign: 'center', borderTop: '1px solid #e2e8f0' }}>
             <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0 }}>
               Powered by{' '}
-              <a href="https://acordly.ai" target="_blank" rel="noopener noreferrer" style={{ color: '#e6007a', textDecoration: 'none', fontWeight: '600' }}>
+              <a href="https://acordly.ai" target="_blank" rel="noopener noreferrer" style={{ color: '#E61B84', textDecoration: 'none', fontWeight: '600' }}>
                 acordly.ai
               </a>
             </p>
@@ -531,7 +531,7 @@ export default function ClientQuestionnaire({ token }) {
             minWidth: '100px',
             padding: '12px 24px',
             borderRadius: '40px',
-            background: submitting ? '#cbd5e1' : '#e6007a',
+            background: submitting ? '#cbd5e1' : '#E61B84',
             border: 'none',
             cursor: submitting ? 'not-allowed' : 'pointer',
             color: '#fff',
@@ -548,14 +548,14 @@ export default function ClientQuestionnaire({ token }) {
           }}
           onMouseEnter={(e) => {
             if (!submitting) {
-              e.currentTarget.style.background = '#c00066';
+              e.currentTarget.style.background = '#C0157A';
               e.currentTarget.style.transform = 'translateY(-2px)';
               e.currentTarget.style.boxShadow = '0 6px 24px rgba(230,0,122,0.5)';
             }
           }}
           onMouseLeave={(e) => {
             if (!submitting) {
-              e.currentTarget.style.background = '#e6007a';
+              e.currentTarget.style.background = '#E61B84';
               e.currentTarget.style.transform = 'translateY(0)';
               e.currentTarget.style.boxShadow = '0 4px 20px rgba(230,0,122,0.4)';
             }
@@ -614,8 +614,8 @@ export default function ClientQuestionnaire({ token }) {
             minWidth: '100px',
             padding: '12px 24px',
             borderRadius: '40px',
-            background: chatOpen ? '#0f172a' : 'linear-gradient(135deg, #e6007a, #c0005f)',
-            border: chatOpen ? '2px solid #e6007a' : 'none',
+            background: chatOpen ? '#0f172a' : 'linear-gradient(135deg, #E61B84, #c0005f)',
+            border: chatOpen ? '2px solid #E61B84' : 'none',
             cursor: 'pointer',
             color: '#fff',
             fontSize: '14px',
@@ -631,13 +631,13 @@ export default function ClientQuestionnaire({ token }) {
           onMouseEnter={e => {
             if (!chatOpen) {
               e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.background = '#c00066';
+              e.currentTarget.style.background = '#C0157A';
             }
           }}
           onMouseLeave={e => {
             if (!chatOpen) {
               e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.background = 'linear-gradient(135deg, #e6007a, #c0005f)';
+              e.currentTarget.style.background = 'linear-gradient(135deg, #E61B84, #c0005f)';
             }
           }}
         >
@@ -680,7 +680,7 @@ export default function ClientQuestionnaire({ token }) {
               <div key={i} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                 <div style={{
                   maxWidth: '82%', padding: '8px 12px', borderRadius: msg.role === 'user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
-                  background: msg.role === 'user' ? '#e6007a' : '#f1f5f9',
+                  background: msg.role === 'user' ? '#E61B84' : '#f1f5f9',
                   color: msg.role === 'user' ? '#fff' : '#0f172a',
                   fontSize: 12, lineHeight: 1.5,
                   wordBreak: 'break-word',
@@ -720,7 +720,7 @@ export default function ClientQuestionnaire({ token }) {
               onClick={sendChatMessage}
               disabled={chatLoading || !chatInput.trim()}
               style={{
-                padding: '10px 14px', background: '#e6007a', color: '#fff', border: 'none',
+                padding: '10px 14px', background: '#E61B84', color: '#fff', border: 'none',
                 borderRadius: 8, fontSize: 13, cursor: chatLoading || !chatInput.trim() ? 'not-allowed' : 'pointer',
                 opacity: chatLoading || !chatInput.trim() ? 0.5 : 1, fontWeight: 600, minHeight: 40, minWidth: 40,
               }}
@@ -734,7 +734,7 @@ export default function ClientQuestionnaire({ token }) {
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-        .questionnaire-textarea:focus { border-color: #e6007a !important; }
+        .questionnaire-textarea:focus { border-color: #E61B84 !important; }
 
         /* Tooltip on hover for floating save button */
         .floating-save-btn:hover::after {

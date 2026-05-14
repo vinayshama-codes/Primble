@@ -2,7 +2,7 @@
   "form_id": "ACORD_186",
   "form_name": "ACORD 186 - Contractors Supplemental Application",
   "form_type": "supplement",
-  "template_file": "",
+  "template_file": "ACORD_186.pdf",
   "description": "Supplemental application for contractors providing additional underwriting detail: subcontracting percentage, project types, prior losses, and completed operations exposure.",
   "always_include": false,
   "matching_flags": ["is_contractor"],

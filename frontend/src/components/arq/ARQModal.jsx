@@ -134,7 +134,7 @@ export default function ARQModal({ sessionId, token, questions, producerFullName
                   onClick={() => handleToggle(q.field_name)}
                   style={{
                     border: "1px solid",
-                    borderColor: selectedQuestions[q.field_name] ? "#e6007a" : "#e2e8f0",
+                    borderColor: selectedQuestions[q.field_name] ? "#E61B84" : "#e2e8f0",
                     borderRadius: 8,
                     padding: "9px 12px",
                     cursor: "pointer",
@@ -151,11 +151,11 @@ export default function ARQModal({ sessionId, token, questions, producerFullName
                     checked={!!selectedQuestions[q.field_name]}
                     onChange={() => handleToggle(q.field_name)}
                     onClick={(e) => e.stopPropagation()}
-                    style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#e6007a", flexShrink: 0 }}
+                    style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#E61B84", flexShrink: 0 }}
                   />
                   <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                     {q.forms && (
-                      <span style={{ fontSize: 10, fontWeight: 700, color: "#e6007a", background: "#fdf2f8", padding: "1px 7px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", background: "#fdf2f8", padding: "1px 7px", borderRadius: 20, whiteSpace: "nowrap", flexShrink: 0 }}>
                         {q.forms.split(",").map((f) => {
                           const t = f.trim();
                           return /^\d+$/.test(t) ? `ACORD ${t}` : t;

@@ -14,6 +14,46 @@ from utils.validators import run_field_validations
 
 logger = logging.getLogger(__name__)
 
+
+# ── State detection for ACORD 137/138 variants ──────────────────────────────
+
+def _infer_primary_state(facts: dict) -> Optional[str]:
+    """
+    Infer the primary state from applicant facts.
+    Returns a 2-letter state code (CA, CO, etc.) or None.
+
+    Priority:
+    1. Extract from mailing_address or physical_address (last 2-char token)
+    2. Check first location in locations list
+    3. Check wc_payroll_by_state (first/dominant state)
+    """
+    # Try mailing address
+    addr = _fv(facts, "mailing_address") or _fv(facts, "physical_address")
+    if addr:
+        tokens = str(addr).upper().split()
+        for token in reversed(tokens):
+            if len(token) == 2 and token.isalpha():
+                return token
+
+    # Try first location
+    locs = _fv(facts, "locations")
+    if locs and isinstance(locs, list) and locs:
+        first_loc = str(locs[0]).upper()
+        tokens = first_loc.split()
+        for token in reversed(tokens):
+            if len(token) == 2 and token.isalpha():
+                return token
+
+    # Try WC payroll by state
+    wc_by_state = _fv(facts, "wc_payroll_by_state")
+    if wc_by_state and isinstance(wc_by_state, dict):
+        states = list(wc_by_state.keys())
+        if states:
+            return states[0].upper() if len(states[0]) == 2 else None
+
+    return None
+
+
 # ── Form required-keys index (built once at import time) ──────────────────────
 #
 # Maps form_id → frozenset of fact-keys that the form needs.
@@ -355,6 +395,7 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
 
     # ── Keyword / rule-based (trigger_weight 0.85) ────────────────────────────
 
+    # ACORD 137 — Crime (state-variant aware)
     _crime_kw = {
         "crime", "employee dishonesty", "money and securities",
         "forgery", "theft", "fidelity", "erisa", "employee theft",
@@ -362,11 +403,25 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         "money orders", "counterfeit", "computer fraud", "funds transfer fraud",
     }
     if flags.get("has_crime") or any(kw in search for kw in _crime_kw):
-        _add("ACORD_137",
-             "ACORD 137 - Commercial Crime Application",
-             trigger_weight=0.85,
-             trigger_reason="crime / dishonesty flag or keywords detected")
+        primary_state = _infer_primary_state(facts)
+        if primary_state in ("CA", "CO"):
+            form_id = f"ACORD_137_{primary_state}"
+            _add(form_id,
+                 f"ACORD 137 {primary_state} - Commercial Crime Application",
+                 trigger_weight=0.85,
+                 trigger_reason=f"crime / dishonesty flag or keywords detected (inferred state: {primary_state})")
+        else:
+            # Fallback: add both if state not clearly detected
+            _add("ACORD_137_CA",
+                 "ACORD 137 CA - Commercial Crime Application",
+                 trigger_weight=0.85,
+                 trigger_reason="crime / dishonesty flag or keywords detected (state not detected, offering CA)")
+            _add("ACORD_137_CO",
+                 "ACORD 137 CO - Commercial Crime Application",
+                 trigger_weight=0.80,
+                 trigger_reason="crime / dishonesty flag or keywords detected (state not detected, offering CO as alternative)")
 
+    # ACORD 138 — Cyber (state-variant aware)
     _cyber_kw = {
         "cyber", "data breach", "network security", "phi", "pci",
         "ransomware", "privacy liability", "e-commerce", "cloud",
@@ -376,10 +431,23 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         "third-party vendor", "vendor risk", "it security",
     }
     if flags.get("has_cyber") or any(kw in search for kw in _cyber_kw):
-        _add("ACORD_138",
-             "ACORD 138 - Cyber / Network Security Application",
-             trigger_weight=0.85,
-             trigger_reason="cyber / data breach flag or keywords detected")
+        primary_state = _infer_primary_state(facts)
+        if primary_state in ("CA", "CO"):
+            form_id = f"ACORD_138_{primary_state}"
+            _add(form_id,
+                 f"ACORD 138 {primary_state} - Cyber / Network Security Application",
+                 trigger_weight=0.85,
+                 trigger_reason=f"cyber / data breach flag or keywords detected (inferred state: {primary_state})")
+        else:
+            # Fallback: add both if state not clearly detected
+            _add("ACORD_138_CA",
+                 "ACORD 138 CA - Cyber / Network Security Application",
+                 trigger_weight=0.85,
+                 trigger_reason="cyber / data breach flag or keywords detected (state not detected, offering CA)")
+            _add("ACORD_138_CO",
+                 "ACORD 138 CO - Cyber / Network Security Application",
+                 trigger_weight=0.80,
+                 trigger_reason="cyber / data breach flag or keywords detected (state not detected, offering CO as alternative)")
 
     # ACORD 101 — Additional Remarks (complex trigger logic unchanged)
     _101_reasons: List[str] = []

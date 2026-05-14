@@ -498,6 +498,67 @@ def _clean_answer(raw: str, field_name: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# ACORD 125 yellow-field guard helpers
+# ---------------------------------------------------------------------------
+
+def _is_empty_arq_value(val) -> bool:
+    current_val = str(val).strip() if val is not None else ""
+    return current_val == "" or current_val in ("null", "None")
+
+
+def is_acord125_yellow_missing_field(form_data: dict, field_name: str) -> bool:
+    """True when an ACORD 125 field is the yellow missing-required state."""
+    confidence = form_data.get("confidence", {})
+    mapped = form_data.get("field_state") or form_data.get("mapped", {})
+    return confidence.get(field_name) == "missing_required" and _is_empty_arq_value(mapped.get(field_name))
+
+
+def filter_arq_questions_for_session(generated_forms: dict, questions: List[dict]) -> List[dict]:
+    """
+    Server-side guard for producer-selected ARQ questions.
+
+    ACORD 125 questions may only target yellow missing-required fields. Other
+    forms keep their existing behavior unchanged.
+    """
+    cleaned_questions = []
+
+    for q in questions:
+        field_name = q.get("field_name", "")
+        form_ids = q.get("form_ids") or []
+        if not isinstance(form_ids, list):
+            form_ids = []
+
+        if not form_ids:
+            forms_text = str(q.get("forms", ""))
+            form_ids = [f"ACORD_{m}" for m in re.findall(r"\b(\d{2,3})\b", forms_text)]
+
+        if "ACORD_125" not in form_ids:
+            cleaned_questions.append(q)
+            continue
+
+        acord125 = generated_forms.get("ACORD_125", {})
+        allowed_125 = is_acord125_yellow_missing_field(acord125, field_name)
+        remaining_form_ids = [
+            fid for fid in form_ids
+            if fid != "ACORD_125" or allowed_125
+        ]
+
+        if not remaining_form_ids:
+            continue
+
+        guarded_q = dict(q)
+        guarded_q["form_ids"] = remaining_form_ids
+        if remaining_form_ids != form_ids:
+            form_nums = []
+            for fid in remaining_form_ids:
+                form_nums.append(str(fid).replace("ACORD_", "").replace("ACORD ", ""))
+            guarded_q["forms"] = ", ".join(sorted(set(form_nums)))
+        cleaned_questions.append(guarded_q)
+
+    return cleaned_questions
+
+
+# ---------------------------------------------------------------------------
 # Question generation
 # ---------------------------------------------------------------------------
 
@@ -524,33 +585,39 @@ async def generate_arq_questions(
                 continue
             raw_val     = mapped.get(field_name)
             current_val = str(raw_val).strip() if raw_val is not None else ""
-            is_empty    = current_val == "" or current_val in ("null", "None")
+            is_empty    = _is_empty_arq_value(raw_val)
 
-            if conf_val == "missing_required":
-                pass
-            elif conf_val == "low_confidence" and is_empty:
-                pass
-            elif conf_val == "low_confidence" and not is_empty:
-                continue
-            elif conf_val == "filled" and is_empty:
-                pass
-            elif conf_val == "filled" and not is_empty:
-                continue
+            if form_id == "ACORD_125":
+                if conf_val != "missing_required" or not is_empty:
+                    continue
             else:
-                continue
+                if conf_val == "missing_required":
+                    pass
+                elif conf_val == "low_confidence" and is_empty:
+                    pass
+                elif conf_val == "low_confidence" and not is_empty:
+                    continue
+                elif conf_val == "filled" and is_empty:
+                    pass
+                elif conf_val == "filled" and not is_empty:
+                    continue
+                else:
+                    continue
 
             if field_name not in missing_fields:
                 missing_fields[field_name] = set()
                 field_current_values[field_name] = current_val
             missing_fields[field_name].add(form_id)
 
-    tier1_fact_keys = ["applicant_name", "producer_name", "mailing_address", "effective_date",
-                       "contact_name", "contact_phone", "contact_email", "lines_of_business"]
-    for fk in tier1_fact_keys:
-        if not facts.get(fk):
-            if fk not in missing_fields:
-                missing_fields[fk] = set()
-                field_current_values[fk] = ""
+    has_non_acord125_forms = any(fid != "ACORD_125" for fid in generated_forms)
+    if has_non_acord125_forms:
+        tier1_fact_keys = ["applicant_name", "producer_name", "mailing_address", "effective_date",
+                           "contact_name", "contact_phone", "contact_email", "lines_of_business"]
+        for fk in tier1_fact_keys:
+            if not facts.get(fk):
+                if fk not in missing_fields:
+                    missing_fields[fk] = set()
+                    field_current_values[fk] = ""
 
     questions = []
     seen_field_names = set()
@@ -632,6 +699,228 @@ async def generate_arq_questions(
 
     for q in questions:
         q.pop("_group_label", None)
+
+    return questions
+
+
+# ---------------------------------------------------------------------------
+# Cross-form conflict ARQ questions
+# ---------------------------------------------------------------------------
+
+# Maps cross-form issue codes to human-readable resolution questions.
+# Each entry: (question_text, hint_text, field_name_for_answer, field_type)
+_CROSS_FORM_QUESTION_MAP: dict[str, tuple[str, str, str, str]] = {
+    "wc_payroll_mismatch": (
+        "Your Workers Compensation payroll and total payroll don't match. "
+        "What is the correct total annual payroll for all employees?",
+        "Enter the gross annual wages paid to all employees, e.g. '$350,000'. "
+        "This should match both your payroll records and workers comp figures.",
+        "total_payroll",
+        "text",
+    ),
+    "wc_state_payroll_total_mismatch": (
+        "The state-level WC payroll breakdown does not add up to your total payroll. "
+        "Please confirm your total annual payroll across all states.",
+        "Enter the total gross payroll across all states, e.g. '$500,000'.",
+        "total_payroll",
+        "text",
+    ),
+    "wc_multi_state_no_breakdown": (
+        "Your business has employees in more than one state. "
+        "Please provide your annual payroll broken out by state "
+        "(e.g. 'Texas: $200,000 / California: $150,000').",
+        "List each state and the payroll amount for employees in that state.",
+        "wc_payroll_by_state",
+        "text",
+    ),
+    "high_subcontracting_no_wc_payroll": (
+        "Your application shows a high percentage of subcontracted work "
+        "but no Workers Compensation payroll was found. "
+        "What is the total annual payroll for your own (non-subcontracted) employees?",
+        "Enter the gross annual wages paid to your own employees, e.g. '$120,000'. "
+        "Enter '$0' if you have no direct employees.",
+        "wc_payroll",
+        "text",
+    ),
+    "location_count_mismatch": (
+        "The number of business locations on your application doesn't match "
+        "your property schedule. How many physical locations does your business have?",
+        "Enter the total number of locations — each location will need its own "
+        "address and property details.",
+        "locations",
+        "text",
+    ),
+    "umbrella_sir_below_gl_deductible": (
+        "Your umbrella self-insured retention (SIR) appears to be lower than "
+        "your GL deductible, which can leave a coverage gap. "
+        "Please confirm your umbrella SIR amount.",
+        "Enter your umbrella self-insured retention, e.g. '$10,000'. "
+        "This should be equal to or greater than your GL deductible.",
+        "umbrella_sir",
+        "text",
+    ),
+    "umbrella_missing_employers_liability": (
+        "Your umbrella policy attaches over Workers Compensation, but we couldn't "
+        "find your Employers Liability limits. What are your Employers Liability limits?",
+        "Enter your Employers Liability limits, e.g. '$100,000 / $500,000 / $100,000' "
+        "(per accident / disease policy / disease each employee).",
+        "employers_liability_limits",
+        "text",
+    ),
+    "umbrella_gl_period_misaligned": (
+        "Your umbrella policy effective date doesn't match your GL/underlying policy "
+        "dates. What is the correct policy effective date?",
+        "Enter the date all your policies begin in MM/DD/YYYY format.",
+        "effective_date",
+        "date",
+    ),
+    "bi_missing_period_of_restoration": (
+        "You have Business Income coverage but no Period of Restoration was provided. "
+        "How many months would it take to reopen your business after a major covered loss?",
+        "Estimate the number of months needed to repair damage and reopen, e.g. '6 months' or '12 months'.",
+        "period_of_restoration",
+        "text",
+    ),
+    "acord125_missing": (
+        "We weren't able to identify a commercial insurance application in your "
+        "uploaded documents. Can you confirm what type of submission this is?",
+        "Describe the type of coverage you need, e.g. 'new business GL and Property'.",
+        "lines_of_business",
+        "text",
+    ),
+    "gl_codes_no_operations": (
+        "GL class codes were found but your application doesn't have a description "
+        "of business operations. In a few sentences, what does your business do?",
+        "Describe your main products or services, e.g. "
+        "'We install commercial HVAC systems in office buildings across Texas.'",
+        "operations_description",
+        "text",
+    ),
+    "contractor_missing_acord186": (
+        "Your business appears to be a contractor but the Contractors Supplement "
+        "is missing. What percentage of your total work is done by subcontractors?",
+        "Enter a percentage, e.g. '40%'. If you use no subcontractors, enter '0%'.",
+        "percent_subcontracted",
+        "text",
+    ),
+    "wc_gl_class_code_mismatch": (
+        "Your Workers Compensation class codes indicate heavy manual labor but your "
+        "GL class codes suggest office or clerical operations. "
+        "Please describe your business operations so we can verify the correct "
+        "class code assignment.",
+        "Describe what your employees actually do day-to-day, e.g. "
+        "'50% office staff handling admin, 50% field technicians installing equipment.'",
+        "operations_description",
+        "text",
+    ),
+    "claims_made_missing_retro_date": (
+        "Your General Liability policy is written on a claims-made basis but no "
+        "retroactive date was found. What is the retroactive date for your GL policy?",
+        "Enter the original start date of continuous GL coverage in MM/DD/YYYY format, "
+        "e.g. '01/01/2018'. This is the earliest date from which claims can arise.",
+        "retro_date",
+        "date",
+    ),
+    "claims_made_missing_prior_acts": (
+        "Your GL policy is claims-made. Does your coverage include prior acts "
+        "(also called 'nose coverage' or 'prior acts endorsement')?",
+        "Answer Yes or No. If yes, enter the date prior acts coverage begins.",
+        "prior_acts_confirmation",
+        "text",
+    ),
+    "umbrella_gl_attachment_failure": (
+        "Your GL per-occurrence limit appears to be below the minimum required for "
+        "umbrella attachment. What is your GL each-occurrence limit?",
+        "Enter the maximum payout per single incident under your GL policy, "
+        "e.g. '$1,000,000'. Umbrella coverage typically requires at least $1M GL underlying.",
+        "gl_each_occurrence",
+        "text",
+    ),
+    "umbrella_auto_period_misaligned": (
+        "Your umbrella and Auto policy effective dates don't match. "
+        "What is the correct effective date for your Auto policy?",
+        "Enter the date your Auto policy begins in MM/DD/YYYY format.",
+        "auto_effective_date",
+        "date",
+    ),
+    "umbrella_wc_period_misaligned": (
+        "Your umbrella and Workers Compensation policy effective dates don't match. "
+        "What is the correct effective date for your WC policy?",
+        "Enter the date your Workers Compensation policy begins in MM/DD/YYYY format.",
+        "wc_effective_date",
+        "date",
+    ),
+}
+
+
+def generate_cross_form_arq_questions(
+    cross_form_issues: List[dict],
+    generated_forms: dict,
+) -> List[dict]:
+    """
+    Convert cross-form validation issues into ARQ questions for the client.
+
+    Only hard_stop and soft_warning issues generate questions.
+    Advisory issues are informational and do not require client input.
+
+    Parameters
+    ----------
+    cross_form_issues : list of issue dicts from run_cross_form_validation()
+    generated_forms   : current generated_forms dict (used to avoid asking
+                        questions about fields already filled by the client)
+
+    Returns
+    -------
+    List of question dicts in the same format as generate_arq_questions().
+    """
+    questions: List[dict] = []
+    seen_field_names: set = set()
+
+    # Build a flat map of already-filled fields across all forms
+    filled_fields: set = set()
+    for form_data in generated_forms.values():
+        mapped = form_data.get("field_state") or form_data.get("mapped", {})
+        for field, val in mapped.items():
+            if val is not None and str(val).strip() not in ("", "null", "None"):
+                filled_fields.add(field)
+
+    for issue in cross_form_issues:
+        itype = issue.get("type", "advisory")
+        if itype == "advisory":
+            continue
+
+        code = issue.get("code", "")
+        if code not in _CROSS_FORM_QUESTION_MAP:
+            continue
+
+        q_text, hint, field_name, field_type = _CROSS_FORM_QUESTION_MAP[code]
+
+        # Skip if we've already queued a question for this field
+        if field_name in seen_field_names:
+            continue
+
+        # Skip if the field is already filled
+        if field_name in filled_fields:
+            continue
+
+        seen_field_names.add(field_name)
+        forms_involved = issue.get("forms", [])
+        form_nums = sorted(
+            {str(f).replace("ACORD_", "").replace("ACORD ", "") for f in forms_involved}
+        )
+
+        questions.append({
+            "field_name":    field_name,
+            "question":      q_text,
+            "hint":          hint,
+            "forms":         ", ".join(form_nums),
+            "form_ids":      forms_involved,
+            "field_type":    field_type,
+            "current_value": "",
+            "source":        "cross_form_conflict",
+            "conflict_code": code,
+            "severity":      itype,
+        })
 
     return questions
 

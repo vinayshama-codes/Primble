@@ -1,0 +1,39 @@
+{
+  "form_id": "ACORD_137_CO",
+  "form_name": "ACORD 137 CO - Commercial Crime Application",
+  "form_type": "commercial_crime",
+  "template_file": "ACORD_137_CO.pdf",
+  "description": "Colorado variant - Captures commercial crime insurance application including employee dishonesty, theft, money and securities coverage, and crime-related exposures.",
+  "always_include": false,
+  "matching_flags": [
+    "has_crime",
+    "has_dishonesty_exposure"
+  ],
+  "matching_keywords": [
+    "crime",
+    "employee dishonesty",
+    "money and securities",
+    "forgery",
+    "theft",
+    "fidelity",
+    "erisa",
+    "employee theft",
+    "burglary",
+    "robbery",
+    "commercial crime",
+    "fidelity bond",
+    "money orders",
+    "counterfeit",
+    "computer fraud",
+    "funds transfer fraud",
+    "acord 137"
+  ],
+  "coverage_types": [
+    "crime",
+    "employee_dishonesty",
+    "commercial_crime"
+  ],
+  "policy_types": [
+    "commercial"
+  ]
+}

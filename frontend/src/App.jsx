@@ -44,8 +44,8 @@ export default function App() {
 function MarketingFooter() {
   return (
     <footer className="footer">
-      <div><h4 className="footer-h4">About Us</h4><p className="footer-p">Acordly automates ACORD form processing for insurance brokers and underwriting teams.</p></div>
-      <div><h4 className="footer-h4">Contact Us</h4><p className="footer-p">support@acordly.ai</p></div>
+      <div><h4 className="footer-h4">About Us</h4><p className="footer-p">Primble automates ACORD form processing for insurance brokers and underwriting teams.</p></div>
+      <div><h4 className="footer-h4">Contact Us</h4><p className="footer-p">support@primble.ai</p></div>
       <div>
         <h4 className="footer-h4">Follow Us</h4>
         <p className="footer-p">
@@ -297,7 +297,7 @@ function AppContent() {
       ) : marketingPage === "acord-license" ? (
         <><AcordLicensePage /><MarketingFooter /></>
       ) : (
-        <LandingPage user={user} onGetStarted={handleGetStarted} />
+        <LandingPage user={user} onGetStarted={handleGetStarted} token={token} onError={(msg) => setHeaderError(msg)} openBillingPortal={openBillingPortal} />
       )}
 
       {showAuthModal && (

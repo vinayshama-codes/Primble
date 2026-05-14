@@ -1,0 +1,45 @@
+{
+  "form_id": "ACORD_138_CO",
+  "form_name": "ACORD 138 CO - Cyber / Network Security Application",
+  "form_type": "cyber_liability",
+  "template_file": "ACORD_138_CO.pdf",
+  "description": "Colorado variant - Captures cyber liability and network security insurance application including data breach coverage, network security, and digital asset protection.",
+  "always_include": false,
+  "matching_flags": [
+    "has_cyber",
+    "has_data_breach_exposure"
+  ],
+  "matching_keywords": [
+    "cyber",
+    "data breach",
+    "network security",
+    "phi",
+    "pci",
+    "ransomware",
+    "privacy liability",
+    "e-commerce",
+    "cloud",
+    "personally identifiable",
+    "hipaa",
+    "cyber liability",
+    "network liability",
+    "data privacy",
+    "breach response",
+    "mfa",
+    "multi-factor",
+    "cloud services",
+    "saas",
+    "third-party vendor",
+    "vendor risk",
+    "it security",
+    "acord 138"
+  ],
+  "coverage_types": [
+    "cyber_liability",
+    "data_breach",
+    "network_security"
+  ],
+  "policy_types": [
+    "commercial"
+  ]
+}

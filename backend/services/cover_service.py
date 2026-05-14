@@ -14,7 +14,7 @@ from services.extraction_service import _fv, _cache_get, _cache_set
 logger = logging.getLogger(__name__)
 
 
-def generate_ai_cover_narrative(
+async def generate_ai_cover_narrative(
     facts: dict,
     flags: dict,
     sqs_results: dict,
@@ -64,7 +64,7 @@ Respond with ONLY a valid JSON object with exactly three keys:
 
 Return ONLY the JSON object."""
     try:
-        raw = groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
+        raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
         if raw.startswith("```"):
             raw = raw.replace("```json", "").replace("```", "").strip()
         s, e = raw.find("{"), raw.rfind("}")
@@ -105,7 +105,7 @@ Return ONLY the JSON object."""
     }
 
 
-def generate_lite_cover_narrative(
+async def generate_lite_cover_narrative(
     facts: dict,
     flags: dict,
     sqs: dict,
@@ -153,7 +153,7 @@ Respond with ONLY a valid JSON object with exactly three keys:
 
 Return ONLY the JSON object."""
     try:
-        raw = groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
+        raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
         if raw.startswith("```"):
             raw = raw.replace("```json", "").replace("```", "").strip()
         s, e = raw.find("{"), raw.rfind("}")

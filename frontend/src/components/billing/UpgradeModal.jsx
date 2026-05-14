@@ -28,7 +28,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
 
   const handleSelect = async (planId) => {
     if (planId === "enterprise") {
-      window.location.href = "mailto:sales@acordly.ai?subject=Enterprise Plan Inquiry";
+      window.location.href = "mailto:sales@primble.ai?subject=Enterprise Plan Inquiry";
       return;
     }
     setLoadingPlan(planId);

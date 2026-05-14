@@ -185,9 +185,9 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
                 soft.append("Carrier-Grade COPE incomplete — SQS capped at 85. Missing: " + ", ".join(missing_c))
 
         if flags.get("property_has_bi_coverage"):
-            if _fv(facts, "business_income_limit") and not _fv(facts, "period_of_restoration"):
-                soft.append("Business Income limit present but Period of Restoration is missing")
-            elif not _fv(facts, "business_income_limit"):
+            # BI limit + POR ownership moved to cross_form_validator as hard stop.
+            # Keep only the "no BI limit at all" soft advisory here to avoid duplication.
+            if not _fv(facts, "business_income_limit"):
                 soft.append("Business Income coverage detected — BI limit and Period of Restoration should be provided")
 
         if flags.get("property_has_peril_deductibles"):
@@ -200,7 +200,11 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
                 if not _fv(facts, k)
             ]
             if missing_perils:
-                soft.append("Peril-specific deductibles referenced — define amounts for: " + ", ".join(missing_perils))
+                # Spec: peril-specific deductible referenced but undefined → hard stop
+                hard.append(
+                    "Peril-specific deductibles referenced but not defined — specify amounts for: "
+                    + ", ".join(missing_perils)
+                )
 
         if not _fv(facts, "valuation_method"):
             soft.append("Property valuation method not specified — select RCV or ACV")
@@ -279,9 +283,11 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
 
         sir    = _to_int(_fv(facts, "umbrella_sir"))
         gl_ded = _to_int(_fv(facts, "gl_deductible"))
-        if sir and gl_ded and sir < gl_ded:
-            soft.append(
-                f"Umbrella SIR ({sir:,}) is lower than GL deductible ({gl_ded:,}) — verify attachment."
+        if sir is not None and gl_ded is not None and sir < gl_ded:
+            # Spec: hard stop — SIR below GL deductible creates a coverage gap
+            hard.append(
+                f"Umbrella SIR ({sir:,}) is lower than GL deductible ({gl_ded:,}) — "
+                "coverage gap between deductible and umbrella attachment. Align SIR ≥ GL deductible."
             )
 
     return hard, soft
@@ -352,7 +358,90 @@ def risk_transfer_check(facts: dict, flags: dict, selected_form_ids: List[str]) 
             "message": f"Specific endorsement wording required: {wording}",
         })
 
+    # Enhanced: Certificate holder / mortgagee / loss payee detection
+    if flags.get("has_mortgagee_requirement") or rt.get("mortgagee_names"):
+        mortgagee = rt.get("mortgagee_names") or []
+        mortgagee_str = ", ".join(str(m) for m in mortgagee) if isinstance(mortgagee, list) else str(mortgagee)
+        checklist.append({
+            "check":   "mortgagee_clause",
+            "label":   "Mortgagee/Lender Clause",
+            "status":  "required",
+            "message": f"Mortgagee clause required for lender: {mortgagee_str}" if mortgagee_str else "Mortgagee clause required",
+        })
+
+    if flags.get("has_loss_payee_requirement") or rt.get("loss_payee_names"):
+        loss_payee = rt.get("loss_payee_names") or []
+        payee_str = ", ".join(str(p) for p in loss_payee) if isinstance(loss_payee, list) else str(loss_payee)
+        checklist.append({
+            "check":   "loss_payee_clause",
+            "label":   "Loss Payee Clause",
+            "status":  "required",
+            "message": f"Loss payee clause required for: {payee_str}" if payee_str else "Loss payee clause required",
+        })
+
+    if flags.get("has_certificate_holder_requirement"):
+        cert_holder = _fv(facts, "certificate_holder")
+        checklist.append({
+            "check":   "certificate_of_insurance",
+            "label":   "Certificate of Insurance",
+            "status":  "required",
+            "message": f"Certificate of Insurance required for: {cert_holder}" if cert_holder else "Certificate of Insurance required",
+        })
+
     return checklist
+
+
+def generate_risk_transfer_enforcement_report(
+    checklist: List[dict],
+    forms_selected: List[str],
+) -> dict:
+    """
+    Generate enforcement report showing compliance status.
+    Shows which risk transfer requirements are satisfied vs pending.
+
+    Returns dict with:
+    - satisfied: List of requirements marked as satisfied
+    - pending: List of requirements still pending (have status='required')
+    - advisory: List of advisory items
+    - enforcement_score: Percentage of required items satisfied (0-100)
+    """
+    satisfied = []
+    pending = []
+    advisory = []
+
+    for item in checklist:
+        status = item.get("status", "advisory")
+        if status == "required":
+            # Check if this is an ACORD 25 requirement
+            if item.get("check") == "additional_insured" and "ACORD_25" in forms_selected:
+                satisfied.append(item)
+            elif item.get("check") in ("mortgagee_clause", "loss_payee_clause", "certificate_of_insurance"):
+                # These require ACORD 25 or 28
+                if "ACORD_25" in forms_selected or "ACORD_28" in forms_selected:
+                    satisfied.append(item)
+                else:
+                    pending.append(item)
+            else:
+                pending.append(item)
+        else:
+            advisory.append(item)
+
+    enforcement_score = 0
+    if satisfied or pending:
+        enforcement_score = int((len(satisfied) / (len(satisfied) + len(pending))) * 100)
+
+    return {
+        "satisfied_requirements": satisfied,
+        "pending_requirements": pending,
+        "advisory_items": advisory,
+        "enforcement_score": enforcement_score,
+        "total_required": len(satisfied) + len(pending),
+        "total_satisfied": len(satisfied),
+        "summary": (
+            f"{len(satisfied)} of {len(satisfied) + len(pending)} required risk transfer requirements satisfied. "
+            f"{len(advisory)} advisory items." if (satisfied or pending) else "No risk transfer requirements detected."
+        )
+    }
 
 
 # ── Cross-validation ──────────────────────────────────────────────────────────
@@ -391,7 +480,8 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
     if wc_pay and tot_pay and tot_pay > 0:
         diff_pct = abs(wc_pay - tot_pay) / tot_pay
         if diff_pct > 0.20:
-            issues.append({"type": "warning", "message": f"WC payroll differs from total payroll by {diff_pct * 100:.0f}%"})
+            # Spec: hard stop — WC payroll must reconcile with total payroll
+            issues.append({"type": "hard_stop", "message": f"WC payroll differs from total payroll by {diff_pct * 100:.0f}% — reconcile or add ACORD 101 explanation"})
 
     rev = _to_float(_fv(facts, "total_revenue"))
     if rev and tot_pay and tot_pay > 0 and rev > 0:
@@ -421,15 +511,24 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
         n, m = len(locs_125), len(locs_140)
         if n > 0 and m > 0:
             diff = abs(n - m)
-            if diff > 1:
-                severity = "hard_stop" if diff > 2 else "warning"
+            if diff == 1:
                 issues.append({
-                    "type":      severity,
+                    "type":      "warning",
                     "field":     "location_count",
                     "125_count": n,
                     "140_count": m,
-                    "severity":  severity,
-                    "message":   "Location count mismatch between application and property schedule",
+                    "severity":  "warning",
+                    "message":   "Location count mismatch between application and property schedule (off by 1 — verify)",
+                })
+            elif diff > 1:
+                # Spec: hard stop for > 1 location mismatch
+                issues.append({
+                    "type":      "hard_stop",
+                    "field":     "location_count",
+                    "125_count": n,
+                    "140_count": m,
+                    "severity":  "hard_stop",
+                    "message":   "Location count mismatch between application and property schedule — must reconcile or add ACORD 101",
                 })
 
     return issues
@@ -446,6 +545,15 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
         issues.append(
             "[hard_stop] code=name_conflict "
             f"Inconsistent applicant_name across docs: {sorted(str(v) for v in _applicant_vals)}"
+        )
+
+    # DBA consistency — spec: "DBAs must be consistently represented or explicitly explained"
+    dba_vals = {_fv(d["facts"], "dba_name") for d in docs if _fv(d["facts"], "dba_name")}
+    if len(dba_vals) > 1:
+        issues.append(
+            f"[warning] field=dba_name "
+            f"Inconsistent DBA name across docs: {sorted(str(v) for v in dba_vals)}. "
+            "Verify or add ACORD 101 explanation."
         )
 
     for key in ("entity_type", "mailing_address"):
@@ -658,6 +766,17 @@ def normalize_weights(base_weights: dict, override: dict) -> dict:
 
 # ── Package-level SQS ─────────────────────────────────────────────────────────
 
+# SPEC-COMPLIANT WEIGHTS (matches decision tree specification v2.1.0+)
+SPEC_PILLAR_WEIGHTS = {
+    "structural_completeness": 0.25,    # ACORD 125 + required line forms
+    "exposure_consistency":    0.25,    # Class codes, payroll alignment
+    "property_integrity":      0.15,    # COPE completeness
+    "loss_history_alignment":  0.15,    # Claims vs exposures
+    "umbrella_limit_adequacy": 0.10,    # Underlying limits vs umbrella
+    "narrative_quality":       0.10,    # ACORD 101 clarity
+}
+
+# LEGACY WEIGHTS (kept for backward compatibility)
 BASE_PILLAR_WEIGHTS = {
     "data_integrity": 0.35,
     "exposure_cope":  0.25,
@@ -800,6 +919,140 @@ def calculate_package_sqs(
         "session_id": session_id,
         "user_id": user_id,
         "calculation_stage": stage,
+    }
+
+
+# ── SPEC-COMPLIANT SQS CALCULATION (v2.1.0+) ──────────────────────────────
+
+def calculate_package_sqs_spec_compliant(
+    facts: dict,
+    flags: dict,
+    form_results: List[dict],
+    cross_issues: List[dict],
+    hard_stops: List[str],
+    soft_stops: List[str],
+    session_data: dict,
+    mapped_data: Optional[dict] = None,
+    confidence_dict: Optional[dict] = None,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    calculation_stage: str = "initial_extract",
+) -> dict:
+    """
+    Calculate package-level SQS using SPEC-COMPLIANT weights (Decision Tree v2.1.0+).
+    Pillars: structural_completeness (25%) + exposure_consistency (25%) + property_integrity (15%) +
+             loss_history_alignment (15%) + umbrella_limit_adequacy (10%) + narrative_quality (10%)
+    """
+    lob = infer_lob(facts, flags)
+
+    # P1: Structural Completeness (ACORD 125 + required forms)
+    tier1_ok, tier1_missing = check_tier1(facts, flags)
+    tier2_score, tier2_missing = check_tier2(facts)
+    conf_rate = confidence_fill_rate(mapped_data or {}, confidence_dict or {})
+    p1 = int((
+        (100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)) * 0.4 +
+        tier2_score * 0.35 +
+        conf_rate * 0.25
+    ))
+
+    # P2: Exposure Consistency (class codes, payroll alignment)
+    lob_rules = LOB_RULES.get(lob, LOB_RULES["generic"])
+    req_present = sum(1 for f in lob_rules["required"] if _fv(facts, f))
+    req_total = len(lob_rules["required"])
+    lob_score = int((req_present / req_total) * 100) if req_total else 100
+    p2 = lob_score
+
+    # P3: Property Integrity (COPE completeness)
+    p3 = _calculate_cope_score(facts, flags)
+
+    # P4: Loss History Alignment
+    p4, _ = calculate_p4_loss_history(facts, flags)
+
+    # P5: Umbrella & Limit Adequacy
+    if flags.get("has_umbrella"):
+        has_underlying = bool(_fv(facts, "gl_limits") or _fv(facts, "auto_liability_limit"))
+        p5 = 100 if has_underlying else 0
+    else:
+        p5 = 100
+
+    # P6: Narrative Quality
+    ops = _fv(facts, "operations_description") or ""
+    p6 = min(100, int(
+        (min(len(ops), 300) / 300) * 60 +
+        (20 if any(w in ops.lower() for w in ["safety", "certified", "osha", "protocol"]) else 0) +
+        (20 if len(ops) > 100 else 0)
+    ))
+
+    # Calculate weighted score using SPEC-COMPLIANT weights
+    raw = int(
+        p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] +
+        p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"] +
+        p3 * SPEC_PILLAR_WEIGHTS["property_integrity"] +
+        p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"] +
+        p5 * SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"] +
+        p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
+    )
+
+    # Hard/soft stop penalties
+    hard_cross = [i for i in cross_issues if i.get("type") == "hard_stop"]
+    if hard_stops or hard_cross:
+        raw = min(raw, 60)
+    elif soft_stops:
+        raw = min(raw, 85)
+    raw = max(0, raw)
+
+    # Tier determination
+    tier = (
+        "Carrier-Ready" if raw >= 90 else
+        "Quote-Ready" if raw >= 78 else
+        "Review-Ready" if raw >= 62 else
+        "At-Risk" if raw >= 45 else
+        "Incomplete"
+    )
+
+    # SQS history
+    history = session_data.get("sqs_history", [])
+    timestamp = datetime.utcnow().isoformat() + "Z"
+    history.append({
+        "at": timestamp,
+        "score": raw,
+        "stage": calculation_stage,
+        "model_version": SQS_MODEL_VERSION,
+        "weights_version": "spec_compliant_v2.1.0"
+    })
+
+    delta = raw - history[0]["score"] if len(history) > 1 else 0
+    all_recs = list(tier1_missing) + list(tier2_missing)[:3]
+
+    return {
+        "package_sqs_score": raw,
+        "package_sqs_score_spec_compliant": raw,
+        "tier": tier,
+        "lob": lob,
+        "pillars": {
+            "structural_completeness": p1,
+            "exposure_consistency": p2,
+            "property_integrity": p3,
+            "loss_history_alignment": p4,
+            "umbrella_limit_adequacy": p5,
+            "narrative_quality": p6,
+        },
+        "weights_used": SPEC_PILLAR_WEIGHTS,
+        "weights_version": "spec_compliant_v2.1.0",
+        "top_recommendations": all_recs,
+        "sqs_history": history,
+        "delta_this_session": delta,
+        "routing_decision": (
+            "auto_quote" if raw >= 85 else
+            "priority_review" if raw >= 70 else
+            "standard_review" if raw >= 50 else
+            "hold"
+        ),
+        "timestamp": timestamp,
+        "model_version": SQS_MODEL_VERSION,
+        "session_id": session_id,
+        "user_id": user_id,
+        "calculation_stage": calculation_stage,
     }
 
 
@@ -1033,7 +1286,7 @@ def calculate_sqs(
             ]]
             struct = int(70 + (sum(br_optional) / len(br_optional)) * 30)
 
-    elif fid == "ACORD_137":
+    elif fid in ("ACORD_137_CA", "ACORD_137_CO"):
         # Crime: limit is the key field
         crime_chks = [
             bool(_fv(facts, "crime_limit")),
@@ -1064,7 +1317,7 @@ def calculate_sqs(
                     "priority": 2,
                 })
 
-    elif fid == "ACORD_138":
+    elif fid in ("ACORD_138_CA", "ACORD_138_CO"):
         # Cyber: limit is required; controls are carrier-grade
         cyber_chks = [
             bool(_fv(facts, "cyber_limit")),

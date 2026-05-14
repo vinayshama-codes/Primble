@@ -491,8 +491,10 @@ TARGET_FORMS = [
     "ACORD_28",
     "ACORD_101",
     "ACORD_133",
-    "ACORD_137",
-    "ACORD_138",
+    "ACORD_137_CA",
+    "ACORD_137_CO",
+    "ACORD_138_CA",
+    "ACORD_138_CO",
     "ACORD_160",
     "ACORD_186",
 ]

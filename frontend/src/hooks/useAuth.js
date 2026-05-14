@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { fetchCurrentUser, logoutUser } from "../api/authApi";
+import { LOGOUT_REDIRECT_URL } from "../config/constants";
 
 export function useAuth() {
   const [user, setUser]               = useState(null);
@@ -21,6 +22,7 @@ export function useAuth() {
       sessionStorage.removeItem("acordly_signature");
       localStorage.removeItem("acordly_signature");
       setUser(null);
+      window.location.href = LOGOUT_REDIRECT_URL;
     });
   };
 

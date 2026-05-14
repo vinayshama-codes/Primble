@@ -319,22 +319,24 @@ try:
     }
     flags = {"has_general_liability": True}
 
-    # "cyber" only in raw text, NOT in ops/lobs → must trigger ACORD_138
+    # "cyber" only in raw text, NOT in ops/lobs → must trigger ACORD_138 variants
     raw_text = (
         "This policy includes cyber liability and data breach coverage "
         "for network security events"
     )
     matches = match_forms_deterministic(facts, flags, text=raw_text)
     form_ids = [m["form_id"] for m in matches]
-    assert "ACORD_138" in form_ids, \
-        f"ACORD_138 not triggered by raw text. Got: {form_ids}"
+    cyber_138_found = any(fid in form_ids for fid in ("ACORD_138_CA", "ACORD_138_CO"))
+    assert cyber_138_found, \
+        f"ACORD_138 CA/CO not triggered by raw text. Got: {form_ids}"
 
-    # "employee dishonesty" only in raw text → must trigger ACORD_137
+    # "employee dishonesty" only in raw text → must trigger ACORD_137 variants
     raw_text2 = "employee dishonesty and money and securities coverage requested"
     matches2 = match_forms_deterministic(facts, flags, text=raw_text2)
     form_ids2 = [m["form_id"] for m in matches2]
-    assert "ACORD_137" in form_ids2, \
-        f"ACORD_137 not triggered by raw text. Got: {form_ids2}"
+    crime_137_found = any(fid in form_ids2 for fid in ("ACORD_137_CA", "ACORD_137_CO"))
+    assert crime_137_found, \
+        f"ACORD_137 CA/CO not triggered by raw text. Got: {form_ids2}"
 
     _record("form_raw_text_matching", True)
 except AssertionError as e:
@@ -366,7 +368,7 @@ try:
     call_count = [0]
     _original_groq = _cover_mod.groq_chat
 
-    def _counting_groq(model, messages, **kwargs):
+    async def _counting_groq(model, messages, **kwargs):
         call_count[0] += 1
         return '{"narrative":"test","sqs_reasoning":"test","ai_block":{}}'
 
@@ -379,8 +381,9 @@ try:
     for k in keys_to_del:
         _EXTRACT_CACHE.pop(k, None)
 
-    r1 = generate_ai_cover_narrative(facts_c, flags_c, sqs_results, ["ACORD_125"], "Agency X")
-    r2 = generate_ai_cover_narrative(facts_c, flags_c, sqs_results, ["ACORD_125"], "Agency X")
+    import asyncio as _asyncio
+    r1 = _asyncio.run(generate_ai_cover_narrative(facts_c, flags_c, sqs_results, ["ACORD_125"], "Agency X"))
+    r2 = _asyncio.run(generate_ai_cover_narrative(facts_c, flags_c, sqs_results, ["ACORD_125"], "Agency X"))
 
     _cover_mod.groq_chat = _original_groq  # restore
 
