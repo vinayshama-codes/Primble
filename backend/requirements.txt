@@ -28,6 +28,7 @@ stripe==15.0.1
 pdfplumber==0.11.9
 pikepdf==10.5.1
 reportlab==4.4.10
+PyMuPDF==1.24.14
 
 # Image Processing
 Pillow==12.2.0

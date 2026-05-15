@@ -48,7 +48,11 @@ async def get_signature(current_user: dict = Depends(get_current_user)):
             current_user["id"],
         )
     sig = dict(row).get("signature_data") if row else None
-    return {"success": True, "signature_data": decrypt_field(sig)}
+    try:
+        decrypted = decrypt_field(sig)
+    except Exception:
+        decrypted = None
+    return {"success": True, "signature_data": decrypted}
 
 
 @router.post("/api/apply-signature/{session_id}/{form_id}")

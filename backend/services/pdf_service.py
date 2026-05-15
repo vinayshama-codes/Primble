@@ -1579,23 +1579,14 @@ _RAW_TEXT_SKIP_PATTERNS = [
 
 
 def _run_coro_sync(coro):
-    """Run an async coroutine from synchronous code.
+    """Run an async coroutine from a synchronous executor thread.
 
-    Uses the running loop if one exists (FastAPI request context), otherwise
-    creates a new event loop. Never calls asyncio.run() which fails when called
-    inside an already-running loop.
+    This is always called from run_in_executor() worker threads, which have no
+    running event loop of their own. asyncio.run() is safe here — it creates a
+    fresh loop for the thread and cleans it up on exit.
     """
     import asyncio as _asyncio
-    try:
-        loop = _asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures as _cf
-            with _cf.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(_asyncio.run, coro)
-                return future.result()
-        return loop.run_until_complete(coro)
-    except RuntimeError:
-        return _asyncio.run(coro)
+    return _asyncio.run(coro)
 
 
 def _fill_empty_from_raw_text(
