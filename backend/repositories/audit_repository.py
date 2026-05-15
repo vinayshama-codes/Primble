@@ -17,6 +17,20 @@ async def write_audit_log(
     ip_address: str = None,
 ) -> None:
     try:
+        user_email = user.get("email")
+        # user_email is NOT NULL in DB; look it up when called from webhook with id only
+        if not user_email and user.get("id"):
+            try:
+                async with get_pool().acquire() as conn2:
+                    row2 = await conn2.fetchrow(
+                        "SELECT email FROM users WHERE id = $1", str(user["id"])
+                    )
+                    if row2:
+                        user_email = row2.get("email") or ""
+            except Exception:
+                pass
+        user_email = user_email or ""
+
         async with get_pool().acquire() as conn:
             await conn.execute(
                 """INSERT INTO acord_audit_log
@@ -25,7 +39,7 @@ async def write_audit_log(
                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
                 str(uuid.uuid4()),
                 user.get("id"),
-                user.get("email"),
+                user_email,
                 user.get("organization_name", ""),
                 action,
                 form_id,

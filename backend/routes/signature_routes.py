@@ -100,9 +100,14 @@ async def apply_signature(
             field_data[field_name] = ""
             confidence[field_name] = "filled"
 
+    # Use the already-filled PDF bytes so values are never lost on re-generation
+    existing_bytes = r.get("pdf_bytes")
+    if existing_bytes is not None and not isinstance(existing_bytes, bytes):
+        existing_bytes = bytes(existing_bytes)
+
     try:
         signed_pdf = await asyncio.get_event_loop().run_in_executor(
-            None, inject_signature_into_pdf, tpl, field_data, confidence, sig
+            None, inject_signature_into_pdf, tpl, field_data, confidence, sig, existing_bytes
         )
     except Exception as ex:
         logger.error(f"apply-signature error form={form_id}: {ex}", exc_info=True)

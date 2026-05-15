@@ -2416,6 +2416,7 @@ def inject_signature_into_pdf(
     field_data: dict,
     confidence: dict,
     signature_b64: str,
+    existing_pdf_bytes: bytes = None,
 ) -> bytes:
     """Fill the PDF then paint the signature image directly into the page content
     stream at every signature-field rectangle.
@@ -2425,7 +2426,8 @@ def inject_signature_into_pdf(
     exports that ignore annotations.
     """
     import base64
-    filled_bytes = fill_pdf(template_path, field_data, confidence)
+    # Use pre-filled bytes when available so no field values are lost on re-generation
+    filled_bytes = existing_pdf_bytes if existing_pdf_bytes is not None else fill_pdf(template_path, field_data, confidence)
     try:
         b64_data = signature_b64
         if "," in b64_data:
