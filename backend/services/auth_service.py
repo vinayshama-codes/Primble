@@ -32,7 +32,7 @@ except Exception as _redis_init_err:
     )
     _auth_redis = None
 
-_AUTH_CACHE_TTL        = 300                 # seconds — user dict cache
+_AUTH_CACHE_TTL        = 30                  # seconds — user dict cache (kept short so DB changes propagate quickly)
 _SESSION_TTL_H         = _CFG_SESSION_TTL_H  # hours   — driven by SESSION_TTL_H env var
 _INACTIVITY_TIMEOUT_H  = int(os.getenv("SESSION_INACTIVITY_TIMEOUT_H", "2"))
 _REVOKED_KEY_PFX       = "revoked:"
@@ -116,6 +116,24 @@ async def revoke_all_sessions(user_id: str) -> None:
                 _auth_redis.delete(f"auth:{token_hash}")
             except Exception as ex:
                 logger.warning(f"auth_service: Redis bulk-revoke failed for hash: {ex}")
+
+
+async def invalidate_user_cache(user_id: str) -> None:
+    """Delete all Redis auth cache entries for a user so DB changes are reflected immediately."""
+    if _auth_redis is None:
+        return
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT token FROM sessions WHERE user_id = $1", user_id
+            )
+        for row in rows:
+            try:
+                _auth_redis.delete(f"auth:{dict(row)['token']}")
+            except Exception as ex:
+                logger.warning(f"auth_service: cache invalidation failed for user={user_id}: {ex}")
+    except Exception as ex:
+        logger.warning(f"auth_service: invalidate_user_cache failed for user={user_id}: {ex}")
 
 
 async def rotate_session(

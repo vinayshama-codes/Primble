@@ -12,7 +12,7 @@ from config.database import get_pool
 from config.settings import PLANS, FRONTEND_URL, STRIPE_WEBHOOK_SECRET
 from models.schemas import ApplyOverageRequest, CheckoutRequest, OverageCheckoutRequest
 from repositories.audit_repository import write_audit_log
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, invalidate_user_cache
 from services.email_service import _send_payment_failed_email
 from services.stripe_service import evaluate_package_limit, get_or_create_stripe_customer
 from utils.rate_limiter import check_verify_upgrade_rate_limit
@@ -169,6 +169,7 @@ async def stripe_webhook(request: Request):
                                 session_id=sid,
                                 form_name=str(qty),
                             )
+                            await invalidate_user_cache(str(uid))
             return {"received": True}
 
         if obj.get("mode") != "setup":
@@ -228,6 +229,7 @@ async def stripe_webhook(request: Request):
                         "payment.subscription_created",
                         session_id=sub_id,
                     )
+                    await invalidate_user_cache(str(user_id))
 
         customer_id = obj.get("customer")
         if customer_id:
@@ -329,6 +331,11 @@ async def stripe_webhook(request: Request):
                             WHERE stripe_subscription_id=$2""",
                         now, sub_id,
                     )
+                    updated_user = await conn.fetchrow(
+                        "SELECT id FROM users WHERE stripe_subscription_id=$1", sub_id
+                    )
+                    if updated_user:
+                        await invalidate_user_cache(str(dict(updated_user)["id"]))
 
     elif event["type"] == "invoice.payment_failed":
         obj = event["data"]["object"]
@@ -406,6 +413,7 @@ async def stripe_webhook(request: Request):
                     "payment.failed",
                     session_id=sub_id,
                 )
+                await invalidate_user_cache(str(row["id"]))
                 row = dict(row)
                 logger.info(f"invoice.payment_failed: user={row['id']} email={row['email']} payment_email_sent_day={row.get('payment_email_sent_day')}")
                 if int(row.get("payment_email_sent_day") or 0) < 1:
@@ -471,6 +479,7 @@ async def stripe_webhook(request: Request):
                             "payment.subscription_cancelled",
                             session_id=sub_id,
                         )
+                        await invalidate_user_cache(str(cancelled_row["id"]))
                 logger.info(f"Subscription deleted: user downgraded to free for sub {sub_id}")
 
     elif event["type"] == "customer.subscription.updated":
@@ -533,6 +542,11 @@ async def stripe_webhook(request: Request):
                             " AND payment_status NOT IN ('soft_locked','suspended','archived')",
                             now_pd, sub_id,
                         )
+                    affected = await conn.fetchrow(
+                        "SELECT id FROM users WHERE stripe_subscription_id=$1", sub_id
+                    )
+                    if affected:
+                        await invalidate_user_cache(str(dict(affected)["id"]))
 
     return {"received": True}
 
@@ -608,6 +622,7 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
                         now, cfg["overage_rate"], user_id,
                     )
                 logger.info(f"verify-upgrade synced user {user_id} to plan={plan} sub={sub_id}, reset packages_used=0")
+                await invalidate_user_cache(str(user_id))
 
                 # Cancel every other active/past_due/trialing subscription for this
                 # customer now that payment is confirmed and the new sub is synced.
@@ -802,6 +817,7 @@ async def cancel_subscription(current_user: dict = Depends(get_current_user)):
                 "UPDATE users SET payment_status='canceling', stripe_subscription_id=$1 WHERE id=$2",
                 cancelled_ids[0], current_user["id"],
             )
+        await invalidate_user_cache(str(current_user["id"]))
 
         return {"success": True, "message": "Subscription will cancel at the end of the current billing period."}
     except stripe.error.InvalidRequestError:
