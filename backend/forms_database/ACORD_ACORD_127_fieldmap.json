@@ -69,5 +69,6 @@
   "Vehicle_TotalPremiumAmount_C": null,
   "Vehicle_ProducerIdentifier_D": null,
   "Vehicle_TotalPremiumAmount_D": null,
+  "__ai_mapped__": [],
   "__schema_version__": "v5"
 }

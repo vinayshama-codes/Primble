@@ -1040,11 +1040,15 @@ def migrate_fieldmaps_to_v5() -> None:
             with open(path) as f:
                 data = json.load(f)
             current_ver = data.get("__schema_version__")
-            if current_ver == _FIELDMAP_SCHEMA_VERSION:
-                continue                                   # already correct — skip
-            data["__schema_version__"] = _FIELDMAP_SCHEMA_VERSION
+            needs_write = False
+            if current_ver != _FIELDMAP_SCHEMA_VERSION:
+                data["__schema_version__"] = _FIELDMAP_SCHEMA_VERSION
+                needs_write = True
             if "__ai_mapped__" not in data:
                 data["__ai_mapped__"] = []
+                needs_write = True
+            if not needs_write:
+                continue
             with open(path, "w") as f:
                 json.dump(data, f, indent=2)
             migrated += 1

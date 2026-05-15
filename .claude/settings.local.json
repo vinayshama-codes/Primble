@@ -83,7 +83,8 @@
       "Bash(xargs sed *)",
       "Bash(grep -E '\\\\.env$|\\\\.env\\\\.')",
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
-      "Bash(python -)"
+      "Bash(python -)",
+      "Bash(python -c \"from cryptography.fernet import Fernet; print\\(Fernet.generate_key\\(\\).decode\\(\\)\\)\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",
