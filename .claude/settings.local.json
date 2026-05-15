@@ -81,7 +81,9 @@
       "Bash(python -c \"from services.sqs_service import calculate_sqs, calculate_package_sqs_spec_compliant, generate_risk_transfer_enforcement_report; from services.form_service import match_forms_deterministic, _infer_primary_state; from services.cross_form_validator import run_cross_form_validation; print\\('✅ All modules imported successfully'\\)\")",
       "Bash(python -c \"from services.sqs_service import calculate_sqs, calculate_package_sqs_spec_compliant, generate_risk_transfer_enforcement_report; from services.form_service import match_forms_deterministic, _infer_primary_state; from services.cross_form_validator import run_cross_form_validation; print\\('SUCCESS: All modules imported'\\)\")",
       "Bash(xargs sed *)",
-      "Bash(grep -E '\\\\.env$|\\\\.env\\\\.')"
+      "Bash(grep -E '\\\\.env$|\\\\.env\\\\.')",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(python -)"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",

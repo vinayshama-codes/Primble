@@ -732,7 +732,97 @@ def _get_checkbox_on_state(item) -> str:
     return "/Yes"
 
 
-def _fill_and_highlight(arr, data: dict, confidence: dict, counter: list):
+def _checkmark_stream_content(w: float, h: float) -> bytes:
+    """Return PDF content-stream bytes that draw a bold ✔ scaled to w×h."""
+    # Checkmark path: start at left ~20% across, mid height;
+    # drop to bottom ~35% across; rise to top-right corner.
+    # Coordinates are in the widget's local space (origin = bottom-left).
+    margin_x = w * 0.10
+    margin_y = h * 0.10
+    # tip of the short left stroke (bottom-left of the tick)
+    x0 = margin_x + w * 0.08
+    y0 = h * 0.42
+    # valley of the tick
+    x1 = margin_x + w * 0.30
+    y1 = margin_y
+    # top-right end of the tick
+    x2 = w - margin_x
+    y2 = h - margin_y
+    lw = max(0.9, min(w, h) * 0.11)   # line weight proportional to box size
+    content = (
+        f"q\n"
+        f"{lw:.2f} w\n"          # line width
+        f"1 J\n"                  # round line caps
+        f"1 j\n"                  # round line joins
+        f"{x0:.2f} {y0:.2f} m\n"
+        f"{x1:.2f} {y1:.2f} l\n"
+        f"{x2:.2f} {y2:.2f} l\n"
+        f"S\n"
+        f"Q\n"
+    )
+    return content.encode("latin-1")
+
+
+def _set_checkbox_checkmark_ap(pdf: pikepdf.Pdf, item, on_state_key: str):
+    """Overwrite the on-state appearance stream in-place with a ✔ path."""
+    try:
+        ap = item.get("/AP")
+        if ap is None:
+            return
+
+        n = ap.get("/N")
+        if n is None:
+            return
+
+        key = on_state_key.lstrip("/")
+        stream_obj = None
+        for k in n.keys():
+            if str(k).lstrip("/") == key:
+                stream_obj = n[k]
+                break
+        if stream_obj is None:
+            for k in n.keys():
+                if str(k).lstrip("/") not in ("Off", "off", "OFF"):
+                    stream_obj = n[k]
+                    break
+        if stream_obj is None:
+            return
+
+        # Read BBox from existing stream
+        bb = stream_obj.get("/BBox")
+        if bb is not None:
+            bx0, by0, bx1, by1 = float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])
+        else:
+            rect = item.get("/Rect")
+            if rect:
+                rx1, ry1, rx2, ry2 = float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])
+                bx0, by0, bx1, by1 = 0.0, 0.0, abs(rx2 - rx1), abs(ry2 - ry1)
+            else:
+                bx0, by0, bx1, by1 = 0.0, 0.0, 14.4, 12.0
+
+        w = bx1 - bx0
+        h = by1 - by0
+        if w <= 0 or h <= 0:
+            w, h = 14.4, 12.0
+
+        stream_bytes = _checkmark_stream_content(w, h)
+
+        # Write new content directly into the existing stream object in-place.
+        # This works even when the stream is an indirect object, because we are
+        # mutating the object that pikepdf already has a reference to.
+        stream_obj.write(stream_bytes)
+
+        # Remove /Filter so pikepdf doesn't try to decompress our raw bytes
+        if "/Filter" in stream_obj:
+            del stream_obj["/Filter"]
+        if "/DecodeParms" in stream_obj:
+            del stream_obj["/DecodeParms"]
+
+    except Exception:
+        pass
+
+
+def _fill_and_highlight(arr, data: dict, confidence: dict, counter: list, pdf: pikepdf.Pdf = None):
     for item in arr:
         try:
             t    = item.get("/T", None)
@@ -743,18 +833,18 @@ def _fill_and_highlight(arr, data: dict, confidence: dict, counter: list):
                 if val is not None and str(val).strip() not in ("", "null", "None"):
                     ft = str(item.get("/FT", ""))
                     if "/Btn" in ft:
-                        # Checkbox: set /V and /AS to the export name (e.g. /Yes or /Off)
-                        val_str   = str(val).strip()
+                        val_str    = str(val).strip()
                         is_checked = val_str.lower() in ("yes", "true", "1", "on", "x")
                         if is_checked:
                             on_state = _get_checkbox_on_state(item)
                             item["/V"]  = pikepdf.Name(on_state)
                             item["/AS"] = pikepdf.Name(on_state)
+                            # Replace the on-state AP stream with a proper ✔ glyph
+                            if pdf is not None:
+                                _set_checkbox_checkmark_ap(pdf, item, on_state)
                         else:
                             item["/V"]  = pikepdf.Name("/Off")
                             item["/AS"] = pikepdf.Name("/Off")
-                        if "/AP" in item:
-                            del item["/AP"]
                         counter[0] += 1
                     else:
                         item["/V"] = pikepdf.String(str(val))
@@ -762,7 +852,7 @@ def _fill_and_highlight(arr, data: dict, confidence: dict, counter: list):
                             del item["/AP"]
                         counter[0] += 1
             if kids:
-                _fill_and_highlight(kids, data, confidence, counter)
+                _fill_and_highlight(kids, data, confidence, counter, pdf)
         except Exception:
             pass
 
@@ -857,7 +947,7 @@ def fill_pdf(template_path: str, data: dict, confidence: Optional[dict] = None) 
             acro = pdf.Root["/AcroForm"]
             acro["/NeedAppearances"] = pikepdf.Boolean(True)
             counter = [0]
-            _fill_and_highlight(acro.get("/Fields", []), data, confidence or {}, counter)
+            _fill_and_highlight(acro.get("/Fields", []), data, confidence or {}, counter, pdf)
             logger.info(f"fill_pdf: wrote {counter[0]} field values")
         if confidence:
             page_rects = _collect_field_rects_for_highlight(pdf, confidence, data or {})
@@ -1749,16 +1839,18 @@ def _fill_unmatched_with_gpt(
     _PROMPT_SKELETON = (
         f"You are filling ACORD form {form_id} for an insurance submission.\n"
         "You have two data sources:\n"
-        "  SOURCE 1 — structured extracted facts (compact, structured)\n"
-        "  SOURCE 2 — raw OCR document text (when provided)\n"
-        "Prefer SOURCE 1. Use SOURCE 2 only when SOURCE 1 has no answer.\n\n"
+        "  SOURCE 1 — context hints: facts previously extracted from the document (use ONLY for disambiguation or confirmation)\n"
+        "  SOURCE 2 — raw OCR document text (PRIMARY source — find all values directly from here)\n\n"
+        "PRIMARY RULE: Extract values directly from SOURCE 2 (raw document text). "
+        "SOURCE 1 facts are hints only — do NOT copy from SOURCE 1 as the answer unless you can also confirm the value exists in SOURCE 2. "
+        "Your goal is to find the actual values printed in the declaration pages.\n\n"
         "Return exactly three keys:\n"
         '  "values":          {FieldName: "exact_value_or_null"}\n'
         '  "mappings":        {FieldName: "fact_key_or_null"}\n'
         '  "raw_text_sourced":[FieldName, ...]\n\n'
         "Rules:\n"
-        "  1. EXACT values only — do not paraphrase or invent.\n"
-        "  2. Return null when neither source has the answer.\n"
+        "  1. EXACT values only — copy verbatim from SOURCE 2. Do not paraphrase or invent.\n"
+        "  2. Return null when the value is genuinely absent from the document text.\n"
         "  3. Checkbox/indicator fields (marked 'checkbox — Yes/No'): return 'Yes' or 'No' ONLY.\n"
         "     Examples of how to fill checkboxes:\n"
         "     - Policy_Status_BoundIndicator: 'Yes' if the document is a bound policy, else 'No'\n"
@@ -1770,10 +1862,10 @@ def _fill_unmatched_with_gpt(
         "  4. Dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
         "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n"
         "  6. mappings: use ONLY exact fact keys from SOURCE 1. null if no clean match.\n"
-        "  7. NEVER put raw_text_sourced fields in mappings.\n"
+        "  7. List ALL fields you fill from SOURCE 2 in raw_text_sourced.\n"
         "  8. Fields ending in _A, _B, _C ... are SEPARATE row slots for DIFFERENT entries.\n"
         "     Each such field is annotated '[slot N of T]' telling you there are T slots for\n"
-        "     that field type. Your job:\n"
+        "     that field type. Search SOURCE 2 carefully for EACH distinct value.\n"
         "       a) Count how many DISTINCT values of that type appear in the document.\n"
         "       b) Assign the 1st distinct value to _A, 2nd to _B, etc.\n"
         "       c) If the document has fewer distinct values than slots, leave the extra\n"
@@ -1916,18 +2008,14 @@ def _fill_unmatched_with_gpt(
                 chunk_label=f"{chunk_idx + 1}/{len(raw_chunks)}")
 
     # ── Conflict resolution ───────────────────────────────────────────────────
-    # SOURCE 1 (structured facts) always wins; among raw-text candidates the
-    # most-frequent value across chunks wins (majority vote).
+    # Raw document text is the primary source. Among candidates from multiple
+    # chunks, the most-frequent value wins (majority vote).
+    # Facts (SOURCE 1) are used only as a fallback when no raw-text value was found.
     all_filled: dict = {}
     for field, candidates in candidate_counts.items():
         if not candidates:
             continue
-        fk = all_mappings.get(field)
-        if fk and _fv(facts, fk) is not None:
-            src1 = str(_fv(facts, fk)).strip()
-            if src1 and src1.lower() not in ("", "null", "none"):
-                all_filled[field] = src1
-                continue
+        # Majority vote across chunks — raw text is the ground truth
         all_filled[field] = max(candidates, key=lambda v: candidates[v])
 
     # ── Audit log ─────────────────────────────────────────────────────────────
@@ -1983,6 +2071,11 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
     new_fieldmap = dict(cached_fieldmap)
     new_ai_set   = set(cached_ai_set)
 
+    # Fields whose Pass 1 values are authoritative and should NOT be overridden by
+    # LLM Call 2: address decomposition (_addr_*/_loc_*), schedule rows, and
+    # indicator/checkbox fields (derived from flags, not raw text values).
+    _pass1_authoritative: set = set()
+
     # Counters for detailed pipeline logging
     cnt_schema          = len(schema)
     cnt_cached_hit      = 0   # fields resolved from cached fact_key (non-null)
@@ -2001,6 +2094,7 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
                 if sched is not None:
                     mapped[field] = sched
                     cnt_cached_hit += 1
+                    _pass1_authoritative.add(field)
                 # sched==None means row out-of-range → leave mapped[field] unset (blank)
             elif cached_key is None:
                 # Cached None means GPT previously found no mapping OR the field was
@@ -2010,15 +2104,16 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
                 if _is_nonfillable_field(field):
                     mapped[field] = None          # accepted: truly non-fillable
                     cnt_cached_null_skip += 1
+                    _pass1_authoritative.add(field)
                 else:
                     # Fillable field whose GPT pass previously returned null — retry.
                     # First try deterministic indicator derivation; if that returns a
-                    # value we accept it and DON'T need GPT. Only unresolved fields go
-                    # into the unmatched bucket.
+                    # value we accept it and DON'T need GPT. Indicators are authoritative.
                     ind = _derive_indicator(field, facts)
                     if ind is not None:
                         mapped[field] = ind
                         cnt_cached_hit += 1
+                        _pass1_authoritative.add(field)
                     else:
                         unmatched[field] = schema[field]
                         cnt_cached_null_retry += 1
@@ -2026,6 +2121,17 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
                 val = _apply_fact_key(cached_key, facts)
                 mapped[field] = val
                 cnt_cached_hit += 1
+                # Authoritative if: address-decomposed key (_addr_*/_loc_*), indicator
+                # field, or nonfillable (Signature, Premium, Rate, etc.).
+                # All other cached fact-key fields go to LLM Call 2 for raw-text confirmation.
+                if (
+                    (isinstance(cached_key, str) and cached_key.startswith("_"))
+                    or "Indicator" in field
+                    or _is_nonfillable_field(field)
+                ):
+                    _pass1_authoritative.add(field)
+                else:
+                    unmatched[field] = schema[field]
         else:
             result = _deterministic_map(field, facts)
             if result == "UNMATCHED":
@@ -2034,17 +2140,38 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
                 mapped[field] = result
                 cnt_deterministic += 1
                 # Persist the matched fact_key so this field is free next run.
+                rule_fact_key = None   # fact_key from _ACORD_FIELD_RULES (None = no match or explicit null)
                 for pattern, fact_key in _ACORD_FIELD_RULES:
                     if pattern in field:
                         new_fieldmap[field] = fact_key
+                        rule_fact_key = fact_key     # may be None for explicit-null rules
                         break
+                # Classify: authoritative (Pass 1 keeps) vs raw-text-eligible (LLM Call 2)
+                #
+                # Authoritative cases:
+                #   1. Address decomposition: fact_key starts with "_" (_addr_*, _loc_*)
+                #   2. Indicator/checkbox fields: value derived from flags, not raw text
+                #   3. Nonfillable fields: Signature, Premium, Rate, etc. — no LLM needed
+                #   4. rule_fact_key is None: either an explicit-null rule (field intentionally
+                #      unmapped) or no _ACORD_FIELD_RULES match (resolved by _derive_indicator)
+                is_addr_key    = isinstance(rule_fact_key, str) and rule_fact_key.startswith("_")
+                is_indicator   = "Indicator" in field
+                is_nonfillable = _is_nonfillable_field(field)
+
+                if is_addr_key or is_indicator or is_nonfillable or rule_fact_key is None:
+                    _pass1_authoritative.add(field)
+                else:
+                    # Non-address, non-indicator, fillable, non-null fact_key mapping:
+                    # send to LLM Call 2 so raw document text can confirm/override.
+                    unmatched[field] = schema[field]
 
     logger.info(
         "map_facts PIPELINE form=%s | schema=%d cached_hit=%d det=%d "
-        "null_skip=%d null_retry=%d unmatched_gpt=%d",
+        "null_skip=%d null_retry=%d gpt_fields=%d pass1_auth=%d",
         form_id or "unknown",
         cnt_schema, cnt_cached_hit, cnt_deterministic,
         cnt_cached_null_skip, cnt_cached_null_retry, len(unmatched),
+        len(_pass1_authoritative),
     )
 
     if unmatched:
@@ -2063,6 +2190,8 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
         # For cached-null-retry fields: only persist a new None mapping if GPT
         # also returned null AND the field is non-fillable; otherwise leave the
         # existing cached None so we retry again on the next run.
+        # Pass 1 authoritative fields (address decomposition, schedule rows, indicators)
+        # keep their Pass 1 value — GPT raw-text fill does not override them.
         for field in unmatched:
             fact_key = None if field in gpt_raw_fields else gpt_mappings.get(field)
             gpt_returned_null = field not in gpt_values
@@ -2075,8 +2204,13 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
             else:
                 new_fieldmap[field] = fact_key   # cache non-null key or confirmed null
 
-            if field in gpt_values:
+            if field in gpt_values and field not in _pass1_authoritative:
+                # LLM Call 2 found a value in raw text — use it as the primary result.
+                # If Pass 1 also had a value it is superseded (raw text is ground truth).
                 mapped[field] = gpt_values[field]
+            elif field in gpt_values and field in _pass1_authoritative:
+                # Pass 1 is authoritative for this field; keep Pass 1 value.
+                mapped.setdefault(field, gpt_values[field])
             else:
                 mapped.setdefault(field, None)
             if fact_key is not None:

@@ -540,6 +540,13 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
             pass
     if flags.get("has_loss_history") and not _fv(facts, "num_claims") and not _fv(facts, "total_incurred"):
         _101_reasons.append("loss history flagged but no claim count or incurred amount found")
+    if flags.get("auto_split_limits"):
+        _limit_val = str(_fv(facts, "auto_liability_limit") or "")
+        if _limit_val.count("/") < 2:
+            _101_reasons.append(
+                "split auto limits selected but not all three components found "
+                "(BI per person / BI per accident / PD per accident) — additional remarks needed"
+            )
     _cross_issues = cross_validate(facts, flags, [])
     if _cross_issues:
         _101_reasons.append(
@@ -577,6 +584,44 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              "ACORD 160 - Inland Marine Application",
              trigger_weight=0.85,
              trigger_reason="inland marine flag or equipment / cargo keywords detected",
+             template_pending=True)
+
+    # ACORD 137 — Crime / Fidelity
+    _137_crime_kw = {
+        "crime", "employee dishonesty", "money and securities", "forgery",
+        "fidelity", "erisa bond", "commercial crime", "theft", "burglary",
+        "robbery", "acord 137",
+    }
+    if (not _already_matched("ACORD_137_CA")
+            and (flags.get("has_crime") or any(kw in search for kw in _137_crime_kw))):
+        _add("ACORD_137_CA",
+             "ACORD 137 CA - Commercial Auto Coverages / Limits Section",
+             trigger_weight=0.85,
+             trigger_reason="crime/fidelity coverage signals detected",
+             template_pending=True)
+        _add("ACORD_137_CO",
+             "ACORD 137 CO - Commercial Auto Coverages / Limits Section",
+             trigger_weight=0.85,
+             trigger_reason="crime/fidelity coverage signals detected",
+             template_pending=True)
+
+    # ACORD 138 — Cyber / Network Security
+    _138_cyber_kw = {
+        "cyber", "data breach", "network security", "ransomware",
+        "cyber liability", "privacy liability", "pci", "phi",
+        "cyber insurance", "acord 138",
+    }
+    if (not _already_matched("ACORD_138_CA")
+            and (flags.get("has_cyber") or any(kw in search for kw in _138_cyber_kw))):
+        _add("ACORD_138_CA",
+             "ACORD 138 CA - Garage and Dealers Coverages / Limits Section",
+             trigger_weight=0.85,
+             trigger_reason="cyber/data breach coverage signals detected",
+             template_pending=True)
+        _add("ACORD_138_CO",
+             "ACORD 138 CO - Garage and Dealers Coverages / Limits Section",
+             trigger_weight=0.85,
+             trigger_reason="cyber/data breach coverage signals detected",
              template_pending=True)
 
     # ACORD 186 — flag-matched above; keyword fallback for GL-present submissions
@@ -627,11 +672,19 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         "evidence of property", "lender evidence", "acord 28",
         "property certificate", "lender requirement", "mortgage lender",
     }
-    if flags.get("has_property_coverage") and any(kw in text for kw in _28_kw):
+    _cert_holder_val = (_fv(facts, "certificate_holder") or "").lower()
+    _mortgagee_val   = (_fv(facts, "mortgagee_name") or "").lower()
+    _28_entity_signal = any(
+        w in _cert_holder_val or w in _mortgagee_val
+        for w in ["bank", "lender", "mortgage", "financial", "credit union", "trust"]
+    )
+    if (not _already_matched("ACORD_28")
+            and flags.get("has_property_coverage")
+            and (_28_entity_signal or any(kw in text for kw in _28_kw))):
         _add("ACORD_28",
              "ACORD 28 - Evidence of Commercial Property Insurance",
              trigger_weight=0.85,
-             trigger_reason="mortgagee / loss payee keywords detected with property coverage",
+             trigger_reason="property coverage with mortgagee/lender/loss payee signals detected",
              template_pending=True)
 
     # ── Sort: blended confidence descending (ACORD_125 naturally stays first) ──

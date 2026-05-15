@@ -809,12 +809,14 @@ def calculate_package_sqs(
     calculation_stage: str = "initial_extract",
 ) -> dict:
     """
-    Calculate package-level SQS with 5 pillars, LOB-aware weights, and full metadata.
+    Calculate package-level SQS with 6 spec-compliant pillars (Decision Tree v2.1.0+).
+    Pillars: structural_completeness (25%) + exposure_consistency (25%) +
+             property_integrity (15%) + loss_history_alignment (15%) +
+             umbrella_limit_adequacy (10%) + narrative_quality (10%)
     """
     lob = infer_lob(facts, flags)
-    weights = normalize_weights(BASE_PILLAR_WEIGHTS, LOB_WEIGHT_OVERRIDES.get(lob, {}))
 
-    # P1 — Data Integrity
+    # P1 — Structural Completeness (ACORD 125 + required line forms)
     tier1_ok, tier1_missing = check_tier1(facts, flags)
     tier2_score, tier2_missing = check_tier2(facts)
     conf_rate = confidence_fill_rate(mapped_data or {}, confidence_dict or {})
@@ -824,37 +826,46 @@ def calculate_package_sqs(
         conf_rate * 0.25
     ))
 
-    # P2 — Exposure & COPE
+    # P2 — Exposure Consistency (class codes, payroll alignment)
     lob_rules   = LOB_RULES.get(lob, LOB_RULES["generic"])
     req_present = sum(1 for f in lob_rules["required"] if _fv(facts, f))
     req_total   = len(lob_rules["required"])
-    lob_score   = int((req_present / req_total) * 100) if req_total else 100
-    cope_score  = _calculate_cope_score(facts, flags)
-    p2 = int(lob_score * 0.6 + cope_score * 0.4)
+    p2 = int((req_present / req_total) * 100) if req_total else 100
 
-    # P3 — Cross-Form Consistency
-    hard_cross  = [i for i in cross_issues if i.get("type") == "hard_stop"]
-    warn_cross  = [i for i in cross_issues if i.get("type") == "warning"]
-    p3 = max(0, 100 - len(hard_cross) * 25 - len(warn_cross) * 10)
+    # P3 — Property Integrity (COPE completeness)
+    p3 = _calculate_cope_score(facts, flags)
 
-    # P4 — Loss History Integrity
+    # P4 — Loss History Alignment
     p4, p4_recs = calculate_p4_loss_history(facts, flags)
 
-    # P5 — Narrative Quality
+    # P5 — Umbrella & Limit Adequacy
+    if flags.get("has_umbrella"):
+        has_underlying = bool(_fv(facts, "gl_limits") or _fv(facts, "auto_liability_limit"))
+        p5 = 100 if has_underlying else 0
+    else:
+        p5 = 100
+
+    # P6 — Narrative Quality
     ops = _fv(facts, "operations_description") or ""
-    p5 = min(100, int(
+    p6 = min(100, int(
         (min(len(ops), 300) / 300) * 60 +
-        (20 if any(w in ops.lower() for w in ["safety","certified","osha","protocol"]) else 0) +
+        (20 if any(w in ops.lower() for w in ["safety", "certified", "osha", "protocol"]) else 0) +
         (20 if len(ops) > 100 else 0)
     ))
 
-    # Weighted package score
+    # Cross-form consistency penalty (applied to P2)
+    hard_cross = [i for i in cross_issues if i.get("type") == "hard_stop"]
+    warn_cross = [i for i in cross_issues if i.get("type") == "warning"]
+    p2 = max(0, p2 - len(hard_cross) * 25 - len(warn_cross) * 10)
+
+    # Weighted package score using spec-compliant weights
     raw = int(
-        p1 * weights["data_integrity"] +
-        p2 * weights["exposure_cope"]  +
-        p3 * weights["consistency"]    +
-        p4 * weights["loss_history"]   +
-        p5 * weights["narrative"]
+        p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] +
+        p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"] +
+        p3 * SPEC_PILLAR_WEIGHTS["property_integrity"] +
+        p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"] +
+        p5 * SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"] +
+        p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
     )
 
     # Hard stop penalty
@@ -877,12 +888,13 @@ def calculate_package_sqs(
     history = session_data.get("sqs_history", [])
     stage = calculation_stage
     timestamp = datetime.utcnow().isoformat() + "Z"
-    
+
     history.append({
         "at": timestamp,
         "score": raw,
         "stage": stage,
-        "model_version": SQS_MODEL_VERSION
+        "model_version": SQS_MODEL_VERSION,
+        "weights_version": "spec_compliant_v2.1.0",
     })
 
     # Delta calculation
@@ -897,13 +909,15 @@ def calculate_package_sqs(
         "tier": tier,
         "lob": lob,
         "pillars": {
-            "data_integrity": p1,
-            "exposure_cope": p2,
-            "consistency": p3,
-            "loss_history": p4,
-            "narrative": p5
+            "structural_completeness": p1,
+            "exposure_consistency": p2,
+            "property_integrity": p3,
+            "loss_history_alignment": p4,
+            "umbrella_limit_adequacy": p5,
+            "narrative_quality": p6,
         },
-        "weights_used": weights,
+        "weights_used": SPEC_PILLAR_WEIGHTS,
+        "weights_version": "spec_compliant_v2.1.0",
         "top_recommendations": top_recs,
         "sqs_history": history,
         "delta_this_session": delta,
@@ -1831,6 +1845,36 @@ FORM_FIELD_INVENTORY: Dict[str, List[str]] = {
         "garage_operations_type", "garage_liability_limit", "garage_deductible",
         "garagekeeper_liability_limit", "garagekeeper_comp_deductible",
         "garagekeeper_coll_deductible", "auto_dealers_inventory_value",
+    ],
+    "ACORD_101": [
+        "operations_description", "applicant_name", "effective_date",
+        "remarks_text", "form_reference", "explanation_of_yes_answers",
+    ],
+    "ACORD_133": [
+        "project_address", "project_cost", "completion_date",
+        "construction_type", "owner_name", "contractor_name",
+        "insured_interest", "applicant_name", "effective_date",
+    ],
+    "ACORD_141": [
+        "locations", "scheduled_item_description", "scheduled_item_value",
+        "valuation_method", "deductible_aop", "deductible_wind",
+        "deductible_earthquake", "deductible_flood",
+        "coinsurance_percentage", "applicant_name", "effective_date",
+    ],
+    "ACORD_160": [
+        "inland_marine_item_description", "inland_marine_item_value",
+        "transit_exposure", "schedule_duration",
+        "applicant_name", "effective_date",
+    ],
+    "ACORD_186": [
+        "contractor_type", "subcontracted_percentage", "residential_commercial_split",
+        "high_hazard_operations", "licensing_details",
+        "applicant_name", "effective_date",
+    ],
+    "ACORD_28": [
+        "applicant_name", "effective_date", "expiration_date",
+        "policy_number", "property_building_value", "property_bpp_value",
+        "certificate_holder", "mortgagee_name",
     ],
 }
 

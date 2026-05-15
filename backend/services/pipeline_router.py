@@ -36,8 +36,8 @@ class ProductLine(Enum):
 _TIER_MAP: dict[str, ProductLine] = {
     # Current tiers
     "free":         ProductLine.CLARITY,
+    "essentials":   ProductLine.CLARITY,   # Clarity pipeline: SQS+ARQ, no form generation
     # Assembly tiers
-    "essentials":   ProductLine.ASSEMBLY,
     "professional": ProductLine.ASSEMBLY,
     "business":     ProductLine.ASSEMBLY,
     "enterprise":   ProductLine.ASSEMBLY,
