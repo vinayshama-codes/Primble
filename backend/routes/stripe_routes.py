@@ -597,6 +597,24 @@ async def verify_upgrade(current_user: dict = Depends(get_current_user)):
                         now, cfg["overage_rate"], user_id,
                     )
                 logger.info(f"verify-upgrade synced user {user_id} to plan={plan} sub={sub_id}, reset packages_used=0")
+
+                # Cancel every other active/past_due/trialing subscription for this
+                # customer now that payment is confirmed and the new sub is synced.
+                try:
+                    for _st in ("active", "past_due", "trialing"):
+                        _others = stripe.Subscription.list(customer=customer.id, status=_st, limit=10)
+                        for _other in _others.auto_paging_iter():
+                            _oid = getattr(_other, "id", None)
+                            if _oid and _oid != sub_id:
+                                stripe.Subscription.cancel(_oid)
+                                logger.info(
+                                    "verify-upgrade: canceled old subscription %s "
+                                    "(new plan=%s sub=%s customer=%s)",
+                                    _oid, plan, sub_id, customer.id,
+                                )
+                except Exception as _ce:
+                    logger.warning("verify-upgrade: could not cancel old subscriptions: %s", _ce)
+
                 return {"subscription_tier": plan, "upgraded": True, "reason": "stripe_verified"}
 
         if current_user.get("subscription_tier") not in ("free", None):

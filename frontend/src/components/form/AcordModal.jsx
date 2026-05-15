@@ -670,7 +670,10 @@ export default function AcordModal({
     fetch(`${API_BASE}/api/session/${resumeSessionId}`, { credentials: "include", signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
+        const isEssentials = user?.subscription_tier === "essentials";
+        if (isEssentials && data?.session_id) {
+          setSessionId(resumeSessionId); setStep("lite");
+        } else if (!isEssentials && data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
           setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });

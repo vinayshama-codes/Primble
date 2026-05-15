@@ -328,10 +328,9 @@ export default function PDFJsViewer({
             updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
           });
           wrap.appendChild(cb);
-        } else if (isChecked) {
-          // View mode: the backend removes /AP so the PDF canvas renders nothing
-          // inside the checkbox. Draw a solid black tick here so it's always
-          // visible and correctly coloured regardless of the PDF's appearance stream.
+        } else if (isChecked && hl) {
+          // View mode with highlight (opaque background hides PDF canvas): draw a
+          // tick so the checkmark is visible over the highlight colour.
           const mark = document.createElement("div");
           const markSize = Math.min(ch * 0.78, 12);
           mark.style.cssText = `position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:${markSize}px;line-height:1;color:#000;font-weight:900;font-family:Arial,sans-serif;user-select:none;pointer-events:none;`;
