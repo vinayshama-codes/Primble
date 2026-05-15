@@ -32,13 +32,11 @@ def scan_file_bytes(content: bytes, filename: str) -> None:
     """
     if _SCANNER == "none":
         if _IS_PROD:
-            logger.error("VIRUS_SCANNER=none in production — rejecting upload for safety")
-            raise HTTPException(
-                503,
-                "Virus scanning is not configured. Set VIRUS_SCANNER=clamav or VIRUS_SCANNER=custom in production.",
+            logger.warning(
+                "VIRUS_SCANNER=none in production — uploads are unscanned. "
+                "Set VIRUS_SCANNER=clamav or VIRUS_SCANNER=custom before handling untrusted files."
             )
-        # Development: log warning and allow
-        logger.debug("virus_scanner: scanning disabled (dev mode) for %s", filename)
+        logger.debug("virus_scanner: scanning disabled for %s", filename)
         return
 
     if _SCANNER == "clamav":
@@ -103,7 +101,6 @@ def _scan_custom_webhook(content: bytes, filename: str) -> None:
         return
     try:
         import urllib.request as _req
-        import urllib.error as _err
         import json as _json
 
         req_obj = _req.Request(
