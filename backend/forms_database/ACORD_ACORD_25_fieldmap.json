@@ -82,5 +82,6 @@
   "CertificateHolder_MailingAddress_StateOrProvinceCode_A": "_addr_state",
   "CertificateHolder_MailingAddress_PostalCode_A": "_addr_zip",
   "Producer_AuthorizedRepresentative_Signature_A": "contact_name",
+  "__ai_mapped__": [],
   "__schema_version__": "v5"
 }

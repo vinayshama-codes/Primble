@@ -11,5 +11,6 @@
   "NamedInsured_FullName_D": "applicant_name",
   "Policy_EffectiveDate_A": "effective_date",
   "Location_ProducerIdentifier_A": null,
+  "__ai_mapped__": [],
   "__schema_version__": "v5"
 }

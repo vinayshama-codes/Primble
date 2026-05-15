@@ -913,7 +913,7 @@ export default function AcordModal({
         if (msg.toLowerCase().includes("lite")) { setStep("lite"); return; }
         setError(msg || "Access blocked. Please update your billing."); return;
       }
-      if (!data.success) { setError("Form generation failed"); return; }
+      if (!data.success) { setError(data.detail || data.message || "Form generation failed"); return; }
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
       if (data.package_sqs) setPackageSqs(data.package_sqs);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");
