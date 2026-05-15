@@ -132,7 +132,7 @@ async def download_pdf(
     generated      = proc_session.get("generated_forms", {})
     form_name      = generated.get(form_id, {}).get("form_name", form_id)
     user_signature = decrypt_field(fresh.get("signature_data")) or None
-    facts       = proc_session.get("facts", {})
+    facts       = proc_session.get("facts") or {}
     flags       = proc_session.get("flags", {})
     org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
     sqs_results = {form_id: generated[form_id].get("sqs", {})} if form_id in generated else {}
@@ -278,7 +278,7 @@ async def download_all(
             logger.error(f"Skipping {fid}: {ex}")
 
     sqs_results = {fid: generated[fid].get("sqs", {}) for fid in generated}
-    facts    = proc_session.get("facts", {})
+    facts    = proc_session.get("facts") or {}
     flags    = proc_session.get("flags", {})
     org_name = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
 
@@ -359,7 +359,7 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    facts       = proc_session.get("facts", {})
+    facts       = proc_session.get("facts") or {}
     flags       = proc_session.get("flags", {})
     hard_stops  = proc_session.get("hard_stops", [])
     soft_stops  = proc_session.get("soft_stops", [])
@@ -397,7 +397,7 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    facts       = proc_session.get("facts", {})
+    facts       = proc_session.get("facts") or {}
     flags       = proc_session.get("flags", {})
     hard_stops  = proc_session.get("hard_stops", [])
     soft_stops  = proc_session.get("soft_stops", [])

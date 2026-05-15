@@ -133,12 +133,8 @@ async def _save_pdf_bytes(sid: str, generated: dict) -> None:
                 )
                 raise HTTPException(503, "PDF storage failed. Please try again.")
             logger.warning(
-                "S3 PDF upload failed for session %s form %s — BYTEA fallback (dev only)",
+                "S3 PDF upload failed for session %s form %s — BYTEA fallback",
                 sid, fid,
-            )
-        elif _IS_PROD:
-            raise HTTPException(
-                503, "PDF storage requires S3 in production. Set AWS_S3_BUCKET."
             )
         s3_results[fid] = (None, pb)
 

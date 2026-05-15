@@ -683,7 +683,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         )
 
         from services.pdf_service import _ACORD_FIELD_RULES
-        updated_facts = dict(session["facts"])
+        updated_facts = dict(session.get("facts") or {})
         for pdf_field, new_val in req.field_updates.items():
             val_str = str(new_val).strip() if new_val is not None else ""
             for pattern, fact_key in _ACORD_FIELD_RULES:
