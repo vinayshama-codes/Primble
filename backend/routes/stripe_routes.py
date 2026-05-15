@@ -373,19 +373,30 @@ async def stripe_webhook(request: Request):
                     if not row and customer_id_from_invoice:
                         logger.warning(f"invoice.payment_failed: no user found by sub_id={sub_id!r}, trying customer_id={customer_id_from_invoice!r}")
                         row = await conn.fetchrow(
-                            "SELECT id, email, full_name, stripe_customer_id, payment_failed_at, "
+                            "SELECT id, email, full_name, stripe_customer_id, stripe_subscription_id, payment_failed_at, "
                             "COALESCE(payment_email_sent_day, 0) AS payment_email_sent_day "
                             "FROM users WHERE stripe_customer_id = $1",
                             customer_id_from_invoice,
                         )
                         if row:
-                            await conn.execute(
-                                "UPDATE users SET payment_status='failed',"
-                                " payment_failed_at=COALESCE(payment_failed_at,$1),"
-                                " stripe_subscription_id=$2"
-                                " WHERE id=$3",
-                                now, sub_id, dict(row)["id"],
-                            )
+                            _current_sub = dict(row).get("stripe_subscription_id")
+                            if _current_sub and _current_sub != sub_id:
+                                # User already upgraded to a different subscription.
+                                # This invoice.payment_failed is for their old/cancelled sub — ignore it.
+                                logger.info(
+                                    "invoice.payment_failed: skipping — user %s already has sub=%s, "
+                                    "invoice belongs to old sub=%s",
+                                    dict(row)["id"], _current_sub, sub_id,
+                                )
+                                row = None  # prevents payment_failed email from being sent below
+                            else:
+                                await conn.execute(
+                                    "UPDATE users SET payment_status='failed',"
+                                    " payment_failed_at=COALESCE(payment_failed_at,$1),"
+                                    " stripe_subscription_id=$2"
+                                    " WHERE id=$3",
+                                    now, sub_id, dict(row)["id"],
+                                )
 
             if not row:
                 logger.error(f"invoice.payment_failed: no user found for sub_id={sub_id!r} customer={customer_id_from_invoice!r} — DB NOT updated, email NOT sent")
