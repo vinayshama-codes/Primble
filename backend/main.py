@@ -168,6 +168,22 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    """Return a JSON 500 so the response flows through CORSMiddleware properly.
+
+    Without this, unhandled exceptions propagate through BaseHTTPMiddleware layers
+    before CORSMiddleware can inject Access-Control-Allow-Origin, causing browsers
+    to report a CORS error instead of the real 500.
+    """
+    logger.error(
+        "Unhandled exception on %s %s: %s",
+        request.method, request.url.path, exc,
+        exc_info=True,
+    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 app.include_router(auth_router)
 app.include_router(form_router)
 app.include_router(download_router)

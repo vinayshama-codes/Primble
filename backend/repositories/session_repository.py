@@ -16,6 +16,8 @@ from services.s3_service import (
     upload_pdf_async    as _s3_upload_async,
     is_configured       as _s3_configured,
 )
+from cryptography.fernet import InvalidToken as _InvalidToken
+
 from utils.crypto import encrypt_field, decrypt_field
 
 _FACTS_PREFIX = "enc:"
@@ -43,7 +45,21 @@ def _decrypt_facts(data: dict) -> dict:
     if not facts_raw:
         return data
     if isinstance(facts_raw, str):
-        decrypted = decrypt_field(facts_raw)
+        try:
+            decrypted = decrypt_field(facts_raw)
+        except _InvalidToken:
+            # Key mismatch (e.g. FIELD_ENCRYPTION_KEY rotated or differs between
+            # environments).  Return session without facts rather than crashing —
+            # the frontend shows an empty session and the user can re-upload.
+            logger.error(
+                "decrypt_facts: FIELD_ENCRYPTION_KEY mismatch for session %s — "
+                "facts cannot be decrypted. Verify FIELD_ENCRYPTION_KEY on Render "
+                "matches the key used when this data was written.",
+                data.get("session_id", "?"),
+            )
+            data = dict(data)
+            data["facts"] = None
+            return data
         try:
             data = dict(data)
             data["facts"] = json.loads(decrypted)

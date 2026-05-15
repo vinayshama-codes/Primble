@@ -5,6 +5,7 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple
 
+import httpx
 import pikepdf
 from PIL import Image
 from fastapi import HTTPException
@@ -46,7 +47,12 @@ def _get_openai_form_fill_client():
                 "OPENAI_API_KEY not set — GPT form-fill pass unavailable. "
                 "Set OPENAI_API_KEY in your .env file."
             )
-        _openai_form_fill_client = _AsyncOpenAI(api_key=api_key)
+        _openai_form_fill_client = _AsyncOpenAI(
+            api_key=api_key,
+            http_client=httpx.AsyncClient(
+                timeout=float(os.getenv("LLM_REQUEST_TIMEOUT", "120")),
+            ),
+        )
     return _openai_form_fill_client
 
 # ── PII fields excluded from LLM prompts (SOC2 / data minimisation) ──────────
