@@ -50,6 +50,59 @@ router = APIRouter(tags=["forms"])
 logger = logging.getLogger(__name__)
 
 
+async def _bg_lite_generate(session_id: str) -> None:
+    """Background task: generate the top recommended form for essentials users and store SQS in session."""
+    try:
+        session = await get_processing_session(session_id)
+        recommendations = session.get("recommendations", [])
+        form_ids = [r["form_id"] for r in recommendations][:1]
+        if not form_ids:
+            logger.info("bg_lite: session=%s no recommendations — skipping", session_id)
+            return
+
+        loop = asyncio.get_event_loop()
+        results = {}
+        for form_id in form_ids:
+            form_meta = next((f for f in session.get("all_forms", []) if f["form_id"] == form_id), None)
+            if not form_meta:
+                continue
+            try:
+                tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
+            except ValueError:
+                continue
+            if not os.path.exists(tpl):
+                continue
+            try:
+                result = await loop.run_in_executor(None, process_single_form, form_meta, session)
+                results[form_id] = result
+            except Exception as ex:
+                logger.error("bg_lite: form generation error form=%s session=%s: %s", form_id, session_id, ex)
+
+        if not results:
+            logger.warning("bg_lite: no forms generated for session=%s", session_id)
+            return
+
+        cross_issues_raw = cross_validate(session.get("facts", {}), session.get("flags", {}), form_ids)
+        seen_msgs, cross_issues = set(), []
+        for issue in cross_issues_raw:
+            msg = issue.get("message", "")
+            if msg not in seen_msgs:
+                seen_msgs.add(msg)
+                cross_issues.append(issue)
+
+        await upd_processing_session(session_id, {
+            "selected_form_ids": form_ids,
+            "generated_forms": results,
+            "active_form_id": form_ids[0] if form_ids else None,
+            "cross_issues_last": cross_issues,
+        })
+        sqs_list = [r["sqs"] for r in results.values() if r.get("sqs")]
+        avg_score = int(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
+        logger.info("bg_lite: session=%s form=%s sqs=%d", session_id, form_ids[0], avg_score)
+    except Exception as ex:
+        logger.error("bg_lite: unexpected error session=%s: %s", session_id, ex)
+
+
 # ASYNC-SAFE
 @router.post("/api/upload-declaration")
 async def upload_declaration(
@@ -237,6 +290,10 @@ async def upload_declaration(
 
         if _job_id:
             await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": sid})
+
+        # For essentials tier — auto-generate top form in background so SQS/ARQ are ready
+        if current_user.get("subscription_tier") == "essentials" and recommendations:
+            asyncio.ensure_future(_bg_lite_generate(sid))
 
         truncation_warnings = [
             {"filename": d["filename"], "warning": d["truncation_warning"]}

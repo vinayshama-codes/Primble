@@ -1480,13 +1480,10 @@ body {
 
 @media (max-width: 768px) {
   .landing-header {
-    padding: 16px 24px;
-    flex-direction: column;
-    gap: 16px;
+    padding: 12px 16px;
   }
   .header-left {
-    flex-direction: column;
-    gap: 16px;
+    gap: 8px;
   }
   .nav {
     flex-wrap: wrap;
@@ -1555,6 +1552,33 @@ body {
   }
   .upgrade-modal {
     max-width: 100%;
+  }
+  .modal-overlay {
+    padding: 8px;
+  }
+  .modal-content {
+    max-height: 95vh;
+    border-radius: 16px;
+  }
+  .udrop-panel {
+    max-width: calc(100vw - 32px);
+  }
+  .user-menu {
+    gap: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-h1 {
+    font-size: 36px;
+  }
+  .hero-p {
+    font-size: 16px;
+    margin-bottom: 24px;
+  }
+  .btn-primary {
+    padding: 14px 28px;
+    font-size: 16px;
   }
 }
 

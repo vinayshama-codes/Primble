@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import psycopg2
 import psycopg2.extras
@@ -86,7 +87,9 @@ async def run_daily_payment_lifecycle():
                     logger.info(f"Lifecycle: user={row['id']} {current_status} → {new_status} (day {days_since})")
 
                 if email_day:
-                    sent_ok = _send_payment_failed_email(row["email"], row.get("full_name", ""), day=email_day)
+                    sent_ok = await asyncio.get_running_loop().run_in_executor(
+                        None, lambda: _send_payment_failed_email(row["email"], row.get("full_name", ""), day=email_day)
+                    )
                     if sent_ok:
                         async with get_pool().acquire() as conn:
                             await conn.execute(

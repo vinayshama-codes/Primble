@@ -1770,17 +1770,6 @@ def _fill_unmatched_with_gpt(
 
     llm_model = model or GPT_MODEL
 
-    # ── PII-filtered structured facts ────────────────────────────────────────
-    facts_for_llm = {
-        k: str(_fv(facts, k))[:120]
-        for k in facts
-        if k not in _PII_EXCLUDE_KEYS
-        and _fv(facts, k) is not None
-        and not isinstance(_fv(facts, k), (list, dict))
-    }
-    fact_lines   = [f'  "{k}": "{v}"' for k, v in facts_for_llm.items()]
-    fact_context = "{\n" + ",\n".join(fact_lines) + "\n}"
-
     # ── Filter out schedule/admin fields ─────────────────────────────────────
     eligible_fields = {
         f: meta
@@ -1796,9 +1785,8 @@ def _fill_unmatched_with_gpt(
 
     # ── Shared accumulators ───────────────────────────────────────────────────
     # candidate_counts[field][value] = number of chunks that returned that value.
-    # Majority vote across chunks; structured-fact values always win at resolution.
+    # Majority vote across chunks resolves conflicts between chunks.
     candidate_counts: Dict[str, Dict[str, int]] = {f: {} for f in field_list}
-    all_mappings:     Dict[str, Optional[str]]  = {}   # field → fact_key (first chunk only)
     all_raw_fields:   set                       = set()
 
     # ── Build a field-spec line for the prompt ───────────────────────────────
@@ -1839,18 +1827,14 @@ def _fill_unmatched_with_gpt(
     # ── Prompt builder ───────────────────────────────────────────────────────
     _PROMPT_SKELETON = (
         f"You are filling ACORD form {form_id} for an insurance submission.\n"
-        "You have two data sources:\n"
-        "  SOURCE 1 — context hints: facts previously extracted from the document (use ONLY for disambiguation or confirmation)\n"
-        "  SOURCE 2 — raw OCR document text (PRIMARY source — find all values directly from here)\n\n"
-        "PRIMARY RULE: Extract values directly from SOURCE 2 (raw document text). "
-        "SOURCE 1 facts are hints only — do NOT copy from SOURCE 1 as the answer unless you can also confirm the value exists in SOURCE 2. "
-        "Your goal is to find the actual values printed in the declaration pages.\n\n"
-        "Return exactly three keys:\n"
+        "You have one data source: the raw OCR document text provided below.\n\n"
+        "PRIMARY RULE: Extract values DIRECTLY from the raw document text. "
+        "Do not invent or paraphrase — copy values verbatim as they appear in the document.\n\n"
+        "Return exactly two keys:\n"
         '  "values":          {FieldName: "exact_value_or_null"}\n'
-        '  "mappings":        {FieldName: "fact_key_or_null"}\n'
         '  "raw_text_sourced":[FieldName, ...]\n\n'
         "Rules:\n"
-        "  1. EXACT values only — copy verbatim from SOURCE 2. Do not paraphrase or invent.\n"
+        "  1. EXACT values only — copy verbatim from the document text. Do not paraphrase or invent.\n"
         "  2. Return null when the value is genuinely absent from the document text.\n"
         "  3. Checkbox/indicator fields (marked 'checkbox — Yes/No'): return 'Yes' or 'No' ONLY.\n"
         "     Examples of how to fill checkboxes:\n"
@@ -1862,11 +1846,10 @@ def _fill_unmatched_with_gpt(
         "     - LossHistory_NoPriorLossesIndicator: 'Yes' only if document explicitly states no losses\n"
         "  4. Dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
         "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n"
-        "  6. mappings: use ONLY exact fact keys from SOURCE 1. null if no clean match.\n"
-        "  7. List ALL fields you fill from SOURCE 2 in raw_text_sourced.\n"
-        "  8. Fields ending in _A, _B, _C ... are SEPARATE row slots for DIFFERENT entries.\n"
+        "  6. List ALL fields you fill in raw_text_sourced.\n"
+        "  7. Fields ending in _A, _B, _C ... are SEPARATE row slots for DIFFERENT entries.\n"
         "     Each such field is annotated '[slot N of T]' telling you there are T slots for\n"
-        "     that field type. Search SOURCE 2 carefully for EACH distinct value.\n"
+        "     that field type. Search the document carefully for EACH distinct value.\n"
         "       a) Count how many DISTINCT values of that type appear in the document.\n"
         "       b) Assign the 1st distinct value to _A, 2nd to _B, etc.\n"
         "       c) If the document has fewer distinct values than slots, leave the extra\n"
@@ -1875,22 +1858,20 @@ def _fill_unmatched_with_gpt(
         "       _A = first number, _B = second number, _C = null.\n\n"
     )
     _SKELETON_CHARS = len(_PROMPT_SKELETON)
-    _FACTS_CHARS    = len(fact_context)
-    # Fixed overhead per call: skeleton + facts header + facts block + fields header + footer
-    _FIXED_OVERHEAD = _SKELETON_CHARS + _FACTS_CHARS + 200
+    # Fixed overhead per call: skeleton + fields header + footer
+    _FIXED_OVERHEAD = _SKELETON_CHARS + 200
 
     def _build_prompt(active_fields: List[str], raw_chunk: str, chunk_idx: int, total_chunks: int) -> str:
         fields_block = "\n".join(_field_spec(f) for f in active_fields)
         raw_section  = (
-            f"\n\n=== SOURCE 2: RAW DOCUMENT TEXT (chunk {chunk_idx + 1}/{total_chunks}) ===\n{raw_chunk}"
+            f"\n\n=== RAW DOCUMENT TEXT (chunk {chunk_idx + 1}/{total_chunks}) ===\n{raw_chunk}"
             if raw_chunk else ""
         )
         return (
             _PROMPT_SKELETON
-            + f"=== SOURCE 1: EXTRACTED FACTS ===\n{fact_context}\n\n"
             + f"Fields to fill ({form_id}):\n{fields_block}"
             + raw_section
-            + '\n\nReturn ONLY valid JSON: {"values": {...}, "mappings": {...}, "raw_text_sourced": [...]}'
+            + '\n\nReturn ONLY valid JSON: {"values": {...}, "raw_text_sourced": [...]}'
         )
 
     # ── LLM caller with retry ─────────────────────────────────────────────────
@@ -1919,23 +1900,9 @@ def _fill_unmatched_with_gpt(
                     return {}
 
     # ── Result absorber ───────────────────────────────────────────────────────
-    def _absorb(result: dict, sent: List[str], is_first_chunk: bool, chunk_label: str = "1/1") -> None:
+    def _absorb(result: dict, sent: List[str], chunk_label: str = "1/1") -> None:
         values      = result.get("values",          {}) or {}
-        mappings    = result.get("mappings",        {}) or {}
         raw_sourced = set(result.get("raw_text_sourced", []) or [])
-        _chunk_label = chunk_label
-
-        for field, fk in mappings.items():
-            if field not in sent:
-                continue
-            if field in raw_sourced:
-                fk = None
-            elif fk is not None and fk not in _FULL_REGISTRY_KEYS:
-                logger.debug("gpt_fill: rejected hallucinated fact_key=%r field=%r", fk, field)
-                fk = None
-            # Structural mappings are doc-independent — record from first chunk only
-            if is_first_chunk and field not in all_mappings:
-                all_mappings[field] = fk
 
         filled_count = 0
         for field, value in values.items():
@@ -1950,7 +1917,7 @@ def _fill_unmatched_with_gpt(
 
         logger.info(
             "gpt_fill: chunk=%s form=%s sent=%d filled=%d raw_sourced=%d",
-            _chunk_label,
+            chunk_label,
             form_id, len(sent), filled_count, len(raw_sourced),
         )
 
@@ -1987,8 +1954,9 @@ def _fill_unmatched_with_gpt(
             form_id, len(field_list), len(raw_text), len(raw_chunks), initial_budget,
         )
     else:
-        # No raw text — single call with facts only
-        raw_chunks = [""]
+        # No raw text available — skip GPT fill entirely
+        logger.warning("gpt_fill: form=%s no raw_text provided — skipping GPT fill", form_id)
+        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": llm_model}
 
     # ── Main loop: one LLM call per chunk ─────────────────────────────────────
     for chunk_idx, raw_chunk in enumerate(raw_chunks):
@@ -2005,13 +1973,10 @@ def _fill_unmatched_with_gpt(
             chunk_idx + 1, len(raw_chunks), form_id, len(active_fields), len(prompt),
         )
         result = _call_llm_sync(prompt)
-        _absorb(result, active_fields, is_first_chunk=(chunk_idx == 0),
-                chunk_label=f"{chunk_idx + 1}/{len(raw_chunks)}")
+        _absorb(result, active_fields, chunk_label=f"{chunk_idx + 1}/{len(raw_chunks)}")
 
     # ── Conflict resolution ───────────────────────────────────────────────────
-    # Raw document text is the primary source. Among candidates from multiple
-    # chunks, the most-frequent value wins (majority vote).
-    # Facts (SOURCE 1) are used only as a fallback when no raw-text value was found.
+    # Among candidates from multiple chunks, the most-frequent value wins (majority vote).
     all_filled: dict = {}
     for field, candidates in candidate_counts.items():
         if not candidates:
@@ -2023,9 +1988,8 @@ def _fill_unmatched_with_gpt(
     for field, value in all_filled.items():
         logger.info(
             "FIELD_SOURCE_AUDIT field=%s source=ai model=%s form_id=%s "
-            "fact_key=%s raw_text_used=%s chunks_agreed=%s",
+            "raw_text_sourced=%s chunks_agreed=%s",
             field, llm_model, form_id,
-            all_mappings.get(field) or "none",
             str(field in all_raw_fields).lower(),
             candidate_counts.get(field, {}).get(value, 1),
         )
@@ -2036,7 +2000,7 @@ def _fill_unmatched_with_gpt(
     )
     return {
         "filled_values":   all_filled,
-        "new_mappings":    all_mappings,
+        "new_mappings":    {},
         "raw_text_fields": all_raw_fields,
         "model_used":      llm_model,
     }
@@ -2241,7 +2205,7 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
         is_req    = meta.get("required", False) if isinstance(meta, dict) else False
         was_ai    = first_run or (field in unmatched) or (field in cached_ai_set) or (field in gpt_filled_set)
         if has_value:
-            confidence[field] = "low_confidence" if was_ai else "filled"
+            confidence[field] = "filled"
         elif is_req and not _is_nonfillable_field(field):
             # Only paint yellow for genuinely fillable required fields.
             # Carrier-computed / admin / signature fields are never fillable so

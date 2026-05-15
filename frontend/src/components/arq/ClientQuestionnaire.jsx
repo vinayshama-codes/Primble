@@ -497,8 +497,8 @@ export default function ClientQuestionnaire({ token }) {
           <footer style={{ marginTop: '16px', paddingTop: '12px', textAlign: 'center', borderTop: '1px solid #e2e8f0' }}>
             <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0 }}>
               Powered by{' '}
-              <a href="https://acordly.ai" target="_blank" rel="noopener noreferrer" style={{ color: '#E61B84', textDecoration: 'none', fontWeight: '600' }}>
-                acordly.ai
+              <a href="https://primble.vercel.app" target="_blank" rel="noopener noreferrer" style={{ color: '#E61B84', textDecoration: 'none', fontWeight: '600' }}>
+                Primble
               </a>
             </p>
           </footer>

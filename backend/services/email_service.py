@@ -56,7 +56,7 @@ def send_arq_email(
     <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;">
       <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;">
         <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);padding:28px 32px;">
-          <p style="color:#e6007a;font-size:22px;font-weight:700;margin:0;letter-spacing:-0.5px;">acordly</p>
+          <p style="color:#e6007a;font-size:22px;font-weight:700;margin:0;letter-spacing:-0.5px;">Primble</p>
           <p style="color:#94a3b8;font-size:12px;margin:4px 0 0 0;">Commercial Insurance Platform</p>
         </div>
         <div style="padding:32px;">
@@ -78,7 +78,7 @@ def send_arq_email(
         </div>
         <div style="background:#f8fafc;padding:16px 32px;border-top:1px solid #e2e8f0;text-align:center;">
           <p style="font-size:11px;color:#94a3b8;margin:0;">
-            Powered by <a href="{FRONTEND_URL}" style="color:#e6007a;font-weight:600;text-decoration:none;">acordly.ai</a>
+            Powered by <a href="{FRONTEND_URL}" style="color:#e6007a;font-weight:600;text-decoration:none;">Primble</a>
           </p>
         </div>
       </div>
@@ -113,7 +113,7 @@ def send_arq_reminder_email(
     <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;">
       <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;">
         <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);padding:28px 32px;">
-          <p style="color:#e6007a;font-size:22px;font-weight:700;margin:0;">acordly</p>
+          <p style="color:#e6007a;font-size:22px;font-weight:700;margin:0;">Primble</p>
           <p style="color:#94a3b8;font-size:12px;margin:4px 0 0 0;">Commercial Insurance Platform</p>
         </div>
         <div style="padding:32px;">
@@ -137,7 +137,7 @@ def send_arq_reminder_email(
         </div>
         <div style="background:#f8fafc;padding:16px 32px;border-top:1px solid #e2e8f0;text-align:center;">
           <p style="font-size:11px;color:#94a3b8;margin:0;">
-            Powered by <a href="{FRONTEND_URL}" style="color:#e6007a;font-weight:600;text-decoration:none;">acordly.ai</a>
+            Powered by <a href="{FRONTEND_URL}" style="color:#e6007a;font-weight:600;text-decoration:none;">Primble</a>
           </p>
         </div>
       </div>
@@ -173,7 +173,7 @@ def send_arq_submitted_notification(
         f"{client_name or client_email} has submitted answers to your insurance questionnaire.\n\n"
         f"{fields_filled} field(s) have been updated in your ACORD forms.\n\n"
         f"Click the link below to review and continue editing:\n{session_link}\n\n"
-        f"The Acordly Team"
+        f"The Primble Team"
     )
     body_html = f"""
     <!DOCTYPE html>
@@ -182,7 +182,7 @@ def send_arq_submitted_notification(
     <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;">
       <div style="max-width:520px;margin:40px auto;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;">
         <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);padding:24px 28px;">
-          <p style="color:#e6007a;font-size:20px;font-weight:700;margin:0;">acordly</p>
+          <p style="color:#e6007a;font-size:20px;font-weight:700;margin:0;">Primble</p>
         </div>
         <div style="padding:28px;">
           <div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:14px 16px;margin-bottom:20px;">
@@ -207,7 +207,7 @@ def send_arq_submitted_notification(
         </div>
         <div style="background:#f8fafc;padding:14px 28px;border-top:1px solid #e2e8f0;text-align:center;">
           <p style="font-size:11px;color:#94a3b8;margin:0;">
-            Powered by <a href="{frontend_url}" style="color:#e6007a;font-weight:600;text-decoration:none;">acordly.ai</a>
+            Powered by <a href="{frontend_url}" style="color:#e6007a;font-weight:600;text-decoration:none;">Primble</a>
           </p>
         </div>
       </div>

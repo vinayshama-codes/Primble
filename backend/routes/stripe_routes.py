@@ -1,5 +1,7 @@
+import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
 import stripe
@@ -281,6 +283,31 @@ async def stripe_webhook(request: Request):
             parent = obj.get("parent") or {}
             sub_id = (parent.get("subscription_details") or {}).get("subscription")
         if sub_id:
+            # On the first payment of a new subscription, cancel any other active
+            # subscriptions the customer still has. This runs on confirmed payment
+            # and is the authoritative cancellation point (checkout.session.completed
+            # may fire before the new sub is fully active).
+            billing_reason = obj.get("billing_reason") or ""
+            if billing_reason == "subscription_create":
+                invoice_customer = obj.get("customer")
+                if invoice_customer:
+                    try:
+                        for st in ("active", "past_due", "trialing"):
+                            old_subs = stripe.Subscription.list(
+                                customer=invoice_customer, status=st, limit=10
+                            )
+                            for old_sub in old_subs.auto_paging_iter():
+                                old_id = getattr(old_sub, "id", None)
+                                if old_id and old_id != sub_id:
+                                    stripe.Subscription.cancel(old_id)
+                                    logger.info(
+                                        "invoice.paid: canceled old subscription %s "
+                                        "(new sub %s confirmed for customer %s)",
+                                        old_id, sub_id, invoice_customer,
+                                    )
+                    except Exception as ce:
+                        logger.warning("invoice.paid: could not cancel old subscriptions: %s", ce)
+
             now = datetime.now(timezone.utc).isoformat()
             async with get_pool().acquire() as conn:
                 async with conn.transaction():
@@ -371,7 +398,9 @@ async def stripe_webhook(request: Request):
                 row = dict(row)
                 logger.info(f"invoice.payment_failed: user={row['id']} email={row['email']} payment_email_sent_day={row.get('payment_email_sent_day')}")
                 if int(row.get("payment_email_sent_day") or 0) < 1:
-                    sent_ok = _send_payment_failed_email(row["email"], row.get("full_name", ""), day=1)
+                    sent_ok = await asyncio.get_running_loop().run_in_executor(
+                        None, lambda: _send_payment_failed_email(row["email"], row.get("full_name", ""), day=1)
+                    )
                     if sent_ok:
                         async with get_pool().acquire() as conn:
                             await conn.execute(
@@ -484,8 +513,32 @@ async def stripe_webhook(request: Request):
                             " AND payment_status IN ('canceling','failed','soft_locked','suspended')",
                             sub_id,
                         )
+                    elif status == "past_due":
+                        now_pd = datetime.now(timezone.utc).isoformat()
+                        await conn.execute(
+                            "UPDATE users SET payment_status='failed',"
+                            " payment_failed_at=COALESCE(payment_failed_at,$1)"
+                            " WHERE stripe_subscription_id=$2"
+                            " AND payment_status NOT IN ('soft_locked','suspended','archived')",
+                            now_pd, sub_id,
+                        )
 
     return {"received": True}
+
+
+# ASYNC-SAFE — called by Render Cron Job (or any external cron) as a fallback
+# when APScheduler doesn't fire (e.g. free-tier sleep, worker restart).
+# Protect with LIFECYCLE_TRIGGER_SECRET env var set in Render dashboard.
+@router.post("/trigger-lifecycle")
+async def trigger_lifecycle(request: Request):
+    from fastapi import HTTPException
+    secret   = request.headers.get("x-lifecycle-secret", "")
+    expected = os.getenv("LIFECYCLE_TRIGGER_SECRET", "")
+    if not expected or secret != expected:
+        raise HTTPException(401, "Unauthorized")
+    from services.scheduler_service import run_daily_payment_lifecycle
+    await run_daily_payment_lifecycle()
+    return {"triggered": True}
 
 
 # ASYNC-SAFE
