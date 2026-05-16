@@ -8,6 +8,7 @@ const PDFJS_CDN    = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf
 const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 const YELLOW_REQUIRED = new Set(["NamedInsured_Signature_A", "NamedInsured_SignatureDate_A"]);
+const CONTAINER_PADDING = 24;
 
 export default function PDFJsViewer({
   pdfUrl, formName, onFormNav, sessionId, formId, token,
@@ -113,7 +114,7 @@ export default function PDFJsViewer({
       try {
         const page   = await pdfDoc.getPage(pageNum);
         const canvas = canvasRef.current; if (!canvas) return;
-        const avail  = containerRef.current ? containerRef.current.clientWidth - 24 : 720;
+        const avail  = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
         const scale  = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
         const vp     = page.getViewport({ scale });
         canvas.width = vp.width; canvas.height = vp.height;
@@ -401,7 +402,7 @@ export default function PDFJsViewer({
         const freshUrl = `${pdfUrlRef.current || pdfUrl}?_sig=${Date.now()}`;
         const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, withCredentials: true }).promise;
         const page     = await newDoc.getPage(pageNum);
-        const avail    = containerRef.current ? containerRef.current.clientWidth - 24 : 720;
+        const avail    = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
         const scale    = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
         const vp       = page.getViewport({ scale });
         const off      = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
@@ -474,7 +475,7 @@ export default function PDFJsViewer({
       .then(async newDoc => {
         try {
           const page    = await newDoc.getPage(pageNum);
-          const avail   = containerRef.current ? containerRef.current.clientWidth - 24 : 720;
+          const avail   = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
           const scale   = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
           const vp      = page.getViewport({ scale });
           const off     = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;

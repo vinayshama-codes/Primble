@@ -3899,3 +3899,63 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Mobile editor: full-width form viewer ── */
+@media (max-width: 768px) {
+  .editor-layout-fullpage {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .editor-layout.editor-layout-fullpage {
+    grid-template-columns: 1fr;
+    height: auto;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* On mobile the sidebar overlays the form instead of pushing it */
+  .editor-layout {
+    display: flex !important;
+    flex-direction: row;
+    position: relative;
+  }
+
+  .editor-sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    width: 85vw;
+    max-width: 320px;
+    height: 100%;
+    z-index: 200;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.18);
+    overflow-y: auto;
+  }
+
+  .editor-layout.sidebar-closed .editor-sidebar {
+    display: none;
+  }
+
+  .editor-main {
+    flex: 1;
+    min-height: 0;
+    width: 100% !important;
+  }
+
+  /* Toolbar wraps neatly on mobile */
+  .editor-main > div[style] {
+    flex-wrap: wrap;
+  }
+
+  /* sidebar-open-btn visible and accessible on mobile */
+  .sidebar-open-btn {
+    width: 32px;
+    height: 64px;
+    font-size: 20px;
+    z-index: 100;
+  }
+}

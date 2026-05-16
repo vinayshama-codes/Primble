@@ -1630,7 +1630,6 @@ export default function AcordModal({
         {step === "editor" && (
           <div className={`editor-layout editor-layout-fullpage${!sidebarOpen ? " sidebar-closed" : ""}`}>
             <div className="editor-sidebar" style={{ background: "#fff", borderRight: "1px solid #e2e8f0", padding: 0, gap: 0 }}>
-              {/* SQS & Actions header */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid #f1f5f9", background: "#fafbfc" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                   <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, background: "rgba(230,27,132,0.1)" }}>
