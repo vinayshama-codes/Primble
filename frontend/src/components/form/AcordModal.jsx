@@ -633,6 +633,7 @@ export default function AcordModal({
   const [liteSqsData, setLiteSqsData] = useState(null);
   const [liteGenerating, setLiteGenerating] = useState(false);
   const [liteCoverLoading, setLiteCoverLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 900);
 
   // ── SQS enhancement state ──────────────────────────────────────────────────
   const [packageSqs, setPackageSqs] = useState(null);
@@ -794,7 +795,13 @@ export default function AcordModal({
 
   const triggerEnterprisePopup = (buttonEl) => {
     const rect = buttonEl.getBoundingClientRect();
-    setEnterprisePopupPos({ top: rect.top, left: rect.right + 12 });
+    const popupWidth = 210;
+    const spaceRight = window.innerWidth - rect.right - 12;
+    const left = spaceRight >= popupWidth
+      ? rect.right + 12
+      : Math.max(8, rect.left - popupWidth - 4);
+    const top = Math.min(rect.top, window.innerHeight - 110);
+    setEnterprisePopupPos({ top, left });
     setShowEnterprisePopup(true);
   };
 
@@ -1621,12 +1628,15 @@ export default function AcordModal({
         )}
 
         {step === "editor" && (
-          <div className="editor-layout editor-layout-fullpage">
+          <div className={`editor-layout editor-layout-fullpage${!sidebarOpen ? " sidebar-closed" : ""}`}>
             <div className="editor-sidebar" style={{ background: "#fff", borderRight: "1px solid #e2e8f0", padding: 0, gap: 0 }}>
               <div style={{ padding: "14px 14px 12px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Generated Forms</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#E61B84", background: "rgba(230,0,122,0.08)", padding: "1px 7px", borderRadius: 20 }}>{formIdList.length}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#E61B84", background: "rgba(230,0,122,0.08)", padding: "1px 7px", borderRadius: 20 }}>{formIdList.length}</span>
+                    <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} title="Hide panel">◀</button>
+                  </div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 130, overflowY: "auto" }}>
                   {formIdList.map(fid => {
@@ -1980,6 +1990,9 @@ export default function AcordModal({
             </div>
 
             <div className="editor-main">
+              {!sidebarOpen && (
+                <button className="sidebar-open-btn" onClick={() => setSidebarOpen(true)} title="Show panel">▶</button>
+              )}
               <PDFJsViewer
                 key={activeFormId}
                 pdfUrl={`${API_BASE}/api/get-pdf/${sessionId}/${activeFormId}`}

@@ -114,7 +114,7 @@ export default function PDFJsViewer({
         const page   = await pdfDoc.getPage(pageNum);
         const canvas = canvasRef.current; if (!canvas) return;
         const avail  = containerRef.current ? containerRef.current.clientWidth - 48 : 720;
-        const scale  = Math.min(2.2, Math.max(1.0, avail / page.getViewport({ scale: 1 }).width));
+        const scale  = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
         const vp     = page.getViewport({ scale });
         canvas.width = vp.width; canvas.height = vp.height;
         renderScaleRef.current = scale;
@@ -402,7 +402,7 @@ export default function PDFJsViewer({
         const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, withCredentials: true }).promise;
         const page     = await newDoc.getPage(pageNum);
         const avail    = containerRef.current ? containerRef.current.clientWidth - 48 : 720;
-        const scale    = Math.min(2.2, Math.max(1.0, avail / page.getViewport({ scale: 1 }).width));
+        const scale    = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
         const vp       = page.getViewport({ scale });
         const off      = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
         const offCtx   = off.getContext("2d"); offCtx.fillStyle = "#fff"; offCtx.fillRect(0,0,off.width,off.height);
@@ -475,7 +475,7 @@ export default function PDFJsViewer({
         try {
           const page    = await newDoc.getPage(pageNum);
           const avail   = containerRef.current ? containerRef.current.clientWidth - 48 : 720;
-          const scale   = Math.min(2.2, Math.max(1.0, avail / page.getViewport({ scale: 1 }).width));
+          const scale   = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
           const vp      = page.getViewport({ scale });
           const off     = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
           await page.render({ canvasContext: off.getContext("2d"), viewport: vp, renderInteractiveForms: false }).promise;

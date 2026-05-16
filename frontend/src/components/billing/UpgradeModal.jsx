@@ -51,6 +51,12 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
 
   const anyLoading = !!loadingPlan;
 
+  const getCtaLabel = (plan) => {
+    if (plan.id === "enterprise") return "Contact sales";
+    if (!user || user.subscription_tier === "free") return "Select";
+    return "Upgrade";
+  };
+
   return (
     <div className="modal-overlay">
       <div className="modal-content upgrade-modal upgrade-modal-wide" onClick={(e) => e.stopPropagation()}>
@@ -147,8 +153,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
                     <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 2 }}>Billed annually</div>
                   )}
 
-                  <div style={{ fontSize: 12, color: "var(--primary)", fontWeight: 600, marginTop: 4, marginBottom: 2 }}>{plan.packageCount}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 2 }}>Overage: {plan.overage}</div>
+                  <div style={{ fontSize: 12, color: "var(--primary)", fontWeight: 600, marginTop: 4, marginBottom: 8 }}>{plan.packageCount}</div>
 
                   <button
                     onClick={() => handleSelect(plan.id)}
@@ -180,7 +185,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
                         <span style={{ width: 13, height: 13, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
                         Opening cart…
                       </>
-                    ) : plan.cta}
+                    ) : getCtaLabel(plan)}
                   </button>
 
                   <div style={{ height: 1, background: "var(--light-gray)", margin: "18px 0" }} />

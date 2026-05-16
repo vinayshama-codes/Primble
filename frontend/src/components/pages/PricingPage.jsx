@@ -27,10 +27,11 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
   };
 
   const getCtaLabel = (plan) => {
-    if (!token) return plan.id === "enterprise" ? "Contact sales" : "Upgrade";
+    if (plan.id === "enterprise") return "Contact sales";
+    if (!token) return "Select";
     const state = getPlanState(plan.id);
     if (state === "current") return "Current plan";
-    if (plan.id === "enterprise") return "Contact sales";
+    if (currentTier === "free" || currentIdx === -1) return "Select";
     return state === "upgrade" ? "Upgrade" : "Downgrade";
   };
 
@@ -139,8 +140,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
                     <div className="mkt-plan-billed">Billed annually</div>
                   )}
 
-                  <div style={{ fontSize: 12, color: "var(--primary)", fontWeight: 600, margin: "6px 0 2px" }}>{plan.packageCount}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 4 }}>Overage: {plan.overage}</div>
+                  <div style={{ fontSize: 12, color: "var(--primary)", fontWeight: 600, margin: "6px 0 8px" }}>{plan.packageCount}</div>
 
                   <button
                     className={plan.featured ? "btn-primary mkt-plan-cta" : "mkt-plan-cta mkt-plan-cta-outline"}

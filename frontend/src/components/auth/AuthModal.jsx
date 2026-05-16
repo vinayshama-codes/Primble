@@ -207,7 +207,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-inner">
           <div className="auth-header">
-            <h2 className="step-title">{mode === "signin" ? "Welcome Back" : "Create Account"}</h2>
+            <h2 className="step-title">{mode === "signin" ? "Get started" : "Create Account"}</h2>
             <p className="step-subtitle">{mode === "signin" ? "Sign in to access your documents" : "Get started with 3 free downloads"}</p>
           </div>
           {error    && (<div className="alert alert-error"><span>⚠️ {error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
