@@ -2094,24 +2094,22 @@ body {
   transform: translateY(-50%);
   width: 28px;
   height: 72px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-left: none;
+  background: #E61B84;
+  border: none;
   border-radius: 0 10px 10px 0;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 18px;
-  color: #475569;
+  color: #fff;
   z-index: 10;
-  box-shadow: 3px 0 10px rgba(0,0,0,0.1);
-  transition: color 0.15s, background 0.15s, box-shadow 0.15s;
+  box-shadow: 3px 0 12px rgba(230,27,132,0.35);
+  transition: background 0.15s, box-shadow 0.15s;
 }
 .sidebar-open-btn:hover {
-  color: #E61B84;
-  background: #fdf2f8;
-  box-shadow: 3px 0 14px rgba(230,27,132,0.15);
+  background: #C0157A;
+  box-shadow: 3px 0 18px rgba(230,27,132,0.5);
 }
 .sidebar-open-label {
   writing-mode: vertical-rl;
@@ -2119,7 +2117,7 @@ body {
   font-size: 7px;
   font-weight: 800;
   letter-spacing: 0.08em;
-  color: #E61B84;
+  color: #fff;
   text-transform: uppercase;
   white-space: nowrap;
   line-height: 1.1;
@@ -4046,8 +4044,4 @@ body {
     align-items: flex-start !important;
   }
 
-  /* Canvas wrapper — allow wider than viewport so user can scroll horizontally */
-  .pdfviewer-canvas-wrapper {
-    max-width: none !important;
-  }
 }

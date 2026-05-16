@@ -10,10 +10,6 @@ const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf
 const YELLOW_REQUIRED = new Set(["NamedInsured_Signature_A", "NamedInsured_SignatureDate_A"]);
 const CONTAINER_PADDING = 24;
 
-// On mobile, render at ~1.8× the container width so dense form text is readable.
-// The canvas overflows and the container scrolls horizontally — same as any doc viewer app.
-const getMobileRenderWidth = (avail) =>
-  window.innerWidth <= 768 ? Math.max(avail * 1.8, 680) : avail;
 
 export default function PDFJsViewer({
   pdfUrl, formName, onFormNav, sessionId, formId, token,
@@ -38,6 +34,10 @@ export default function PDFJsViewer({
   const isSignedLocalRef       = useRef(isSigned);
   const clientFilledRef        = useRef([]);
   const renderScaleRef         = useRef(1);
+  const wrapperRef             = useRef(null);
+  const mobileZoomRef          = useRef(1);
+  const mobilePanRef           = useRef({ x: 0, y: 0 });
+  const touchStateRef          = useRef({ type: null, lastDist: 0, lastPos: { x: 0, y: 0 }, lastTap: 0, lastTapX: 0, lastTapY: 0 });
 
   const [pdfjsReady,    setPdfjsReady]    = useState(!!window.pdfjsLib);
   const [pdfDoc,        setPdfDoc]        = useState(null);
@@ -63,6 +63,119 @@ export default function PDFJsViewer({
   useEffect(() => { editModeRef.current = editMode; }, [editMode]);
   useEffect(() => { isSignedLocalRef.current = isSignedLocal; }, [isSignedLocal]);
   useEffect(() => { setIsSignedLocal(isSigned); }, [formId]); // eslint-disable-line
+
+  // Reset mobile zoom whenever the active form or page changes
+  useEffect(() => {
+    if (window.innerWidth > 768) return;
+    mobileZoomRef.current = 1;
+    mobilePanRef.current  = { x: 0, y: 0 };
+    if (wrapperRef.current)   wrapperRef.current.style.transform = '';
+    if (containerRef.current) containerRef.current.style.overflow = 'auto';
+  }, [formId, pageNum]); // eslint-disable-line
+
+  // Pinch-to-zoom + double-tap + drag-to-pan for mobile PDF viewer
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || window.innerWidth > 768) return;
+
+    const getDist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const getMid  = (t, r) => ({
+      x: (t[0].clientX + t[1].clientX) / 2 - r.left,
+      y: (t[0].clientY + t[1].clientY) / 2 - r.top,
+    });
+
+    const setTransform = (zoom, pan) => {
+      const wrapper = wrapperRef.current;
+      if (!wrapper) return;
+      if (zoom <= 1) {
+        wrapper.style.transform = '';
+        container.style.overflow = 'auto';
+      } else {
+        wrapper.style.transformOrigin = '0 0';
+        wrapper.style.transform = `translate(${pan.x}px,${pan.y}px) scale(${zoom})`;
+        container.style.overflow = 'hidden';
+      }
+    };
+
+    const ts = touchStateRef.current;
+
+    const onStart = (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        ts.type     = 'pinch';
+        ts.lastDist = getDist(e.touches);
+      } else if (e.touches.length === 1) {
+        const now = Date.now();
+        const { clientX: cx, clientY: cy } = e.touches[0];
+        // Double-tap to zoom in / reset
+        if (now - ts.lastTap < 280 && Math.abs(cx - ts.lastTapX) < 40 && Math.abs(cy - ts.lastTapY) < 40) {
+          e.preventDefault();
+          const rect = container.getBoundingClientRect();
+          if (mobileZoomRef.current > 1.05) {
+            mobileZoomRef.current = 1;
+            mobilePanRef.current  = { x: 0, y: 0 };
+          } else {
+            const z = 2.5, lx = cx - rect.left, ly = cy - rect.top;
+            mobileZoomRef.current = z;
+            mobilePanRef.current  = { x: -(lx * (z - 1)), y: -(ly * (z - 1)) };
+          }
+          setTransform(mobileZoomRef.current, mobilePanRef.current);
+          ts.lastTap = 0; ts.type = null; return;
+        }
+        ts.lastTap = now; ts.lastTapX = cx; ts.lastTapY = cy;
+        ts.type = 'pan'; ts.lastPos = { x: cx, y: cy };
+      }
+    };
+
+    const onMove = (e) => {
+      if (ts.type === 'pinch' && e.touches.length === 2) {
+        e.preventDefault();
+        const rect    = container.getBoundingClientRect();
+        const newDist = getDist(e.touches);
+        const newMid  = getMid(e.touches, rect);
+        const oldZ    = mobileZoomRef.current;
+        const newZ    = Math.min(5, Math.max(1, oldZ * (newDist / ts.lastDist)));
+        const pan     = mobilePanRef.current;
+        mobilePanRef.current = {
+          x: newMid.x - (newMid.x - pan.x) * (newZ / oldZ),
+          y: newMid.y - (newMid.y - pan.y) * (newZ / oldZ),
+        };
+        mobileZoomRef.current = newZ;
+        ts.lastDist = newDist;
+        setTransform(newZ, mobilePanRef.current);
+      } else if (ts.type === 'pan' && e.touches.length === 1 && mobileZoomRef.current > 1.05) {
+        e.preventDefault();
+        const { clientX: cx, clientY: cy } = e.touches[0];
+        mobilePanRef.current = {
+          x: mobilePanRef.current.x + (cx - ts.lastPos.x),
+          y: mobilePanRef.current.y + (cy - ts.lastPos.y),
+        };
+        ts.lastPos = { x: cx, y: cy };
+        setTransform(mobileZoomRef.current, mobilePanRef.current);
+      }
+    };
+
+    const onEnd = (e) => {
+      if (e.touches.length === 1 && ts.type === 'pinch') {
+        ts.type = 'pan'; ts.lastPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      } else if (e.touches.length === 0) {
+        if (mobileZoomRef.current < 1.05) {
+          mobileZoomRef.current = 1; mobilePanRef.current = { x: 0, y: 0 };
+          setTransform(1, { x: 0, y: 0 });
+        }
+        ts.type = null;
+      }
+    };
+
+    container.addEventListener('touchstart', onStart, { passive: false });
+    container.addEventListener('touchmove',  onMove,  { passive: false });
+    container.addEventListener('touchend',   onEnd,   { passive: false });
+    return () => {
+      container.removeEventListener('touchstart', onStart);
+      container.removeEventListener('touchmove',  onMove);
+      container.removeEventListener('touchend',   onEnd);
+    };
+  }, []); // eslint-disable-line
 
   // Load PDF.js
   useEffect(() => {
@@ -120,7 +233,7 @@ export default function PDFJsViewer({
         const page   = await pdfDoc.getPage(pageNum);
         const canvas = canvasRef.current; if (!canvas) return;
         const avail  = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
-        const scale  = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
+        const scale  = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
         const vp     = page.getViewport({ scale });
         canvas.width = vp.width; canvas.height = vp.height;
         renderScaleRef.current = scale;
@@ -408,7 +521,7 @@ export default function PDFJsViewer({
         const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, withCredentials: true }).promise;
         const page     = await newDoc.getPage(pageNum);
         const avail    = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
-        const scale    = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
+        const scale    = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
         const vp       = page.getViewport({ scale });
         const off      = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
         const offCtx   = off.getContext("2d"); offCtx.fillStyle = "#fff"; offCtx.fillRect(0,0,off.width,off.height);
@@ -481,7 +594,7 @@ export default function PDFJsViewer({
         try {
           const page    = await newDoc.getPage(pageNum);
           const avail   = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
-          const scale   = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
+          const scale   = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
           const vp      = page.getViewport({ scale });
           const off     = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
           await page.render({ canvasContext: off.getContext("2d"), viewport: vp, renderInteractiveForms: false }).promise;
@@ -597,7 +710,7 @@ export default function PDFJsViewer({
             <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />Loading PDF…
           </div>
         ) : (
-          <div className="pdfviewer-canvas-wrapper" style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2 }}>
+          <div ref={wrapperRef} className="pdfviewer-canvas-wrapper" style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2 }}>
             <canvas ref={canvasRef} style={{ display: "block" }} />
             <div ref={overlayRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 1, pointerEvents: editMode ? "all" : "none" }} />
             {saveStatus === "saving" && (
