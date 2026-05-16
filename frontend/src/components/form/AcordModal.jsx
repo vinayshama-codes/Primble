@@ -1639,7 +1639,7 @@ export default function AcordModal({
                   </span>
                   <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", letterSpacing: "0.01em" }}>SQS &amp; Actions</span>
                 </div>
-                <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} title="Hide panel" style={{ fontSize: 16, padding: "3px 7px", color: "#64748b" }}>←</button>
+                <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} title="Hide panel">✕</button>
               </div>
               <div style={{ padding: "14px 14px 12px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>

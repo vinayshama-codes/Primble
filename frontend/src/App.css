@@ -300,7 +300,7 @@ body {
 .btn-dark:hover { background: var(--dark-medium); transform: translateY(-2px); }
 
 .hero-wrapper {
-  background: rgba(230, 27, 132, 0.04);
+  background: rgba(230, 27, 132, 0.08);
   width: 100%;
 }
 .hero {
@@ -1532,8 +1532,8 @@ body {
     gap: 8px;
   }
   .pricing-section-h1 {
-    font-size: 22px;
-    white-space: normal;
+    font-size: 18px;
+    white-space: nowrap;
   }
   .features {
     grid-template-columns: 1fr;
@@ -1607,7 +1607,8 @@ body {
     font-weight: 800;
   }
   .pricing-section-h1 {
-    font-size: 16px;
+    font-size: 14px;
+    white-space: nowrap;
   }
   .hero-tagline {
     font-size: 15px;
@@ -2070,10 +2071,15 @@ body {
   border: none;
   cursor: pointer;
   color: #94a3b8;
-  font-size: 11px;
-  padding: 2px 5px;
-  border-radius: 4px;
+  font-size: 18px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 6px;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: color 0.15s, background 0.15s;
   flex-shrink: 0;
 }
@@ -3979,5 +3985,76 @@ body {
     height: 88px;
     font-size: 20px;
     z-index: 100;
+  }
+
+  /* FIX 2: Bigger, clearer X close button inside SQS sidebar on mobile */
+  .sidebar-close-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+    border-radius: 8px;
+    color: #475569;
+    background: rgba(100,116,139,0.08);
+  }
+  .sidebar-close-btn:hover,
+  .sidebar-close-btn:active {
+    color: #E61B84;
+    background: rgba(230,0,122,0.12);
+  }
+
+  /* FIX 1: PDF viewer toolbar — stack into two rows, no overflow on mobile */
+  .pdfviewer-toolbar-top {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 6px !important;
+    padding: 8px 10px !important;
+  }
+
+  /* Form name row — full width, allow name to breathe */
+  .pdfviewer-toolbar-top > div:first-child {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Action buttons — full width row, wrap freely */
+  .pdfviewer-toolbar-actions {
+    width: 100%;
+    flex-wrap: wrap !important;
+    gap: 5px !important;
+    justify-content: flex-start !important;
+  }
+
+  /* Slightly smaller buttons on mobile so they all fit */
+  .pdfviewer-toolbar-actions button {
+    font-size: 11px !important;
+    padding: 5px 8px !important;
+  }
+
+  /* Edit-mode hint banner — tighter on mobile */
+  .pdfviewer-edit-hint {
+    padding: 4px 10px !important;
+    gap: 8px !important;
+    row-gap: 4px !important;
+  }
+
+  /* Canvas container — full width, horizontal scroll if PDF wider than screen */
+  .pdfviewer-canvas-container {
+    padding: 8px !important;
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    justify-content: flex-start !important;
+    align-items: flex-start !important;
+  }
+
+  /* Canvas wrapper — constrain to viewport, scroll if needed */
+  .pdfviewer-canvas-wrapper {
+    max-width: calc(100vw - 16px) !important;
+  }
+
+  /* Canvas scales to its container — prevents horizontal bleed */
+  .pdfviewer-canvas-wrapper canvas {
+    max-width: 100% !important;
+    height: auto !important;
+    display: block !important;
   }
 }

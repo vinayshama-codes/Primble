@@ -526,7 +526,7 @@ export default function PDFJsViewer({
       {showSignPrompt === "none" && <NoSignaturePrompt onSetup={() => { setShowSignPrompt(null); onOpenSignatureModal(); }} onClose={() => setShowSignPrompt(null)} />}
 
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
+      <div className="pdfviewer-toolbar-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
           <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>📄 {formName}</span>
           {fieldsLoaded && (
@@ -538,7 +538,7 @@ export default function PDFJsViewer({
           )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+        <div className="pdfviewer-toolbar-actions" style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
           {saveStatus === "saving" && <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}><span style={{ width: 10, height: 10, border: "2px solid #f59e0b", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Saving…</span>}
           {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>✓ Saved</span>}
           {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>⚠ Failed</span>}
@@ -576,7 +576,7 @@ export default function PDFJsViewer({
       </div>
 
       {editMode && (
-        <div style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div className="pdfviewer-edit-hint" style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ color: "#f59e0b", fontSize: 11 }}>✏️ Click any field to edit — "Done Editing" saves all changes</span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,243,199,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🟡 Required field</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,226,226,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🩷 Low confidence</span></span>
@@ -584,7 +584,7 @@ export default function PDFJsViewer({
         </div>
       )}
 
-      <div ref={containerRef} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 12, background: "#252a3d", minHeight: 0 }}>
+      <div ref={containerRef} className="pdfviewer-canvas-container" style={{ flex: 1, overflowY: "auto", overflowX: "auto", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 12, background: "#252a3d", minHeight: 0 }}>
         {loadError ? (
           <div style={{ color: "#6b7899", textAlign: "center", marginTop: 60 }}>⚠️ Could not load PDF preview.</div>
         ) : !pdfDoc ? (
@@ -592,8 +592,8 @@ export default function PDFJsViewer({
             <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />Loading PDF…
           </div>
         ) : (
-          <div style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2 }}>
-            <canvas ref={canvasRef} style={{ display: "block" }} />
+          <div className="pdfviewer-canvas-wrapper" style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2, maxWidth: "100%" }}>
+            <canvas ref={canvasRef} style={{ display: "block", maxWidth: "100%", height: "auto" }} />
             <div ref={overlayRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 1, pointerEvents: editMode ? "all" : "none" }} />
             {saveStatus === "saving" && (
               <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.65)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, borderRadius: 2, backdropFilter: "blur(2px)", zIndex: 100 }}>

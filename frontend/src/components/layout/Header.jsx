@@ -281,7 +281,7 @@ function UserDropdown({
                 onClick={() => { setOpen(false); onUpgradeClick(); }}
               >
                 <span className="udrop-item-icon">⭐</span>
-                <span className="udrop-item-label">Select</span>
+                <span className="udrop-item-label">Select a Plan</span>
               </button>
             ) : (
               <>

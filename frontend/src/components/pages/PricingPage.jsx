@@ -32,7 +32,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
     const state = getPlanState(plan.id);
     if (state === "current") return "Current plan";
     if (currentTier === "free" || currentIdx === -1) return "Select";
-    return state === "upgrade" ? "Upgrade" : "Downgrade";
+    return "Upgrade";
   };
 
   const handleSelect = async (planId) => {
