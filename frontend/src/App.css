@@ -990,7 +990,7 @@ body {
 /* ==================== EDITOR LAYOUT ==================== */
 .editor-layout {
   display: grid;
-  grid-template-columns: 380px 1fr;
+  grid-template-columns: 300px 1fr;
   gap: 0;
   height: 75vh;
   overflow: hidden;
@@ -2070,7 +2070,7 @@ body {
 /* On desktop: sidebar is always visible, hide toggle buttons */
 @media (min-width: 769px) {
   .editor-layout.sidebar-closed {
-    grid-template-columns: 380px 1fr;
+    grid-template-columns: 300px 1fr;
   }
   .editor-layout.sidebar-closed .editor-sidebar {
     display: block !important;
