@@ -2066,6 +2066,20 @@ body {
 .editor-layout.sidebar-closed .editor-sidebar {
   display: none;
 }
+
+/* On desktop: sidebar is always visible, hide toggle buttons */
+@media (min-width: 769px) {
+  .editor-layout.sidebar-closed {
+    grid-template-columns: 380px 1fr;
+  }
+  .editor-layout.sidebar-closed .editor-sidebar {
+    display: block !important;
+  }
+  .sidebar-open-btn,
+  .sidebar-close-btn {
+    display: none !important;
+  }
+}
 .sidebar-close-btn {
   background: none;
   border: none;
