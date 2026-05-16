@@ -4044,4 +4044,8 @@ body {
     align-items: flex-start !important;
   }
 
+  /* Canvas wrapper — allow wider than viewport so user can scroll horizontally */
+  .pdfviewer-canvas-wrapper {
+    max-width: none !important;
+  }
 }
