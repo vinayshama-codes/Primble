@@ -39,13 +39,23 @@ async def create_checkout(req: CheckoutRequest, current_user: dict = Depends(get
     plan_cfg   = PLANS[plan][cycle]
     plan_label = f"Acordly {plan.title()} — {'Annual' if cycle == 'annual' else 'Monthly'}"
 
+    _overage_descriptions = {
+        "essentials":    "Includes 50 scores/month. Overages billed at $1.75/score.",
+        "professional":  "Includes 100 packages/month. Overages billed at $1.50/package.",
+        "business":      "Includes 400 packages/month. Overages billed at $1.25/package.",
+    }
+    plan_description = _overage_descriptions.get(plan)
+
     customer_id = current_user.get("stripe_customer_id")
 
     def _build_checkout_kwargs(cid: str | None) -> dict:
+        product_data = {"name": plan_label}
+        if plan_description:
+            product_data["description"] = plan_description
         kwargs = dict(
             payment_method_types=["card"],
             line_items=[{"price_data": {"currency": "usd",
-                "product_data": {"name": plan_label},
+                "product_data": product_data,
                 "unit_amount": plan_cfg["amount"],
                 "recurring": {"interval": plan_cfg["interval"]}}, "quantity": 1}],
             mode="subscription",

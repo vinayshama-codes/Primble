@@ -1999,7 +1999,9 @@ export default function AcordModal({
 
             <div className="editor-main">
               {!sidebarOpen && (
-                <button className="sidebar-open-btn" onClick={() => setSidebarOpen(true)} title="Show panel">→</button>
+                <button className="sidebar-open-btn" onClick={() => setSidebarOpen(true)} title="Show SQS &amp; Actions">
+                  <span className="sidebar-open-label">SQS &amp; ACTIONS</span>
+                </button>
               )}
               <PDFJsViewer
                 key={activeFormId}

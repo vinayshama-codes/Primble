@@ -281,7 +281,7 @@ function UserDropdown({
                 onClick={() => { setOpen(false); onUpgradeClick(); }}
               >
                 <span className="udrop-item-icon">⭐</span>
-                <span className="udrop-item-label">Select Plan</span>
+                <span className="udrop-item-label">Select</span>
               </button>
             ) : (
               <>
@@ -290,7 +290,7 @@ function UserDropdown({
                   onClick={() => setShowPlan(p => !p)}
                 >
                   <span className="udrop-item-icon">✅</span>
-                  <span className="udrop-item-label">My Plan</span>
+                  <span className="udrop-item-label">Upgrade</span>
                   <ChevronDown rotated={showPlan} />
                 </button>
 

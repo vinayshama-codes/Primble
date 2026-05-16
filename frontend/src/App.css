@@ -1517,7 +1517,9 @@ body {
     padding: 40px 16px 32px;
   }
   .hero-h1 {
-    font-size: 46px;
+    font-size: 56px;
+    color: #0f172a;
+    font-weight: 800;
   }
   .hero-tagline {
     font-size: 16px;
@@ -1530,7 +1532,7 @@ body {
     gap: 8px;
   }
   .pricing-section-h1 {
-    font-size: 28px;
+    font-size: 22px;
     white-space: normal;
   }
   .features {
@@ -1600,10 +1602,12 @@ body {
 
 @media (max-width: 480px) {
   .hero-h1 {
-    font-size: 40px;
+    font-size: 48px;
+    color: #0f172a;
+    font-weight: 800;
   }
   .pricing-section-h1 {
-    font-size: 20px;
+    font-size: 16px;
   }
   .hero-tagline {
     font-size: 15px;
@@ -2102,6 +2106,18 @@ body {
   color: #E61B84;
   background: #fdf2f8;
   box-shadow: 3px 0 14px rgba(230,27,132,0.15);
+}
+.sidebar-open-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #E61B84;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.1;
+  pointer-events: none;
 }
 
 /* ── SQS compact overrides inside sidebar ── */
@@ -3944,17 +3960,23 @@ body {
     flex: 1;
     min-height: 0;
     width: 100% !important;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
-  /* Toolbar wraps neatly on mobile */
-  .editor-main > div[style] {
-    flex-wrap: wrap;
+  /* PDF viewer fills editor-main on mobile */
+  .editor-main > div {
+    flex: 1;
+    min-height: 0;
+    height: 100%;
   }
 
   /* sidebar-open-btn visible and accessible on mobile */
   .sidebar-open-btn {
     width: 32px;
-    height: 64px;
+    height: 88px;
     font-size: 20px;
     z-index: 100;
   }
