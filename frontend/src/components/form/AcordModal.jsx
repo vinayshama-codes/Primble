@@ -1630,13 +1630,22 @@ export default function AcordModal({
         {step === "editor" && (
           <div className={`editor-layout editor-layout-fullpage${!sidebarOpen ? " sidebar-closed" : ""}`}>
             <div className="editor-sidebar" style={{ background: "#fff", borderRight: "1px solid #e2e8f0", padding: 0, gap: 0 }}>
+              {/* SQS & Actions header */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid #f1f5f9", background: "#fafbfc" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, background: "rgba(230,27,132,0.1)" }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                    </svg>
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", letterSpacing: "0.01em" }}>SQS &amp; Actions</span>
+                </div>
+                <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} title="Hide panel" style={{ fontSize: 16, padding: "3px 7px", color: "#64748b" }}>←</button>
+              </div>
               <div style={{ padding: "14px 14px 12px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Generated Forms</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#E61B84", background: "rgba(230,0,122,0.08)", padding: "1px 7px", borderRadius: 20 }}>{formIdList.length}</span>
-                    <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} title="Hide panel">◀</button>
-                  </div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#E61B84", background: "rgba(230,0,122,0.08)", padding: "1px 7px", borderRadius: 20 }}>{formIdList.length}</span>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 130, overflowY: "auto" }}>
                   {formIdList.map(fid => {
@@ -1991,7 +2000,7 @@ export default function AcordModal({
 
             <div className="editor-main">
               {!sidebarOpen && (
-                <button className="sidebar-open-btn" onClick={() => setSidebarOpen(true)} title="Show panel">▶</button>
+                <button className="sidebar-open-btn" onClick={() => setSidebarOpen(true)} title="Show panel">→</button>
               )}
               <PDFJsViewer
                 key={activeFormId}
