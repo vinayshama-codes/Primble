@@ -10,6 +10,11 @@ const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf
 const YELLOW_REQUIRED = new Set(["NamedInsured_Signature_A", "NamedInsured_SignatureDate_A"]);
 const CONTAINER_PADDING = 24;
 
+// On mobile, render at ~1.8× the container width so dense form text is readable.
+// The canvas overflows and the container scrolls horizontally — same as any doc viewer app.
+const getMobileRenderWidth = (avail) =>
+  window.innerWidth <= 768 ? Math.max(avail * 1.8, 680) : avail;
+
 export default function PDFJsViewer({
   pdfUrl, formName, onFormNav, sessionId, formId, token,
   savedSignature, isSigned, onSignApplied, onOpenSignatureModal,
@@ -115,7 +120,7 @@ export default function PDFJsViewer({
         const page   = await pdfDoc.getPage(pageNum);
         const canvas = canvasRef.current; if (!canvas) return;
         const avail  = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
-        const scale  = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
+        const scale  = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
         const vp     = page.getViewport({ scale });
         canvas.width = vp.width; canvas.height = vp.height;
         renderScaleRef.current = scale;
@@ -403,7 +408,7 @@ export default function PDFJsViewer({
         const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, withCredentials: true }).promise;
         const page     = await newDoc.getPage(pageNum);
         const avail    = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
-        const scale    = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
+        const scale    = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
         const vp       = page.getViewport({ scale });
         const off      = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
         const offCtx   = off.getContext("2d"); offCtx.fillStyle = "#fff"; offCtx.fillRect(0,0,off.width,off.height);
@@ -476,7 +481,7 @@ export default function PDFJsViewer({
         try {
           const page    = await newDoc.getPage(pageNum);
           const avail   = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
-          const scale   = Math.min(2.2, Math.max(0.2, avail / page.getViewport({ scale: 1 }).width));
+          const scale   = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
           const vp      = page.getViewport({ scale });
           const off     = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
           await page.render({ canvasContext: off.getContext("2d"), viewport: vp, renderInteractiveForms: false }).promise;
@@ -592,8 +597,8 @@ export default function PDFJsViewer({
             <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />Loading PDF…
           </div>
         ) : (
-          <div className="pdfviewer-canvas-wrapper" style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2, maxWidth: "100%" }}>
-            <canvas ref={canvasRef} style={{ display: "block", maxWidth: "100%", height: "auto" }} />
+          <div className="pdfviewer-canvas-wrapper" style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2 }}>
+            <canvas ref={canvasRef} style={{ display: "block" }} />
             <div ref={overlayRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 1, pointerEvents: editMode ? "all" : "none" }} />
             {saveStatus === "saving" && (
               <div style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.65)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, borderRadius: 2, backdropFilter: "blur(2px)", zIndex: 100 }}>

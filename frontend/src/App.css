@@ -1532,8 +1532,8 @@ body {
     gap: 8px;
   }
   .pricing-section-h1 {
-    font-size: 18px;
-    white-space: nowrap;
+    font-size: 28px;
+    white-space: normal;
   }
   .features {
     grid-template-columns: 1fr;
@@ -1607,8 +1607,8 @@ body {
     font-weight: 800;
   }
   .pricing-section-h1 {
-    font-size: 14px;
-    white-space: nowrap;
+    font-size: 24px;
+    white-space: normal;
   }
   .hero-tagline {
     font-size: 15px;
@@ -4046,15 +4046,8 @@ body {
     align-items: flex-start !important;
   }
 
-  /* Canvas wrapper — constrain to viewport, scroll if needed */
+  /* Canvas wrapper — allow wider than viewport so user can scroll horizontally */
   .pdfviewer-canvas-wrapper {
-    max-width: calc(100vw - 16px) !important;
-  }
-
-  /* Canvas scales to its container — prevents horizontal bleed */
-  .pdfviewer-canvas-wrapper canvas {
-    max-width: 100% !important;
-    height: auto !important;
-    display: block !important;
+    max-width: none !important;
   }
 }
