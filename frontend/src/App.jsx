@@ -168,7 +168,7 @@ function AppContent() {
     } catch { setPortalRedirecting(false); setHeaderError("Network error. Please try again."); }
   };
 
-  const handleGetStarted = (planId, billingCycle) => {
+  const handleGetStarted = (planId, billingCycle, authMode) => {
     if (planId) {
       sessionStorage.setItem("acordly_pending_plan", planId);
       sessionStorage.setItem("acordly_pending_billing_cycle", billingCycle || "monthly");
@@ -182,6 +182,7 @@ function AppContent() {
         window.history.pushState({ acordly: true }, "");
       }
     } else {
+      setAuthModalMode(authMode === "signup" ? "signup" : "signin");
       setShowAuthModal(true);
     }
   };

@@ -9,6 +9,29 @@ const ChevronDown = ({ rotated }) => (
 );
 
 
+const SignatureIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+  </svg>
+);
+
+const PlanIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="#E61B84" stroke="#E61B84" strokeWidth="1.5"
+    strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
+
+const UpgradeIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="17 11 12 6 7 11" />
+    <line x1="12" y1="6" x2="12" y2="18" />
+  </svg>
+);
+
 const SignOutIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
     strokeLinecap="round" strokeLinejoin="round">
@@ -239,21 +262,17 @@ function UserDropdown({
       {/* Trigger pill */}
       <button className="udrop-trigger" onClick={() => setOpen(p => !p)}>
         <span className="udrop-avatar">{initials}</span>
-        <span className="udrop-trigger-text">
-          <span className="udrop-trigger-initial">{initials}</span>
-          <span className="udrop-email-preview">{user.email}</span>
-        </span>
         <ChevronDown rotated={open} />
       </button>
 
       {open && (
         <div className="udrop-panel">
 
-          {/* ── Header: avatar + email ── */}
+          {/* ── Header: avatar + name + email ── */}
           <div className="udrop-header">
             <span className="udrop-avatar udrop-avatar--lg">{initials}</span>
             <div className="udrop-header-info">
-              <span className="udrop-header-initial">{initials}</span>
+              {user.full_name && <span className="udrop-header-name">{user.full_name}</span>}
               <span className="udrop-header-email">{user.email}</span>
             </div>
           </div>
@@ -270,7 +289,7 @@ function UserDropdown({
               className="udrop-item"
               onClick={() => { setOpen(false); onSignatureClick(); }}
             >
-              <span className="udrop-item-icon">✍️</span>
+              <span className="udrop-item-icon" style={{ display: "flex", alignItems: "center" }}><SignatureIcon /></span>
               <span className="udrop-item-label">{savedSignature ? "Manage Signature" : "Add Signature"}</span>
             </button>
 
@@ -280,7 +299,7 @@ function UserDropdown({
                 className="udrop-item udrop-item--upgrade"
                 onClick={() => { setOpen(false); onUpgradeClick(); }}
               >
-                <span className="udrop-item-icon">⭐</span>
+                <span className="udrop-item-icon" style={{ display: "flex", alignItems: "center" }}><PlanIcon /></span>
                 <span className="udrop-item-label">Select a Plan</span>
               </button>
             ) : (
@@ -289,7 +308,7 @@ function UserDropdown({
                   className={`udrop-item udrop-item--submenu ${showPlan ? "udrop-item--active" : ""}`}
                   onClick={() => setShowPlan(p => !p)}
                 >
-                  <span className="udrop-item-icon">✅</span>
+                  <span className="udrop-item-icon" style={{ display: "flex", alignItems: "center" }}><UpgradeIcon /></span>
                   <span className="udrop-item-label">Upgrade</span>
                   <ChevronDown rotated={showPlan} />
                 </button>

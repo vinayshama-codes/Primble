@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { API_BASE } from "../../config/constants";
 import { isPersonalEmail } from "../../utils/formatters";
@@ -21,6 +21,16 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
   const [resetMsg, setResetMsg]                   = useState("");
   const [showPassword, setShowPassword]           = useState(false);
   const [showNewPass, setShowNewPass]             = useState(false);
+  const [signupStage, setSignupStage]             = useState(0);
+
+  const SIGNUP_STAGES = ["Saving your details...", "Verifying your email..."];
+
+  useEffect(() => {
+    if (!loading || mode !== "signup") return;
+    setSignupStage(0);
+    const t = setTimeout(() => setSignupStage(1), 8000);
+    return () => clearTimeout(t);
+  }, [loading, mode]);
 
   const handleEmailAuth = async (e) => {
     e.preventDefault();
@@ -201,13 +211,34 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
     );
   }
 
+  if (loading && mode === "signup") {
+    return (
+      <div className="upgrade-stage-overlay">
+        <div className="upgrade-stage-spinner" />
+        <div className="upgrade-stage-steps">
+          {SIGNUP_STAGES.map((s, i) => (
+            <div
+              key={s}
+              className={`upgrade-stage-step ${i === signupStage ? "active" : i < signupStage ? "done" : ""}`}
+            >
+              <div className="upgrade-stage-dot" />
+              {i < signupStage ? `✓ ${s}` : s}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="modal-overlay">
       <div className="modal-content auth-modal">
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-inner">
           <div className="auth-header">
-            <h2 className="step-title">{mode === "signin" ? "Get started" : "Create Account"}</h2>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px" }}>
+              <img src="/primble-logo.webp" alt="Primble" style={{ height: "32px", width: "auto" }} />
+            </div>
             <p className="step-subtitle">{mode === "signin" ? "Sign in to access your documents" : "Get started with 3 free downloads"}</p>
           </div>
           {error    && (<div className="alert alert-error"><span>⚠️ {error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
@@ -253,7 +284,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
               <div className="acord-disclaimer-box">
                 <label className="acord-disclaimer-label">
                   <input type="checkbox" checked={disclaimerChecked} onChange={(e) => setDisclaimerChecked(e.target.checked)} className="acord-disclaimer-checkbox" />
-                  <span>By creating an account, you acknowledge that <strong>ACORD® Forms require a separate license from ACORD Corporation</strong> and agree to obtain any required license before exporting or distributing those forms.</span>
+                  <span>By creating a Primble account, you acknowledge that ACORD Corporation requires a separate license to build and distribute ACORD Forms and agree to obtain such license.</span>
                 </label>
               </div>
             )}
@@ -264,10 +295,10 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
           <div className="auth-switch">
             {mode === "signin" ? (
               <>
-                <p>Don't have an account? <button onClick={() => { setMode("signup"); setDisclaimerChecked(false); setResetMsg(""); }}>Sign up</button></p>
-                <p style={{ marginTop: "6px" }}>
-                  <button style={{ color: "#64748b", fontSize: "13px" }} onClick={() => { setMode2("forgot"); setError(""); setResetMsg(""); }}>Forgot your password?</button>
+                <p style={{ marginBottom: "6px" }}>
+                  <button style={{ color: "#64748b", fontSize: "13px", fontWeight: "normal" }} onClick={() => { setMode2("forgot"); setError(""); setResetMsg(""); }}>Forgot your password?</button>
                 </p>
+                <p>Don't have an account? <button onClick={() => { setMode("signup"); setDisclaimerChecked(false); setResetMsg(""); }}>Sign up</button></p>
               </>
             ) : (
               <p>Already have an account? <button onClick={() => setMode("signin")}>Sign in</button></p>

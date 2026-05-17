@@ -544,23 +544,23 @@ export default function PDFJsViewer({
         <div className="pdfviewer-toolbar-actions" style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
           {saveStatus === "saving" && <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}><span style={{ width: 10, height: 10, border: "2px solid #f59e0b", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Saving…</span>}
           {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>✓ Saved</span>}
-          {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>⚠ Failed</span>}
+          {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>Failed</span>}
 
           <button onClick={handleRefresh} disabled={loadingStage !== "idle"}
             title="Refresh — picks up client-submitted answers and shows green highlights"
             style={{ display: "flex", alignItems: "center", gap: 3, padding: "4px 9px", borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#8b93b0", fontSize: 11, fontWeight: 600, cursor: loadingStage !== "idle" ? "wait" : "pointer", fontFamily: "inherit" }}>
-            🔄 Refresh
+            Refresh
           </button>
 
           <button onClick={handleToggleEditMode} disabled={saveStatus === "saving" || saveStatus === "generating"}
             style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${editMode ? "#f59e0b" : "#2a3047"}`, background: editMode ? "rgba(245,158,11,0.15)" : "#252a3d", color: editMode ? "#f59e0b" : "#8b93b0", fontSize: 12, fontWeight: 600, cursor: (saveStatus === "saving" || saveStatus === "generating") ? "wait" : "pointer", fontFamily: "inherit", opacity: (saveStatus === "saving" || saveStatus === "generating") ? 0.7 : 1 }}>
-            ✏️ {editMode ? "Done Editing" : "Edit Fields"}
+            {editMode ? "Done Editing" : "Edit Fields"}
           </button>
 
           <button onClick={handleSignClick} disabled={applyingSign}
             title={isSignedLocal ? "Signature applied — enter edit mode to remove" : savedSignature ? "Apply your saved signature" : "Set up a signature"}
             style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${isSignedLocal ? "#10b981" : "rgba(230,0,122,0.4)"}`, background: isSignedLocal ? "rgba(16,185,129,0.1)" : "rgba(230,0,122,0.08)", color: isSignedLocal ? "#10b981" : "#E61B84", fontSize: 12, fontWeight: 600, cursor: applyingSign ? "wait" : "pointer", fontFamily: "inherit", opacity: applyingSign ? 0.7 : 1 }}>
-            {applyingSign ? <><span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Signing…</> : isSignedLocal ? "✓ Signed" : "✍ Sign"}
+            {applyingSign ? <><span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Signing…</> : isSignedLocal ? "Signed" : "Sign"}
           </button>
 
           {rendering && <span style={{ color: "#4f7cff", fontSize: 11 }}>Rendering…</span>}
@@ -580,7 +580,7 @@ export default function PDFJsViewer({
 
       {editMode && (
         <div className="pdfviewer-edit-hint" style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ color: "#f59e0b", fontSize: 11 }}>✏️ Click any field to edit — "Done Editing" saves all changes</span>
+          <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any field to edit — "Done Editing" saves all changes</span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,243,199,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🟡 Required field</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,226,226,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🩷 Low confidence</span></span>
           {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(187,247,208,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>✅ Client-filled</span></span>}

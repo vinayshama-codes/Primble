@@ -270,16 +270,16 @@ export default function ClientQuestionnaire({ token }) {
         boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
         marginBottom: '12px',
       }}>
-        <div style={{ fontWeight: 700, color: '#0369a1', marginBottom: 6 }}>📞 Contact Your Agent</div>
+        <div style={{ fontWeight: 700, color: '#0369a1', marginBottom: 6 }}>Contact Your Agent</div>
         {producerName && <div style={{ color: '#0f172a', marginBottom: 4 }}>{producerName}</div>}
         {producerEmail && (
           <div style={{ color: '#475569', marginBottom: 2 }}>
-            ✉ <a href={`mailto:${producerEmail}`} style={{ color: '#0369a1', textDecoration: 'none' }}>{producerEmail}</a>
+            <a href={`mailto:${producerEmail}`} style={{ color: '#0369a1', textDecoration: 'none' }}>{producerEmail}</a>
           </div>
         )}
         {producerPhone && (
           <div style={{ color: '#475569' }}>
-            📱 <a href={`tel:${producerPhone}`} style={{ color: '#0369a1', textDecoration: 'none' }}>{producerPhone}</a>
+            <a href={`tel:${producerPhone}`} style={{ color: '#0369a1', textDecoration: 'none' }}>{producerPhone}</a>
           </div>
         )}
       </div>
@@ -299,7 +299,6 @@ export default function ClientQuestionnaire({ token }) {
   if (submitted) {
     return (
       <div style={{ maxWidth: 600, margin: '40px auto', padding: '32px 24px', textAlign: 'center', background: '#fff', borderRadius: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '1px solid #e2e8f0' }}>
-        <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
         <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 12, color: '#1e293b' }}>Thank You!</h2>
         <p style={{ fontSize: 16, color: '#475569', marginBottom: 24 }}>
           Your answers have been submitted successfully. Your insurance agent has been notified and the forms will be updated automatically.
@@ -314,7 +313,6 @@ export default function ClientQuestionnaire({ token }) {
   if (error && !questions.length) {
     return (
       <div style={{ maxWidth: 500, margin: '40px auto', padding: '32px 24px', textAlign: 'center', background: '#fff', borderRadius: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '1px solid #fee2e2' }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
         <h2 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12, color: '#dc2626' }}>Questionnaire Unavailable</h2>
         <p style={{ fontSize: 14, color: '#475569', marginBottom: 24 }}>{error}</p>
         <p style={{ fontSize: 13, color: '#64748b', marginBottom: 20 }}>Please contact your agent or broker for further assistance.</p>
@@ -331,7 +329,6 @@ export default function ClientQuestionnaire({ token }) {
         {/* Header */}
         <div style={{ padding: '24px 24px 20px', background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
             <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Insurance Information Needed</h1>
             <p style={{ fontSize: 13, opacity: 0.9 }}>
               {clientName ? `Hi ${clientName},` : 'Hello,'} your insurance agent needs a few details to complete your application.
@@ -375,7 +372,7 @@ export default function ClientQuestionnaire({ token }) {
             gap: 6,
             justifyContent: 'flex-start'
           }}>
-            <span>💾 Auto-saving in progress...</span>
+            <span>Auto-saving in progress...</span>
           </div>
         )}
 
@@ -418,13 +415,12 @@ export default function ClientQuestionnaire({ token }) {
                         {q.question}
                       </label>
                       {hint && (
-                        <div style={{ marginTop: 5, fontSize: 11, color: '#64748b', lineHeight: 1.5, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                          <span style={{ flexShrink: 0 }}>💡</span>
-                          <span>{hint}</span>
+                        <div style={{ marginTop: 5, fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
+                          {hint}
                         </div>
                       )}
                       {hasError && (
-                        <p style={{ margin: '4px 0 0', fontSize: 11, color: '#dc2626' }}>⚠️ {fieldErrors[q.field_name]}</p>
+                        <p style={{ margin: '4px 0 0', fontSize: 11, color: '#dc2626' }}>{fieldErrors[q.field_name]}</p>
                       )}
                     </div>
 
@@ -576,7 +572,6 @@ export default function ClientQuestionnaire({ token }) {
             </>
           ) : (
             <>
-              <span>✓</span>
               Submit
             </>
           )}
@@ -641,7 +636,7 @@ export default function ClientQuestionnaire({ token }) {
             }
           }}
         >
-          {chatOpen ? '✕ Close' : '💬 Chat'}
+          {chatOpen ? '✕ Close' : 'Chat'}
         </button>
       </div>
 

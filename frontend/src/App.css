@@ -135,6 +135,10 @@ body {
 .udrop-header-initial {
   font-size: 14px; font-weight: 800; color: #0f172a; line-height: 1.2;
 }
+.udrop-header-name {
+  font-size: 13px; font-weight: 700; color: #0f172a; line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;
+}
 .udrop-header-email {
   font-size: 11.5px; color: #64748b; font-weight: 500;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -302,6 +306,7 @@ body {
 .hero-wrapper {
   background: rgba(230, 27, 132, 0.08);
   width: 100%;
+  font-family: 'Montserrat', sans-serif;
 }
 .hero {
   text-align: center;
@@ -342,6 +347,26 @@ body {
   margin-bottom: 24px;
   color: #2d2d2d;
   letter-spacing: -0.03em;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.hero-eyebrow-label {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 16px;
+}
+.hero-h1-main {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 52px;
+  font-weight: 800;
+  line-height: 1.1;
+  margin-bottom: 20px;
+  color: #0f172a;
+  letter-spacing: -0.02em;
   overflow-wrap: break-word;
   word-break: break-word;
 }
@@ -1499,6 +1524,7 @@ body {
 
 @media (max-width: 900px) {
   .hero-h1 { font-size: 58px; }
+  .hero-h1-main { font-size: 40px; }
   .pricing-section-h1 { font-size: 32px; white-space: normal; }
 }
 
@@ -1520,6 +1546,9 @@ body {
     font-size: 56px;
     color: #0f172a;
     font-weight: 800;
+  }
+  .hero-h1-main {
+    font-size: 36px;
   }
   .hero-tagline {
     font-size: 16px;
@@ -1605,6 +1634,9 @@ body {
     font-size: 48px;
     color: #0f172a;
     font-weight: 800;
+  }
+  .hero-h1-main {
+    font-size: 30px;
   }
   .pricing-section-h1 {
     font-size: 24px;
@@ -2402,6 +2434,21 @@ body {
 .db-primary-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(230,0,122,0.4);
+}
+
+@media (max-width: 640px) {
+  .db-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .db-header .db-header-title {
+    white-space: nowrap;
+  }
+  .db-header .db-primary-btn {
+    width: 100%;
+    text-align: center;
+    white-space: nowrap;
+  }
 }
 
 /* ── Empty state ── */

@@ -120,7 +120,7 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
               onMouseEnter={e => { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.color = "#fff"; }}
               onMouseLeave={e => { e.currentTarget.style.background = "rgba(230,0,122,0.08)"; e.currentTarget.style.color = "#E61B84"; }}>✕</button>
           </div>
-          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 16, color: "#dc2626", fontSize: 13 }}>⚠️ {error}</div>}
+          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Client Email <span style={{ color: "#E61B84" }}>*</span></label>
@@ -275,7 +275,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
       <div style={{ background: "#fff", borderRadius: 16, padding: "28px 28px 24px", maxWidth: 520, width: "100%", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column", gap: 0, maxHeight: "88vh", overflow: "hidden" }}>
         <div style={{ flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <div style={{ width: 40, height: 40, borderRadius: "50%", background: openRecs.length > 0 ? "#fef3c7" : "#f0fdf4", border: `2px solid ${openRecs.length > 0 ? "#fde68a" : "#bbf7d0"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{openRecs.length > 0 ? "⚠️" : "✅"}</div>
+            <div style={{ width: 40, height: 40, borderRadius: "50%", background: openRecs.length > 0 ? "#fef3c7" : "#f0fdf4", border: `2px solid ${openRecs.length > 0 ? "#fde68a" : "#bbf7d0"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }} />
             <div>
               <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
               <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length > 0 ? `${openRecs.length} item${openRecs.length !== 1 ? "s" : ""} flagged — review before downloading` : "All clear — review the SQS summary below"}</div>
@@ -285,7 +285,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
         <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
           {hardRecs.length > 0 && (
             <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>🚫 Hard Stops ({hardRecs.length})</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>Hard Stops ({hardRecs.length})</div>
               {hardRecs.map((r, i) => (
                 <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0" }}>• {r.message}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (–{r.score_impact} pts)</span> : ""}</div>
               ))}
@@ -293,7 +293,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
           )}
           {softRecs.length > 0 && (
             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>⚠️ Open Recommendations ({softRecs.length})</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>Open Recommendations ({softRecs.length})</div>
               {softRecs.map((r, i) => (
                 <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0" }}>• {r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> (+{r.score_impact} pts if fixed)</span> : ""}</div>
               ))}
@@ -401,10 +401,10 @@ function DashboardStep({ token, onResume, onNewPackage }) {
   const globalAvg  = stats.avg_sqs_score;
 
   const tips = [
-    "Upload source documents as PDFs — Acordly pre-fills ACORD fields automatically.",
-    "Generate multiple ACORD forms from a single submission in one pass.",
-    "Add e-signatures directly inside the form editor before downloading.",
-    "Download completed packages as a single merged PDF.",
+    "Upload client documents, applications, loss runs, schedules, or other submission materials.",
+    "Let Primble extract key data and check the package for missing or inconsistent information.",
+    "Resolve quality findings with guided client follow-up before finalizing the package.",
+    "Download underwriting-ready forms, supporting materials, and/or a submission brief once the package is complete.",
   ];
 
   return (
@@ -443,7 +443,7 @@ function DashboardStep({ token, onResume, onNewPackage }) {
             <div className="db-empty-state">
               <div className="db-empty-topbar" />
               <p className="db-empty-title">No packages yet</p>
-              <p className="db-empty-desc">Upload your first submission documents — Acordly will extract data and fill ACORD forms automatically.</p>
+              <p className="db-empty-desc">Upload your first submission package to extract key data, check submission quality, and prepare underwriting-ready forms and materials.</p>
               <div className="db-empty-steps">
                 {[["Upload docs", "AI extracts data", "Download forms"]].flat().map((label, i, arr) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1172,7 +1172,7 @@ export default function AcordModal({
 
         {error && (
           <div className="alert alert-error">
-            <span>⚠️ {error}</span>
+            <span>{error}</span>
             <button className="alert-close" onClick={() => setError(null)}>✕</button>
           </div>
         )}
@@ -1657,8 +1657,8 @@ export default function AcordModal({
                         onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? "#E61B84" : "#1e293b" }}>
                           {fd?.form_name || fid}
-                          {signedForms.has(fid) && <span style={{ color: "#10b981" }}> ✍</span>}
-                          {pdfLoading[fid] ? <span style={{ color: "#f59e0b" }}> ⏳</span> : <span style={{ color: "#10b981" }}> ✓</span>}
+                          {signedForms.has(fid) && <span style={{ color: "#10b981", fontSize: 10 }}> (signed)</span>}
+                          {pdfLoading[fid] ? <span style={{ color: "#f59e0b", fontSize: 10 }}> (loading)</span> : <span style={{ color: "#10b981", fontSize: 10 }}> (ready)</span>}
                         </div>
                         {sq && <div style={{ display: "flex", gap: 6, marginTop: 2 }}><span style={{ fontSize: 10, fontWeight: 700, color: gradeColor(sq.grade) }}>{sq.sqs_score} {sq.grade}</span><span style={{ fontSize: 10, color: "#94a3b8" }}>{sq.tier}</span></div>}
                       </div>
@@ -1744,7 +1744,7 @@ export default function AcordModal({
                                   {SQS_LABELS[key] || key}
                                   <span style={{ color: "#94a3b8" }}> ({SQS_WEIGHTS[key] || 0}%)</span>
                                   {docSourced.has(key) && (
-                                    <span title="Sourced from uploaded documents — editing form fields won't change this" style={{ marginLeft: 4, fontSize: 9, color: "#94a3b8", cursor: "help" }}>📄</span>
+                                    <span title="Sourced from uploaded documents — editing form fields won't change this" style={{ marginLeft: 4, fontSize: 9, color: "#94a3b8", cursor: "help" }}>(doc)</span>
                                   )}
                                 </span>
                                 <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>
@@ -1754,7 +1754,7 @@ export default function AcordModal({
                               </div>
                             </div>
                           ))}
-                          <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2 }}>📄 = sourced from uploaded docs, not form edits</div>
+                          <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2 }}>(doc) = sourced from uploaded docs, not form edits</div>
                         </div>
                       );
                     })()}
@@ -1810,7 +1810,7 @@ export default function AcordModal({
                     {/* ── Issues ── */}
                     {activeSqs.issues?.length > 0 && (
                       <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "7px 10px", marginBottom: 8, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#000", marginBottom: 3 }}>⚠️ Issues</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#000", marginBottom: 3 }}>Issues</div>
                         {activeSqs.issues.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#000", padding: "1px 0" }}>• {s}</div>)}
                       </div>
                     )}
@@ -1845,7 +1845,7 @@ export default function AcordModal({
                   <div style={{ padding: "12px 14px" }}>
                     <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 8, padding: "8px 10px", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: "#000", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>Cross-Form Validation</div>
-                      {crossIssues.map((iss, i) => <div key={i} style={{ fontSize: 12, padding: "3px 0", color: "#000" }}>{iss.type === "hard_stop" ? "🚫" : "⚠️"} {iss.message}</div>)}
+                      {crossIssues.map((iss, i) => <div key={i} style={{ fontSize: 12, padding: "3px 0", color: "#000" }}>{iss.message}</div>)}
                     </div>
                   </div>
                 </>
