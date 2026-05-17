@@ -147,12 +147,12 @@ function AppContent() {
         const applied = data.credited || data.already_applied;
         setOverageToast(applied
           ? `✅ ${qty} extra package${qty !== "1" ? "s" : ""} added!`
-          : `⚠️ Could not verify payment. Contact support if packages were not credited.`);
+          : `Could not verify payment. Contact support if packages were not credited.`);
         setTimeout(() => setOverageToast(null), 8000);
         if (savedSid && applied) { setResumeSessionId(savedSid); setShowModal(true); }
       })
       .catch(() => {
-        setOverageToast("⚠️ Payment received but could not auto-credit. Please refresh.");
+        setOverageToast("Payment received but could not auto-credit. Please refresh.");
         setTimeout(() => setOverageToast(null), 8000);
         if (savedSid) { setResumeSessionId(savedSid); setShowModal(true); }
       });
@@ -278,7 +278,7 @@ function AppContent() {
         onHome={() => { setMarketingPage(null); setShowModal(false); }}
       />
       {headerError && (
-        <div className="header-error-bar">⚠️ {headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
+        <div className="header-error-bar">{headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
       )}
 
       {/* Page content — switches between landing, marketing pages, and app */}

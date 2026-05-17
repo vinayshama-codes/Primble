@@ -109,7 +109,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
               <>
                 <h2 className="step-title">Verify Your Email</h2>
                 <p className="step-subtitle">Enter the 6-digit code sent to {email}</p>
-                {error && <div className="alert alert-error"><span>⚠️ {error}</span></div>}
+                {error && <div className="alert alert-error"><span>{error}</span></div>}
                 <form onSubmit={handleVerify} className="auth-form">
                   <div className="form-group">
                     <label>Verification Code</label>
@@ -136,7 +136,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
           <div className="modal-inner">
             <h2 className="step-title">Reset Your Password</h2>
             <p className="step-subtitle">Enter your email and we'll send a reset code</p>
-            {error    && <div className="alert alert-error"><span>⚠️ {error}</span></div>}
+            {error    && <div className="alert alert-error"><span>{error}</span></div>}
             {resetMsg && <div className="alert alert-success"><span>✅ {resetMsg}</span></div>}
             <form onSubmit={handleForgotRequest} className="auth-form">
               <div className="form-group">
@@ -160,7 +160,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
           <div className="modal-inner">
             <h2 className="step-title">Set New Password</h2>
             <p className="step-subtitle">Enter the code sent to {email} and your new password</p>
-            {error    && <div className="alert alert-error"><span>⚠️ {error}</span></div>}
+            {error    && <div className="alert alert-error"><span>{error}</span></div>}
             {resetMsg && <div className="alert alert-success"><span>✅ {resetMsg}</span></div>}
             <form onSubmit={handleResetPassword} className="auth-form">
               <div className="form-group">
@@ -227,7 +227,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
             </div>
             <p className="step-subtitle">{mode === "signin" ? "Sign in to access your documents" : "Get started with 3 free downloads"}</p>
           </div>
-          {error    && (<div className="alert alert-error"><span>⚠️ {error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
+          {error    && (<div className="alert alert-error"><span>{error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
           {resetMsg && <div className="alert alert-success"><span>✅ {resetMsg}</span></div>}
           <div className="auth-google">
             <GoogleLogin onSuccess={handleGoogleSuccess} onError={() => setError("Google sign-in failed")} useOneTap size="large" text={mode === "signin" ? "signin_with" : "signup_with"} shape="pill" logo_alignment="left" />

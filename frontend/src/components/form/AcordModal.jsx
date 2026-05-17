@@ -28,10 +28,10 @@ const PACKAGE_PILLAR_LABELS = {
 };
 
 const REC_TYPE_STYLE = {
-  hard_stop:    { bg: "#fdf2f8", border: "#f9a8d4", color: "#000", icon: "🚫" },
-  soft_warning: { bg: "#fdf2f8", border: "#f9a8d4", color: "#000", icon: "⚠️" },
-  missing_field:{ bg: "#fdf2f8", border: "#f9a8d4", color: "#000", icon: "📋" },
-  suggestion:   { bg: "#fdf2f8", border: "#f9a8d4", color: "#000", icon: "💡" },
+  hard_stop:    { bg: "#fdf2f8", border: "#f9a8d4", color: "#000" },
+  soft_warning: { bg: "#fdf2f8", border: "#f9a8d4", color: "#000" },
+  missing_field:{ bg: "#fdf2f8", border: "#f9a8d4", color: "#000" },
+  suggestion:   { bg: "#fdf2f8", border: "#f9a8d4", color: "#000" },
 };
 
 const FALLBACK_CHAT_REPLY = "I'm not sure about that. Please contact your agent or broker for assistance.";
@@ -41,7 +41,7 @@ function DeleteConfirmModal({ onConfirm, onCancel }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.7)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ background: "#fff", borderRadius: 16, padding: "32px 28px", maxWidth: 400, width: "100%", boxShadow: "0 24px 60px rgba(0,0,0,0.25)", animation: "slideUp 0.2s ease-out" }}>
-        <div style={{ width: 52, height: 52, borderRadius: "50%", background: "#fef2f2", border: "2px solid #fecaca", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, margin: "0 auto 18px" }}>🗑️</div>
+        <div style={{ width: 52, height: 52, borderRadius: "50%", background: "#fef2f2", border: "2px solid #fecaca", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, margin: "0 auto 18px" }}></div>
         <h3 style={{ textAlign: "center", fontSize: 18, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>Delete Session?</h3>
         <p style={{ textAlign: "center", fontSize: 14, color: "#64748b", lineHeight: 1.6, marginBottom: 24 }}>This submission package will be permanently deleted and cannot be recovered.</p>
         <div style={{ display: "flex", gap: 10 }}>
@@ -233,7 +233,6 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss }) {
   return (
     <div style={{ background: st.bg, border: `1px solid ${st.border}`, borderRadius: 8, padding: "8px 10px", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
-        <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{st.icon}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{msg}</div>
           {impact > 0 && <div style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>+{impact} pts if fixed</div>}
@@ -274,12 +273,9 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ background: "#fff", borderRadius: 16, padding: "28px 28px 24px", maxWidth: 520, width: "100%", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column", gap: 0, maxHeight: "88vh", overflow: "hidden" }}>
         <div style={{ flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <div style={{ width: 40, height: 40, borderRadius: "50%", background: openRecs.length > 0 ? "#fef3c7" : "#f0fdf4", border: `2px solid ${openRecs.length > 0 ? "#fde68a" : "#bbf7d0"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }} />
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
-              <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length > 0 ? `${openRecs.length} item${openRecs.length !== 1 ? "s" : ""} flagged — review before downloading` : "All clear — review the SQS summary below"}</div>
-            </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
+            <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length > 0 ? `${openRecs.length} item${openRecs.length !== 1 ? "s" : ""} flagged — review before downloading` : "All clear — review the SQS summary below"}</div>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
@@ -301,7 +297,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
           )}
           {narrative && (
             <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px 18px", marginTop: softRecs.length > 0 || hardRecs.length > 0 ? 10 : 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 10 }}>📊 SQS Analysis Summary</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 10 }}>SQS Analysis Summary</div>
               <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.75, margin: 0 }}>{narrative.replace(/\n+/g, " ").trim()}</p>
             </div>
           )}
@@ -1099,7 +1095,7 @@ export default function AcordModal({
         <div className="modal-content acord-license-modal" onClick={e => e.stopPropagation()}>
           <button className="modal-close" onClick={() => { setShowAcordModal(false); setAcordLicenseChecked(false); }}>✕</button>
           <div className="modal-inner">
-            <div className="acord-license-icon">⚖️</div>
+            <div className="acord-license-icon"></div>
             <h2 className="acord-license-title">ACORD® License Confirmation</h2>
             <div className="acord-license-body">
               <p>ACORD® Forms are copyrighted material owned by ACORD Corporation and are licensed, not sold. By continuing, you confirm that you or your organization maintain a valid ACORD license permitting the use of these forms.</p>
@@ -1114,9 +1110,9 @@ export default function AcordModal({
             </button>
             <div className="acord-stub-actions">
               <span className="acord-stub-label">Coming soon:</span>
-              <button className="btn-stub" disabled>✉ Email</button>
-              <button className="btn-stub" disabled>🔗 Share</button>
-              <button className="btn-stub" disabled>📠 Fax</button>
+              <button className="btn-stub" disabled>Email</button>
+              <button className="btn-stub" disabled>Share</button>
+              <button className="btn-stub" disabled>Fax</button>
             </div>
             <button className="btn btn-modal-secondary btn-block" onClick={() => { setShowAcordModal(false); setAcordLicenseChecked(false); }}>Cancel</button>
           </div>
@@ -1139,33 +1135,33 @@ export default function AcordModal({
         {user && user.subscription_tier === "free" && step !== "upload" && step !== "dashboard" && (
           <div className={`freemium-banner ${user.downloads_remaining === 0 ? "freemium-depleted" : ""}`}>
             {user.downloads_remaining > 0
-              ? <><span className="freemium-icon">🎉</span><span className="freemium-text">{user.downloads_remaining} free download{user.downloads_remaining > 1 ? "s" : ""} remaining</span></>
-              : <><span className="freemium-icon">🚀</span><span className="freemium-text">Free limit reached — upgrade to continue</span><button className="freemium-upgrade-btn" onClick={onShowUpgrade}>Upgrade Now</button></>}
+              ? <><span className="freemium-text">{user.downloads_remaining} free download{user.downloads_remaining > 1 ? "s" : ""} remaining</span></>
+              : <><span className="freemium-text">Free limit reached — upgrade to continue</span><button className="freemium-upgrade-btn" onClick={onShowUpgrade}>Upgrade Now</button></>}
           </div>
         )}
 
         {inOverage && (
           <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "9px 14px", fontSize: 12, color: "#92400e", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-            📋 <span>You're in overage territory — each additional download will be billed on your next invoice.</span>
+            <span>You're in overage territory — each additional download will be billed on your next invoice.</span>
           </div>
         )}
 
         {user && user.subscription_tier !== "free" && (() => {
           const ps = user.payment_status;
           if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived — <a href="mailto:support@primble.ai">Contact support</a> to restore.</div>;
-          if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">🚫 Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
-          if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">🔒 Account Disabled — Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
+          if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
+          if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">Account Disabled — Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
           if (ps === "failed") {
             const daysFailed = user.payment_failed_at ? Math.floor((Date.now() - new Date(user.payment_failed_at).getTime()) / 86400000) : 0;
-            if (daysFailed >= 7) return <div className="payment-status-banner payment-status-failed" style={{ background: "#fef2f2", borderColor: "#fca5a5", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap" }}>🚨 Payment still overdue — account will be restricted soon.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Update billing now</button></div>;
-            return <div className="payment-status-banner payment-status-failed">⚠️ Payment overdue —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
+            if (daysFailed >= 7) return <div className="payment-status-banner payment-status-failed" style={{ background: "#fef2f2", borderColor: "#fca5a5", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap" }}>Payment still overdue — account will be restricted soon.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Update billing now</button></div>;
+            return <div className="payment-status-banner payment-status-failed">Payment overdue —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
           }
           return null;
         })()}
 
         {pkgStatusMsg && (
           <div className="overage-inline-notice" style={{ background: pkgStatusType === "overage" ? "#fefce8" : "#f0fdf4", borderColor: pkgStatusType === "overage" ? "#fde047" : "#86efac", color: pkgStatusType === "overage" ? "#713f12" : "#14532d" }}>
-            <span>{pkgStatusType === "overage" ? "💳" : "📦"}</span>
+            <span></span>
             <span>{pkgStatusMsg}{" "}<button onClick={() => setPkgStatusMsg("")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 700, fontSize: 12, textDecoration: "underline" }}>Dismiss</button></span>
           </div>
         )}
@@ -1234,7 +1230,7 @@ export default function AcordModal({
                         <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>{sqs.tier || "Submission Scored"}</div>
                         {rd && (
                           <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 20, border: `1px solid ${rs.border}`, background: rs.bg, color: rs.color, fontSize: 12, fontWeight: 700, marginBottom: 12 }}>
-                            {{ auto_quote: "✅", review: "🔍", full_review: "📋", hold: "🚫" }[rd]} {routingLabel[rd] || rd}
+                            {routingLabel[rd] || rd}
                           </div>
                         )}
                         {/* Breakdown pillars */}
@@ -1345,7 +1341,9 @@ export default function AcordModal({
           if (freeExhausted) {
             return (
               <div style={{ maxWidth: 560, margin: "0 auto", textAlign: "center", padding: "60px 24px" }}>
-                <div style={{ width: 72, height: 72, borderRadius: 20, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, margin: "0 auto 20px" }}>🚀</div>
+                <div style={{ width: 72, height: 72, borderRadius: 20, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 11 12 6 7 11"/><line x1="12" y1="6" x2="12" y2="18"/></svg>
+                </div>
                 <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Free Limit Reached</h2>
                 <p style={{ fontSize: 15, color: "#64748b", marginBottom: 28, lineHeight: 1.6 }}>You've used all your free downloads. Upgrade to keep generating ACORD packages.</p>
                 <button onClick={onShowUpgrade}
@@ -1500,11 +1498,11 @@ export default function AcordModal({
         {step === "stopped" && (
           <div className="modal-step">
             <div className="stop-banner stop-hard">
-              <div className="stop-icon">🚫</div>
+              <div className="stop-icon"></div>
               <h2 className="stop-title">Submission Blocked — Minimum Fields Missing</h2>
               <p className="stop-subtitle">ACORD 125 cannot be generated. Missing:</p>
             </div>
-            <div className="stop-fields">{hardStops.map((f, i) => <div key={i} className="stop-field-item"><span className="stop-field-icon">✗</span><span>{f}</span></div>)}</div>
+            <div className="stop-fields">{hardStops.map((f, i) => <div key={i} className="stop-field-item"><span className="stop-field-icon"></span><span>{f}</span></div>)}</div>
             <p className="stop-advice">Upload documents that include these fields, then try again.</p>
             <button className="btn btn-modal-primary" onClick={resetToUpload}>← Upload New Documents</button>
           </div>
@@ -1712,7 +1710,7 @@ export default function AcordModal({
                     {/* ── Session delta ── */}
                     {packageSqs && packageSqs.sqs_history?.length > 1 && (
                       <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "6px 10px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                        <span style={{ fontSize: 14 }}>{packageSqs.delta_this_session >= 0 ? "📈" : "📉"}</span>
+                        <span style={{ fontSize: 14 }}></span>
                         <div>
                           <span style={{ fontSize: 11, fontWeight: 700, color: packageSqs.delta_this_session >= 0 ? "#059669" : "#dc2626" }}>
                             {packageSqs.delta_this_session >= 0 ? "+" : ""}{packageSqs.delta_this_session} pts this session
@@ -1727,7 +1725,7 @@ export default function AcordModal({
                     {/* ── Routing decision ── */}
                     {activeSqs.routing_decision && (
                       <div style={{ padding: "5px 9px", borderRadius: 7, fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, background: "#fdf2f8", color: "#000", border: "1px solid #f9a8d4", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                        {{ auto_quote: "✅ Auto-Route to Quoting", review: "🔍 Light Review", full_review: "📋 Full Underwriter Review", hold: "🚫 Hold — Remediation Required" }[activeSqs.routing_decision]}
+                        {{ auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Underwriter Review", hold: "Hold — Remediation Required" }[activeSqs.routing_decision]}
                       </div>
                     )}
 

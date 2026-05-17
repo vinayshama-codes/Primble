@@ -67,7 +67,7 @@ export default function ARQModal({ sessionId, token, questions, producerFullName
       >
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-inner" style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", padding: "24px 28px" }}>
-          <div style={{ fontSize: 32, marginBottom: 6, textAlign: "center" }}>📧</div>
+          <div style={{ fontSize: 32, marginBottom: 6, textAlign: "center" }}></div>
           <h2 className="step-title" style={{ textAlign: "center", marginBottom: 4 }}>Send to Client</h2>
           <p className="step-subtitle" style={{ textAlign: "center", marginBottom: 16 }}>
             Select questions to send. The client receives a secure link to answer them.
@@ -75,7 +75,7 @@ export default function ARQModal({ sessionId, token, questions, producerFullName
 
           {error && (
             <div className="alert alert-error" style={{ marginBottom: 14 }}>
-              ⚠️ {error}
+              {error}
               <button className="alert-close" onClick={() => setError("")}>✕</button>
             </div>
           )}
@@ -188,13 +188,13 @@ export default function ARQModal({ sessionId, token, questions, producerFullName
                 Sending…
               </span>
             ) : (
-              `📧 Send ${selectedCount} Question${selectedCount !== 1 ? "s" : ""} to Client`
+              `Send ${selectedCount} Question${selectedCount !== 1 ? "s" : ""} to Client`
             )}
           </button>
 
           {selectedCount === 0 && (
             <p style={{ fontSize: 11, color: "#f59e0b", textAlign: "center", marginTop: 6 }}>
-              ⚠️ Select at least one question to send.
+              Select at least one question to send.
             </p>
           )}
 

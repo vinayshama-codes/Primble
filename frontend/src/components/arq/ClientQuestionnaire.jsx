@@ -660,7 +660,7 @@ export default function ClientQuestionnaire({ token }) {
           {/* Chat header */}
           <div style={{ padding: '12px 16px', background: 'linear-gradient(135deg, #0f172a, #1e293b)', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 18 }}>🤖</span>
+              <span style={{ fontSize: 18 }}></span>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>Form Assistant</div>
                 <div style={{ fontSize: 10, opacity: 0.7 }}>Ask me anything about this form</div>

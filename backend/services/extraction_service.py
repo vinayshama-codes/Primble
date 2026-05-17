@@ -691,7 +691,7 @@ def _validate_parsed(result: dict, context: str) -> dict:
         # List → validate + normalize for known fields
         if isinstance(v, list):
 
-            # 🔥 FIX: normalize locations (list of dict → list of string)
+            # FIX: normalize locations (list of dict → list of string)
             if field == "locations":
                 if all(isinstance(x, dict) for x in v):
                     try:

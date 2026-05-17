@@ -18,7 +18,7 @@ def create_tables():
         return False
 
     try:
-        print("🔄 Connecting to database...")
+        print("Connecting to database...")
         with get_db_cursor() as (conn, cur):
             # ── arq_sessions ──
             cur.execute("""

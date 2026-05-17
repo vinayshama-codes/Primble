@@ -107,12 +107,12 @@ Each form has a JSON schema mapping fields for extraction.
 
 ## Critical Issues & Roadmap
 
-### 🚨 Current Blockers (Priority #1)
+### Current Blockers (Priority #1)
 - **SQS & ARQ Async Processing:** Not working properly. Blocking background job processing and agent questionnaire workflows.
   - Impact: Can't offload long-running extraction jobs; forms can't route to ARQ
   - Owner: You (as lead architect)
 
-### ⚠️ Major Technical Debt
+### Major Technical Debt
 - **Security/Compliance Gaps:** Missing controls for sensitive data (PII, financial info, signed docs)
   - Data types at risk: PII, insurance claims, financial data, signatures
   - Needs: Encryption at rest, field masking, audit logging, compliance hardening
@@ -170,7 +170,7 @@ frontend/
 - State insurance regulations
 - PII protection (varies by state)
 
-⚠️ **Security gaps must be addressed before production launch.**
+**Security gaps must be addressed before production launch.**
 
 ---
 
@@ -221,12 +221,12 @@ npm run dev
 - ACORD form schema-driven approach (reusable, scalable)
 - Google OAuth integration (easy onboarding)
 
-**⚠️ Known Workarounds:**
+**Known Workarounds:**
 - SQS/ARQ not fully integrated (blocking production workflows)
 - Security controls incomplete (must add before launch)
 - No staging environment (hurts quality assurance)
 
-**🔧 Would Rewrite If Time:**
+**Would Rewrite If Time:**
 - Async queue system (SQS/ARQ) - needs proper error handling and monitoring
 - Test suite - needs comprehensive coverage from day one
 - Deployment pipeline - needs containerization and cloud setup

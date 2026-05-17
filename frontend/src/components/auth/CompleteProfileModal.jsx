@@ -38,7 +38,7 @@ export default function CompleteProfileModal({ token, user, onComplete }) {
             <h2 className="step-title">Complete Your Profile</h2>
             <p className="step-subtitle">One more step before you get started.</p>
           </div>
-          {error && (<div className="alert alert-error"><span>⚠️ {error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
+          {error && (<div className="alert alert-error"><span>{error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
           <form onSubmit={handleSubmit} className="auth-form">
             <div className="form-group">
               <label>Organization / Agency Name <span className="field-required">*</span></label>

@@ -86,7 +86,7 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal }) {
             <div className="udrop-plan-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
           </div>
           {pct >= 90 && (
-            <div className="udrop-plan-usage-warn">⚠️ Approaching limit</div>
+            <div className="udrop-plan-usage-warn">Approaching limit</div>
           )}
         </div>
       )}
@@ -179,11 +179,11 @@ function UserDropdown({
 
   const statusBadge = (() => {
     if (upgradeChecking) return (
-      <div className="udrop-status udrop-status--warning">⏳ Activating plan…</div>
+      <div className="udrop-status udrop-status--warning">Activating plan…</div>
     );
     if (upgradeFailed) return (
       <div className="udrop-status udrop-status--error">
-        ⚠️ Activation pending
+        Activation pending
         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
           <button className="udrop-link" onClick={() => {
             setUpgradeFailed(false);
@@ -211,7 +211,7 @@ function UserDropdown({
     );
     if (user.payment_status === "suspended") return (
       <div className="udrop-status udrop-status--error">
-        🚫 Account suspended —{" "}
+        Account suspended —{" "}
         <button onClick={openBillingPortal} disabled={billingPortalLoading} className="udrop-link">
           {billingPortalLoading && <BillingSpinner />}Restore billing
         </button>
@@ -219,7 +219,7 @@ function UserDropdown({
     );
     if (user.payment_status === "soft_locked") return (
       <div className="udrop-status udrop-status--warning">
-        🔒 Account disabled — please{" "}
+        Account disabled — please{" "}
         <button onClick={openBillingPortal} disabled={billingPortalLoading} className="udrop-link">
           {billingPortalLoading && <BillingSpinner />}update billing
         </button>
@@ -231,7 +231,7 @@ function UserDropdown({
         : 0;
       return (
         <div className={`udrop-status ${daysOverdue >= 7 ? "udrop-status--error" : "udrop-status--warning"}`}>
-          {daysOverdue >= 7 ? "🚨 Payment still overdue — account will be restricted soon." : "⚠️ Payment overdue —"}{" "}
+          {daysOverdue >= 7 ? "Payment still overdue — account will be restricted soon." : "Payment overdue —"}{" "}
           <button onClick={openBillingPortal} disabled={billingPortalLoading} className="udrop-link">
             {billingPortalLoading && <BillingSpinner />}{daysOverdue >= 7 ? "Update billing now" : "Update billing"}
           </button>

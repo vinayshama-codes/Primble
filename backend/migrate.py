@@ -88,7 +88,7 @@ def run_migration():
             except Exception as e:
                 conn.rollback()
                 # Column may already exist with older Postgres — not an error
-                print(f"  ⚠️  {label} — skipped ({e})")
+                print(f"  {label} — skipped ({e})")
 
     print("\n✅ Migration completed successfully!")
     return True

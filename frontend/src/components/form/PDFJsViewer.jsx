@@ -531,7 +531,7 @@ export default function PDFJsViewer({
       {/* Toolbar */}
       <div className="pdfviewer-toolbar-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
-          <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>📄 {formName}</span>
+          <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>{formName}</span>
           {fieldsLoaded && (
             <>
               {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>🟡 {highlightCounts.yellow} required</span>}
@@ -589,7 +589,7 @@ export default function PDFJsViewer({
 
       <div ref={containerRef} className="pdfviewer-canvas-container" style={{ flex: 1, overflowY: "auto", overflowX: "auto", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 12, background: "#252a3d", minHeight: 0 }}>
         {loadError ? (
-          <div style={{ color: "#6b7899", textAlign: "center", marginTop: 60 }}>⚠️ Could not load PDF preview.</div>
+          <div style={{ color: "#6b7899", textAlign: "center", marginTop: 60 }}>Could not load PDF preview.</div>
         ) : !pdfDoc ? (
           <div style={{ color: "#6b7899", textAlign: "center", marginTop: 60 }}>
             <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />Loading PDF…
