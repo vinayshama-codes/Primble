@@ -128,7 +128,7 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
       <div className="modal-content" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-inner">
-          <h2 className="step-title" style={{ marginBottom: 6 }}>✍️ Your Signature</h2>
+          <h2 className="step-title" style={{ marginBottom: 6 }}>Your Signature</h2>
           <p className="step-subtitle" style={{ marginBottom: 20 }}>
             Saved once, auto-applied to ACORD forms when you choose to sign.
           </p>

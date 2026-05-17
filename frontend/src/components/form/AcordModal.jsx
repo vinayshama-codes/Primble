@@ -445,7 +445,7 @@ function DashboardStep({ token, onResume, onNewPackage }) {
               <p className="db-empty-title">No packages yet</p>
               <p className="db-empty-desc">Upload your first submission package to extract key data, check submission quality, and prepare underwriting-ready forms and materials.</p>
               <div className="db-empty-steps">
-                {[["Upload docs", "AI extracts data", "Download forms"]].flat().map((label, i, arr) => (
+                {[["Upload docs", "Check quality", "Fix issues", "Generate forms"]].flat().map((label, i, arr) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <div className="db-empty-step-pill">{label}</div>
                     {i < arr.length - 1 && <span className="db-empty-step-arrow">→</span>}

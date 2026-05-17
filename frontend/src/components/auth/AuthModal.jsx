@@ -21,16 +21,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
   const [resetMsg, setResetMsg]                   = useState("");
   const [showPassword, setShowPassword]           = useState(false);
   const [showNewPass, setShowNewPass]             = useState(false);
-  const [signupStage, setSignupStage]             = useState(0);
-
-  const SIGNUP_STAGES = ["Saving your details...", "Verifying your email..."];
-
-  useEffect(() => {
-    if (!loading || mode !== "signup") return;
-    setSignupStage(0);
-    const t = setTimeout(() => setSignupStage(1), 8000);
-    return () => clearTimeout(t);
-  }, [loading, mode]);
+  const SIGNUP_STAGES = ["Verifying your email..."];
 
   const handleEmailAuth = async (e) => {
     e.preventDefault();
@@ -216,15 +207,10 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
       <div className="upgrade-stage-overlay">
         <div className="upgrade-stage-spinner" />
         <div className="upgrade-stage-steps">
-          {SIGNUP_STAGES.map((s, i) => (
-            <div
-              key={s}
-              className={`upgrade-stage-step ${i === signupStage ? "active" : i < signupStage ? "done" : ""}`}
-            >
-              <div className="upgrade-stage-dot" />
-              {i < signupStage ? `✓ ${s}` : s}
-            </div>
-          ))}
+          <div className="upgrade-stage-step active">
+            <div className="upgrade-stage-dot" />
+            {SIGNUP_STAGES[0]}
+          </div>
         </div>
       </div>
     );
@@ -284,7 +270,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
               <div className="acord-disclaimer-box">
                 <label className="acord-disclaimer-label">
                   <input type="checkbox" checked={disclaimerChecked} onChange={(e) => setDisclaimerChecked(e.target.checked)} className="acord-disclaimer-checkbox" />
-                  <span>By creating a Primble account, you acknowledge that ACORD Corporation requires a separate license to build and distribute ACORD Forms and agree to obtain such license.</span>
+                  <span>By creating a Primble account, you acknowledge that <strong>ACORD Corporation</strong> requires a separate license to build and distribute <strong>ACORD Forms</strong> and agree to obtain such license.</span>
                 </label>
               </div>
             )}

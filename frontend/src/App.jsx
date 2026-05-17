@@ -253,9 +253,14 @@ function AppContent() {
       )}
 
       {signingIn && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(255,255,255,0.97)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
-          <div className="loading-spinner" style={{ width: 40, height: 40, marginBottom: 16 }} />
-          <p style={{ color: "#64748b", fontSize: "15px", fontWeight: 500 }}>Signing you in...</p>
+        <div className="upgrade-stage-overlay">
+          <div className="upgrade-stage-spinner" />
+          <div className="upgrade-stage-steps">
+            <div className="upgrade-stage-step active">
+              <div className="upgrade-stage-dot" />
+              Signing you in...
+            </div>
+          </div>
         </div>
       )}
 
