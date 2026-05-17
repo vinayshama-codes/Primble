@@ -282,7 +282,6 @@ function UserDropdown({
                 className="udrop-item udrop-item--upgrade"
                 onClick={() => { setOpen(false); onUpgradeClick(); }}
               >
-                <span className="udrop-item-icon" style={{ display: "flex", alignItems: "center" }}><PlanIcon /></span>
                 <span className="udrop-item-label">Select a Plan</span>
               </button>
             ) : (

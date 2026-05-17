@@ -41,6 +41,26 @@ export default function App() {
   );
 }
 
+function AppLoadingOverlay({ label }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(255,255,255,0.97)",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", zIndex: 99999, gap: 24,
+    }}>
+      <div style={{
+        width: 52, height: 52, borderRadius: "50%",
+        border: "4px solid #e2e8f0", borderTopColor: "#e61b84",
+        animation: "spin 0.9s linear infinite",
+      }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#e61b84" }} />
+        <span style={{ fontSize: 16, fontWeight: 700, color: "#1e293b" }}>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 function MarketingFooter() {
   return (
     <footer className="footer">
@@ -245,24 +265,9 @@ function AppContent() {
         </div>
       )}
 
-      {resumeLoading && (
-        <div style={{ position: "fixed", inset: 0, background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
-          <div className="loading-spinner" style={{ width: 40, height: 40, marginBottom: 16 }} />
-          <p style={{ color: "#64748b", fontSize: 15, fontWeight: 500 }}>Restoring your session...</p>
-        </div>
-      )}
+      {resumeLoading && <AppLoadingOverlay label="Restoring your session..." />}
 
-      {signingIn && (
-        <div className="upgrade-stage-overlay">
-          <div className="upgrade-stage-spinner" />
-          <div className="upgrade-stage-steps">
-            <div className="upgrade-stage-step active">
-              <div className="upgrade-stage-dot" />
-              Signing you in...
-            </div>
-          </div>
-        </div>
-      )}
+      {signingIn && <AppLoadingOverlay label="Signing you in..." />}
 
       {/* Persistent header — always visible */}
       <Header

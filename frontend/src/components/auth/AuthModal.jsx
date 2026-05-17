@@ -1,7 +1,27 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { API_BASE } from "../../config/constants";
 import { isPersonalEmail } from "../../utils/formatters";
+
+function AuthLoadingOverlay({ label }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(255,255,255,0.97)",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", zIndex: 99999, gap: 24,
+    }}>
+      <div style={{
+        width: 52, height: 52, borderRadius: "50%",
+        border: "4px solid #e2e8f0", borderTopColor: "#e61b84",
+        animation: "spin 0.9s linear infinite",
+      }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#e61b84" }} />
+        <span style={{ fontSize: 16, fontWeight: 700, color: "#1e293b" }}>{label}</span>
+      </div>
+    </div>
+  );
+}
 
 export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }) {
   const [mode, setMode]                           = useState(initialMode);
@@ -101,10 +121,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
           <button className="modal-close" onClick={onClose}>✕</button>
           <div className="modal-inner">
             {transitioning ? (
-              <div style={{ textAlign: "center", padding: "40px 0" }}>
-                <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />
-                <p style={{ color: "#64748b", fontSize: "14px" }}>Signing you in...</p>
-              </div>
+              <AuthLoadingOverlay label="Signing you in..." />
             ) : (
               <>
                 <h2 className="step-title">Verify Your Email</h2>
@@ -190,30 +207,11 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
   }
 
   if (transitioning) {
-    return (
-      <div className="modal-overlay">
-        <div className="modal-content auth-modal" style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "200px" }}>
-          <div style={{ textAlign: "center" }}>
-            <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />
-            <p style={{ color: "#64748b", fontSize: "14px" }}>Signing you in...</p>
-          </div>
-        </div>
-      </div>
-    );
+    return <AuthLoadingOverlay label="Signing you in..." />;
   }
 
   if (loading && mode === "signup") {
-    return (
-      <div className="upgrade-stage-overlay">
-        <div className="upgrade-stage-spinner" />
-        <div className="upgrade-stage-steps">
-          <div className="upgrade-stage-step active">
-            <div className="upgrade-stage-dot" />
-            {SIGNUP_STAGES[0]}
-          </div>
-        </div>
-      </div>
-    );
+    return <AuthLoadingOverlay label={SIGNUP_STAGES[0]} />;
   }
 
   return (
