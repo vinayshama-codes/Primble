@@ -2,9 +2,8 @@ import { useState, useEffect } from "react";
 import "./App.css";
 import "./styles/injected.js";
 import { GoogleOAuthProvider } from "@react-oauth/google";
-import { GoogleReCaptchaProvider } from "react-google-recaptcha-v3";
 
-import { GOOGLE_CLIENT_ID, API_BASE, RECAPTCHA_SITE_KEY } from "./config/constants";
+import { GOOGLE_CLIENT_ID, API_BASE } from "./config/constants";
 import { useAuth }            from "./hooks/useAuth";
 import { useSignature }       from "./hooks/useSignature";
 import { useUpgradePolling, useBillingReturnPolling } from "./hooks/useUpgradePolling";
@@ -35,17 +34,11 @@ export default function App() {
     return <ErrorBoundary><ClientQuestionnaire token={qMatch[1]} /></ErrorBoundary>;
   }
 
-  const inner = (
-    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <AppContent />
-    </GoogleOAuthProvider>
-  );
-
   return (
     <ErrorBoundary>
-      {RECAPTCHA_SITE_KEY
-        ? <GoogleReCaptchaProvider reCaptchaKey={RECAPTCHA_SITE_KEY} scriptProps={{ async: true, defer: true }}>{inner}</GoogleReCaptchaProvider>
-        : inner}
+      <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+        <AppContent />
+      </GoogleOAuthProvider>
     </ErrorBoundary>
   );
 }

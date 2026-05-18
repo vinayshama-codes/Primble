@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
-import { useGoogleReCaptcha } from "react-google-recaptcha-v3";
 import { API_BASE } from "../../config/constants";
 
 function AuthLoadingOverlay({ label }) {
@@ -46,8 +45,6 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
   const [showNewPass, setShowNewPass]             = useState(false);
   const SIGNUP_STAGES = ["Verifying your email..."];
 
-  const { executeRecaptcha } = useGoogleReCaptcha();
-
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     setError("");
@@ -57,14 +54,8 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
       if (!orgName.trim())    { setError("Organization or agency name is required."); setLoading(false); return; }
     }
     const endpoint = mode === "signup" ? "/api/auth/signup" : "/api/auth/login";
-
-    let recaptcha_token = null;
-    if (mode === "signup" && executeRecaptcha) {
-      try { recaptcha_token = await executeRecaptcha("signup"); } catch { /* non-blocking */ }
-    }
-
     const body     = mode === "signup"
-      ? { email, password, full_name: fullName, organization_name: orgName.trim(), acord_disclaimer_accepted: disclaimerChecked, recaptcha_token }
+      ? { email, password, full_name: fullName, organization_name: orgName.trim(), acord_disclaimer_accepted: disclaimerChecked }
       : { email, password };
     try {
       const res  = await fetch(`${API_BASE}${endpoint}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

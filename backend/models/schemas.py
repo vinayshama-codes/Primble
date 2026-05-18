@@ -99,7 +99,6 @@ class SignupRequest(BaseModel):
     full_name: str
     organization_name: str
     acord_disclaimer_accepted: bool = False
-    recaptcha_token: str | None = None
 
 
 class LoginRequest(BaseModel):

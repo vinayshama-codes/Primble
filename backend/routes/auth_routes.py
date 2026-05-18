@@ -30,32 +30,9 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
 
 import os as _os
-import httpx as _httpx
 _IS_PRODUCTION  = _os.getenv("ENVIRONMENT", "development").lower() == "production"
 _COOKIE_SECURE  = _IS_PRODUCTION          # False on localhost (http), True on prod (https)
 _COOKIE_SAMESITE = "none" if _IS_PRODUCTION else "lax"
-
-_RECAPTCHA_SECRET = _os.getenv("RECAPTCHA_SECRET_KEY", "")
-_RECAPTCHA_MIN_SCORE = float(_os.getenv("RECAPTCHA_MIN_SCORE", "0.5"))
-
-async def _verify_recaptcha(token: str | None) -> None:
-    """Verify reCAPTCHA v3 token. Skipped entirely if RECAPTCHA_SECRET_KEY is not set."""
-    if not _RECAPTCHA_SECRET or not token:
-        return
-    try:
-        async with _httpx.AsyncClient(timeout=5) as client:
-            resp = await client.post(
-                "https://www.google.com/recaptcha/api/siteverify",
-                data={"secret": _RECAPTCHA_SECRET, "response": token},
-            )
-        result = resp.json()
-        if not result.get("success") or result.get("score", 0) < _RECAPTCHA_MIN_SCORE:
-            logger.warning(f"reCAPTCHA failed: {result}")
-            raise HTTPException(400, "reCAPTCHA verification failed. Please try again.")
-    except HTTPException:
-        raise
-    except Exception as ex:
-        logger.warning(f"reCAPTCHA check error (non-blocking): {ex}")
 
 _NONCE_TTL = 300  # seconds
 
@@ -255,7 +232,6 @@ def _clear_session_cookie(response: JSONResponse) -> None:
 @router.post("/signup")
 async def signup(req: SignupRequest, request: Request):
     check_auth_rate_limit(req.email.lower())
-    await _verify_recaptcha(req.recaptcha_token)
     if not req.acord_disclaimer_accepted:
         raise HTTPException(400, "You must accept the ACORD disclaimer to create an account.")
     if not req.organization_name or not req.organization_name.strip():
