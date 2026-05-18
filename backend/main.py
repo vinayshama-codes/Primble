@@ -30,6 +30,7 @@ if _SENTRY_DSN:
 from config.database import create_pool, close_pool, get_pool, init_db
 from config.settings import (  # noqa: F401
     ALLOWED_ORIGINS,
+    CORS_ALLOW_ORIGIN_REGEX,
     MAX_UPLOAD_SIZE_BYTES,
     ADMIN_EMAILS as _SETTINGS_ADMIN_EMAILS,
     DEV_ROUTES_ENABLED as _SETTINGS_DEV_ROUTES_ENABLED,
@@ -163,6 +164,7 @@ app.add_middleware(InFlightMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=CORS_ALLOW_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],

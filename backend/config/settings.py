@@ -34,6 +34,19 @@ elif _env == "production":
 else:
     ALLOWED_ORIGINS = list({FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"})
 
+_dev_origin_regex = (
+    r"^https?://("
+    r"localhost|127\.0\.0\.1|0\.0\.0\.0|"
+    r"10(?:\.\d{1,3}){3}|"
+    r"192\.168(?:\.\d{1,3}){2}|"
+    r"172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}"
+    r")(?::\d+)?$"
+)
+CORS_ALLOW_ORIGIN_REGEX = (
+    os.getenv("CORS_ALLOW_ORIGIN_REGEX", "").strip()
+    or (None if _env == "production" else _dev_origin_regex)
+)
+
 MAX_UPLOAD_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 MAX_FILES_PER_UPLOAD  = int(os.getenv("MAX_FILES_PER_UPLOAD", "10"))
 
