@@ -99,6 +99,7 @@ class SignupRequest(BaseModel):
     full_name: str
     organization_name: str
     acord_disclaimer_accepted: bool = False
+    recaptcha_token: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -113,7 +114,7 @@ class VerifyEmailRequest(BaseModel):
 
 class GoogleAuthRequest(BaseModel):
     credential: str
-    nonce: str
+    nonce: Optional[str] = None
 
 
 class FormSelectionRequest(BaseModel):
@@ -176,6 +177,12 @@ class SaveSignatureRequest(BaseModel):
 class CompleteProfileRequest(BaseModel):
     organization_name: str
     acord_disclaimer_accepted: bool = False
+    pending_token: Optional[str] = None
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: Optional[str] = None
+    organization_name: Optional[str] = None
 
 
 # ── Audit API request / response models ───────────────────────────────────────

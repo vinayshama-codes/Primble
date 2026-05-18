@@ -13,7 +13,7 @@ from config.database import get_pool
 from config.settings import GOOGLE_CLIENT_ID, SESSION_TTL_H as _SESSION_TTL_H
 from models.schemas import (
     SignupRequest, LoginRequest, VerifyEmailRequest,
-    GoogleAuthRequest, CompleteProfileRequest,
+    GoogleAuthRequest, CompleteProfileRequest, UpdateProfileRequest,
 )
 from services.auth_service import (
     hash_password, verify_password, create_session_token, get_current_user,
@@ -22,7 +22,7 @@ from services.auth_service import (
 )
 from services.email_service import send_verification_email, _send_generic_email
 from utils.helpers import generate_verification_code
-from utils.validators import validate_work_email, validate_password
+from utils.validators import validate_password
 from utils.rate_limiter import check_auth_rate_limit, get_client_ip, _redis as _rate_limiter_redis
 from repositories.audit_repository import write_audit_log
 
@@ -30,15 +30,73 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 logger = logging.getLogger(__name__)
 
 import os as _os
+import httpx as _httpx
 _IS_PRODUCTION  = _os.getenv("ENVIRONMENT", "development").lower() == "production"
 _COOKIE_SECURE  = _IS_PRODUCTION          # False on localhost (http), True on prod (https)
 _COOKIE_SAMESITE = "none" if _IS_PRODUCTION else "lax"
+
+_RECAPTCHA_SECRET = _os.getenv("RECAPTCHA_SECRET_KEY", "")
+_RECAPTCHA_MIN_SCORE = float(_os.getenv("RECAPTCHA_MIN_SCORE", "0.5"))
+
+async def _verify_recaptcha(token: str | None) -> None:
+    """Verify reCAPTCHA v3 token. Skipped entirely if RECAPTCHA_SECRET_KEY is not set."""
+    if not _RECAPTCHA_SECRET or not token:
+        return
+    try:
+        async with _httpx.AsyncClient(timeout=5) as client:
+            resp = await client.post(
+                "https://www.google.com/recaptcha/api/siteverify",
+                data={"secret": _RECAPTCHA_SECRET, "response": token},
+            )
+        result = resp.json()
+        if not result.get("success") or result.get("score", 0) < _RECAPTCHA_MIN_SCORE:
+            logger.warning(f"reCAPTCHA failed: {result}")
+            raise HTTPException(400, "reCAPTCHA verification failed. Please try again.")
+    except HTTPException:
+        raise
+    except Exception as ex:
+        logger.warning(f"reCAPTCHA check error (non-blocking): {ex}")
 
 _NONCE_TTL = 300  # seconds
 
 # In-process nonce store used when Redis is unavailable.
 # Maps nonce -> (fingerprint, expires_at_monotonic)
 _nonce_store: dict = {}
+
+# Pending Google sign-up tokens — holds Google identity until profile is completed.
+# Keyed by a random token; expires after 10 minutes.
+_PENDING_TOKEN_TTL = 600
+_pending_store: dict = {}
+
+
+def _pending_set(token: str, google_id: str, email: str, name: str) -> None:
+    import time as _time, json as _json
+    payload = {"google_id": google_id, "email": email, "name": name,
+               "expires_at": _time.monotonic() + _PENDING_TOKEN_TTL}
+    _pending_store[token] = payload
+    if _auth_redis is not None:
+        try:
+            _auth_redis.setex(f"pending:{token}", _PENDING_TOKEN_TTL, _json.dumps(
+                {"google_id": google_id, "email": email, "name": name}
+            ))
+        except Exception:
+            pass
+
+
+def _pending_pop(token: str) -> dict | None:
+    import time as _time, json as _json
+    entry = _pending_store.pop(token, None)
+    if entry and entry["expires_at"] > _time.monotonic():
+        return entry
+    if _auth_redis is not None:
+        try:
+            raw = _auth_redis.getdel(f"pending:{token}")
+            if raw:
+                return _json.loads(raw)
+        except Exception:
+            pass
+    return None
+
 
 # Account lockout configuration (SOC 2 CC6.1)
 _LOCKOUT_MAX_FAILURES = 10
@@ -197,11 +255,9 @@ def _clear_session_cookie(response: JSONResponse) -> None:
 @router.post("/signup")
 async def signup(req: SignupRequest, request: Request):
     check_auth_rate_limit(req.email.lower())
+    await _verify_recaptcha(req.recaptcha_token)
     if not req.acord_disclaimer_accepted:
         raise HTTPException(400, "You must accept the ACORD disclaimer to create an account.")
-    ok_email, email_msg = validate_work_email(req.email)
-    if not ok_email:
-        raise HTTPException(400, email_msg)
     if not req.organization_name or not req.organization_name.strip():
         raise HTTPException(400, "Organization or agency name is required.")
     ok, msg = validate_password(req.password)
@@ -517,15 +573,14 @@ async def google_nonce(request: Request):
 async def google_auth(req: GoogleAuthRequest, request: Request):
     check_auth_rate_limit(get_client_ip(request))
     try:
-        # Validate state/nonce sent by the frontend
-        nonce = getattr(req, "nonce", None)
-        if not nonce:
-            raise HTTPException(400, "Invalid or missing OAuth state/nonce")
-        stored_fp = _nonce_pop(nonce)
-        if stored_fp is None:
-            raise HTTPException(400, "Invalid or missing OAuth state/nonce")
-        if stored_fp != _nonce_fingerprint(request):
-            raise HTTPException(400, "OAuth nonce fingerprint mismatch")
+        # Validate state/nonce if the frontend sends one
+        nonce = req.nonce
+        if nonce:
+            stored_fp = _nonce_pop(nonce)
+            if stored_fp is None:
+                raise HTTPException(400, "Invalid or missing OAuth state/nonce")
+            if stored_fp != _nonce_fingerprint(request):
+                raise HTTPException(400, "OAuth nonce fingerprint mismatch")
 
         cid    = GOOGLE_CLIENT_ID
         idinfo = id_token.verify_oauth2_token(req.credential, google_requests.Request(), cid, clock_skew_in_seconds=5)
@@ -539,15 +594,12 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
         if not email:
             raise ValueError("No email in token")
 
-        ok_email, email_msg = validate_work_email(email)
-        if not ok_email:
-            raise HTTPException(400, "Only organizational email accounts are supported. Please sign in with your work email.")
-
         async with get_pool().acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM users WHERE google_id = $1", google_id)
             if not row:
                 row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
                 if row:
+                    # Existing email-signup user connecting Google for the first time
                     uid = dict(row)["id"]
                     await conn.execute(
                         "UPDATE users SET google_id=$1, auth_provider='google', email_verified=1 WHERE id=$2",
@@ -555,14 +607,15 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
                     )
                     row = await conn.fetchrow("SELECT * FROM users WHERE id=$1", uid)
                 else:
-                    uid = str(uuid.uuid4())
-                    now = datetime.now(timezone.utc).isoformat()
-                    await conn.execute(
-                        "INSERT INTO users (id, email, google_id, full_name, auth_provider, email_verified, created_at, last_login) "
-                        "VALUES ($1,$2,$3,$4,'google',1,$5,$6)",
-                        uid, email, google_id, name, now, now,
-                    )
-                    row = await conn.fetchrow("SELECT * FROM users WHERE id=$1", uid)
+                    # Brand-new user — don't create the record yet; require profile completion first
+                    pending_token = secrets.token_urlsafe(32)
+                    _pending_set(pending_token, google_id, email, name)
+                    return JSONResponse({
+                        "success": True,
+                        "profile_incomplete": True,
+                        "pending_token": pending_token,
+                        "user": {"email": email, "full_name": name},
+                    })
 
             user = dict(row)
             await conn.execute(
@@ -584,8 +637,18 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
         org_name           = user.get("organization_name") or ""
         disclaimer         = int(user.get("acord_disclaimer_accepted", 0) or 0)
         profile_incomplete = not org_name.strip() or not disclaimer
+        if profile_incomplete:
+            # Existing user with incomplete profile — issue pending token, no session yet
+            pending_token = secrets.token_urlsafe(32)
+            _pending_set(pending_token, google_id, email, name)
+            return JSONResponse({
+                "success": True,
+                "profile_incomplete": True,
+                "pending_token": pending_token,
+                "user": {"email": email, "full_name": name},
+            })
         resp = JSONResponse({
-            "success": True, "profile_incomplete": profile_incomplete,
+            "success": True, "profile_incomplete": False,
             "user": {
                 "id": user["id"], "email": user["email"],
                 "full_name": user.get("full_name", ""),
@@ -608,26 +671,60 @@ async def complete_profile(
     req: CompleteProfileRequest,
     request: Request,
     acordly_session: str = Cookie(None),
-    current_user: dict = Depends(get_current_user),
 ):
     if not req.acord_disclaimer_accepted:
         raise HTTPException(400, "You must accept the ACORD disclaimer.")
     if not req.organization_name or not req.organization_name.strip():
         raise HTTPException(400, "Organization name is required.")
     now = datetime.now(timezone.utc).isoformat()
+    ip  = request.client.host if request.client else None
+    ua  = request.headers.get("user-agent")
+
+    if req.pending_token:
+        # New Google user — verify pending token then INSERT the record
+        identity = _pending_pop(req.pending_token)
+        if not identity:
+            raise HTTPException(400, "Sign-up session expired. Please sign in with Google again.")
+        uid = str(uuid.uuid4())
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                "INSERT INTO users "
+                "(id, email, google_id, full_name, auth_provider, email_verified, "
+                " organization_name, acord_disclaimer_accepted, acord_disclaimer_accepted_at, "
+                " created_at, last_login) "
+                "VALUES ($1,$2,$3,$4,'google',1,$5,1,$6,$7,$8)",
+                uid, identity["email"], identity["google_id"], identity["name"],
+                req.organization_name.strip(), now, now, now,
+            )
+            row = await conn.fetchrow("SELECT * FROM users WHERE id=$1", uid)
+        user = dict(row)
+        await write_audit_log(user, "user.oauth_signup", ip_address=ip)
+        token = await create_session_token(uid, ip_address=ip, user_agent=ua)
+        resp  = JSONResponse({
+            "success": True,
+            "user": {
+                "id": user["id"], "email": user["email"],
+                "full_name": user.get("full_name", ""),
+                "organization_name": req.organization_name.strip(),
+                "subscription_tier": "free", "downloads_remaining": 3,
+                "acord_license_confirmed": False, "acord_disclaimer_accepted": True,
+            },
+        })
+        _set_session_cookie(resp, token)
+        return resp
+
+    # Existing user updating their profile (session-cookie path)
+    from services.auth_service import get_current_user as _get_current_user
+    current_user = await _get_current_user(acordly_session=acordly_session)
     async with get_pool().acquire() as conn:
         await conn.execute(
-            "UPDATE users SET organization_name=$1, acord_disclaimer_accepted=1, acord_disclaimer_accepted_at=$2 WHERE id=$3",
+            "UPDATE users SET organization_name=$1, acord_disclaimer_accepted=1, "
+            "acord_disclaimer_accepted_at=$2 WHERE id=$3",
             req.organization_name.strip(), now, current_user["id"],
         )
-
     resp = JSONResponse({"success": True, "message": "Profile updated."})
     if acordly_session:
-        new_token = await rotate_session(
-            acordly_session,
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-        )
+        new_token = await rotate_session(acordly_session, ip_address=ip, user_agent=ua)
         _set_session_cookie(resp, new_token)
     return resp
 
@@ -695,6 +792,53 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "payment_failed_at": current_user.get("payment_failed_at"),
         "overage_rate": int(current_user.get("overage_rate", 0) or 0),
     }
+
+
+@router.patch("/update-profile")
+async def update_profile(
+    req: UpdateProfileRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    updates = {}
+    if req.full_name is not None:
+        updates["full_name"] = req.full_name.strip()
+    if req.organization_name is not None:
+        updates["organization_name"] = req.organization_name.strip()
+    if not updates:
+        raise HTTPException(400, "No fields to update.")
+    set_clause = ", ".join(f"{k}=${i+1}" for i, k in enumerate(updates))
+    values = list(updates.values()) + [current_user["id"]]
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            f"UPDATE users SET {set_clause} WHERE id=${len(values)}",
+            *values,
+        )
+    return {"success": True, **updates}
+
+
+@router.post("/contact")
+async def contact_primble(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    body = await request.json()
+    from_email = (body.get("from_email") or "").strip()
+    subject    = (body.get("subject") or "").strip()
+    message    = (body.get("message") or "").strip()
+    if not subject or not message:
+        raise HTTPException(400, "Subject and message are required.")
+    full_msg = (
+        f"From: {current_user.get('full_name', '')} <{from_email or current_user['email']}>\n"
+        f"User ID: {current_user['id']}\n\n"
+        f"{message}"
+    )
+    _send_generic_email(
+        to_email="info@primble.com",
+        subject=f"[Primble Contact] {subject}",
+        body_txt=full_msg,
+        body_html=f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{full_msg}</pre>",
+    )
+    return {"success": True}
 
 
 @router.post("/logout")

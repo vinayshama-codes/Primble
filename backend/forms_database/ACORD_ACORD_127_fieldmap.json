@@ -1,16 +1,5 @@
 {
   "Form_EditionIdentifier_A": null,
-  "Producer_CustomerIdentifier_A": "producer_name",
-  "Form_CompletionDate_A": "effective_date",
-  "Producer_FullName_A": "producer_name",
-  "Policy_PolicyNumberIdentifier_A": "policy_number",
-  "Policy_EffectiveDate_A": "effective_date",
-  "Insurer_FullName_A": "carrier_name",
-  "Insurer_NAICCode_A": "carrier_naic",
-  "NamedInsured_FullName_A": "applicant_name",
-  "AdditionalInterest_FullName_C": "additional_named_insureds",
-  "AdditionalInterest_FullName_D": "additional_named_insureds",
-  "AdditionalInterest_FullName_A": "additional_named_insureds",
   "AdditionalInterest_MailingAddress_LineOne_A": "_addr_line1",
   "AdditionalInterest_MailingAddress_LineTwo_A": "_addr_line2",
   "AdditionalInterest_MailingAddress_CityName_A": "_addr_city",
@@ -18,7 +7,6 @@
   "AdditionalInterest_MailingAddress_PostalCode_A": "_addr_zip",
   "AdditionalInterest_Item_VehicleProducerIdentifier_A": null,
   "AdditionalInterest_Item_LocationProducerIdentifier_A": null,
-  "AdditionalInterest_FullName_B": "additional_named_insureds",
   "AdditionalInterest_MailingAddress_LineOne_B": "_addr_line1",
   "AdditionalInterest_MailingAddress_LineTwo_B": "_addr_line2",
   "AdditionalInterest_MailingAddress_CityName_B": "_addr_city",
@@ -27,7 +15,6 @@
   "AdditionalInterest_Item_VehicleProducerIdentifier_B": null,
   "AdditionalInterest_Item_LocationProducerIdentifier_B": null,
   "Producer_AuthorizedRepresentative_Signature_A": "contact_name",
-  "Producer_AuthorizedRepresentative_FullName_A": "contact_name",
   "NamedInsured_Signature_A": null,
   "NamedInsured_SignatureDate_A": null,
   "Driver_ProducerIdentifier_A": null,
@@ -69,6 +56,6 @@
   "Vehicle_TotalPremiumAmount_C": null,
   "Vehicle_ProducerIdentifier_D": null,
   "Vehicle_TotalPremiumAmount_D": null,
-  "__ai_mapped__": [],
-  "__schema_version__": "v5"
+  "__schema_version__": "v5",
+  "__ai_mapped__": []
 }

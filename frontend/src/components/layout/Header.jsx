@@ -144,6 +144,8 @@ function UserDropdown({
   setUpgradeFailed,
   setUpgradeChecking,
   setUser,
+  onAccountSettings,
+  onContactPrimble,
 }) {
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -268,7 +270,15 @@ function UserDropdown({
           {/* ── Actions ── */}
           <div className="udrop-section udrop-actions">
 
-            {/* Signature */}
+            {/* 1. Account Settings */}
+            <button
+              className="udrop-item"
+              onClick={() => { setOpen(false); onAccountSettings(); }}
+            >
+              <span className="udrop-item-label">Account Settings</span>
+            </button>
+
+            {/* 2. Manage Signature */}
             <button
               className="udrop-item"
               onClick={() => { setOpen(false); onSignatureClick(); }}
@@ -276,13 +286,13 @@ function UserDropdown({
               <span className="udrop-item-label">{savedSignature ? "Manage Signature" : "Add Signature"}</span>
             </button>
 
-            {/* Plan */}
+            {/* 3. Edit Subscription / Select */}
             {user.subscription_tier === "free" ? (
               <button
-                className="udrop-item udrop-item--upgrade"
+                className="udrop-item"
                 onClick={() => { setOpen(false); onUpgradeClick(); }}
               >
-                <span className="udrop-item-label">Select a Plan</span>
+                <span className="udrop-item-label">Select a plan</span>
               </button>
             ) : (
               <>
@@ -290,11 +300,10 @@ function UserDropdown({
                   className={`udrop-item udrop-item--submenu ${showPlan ? "udrop-item--active" : ""}`}
                   onClick={() => setShowPlan(p => !p)}
                 >
-                  <span className="udrop-item-label">Upgrade</span>
+                  <span className="udrop-item-label">Edit Subscription</span>
                   <ChevronDown rotated={showPlan} />
                 </button>
 
-                {/* Inline accordion expansion */}
                 {showPlan && (
                   <InlinePlanPanel
                     user={user}
@@ -304,11 +313,19 @@ function UserDropdown({
                 )}
               </>
             )}
+
+            {/* 4. Contact Primble */}
+            <button
+              className="udrop-item"
+              onClick={() => { setOpen(false); onContactPrimble(); }}
+            >
+              <span className="udrop-item-label">Contact Primble</span>
+            </button>
           </div>
 
           <div className="udrop-divider" />
 
-          {/* ── Sign out ── */}
+          {/* ── 5. Sign Out ── */}
           <div className="udrop-section">
             <button
               className="udrop-item udrop-item--danger"
@@ -342,7 +359,7 @@ export default function Header({
   onSignatureClick, onUpgradeClick, onLogout, onHome, onSignUp, onLogIn,
   openBillingPortal, upgradeChecking, upgradeFailed,
   setUpgradeFailed, setUpgradeChecking, setUser,
-  onNavigate,
+  onNavigate, onAccountSettings, onContactPrimble,
 }) {
   return (
     <header className="landing-header">
@@ -372,6 +389,8 @@ export default function Header({
           setUpgradeFailed={setUpgradeFailed}
           setUpgradeChecking={setUpgradeChecking}
           setUser={setUser}
+          onAccountSettings={onAccountSettings}
+          onContactPrimble={onContactPrimble}
         />
       ) : (
         <div className="user-menu" style={{ display: "flex", alignItems: "center", gap: 10 }}>

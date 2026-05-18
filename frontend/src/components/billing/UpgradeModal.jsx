@@ -69,7 +69,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
               Choose a plan
             </div>
             <h2 style={{ fontSize: 28, fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 8 }}>
-              Transparent pricing. Clear mechanics.
+              Transparent pricing. Designed to scale.
             </h2>
             {user?.subscription_tier === "free" && user?.downloads_remaining <= 0 && (
               <p style={{ fontSize: 15, color: "var(--text-secondary)", marginBottom: 0 }}>

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
+import { useGoogleReCaptcha } from "react-google-recaptcha-v3";
 import { API_BASE } from "../../config/constants";
-import { isPersonalEmail } from "../../utils/formatters";
 
 function AuthLoadingOverlay({ label }) {
   return (
@@ -23,6 +23,9 @@ function AuthLoadingOverlay({ label }) {
   );
 }
 
+const extractError = (detail) =>
+  Array.isArray(detail) ? detail.map((e) => e.msg || String(e)).join("; ") : (detail || "");
+
 export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }) {
   const [mode, setMode]                           = useState(initialMode);
   const [email, setEmail]                         = useState("");
@@ -43,6 +46,8 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
   const [showNewPass, setShowNewPass]             = useState(false);
   const SIGNUP_STAGES = ["Verifying your email..."];
 
+  const { executeRecaptcha } = useGoogleReCaptcha();
+
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     setError("");
@@ -50,11 +55,16 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
     if (mode === "signup") {
       if (!disclaimerChecked) { setError("You must accept the ACORD disclaimer to create an account."); setLoading(false); return; }
       if (!orgName.trim())    { setError("Organization or agency name is required."); setLoading(false); return; }
-      if (isPersonalEmail(email)) { setError("Please use a work email address. Personal email domains are not accepted."); setLoading(false); return; }
     }
     const endpoint = mode === "signup" ? "/api/auth/signup" : "/api/auth/login";
+
+    let recaptcha_token = null;
+    if (mode === "signup" && executeRecaptcha) {
+      try { recaptcha_token = await executeRecaptcha("signup"); } catch { /* non-blocking */ }
+    }
+
     const body     = mode === "signup"
-      ? { email, password, full_name: fullName, organization_name: orgName.trim(), acord_disclaimer_accepted: disclaimerChecked }
+      ? { email, password, full_name: fullName, organization_name: orgName.trim(), acord_disclaimer_accepted: disclaimerChecked, recaptcha_token }
       : { email, password };
     try {
       const res  = await fetch(`${API_BASE}${endpoint}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -62,7 +72,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
       if (res.status === 202 && data.requires_verification) { setLoading(false); setNeedsVerify(true); }
       else if (res.ok && data.success) { setTransitioning(true); onSuccess(data.user); }
       else if (data.requires_verification) { setLoading(false); setNeedsVerify(true); }
-      else { setLoading(false); setError(data.detail || data.message || "Authentication failed"); }
+      else { setLoading(false); setError(extractError(data.detail) || data.message || "Authentication failed"); }
     } catch { setLoading(false); setError("Network error. Please try again."); }
   };
 
@@ -74,7 +84,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
       const res  = await fetch(`${API_BASE}/api/auth/verify-email`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code: verifyCode }) });
       const data = await res.json();
       if (res.ok && data.success) { setTransitioning(true); onSuccess(data.user); }
-      else { setLoading(false); setError(data.detail || "Invalid code"); }
+      else { setLoading(false); setError(extractError(data.detail) || "Invalid code"); }
     } catch { setLoading(false); setError("Network error."); }
   };
 
@@ -96,7 +106,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
       const res  = await fetch(`${API_BASE}/api/auth/reset-password`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code: resetCode, new_password: newPass }) });
       const data = await res.json();
       if (res.ok) { setResetMsg("Password updated! You can now sign in."); setMode2(""); setMode("signin"); setPassword(""); }
-      else { setError(data.detail || "Reset failed. Please try again."); }
+      else { setError(extractError(data.detail) || "Reset failed. Please try again."); }
     } catch { setError("Network error."); }
     finally { setLoading(false); }
   };
@@ -104,13 +114,17 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
   const handleGoogleSuccess = async (credentialResponse) => {
     setLoading(true);
     try {
-      const nonceRes = await fetch(`${API_BASE}/api/auth/google/nonce`, { credentials: "include" });
-      if (!nonceRes.ok) { setLoading(false); setError("Failed to initialize Google login. Please try again."); return; }
-      const { nonce } = await nonceRes.json();
-      const res  = await fetch(`${API_BASE}/api/auth/google`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential: credentialResponse.credential, nonce }) });
+      const res  = await fetch(`${API_BASE}/api/auth/google`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential: credentialResponse.credential }) });
       const data = await res.json();
-      if (res.ok && data.success) { setTransitioning(true); onSuccess(data.user, data.profile_incomplete === true); }
-      else { setLoading(false); setError(data.detail || data.message || "Google authentication failed"); }
+      if (res.ok && data.success) {
+        if (data.profile_incomplete) {
+          onSuccess(data.user, true, data.pending_token || null);
+        } else {
+          setTransitioning(true);
+          onSuccess(data.user, false, null);
+        }
+      }
+      else { setLoading(false); setError(extractError(data.detail) || data.message || "Google authentication failed"); }
     } catch { setLoading(false); setError("Network error. Please try again."); }
   };
 
@@ -210,8 +224,8 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
     return <AuthLoadingOverlay label="Signing you in..." />;
   }
 
-  if (loading && mode === "signup") {
-    return <AuthLoadingOverlay label={SIGNUP_STAGES[0]} />;
+  if (loading) {
+    return <AuthLoadingOverlay label={mode === "signup" ? SIGNUP_STAGES[0] : "Signing you in..."} />;
   }
 
   return (
@@ -228,7 +242,29 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
           {error    && (<div className="alert alert-error"><span>{error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
           {resetMsg && <div className="alert alert-success"><span>✅ {resetMsg}</span></div>}
           <div className="auth-google">
-            <GoogleLogin onSuccess={handleGoogleSuccess} onError={() => setError("Google sign-in failed")} useOneTap size="large" text={mode === "signin" ? "signin_with" : "signup_with"} shape="pill" logo_alignment="left" />
+            <div className="google-btn-wrapper">
+              <button type="button" className="google-btn-custom" tabIndex={-1} aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                  <path fill="none" d="M0 0h48v48H0z"/>
+                </svg>
+                <span>{mode === "signin" ? "Continue with Google" : "Sign up with Google"}</span>
+              </button>
+              <div className="google-btn-overlay">
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={() => setError("Google sign-in failed")}
+                  size="large"
+                  text={mode === "signin" ? "signin_with" : "signup_with"}
+                  shape="rectangular"
+                  logo_alignment="left"
+                  width={440}
+                />
+              </div>
+            </div>
           </div>
           <div style={{ textAlign: "center", margin: "12px 0", color: "#64748b", fontSize: "13px" }}><b>or continue with email </b></div>
           <form onSubmit={handleEmailAuth} className="auth-form">
@@ -245,11 +281,8 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
               </>
             )}
             <div className="form-group">
-              <label>Work Email <span className="field-required">*</span></label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@youragency.com" required className="form-input" />
-              {mode === "signup" && isPersonalEmail(email) && email.length > 4 && (
-                <span className="field-warning">⚠ Please use a work email address</span>
-              )}
+              <label>Email <span className="field-required">*</span></label>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required className="form-input" />
             </div>
             <div className="form-group">
               <label>Password</label>

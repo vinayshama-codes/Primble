@@ -551,7 +551,61 @@ body {
 .auth-google {
   display: flex;
   justify-content: center;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+/* Custom Google button that visually matches form inputs */
+.google-btn-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.google-btn-custom {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border: 1px solid var(--light-gray);
+  border-radius: var(--radius-md);
+  background: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.google-btn-wrapper:hover .google-btn-custom {
+  border-color: #adb5bd;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  background: #fafafa;
+}
+
+/* Invisible Google OAuth iframe sits on top to capture clicks */
+.google-btn-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  opacity: 0;
+  z-index: 2;
+  cursor: pointer;
+}
+
+.google-btn-overlay > div,
+.google-btn-overlay iframe {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: unset !important;
 }
 .auth-divider {
   text-align: center;
@@ -2609,17 +2663,18 @@ body {
 /* Hero */
 .mkt-hero {
   text-align: center;
-  padding: 48px 20px 16px;
-  max-width: 860px;
+  padding: 72px 20px 40px;
+  max-width: 900px;
   margin: 0 auto;
 }
 .pricing-section-h1 {
-  font-size: 42px;
-  font-weight: 700;
-  color: #2d2d2d;
+  font-size: 32px;
+  font-weight: 800;
+  color: #1a1a1a;
   letter-spacing: -0.02em;
   line-height: 1.15;
-  margin-bottom: 32px;
+  margin-bottom: 36px;
+  white-space: nowrap;
 }
 .mkt-hero-compact {
   padding-bottom: 48px;
@@ -4109,4 +4164,173 @@ body {
   .pdfviewer-canvas-wrapper {
     max-width: none !important;
   }
+}
+
+/* ==================== ACCOUNT SETTINGS & CONTACT MODALS ==================== */
+
+.acct-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2000;
+  padding: 16px;
+}
+
+.acct-modal {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.18);
+  width: 100%; max-width: 480px;
+  max-height: 90vh; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+
+.acct-modal--sm {
+  max-width: 420px;
+}
+
+.acct-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 24px 0;
+}
+
+.acct-modal-title {
+  font-size: 18px; font-weight: 800; color: #0f172a; line-height: 1.2;
+}
+
+.acct-modal-close {
+  background: none; border: none; cursor: pointer;
+  color: #94a3b8; padding: 4px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.acct-modal-close:hover { color: #0f172a; background: #f1f5f9; }
+
+.acct-modal-body {
+  padding: 20px 24px 24px;
+  display: flex; flex-direction: column; gap: 0;
+}
+
+.acct-section { padding-bottom: 4px; }
+
+.acct-section-title {
+  font-size: 13px; font-weight: 700; color: #64748b;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin-bottom: 14px;
+}
+
+.acct-divider {
+  height: 1px; background: #f1f5f9; margin: 20px 0;
+}
+
+.acct-form {
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+.acct-field {
+  display: flex; flex-direction: column; gap: 5px;
+}
+
+.acct-label {
+  font-size: 12.5px; font-weight: 700; color: #475569;
+}
+
+.acct-input {
+  width: 100%; padding: 9px 12px;
+  border: 1.5px solid #e2e8f0; border-radius: 8px;
+  font-size: 14px; color: #0f172a; background: #fff;
+  outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+}
+.acct-input:focus { border-color: #E61B84; box-shadow: 0 0 0 3px rgba(230,27,132,0.1); }
+
+.acct-input--readonly {
+  background: #f8fafc; color: #64748b; cursor: default;
+}
+.acct-input--readonly:focus { border-color: #e2e8f0; box-shadow: none; }
+
+.acct-textarea {
+  width: 100%; padding: 9px 12px;
+  border: 1.5px solid #e2e8f0; border-radius: 8px;
+  font-size: 14px; color: #0f172a; background: #fff;
+  outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: inherit; resize: vertical; min-height: 100px;
+}
+.acct-textarea:focus { border-color: #E61B84; box-shadow: 0 0 0 3px rgba(230,27,132,0.1); }
+
+.acct-field-hint {
+  font-size: 11.5px; color: #94a3b8; font-weight: 500;
+}
+
+.acct-error {
+  font-size: 13px; color: #dc2626; font-weight: 600;
+  background: #fff1f2; border-radius: 7px; padding: 8px 12px;
+}
+
+.acct-success {
+  font-size: 13px; color: #15803d; font-weight: 600;
+  background: #f0fdf4; border-radius: 7px; padding: 8px 12px;
+}
+
+.acct-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 18px; border-radius: 9px;
+  font-size: 13.5px; font-weight: 700; cursor: pointer;
+  border: none; transition: background 0.15s, opacity 0.15s;
+  width: 100%;
+}
+.acct-btn:disabled { opacity: 0.6; cursor: wait; }
+
+.acct-btn--primary { background: #0f172a; color: #fff; }
+.acct-btn--primary:hover:not(:disabled) { background: #1e293b; }
+
+.acct-btn--secondary {
+  background: #fff; color: #0f172a;
+  border: 1.5px solid #e2e8f0;
+}
+.acct-btn--secondary:hover:not(:disabled) { background: #f8fafc; }
+
+.acct-spinner {
+  width: 13px; height: 13px;
+  border: 2px solid currentColor; border-top-color: transparent;
+  border-radius: 50%; display: inline-block;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Plan row in Account Settings */
+.acct-plan-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; background: #f8fafc;
+  border: 1px solid #e2e8f0; border-radius: 10px;
+  margin-bottom: 12px;
+}
+.acct-plan-name {
+  font-size: 14px; font-weight: 700; color: #0f172a;
+}
+.acct-plan-cycle {
+  font-size: 12px; color: #64748b; margin-top: 2px;
+}
+.acct-plan-badge {
+  font-size: 11px; font-weight: 700; padding: 3px 10px;
+  border-radius: 20px;
+}
+.acct-plan-badge--paid { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.acct-plan-badge--free { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+
+/* Contact sent state */
+.contact-sent {
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; padding: 16px 0;
+}
+.contact-sent-icon {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: #f0fdf4; display: flex; align-items: center; justify-content: center;
+  margin-bottom: 16px;
+}
+.contact-sent-title {
+  font-size: 18px; font-weight: 800; color: #0f172a; margin-bottom: 8px;
+}
+.contact-sent-body {
+  font-size: 14px; color: #64748b; line-height: 1.5;
+}
 }

@@ -102,8 +102,9 @@ class JobRepository(JobQueue):
     # ASYNC-SAFE
     async def count_user_active_jobs(self, user_id: str) -> int:
         async with get_pool().acquire() as conn:
+            # Jobs older than 30 minutes are considered dead (crashed/timed out) and excluded.
             row = await conn.fetchrow(
-                "SELECT COUNT(*) FROM jobs WHERE user_id = $1 AND status IN ('pending', 'processing')",
+                "SELECT COUNT(*) FROM jobs WHERE user_id = $1 AND status IN ('pending', 'processing') AND created_at::timestamptz > NOW() - INTERVAL '30 minutes'",
                 str(user_id),
             )
         return int(row[0]) if row else 0

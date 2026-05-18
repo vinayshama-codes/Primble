@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import "./App.css";
 import "./styles/injected.js";
 import { GoogleOAuthProvider } from "@react-oauth/google";
+import { GoogleReCaptchaProvider } from "react-google-recaptcha-v3";
 
-import { GOOGLE_CLIENT_ID, API_BASE } from "./config/constants";
+import { GOOGLE_CLIENT_ID, API_BASE, RECAPTCHA_SITE_KEY } from "./config/constants";
 import { useAuth }            from "./hooks/useAuth";
 import { useSignature }       from "./hooks/useSignature";
 import { useUpgradePolling, useBillingReturnPolling } from "./hooks/useUpgradePolling";
@@ -23,6 +24,8 @@ import UpgradeModal           from "./components/billing/UpgradeModal";
 import SignatureModal         from "./components/signature/SignatureModal";
 import ClientQuestionnaire    from "./components/arq/ClientQuestionnaire";
 import ErrorBoundary          from "./components/layout/ErrorBoundary";
+import AccountSettingsModal   from "./components/account/AccountSettingsModal";
+import ContactModal           from "./components/account/ContactModal";
 
 export default function App() {
   const path = window.location.pathname;
@@ -34,9 +37,11 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-        <AppContent />
-      </GoogleOAuthProvider>
+      <GoogleReCaptchaProvider reCaptchaKey={RECAPTCHA_SITE_KEY} scriptProps={{ async: true, defer: true }}>
+        <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+          <AppContent />
+        </GoogleOAuthProvider>
+      </GoogleReCaptchaProvider>
     </ErrorBoundary>
   );
 }
@@ -98,8 +103,12 @@ function AppContent() {
   const [showAuthModal,       setShowAuthModal]       = useState(false);
   const [authModalMode,       setAuthModalMode]       = useState("signin");
   const [showCompleteProfile, setShowCompleteProfile] = useState(false);
+  const [pendingGoogleToken,  setPendingGoogleToken]  = useState(null);
+  const [pendingGoogleUser,   setPendingGoogleUser]   = useState(null);
   const [showUpgradeModal,    setShowUpgradeModal]    = useState(false);
   const [showSignatureModal,  setShowSignatureModal]  = useState(false);
+  const [showAccountSettings, setShowAccountSettings] = useState(false);
+  const [showContactModal,    setShowContactModal]    = useState(false);
   const [signingIn,           setSigningIn]           = useState(false);
   const [headerError,         setHeaderError]         = useState("");
   const [resumeSessionId,     setResumeSessionId]     = useState(null);
@@ -281,6 +290,8 @@ function AppContent() {
         onLogIn={() => { setAuthModalMode("signin"); setShowAuthModal(true); }}
         onNavigate={handleNavigate}
         onHome={() => { setMarketingPage(null); setShowModal(false); }}
+        onAccountSettings={() => setShowAccountSettings(true)}
+        onContactPrimble={() => setShowContactModal(true)}
       />
       {headerError && (
         <div className="header-error-bar">{headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
@@ -315,28 +326,38 @@ function AppContent() {
         <AuthModal
           initialMode={authModalMode}
           onClose={() => setShowAuthModal(false)}
-          onSuccess={(usr, profileIncomplete) => {
-            login(usr);
+          onSuccess={(usr, profileIncomplete, pendingToken) => {
             setShowAuthModal(false);
-            setSigningIn(true);
-            setTimeout(async () => {
-              setSigningIn(false);
-              const pendingResume = sessionStorage.getItem("acordly_resume_after_login");
-              sessionStorage.removeItem("acordly_resume_after_login");
-              const hasPendingPlan = !!sessionStorage.getItem("acordly_pending_plan");
-              if (profileIncomplete)       { setShowCompleteProfile(true); }
-              else if (hasPendingPlan)     { await triggerPendingCheckout(); }
-              else if (pendingResume)      { setResumeSessionId(pendingResume); setShowModal(true); }
-              else                         { setShowModal(true); }
-            }, 80);
+            if (profileIncomplete) {
+              setPendingGoogleToken(pendingToken || null);
+              setPendingGoogleUser(usr || null);
+              setShowCompleteProfile(true);
+            } else {
+              login(usr);
+              setSigningIn(true);
+              setTimeout(async () => {
+                setSigningIn(false);
+                const pendingResume = sessionStorage.getItem("acordly_resume_after_login");
+                sessionStorage.removeItem("acordly_resume_after_login");
+                const hasPendingPlan = !!sessionStorage.getItem("acordly_pending_plan");
+                if (hasPendingPlan)   { await triggerPendingCheckout(); }
+                else if (pendingResume) { setResumeSessionId(pendingResume); setShowModal(true); }
+                else                  { setShowModal(true); }
+              }, 80);
+            }
           }}
         />
       )}
 
-      {showCompleteProfile && user && (
-        <CompleteProfileModal token={token} user={user}
+      {showCompleteProfile && (
+        <CompleteProfileModal
+          pendingToken={pendingGoogleToken}
+          user={user || pendingGoogleUser}
           onComplete={async (u) => {
-            setUser(u); setShowCompleteProfile(false);
+            login(u);
+            setShowCompleteProfile(false);
+            setPendingGoogleToken(null);
+            setPendingGoogleUser(null);
             const hasPendingPlan = !!sessionStorage.getItem("acordly_pending_plan");
             if (hasPendingPlan) { await triggerPendingCheckout(); } else { setShowModal(true); }
           }}
@@ -355,6 +376,22 @@ function AppContent() {
         <SignatureModal token={token} existingSignature={savedSignature}
           onClose={() => setShowSignatureModal(false)}
           onSaved={(sig) => { updateSignature(sig); setShowSignatureModal(false); }}
+        />
+      )}
+
+      {showAccountSettings && user && (
+        <AccountSettingsModal
+          user={user}
+          onClose={() => setShowAccountSettings(false)}
+          onUserUpdate={setUser}
+          openBillingPortal={openBillingPortal}
+        />
+      )}
+
+      {showContactModal && user && (
+        <ContactModal
+          user={user}
+          onClose={() => setShowContactModal(false)}
         />
       )}
     </div>

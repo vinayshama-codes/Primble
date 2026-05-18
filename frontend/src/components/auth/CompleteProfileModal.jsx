@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { API_BASE } from "../../config/constants";
 
-export default function CompleteProfileModal({ token, user, onComplete }) {
+export default function CompleteProfileModal({ pendingToken, user, onComplete }) {
   const [orgName, setOrgName]                     = useState("");
   const [disclaimerChecked, setDisclaimerChecked] = useState(false);
   const [error, setError]                         = useState("");
@@ -18,11 +18,15 @@ export default function CompleteProfileModal({ token, user, onComplete }) {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organization_name: orgName.trim(), acord_disclaimer_accepted: true }),
+        body: JSON.stringify({
+          organization_name: orgName.trim(),
+          acord_disclaimer_accepted: true,
+          ...(pendingToken ? { pending_token: pendingToken } : {}),
+        }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        onComplete({ ...user, organization_name: orgName.trim(), acord_disclaimer_accepted: true });
+        onComplete(data.user || { ...user, organization_name: orgName.trim(), acord_disclaimer_accepted: true });
       } else {
         setError(data.detail || data.message || "Failed to save profile. Please try again.");
       }

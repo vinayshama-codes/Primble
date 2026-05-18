@@ -72,7 +72,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
     <main className="mkt-page">
 
       {/* HERO */}
-      <section className="mkt-hero" style={{ paddingTop: 0, paddingBottom: 16 }}>
+      <section className="mkt-hero" style={{ paddingTop: 64, paddingBottom: 0 }}>
         <h1 className="pricing-section-h1">Choose the Plan That Fits Your Business</h1>
         {token && user?.subscription_tier && user.subscription_tier !== "free" && openBillingPortal && (
           <p style={{ fontSize: 13, color: "#64748b", marginTop: 8 }}>
