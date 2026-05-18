@@ -35,13 +35,17 @@ export default function App() {
     return <ErrorBoundary><ClientQuestionnaire token={qMatch[1]} /></ErrorBoundary>;
   }
 
+  const inner = (
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <AppContent />
+    </GoogleOAuthProvider>
+  );
+
   return (
     <ErrorBoundary>
-      <GoogleReCaptchaProvider reCaptchaKey={RECAPTCHA_SITE_KEY} scriptProps={{ async: true, defer: true }}>
-        <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-          <AppContent />
-        </GoogleOAuthProvider>
-      </GoogleReCaptchaProvider>
+      {RECAPTCHA_SITE_KEY
+        ? <GoogleReCaptchaProvider reCaptchaKey={RECAPTCHA_SITE_KEY} scriptProps={{ async: true, defer: true }}>{inner}</GoogleReCaptchaProvider>
+        : inner}
     </ErrorBoundary>
   );
 }
