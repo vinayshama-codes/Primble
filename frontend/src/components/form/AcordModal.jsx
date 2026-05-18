@@ -569,6 +569,7 @@ export default function AcordModal({
   fullPage = false,
 }) {
   const dropRef = useRef(null);
+  const fileInputRef = useRef(null);
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -1385,9 +1386,10 @@ export default function AcordModal({
                 padding: "8px",
               }}>
                 {/* Drop target */}
-                <input type="file" id="file-upload" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,application/pdf,application/zip,image/*" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ display: "none" }} />
-                <label htmlFor="file-upload"
+                <input ref={fileInputRef} type="file" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,application/pdf,application/zip,image/*" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }} />
+                <label
                   ref={dropRef}
+                  onClick={() => { if (!uploadBlocked) fileInputRef.current?.click(); }}
                   style={{
                     display: "block",
                     position: "relative",

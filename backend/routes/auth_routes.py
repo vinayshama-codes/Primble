@@ -336,6 +336,7 @@ async def verify_email(req: VerifyEmailRequest, request: Request):
     )
     resp = JSONResponse({
         "success": True,
+        "session_token": token,
         "user": {
             "id": user_id, "email": pending["email"],
             "full_name": pending.get("full_name", ""),
@@ -431,6 +432,7 @@ async def login(req: LoginRequest, request: Request):
     used  = int(user.get("downloads_used", 0) or 0)
     resp  = JSONResponse({
         "success": True,
+        "session_token": token,
         "user": {
             "id": user["id"], "email": user["email"],
             "full_name": user.get("full_name", ""),
@@ -625,6 +627,7 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
             })
         resp = JSONResponse({
             "success": True, "profile_incomplete": False,
+            "session_token": token,
             "user": {
                 "id": user["id"], "email": user["email"],
                 "full_name": user.get("full_name", ""),
@@ -678,6 +681,7 @@ async def complete_profile(
         token = await create_session_token(uid, ip_address=ip, user_agent=ua)
         resp  = JSONResponse({
             "success": True,
+            "session_token": token,
             "user": {
                 "id": user["id"], "email": user["email"],
                 "full_name": user.get("full_name", ""),
@@ -698,9 +702,14 @@ async def complete_profile(
             "acord_disclaimer_accepted_at=$2 WHERE id=$3",
             req.organization_name.strip(), now, current_user["id"],
         )
-    resp = JSONResponse({"success": True, "message": "Profile updated."})
+    new_token = None
     if acordly_session:
         new_token = await rotate_session(acordly_session, ip_address=ip, user_agent=ua)
+    resp_dict = {"success": True, "message": "Profile updated."}
+    if new_token:
+        resp_dict["session_token"] = new_token
+    resp = JSONResponse(resp_dict)
+    if new_token:
         _set_session_cookie(resp, new_token)
     return resp
 
