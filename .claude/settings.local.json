@@ -85,7 +85,8 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
       "Bash(python -)",
       "Bash(python -c \"from cryptography.fernet import Fernet; print\\(Fernet.generate_key\\(\\).decode\\(\\)\\)\")",
-      "Bash(grep -i \"\\\\.py$\")"
+      "Bash(grep -i \"\\\\.py$\")",
+      "Bash(git restore *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",
