@@ -25,6 +25,10 @@ function AuthLoadingOverlay({ label }) {
 const extractError = (detail) =>
   Array.isArray(detail) ? detail.map((e) => e.msg || String(e)).join("; ") : (detail || "");
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PASS_UPPER_RE = /[A-Z]/;
+const PASS_SPECIAL_RE = /[^a-zA-Z0-9]/;
+
 export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }) {
   const [mode, setMode]                           = useState(initialMode);
   const [email, setEmail]                         = useState("");
@@ -43,15 +47,47 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
   const [resetMsg, setResetMsg]                   = useState("");
   const [showPassword, setShowPassword]           = useState(false);
   const [showNewPass, setShowNewPass]             = useState(false);
+  const [fieldErrors, setFieldErrors]             = useState({});
   const SIGNUP_STAGES = ["Verifying your email..."];
+
+  const clearFieldError = (field) => setFieldErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
 
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     setError("");
+    const errs = {};
+
+    if (mode === "signup") {
+      if (!fullName.trim()) {
+        errs.fullName = "Please enter your full name.";
+      } else if (!/^[a-zA-Z\s'\-\.]+$/.test(fullName.trim())) {
+        errs.fullName = "Please enter a valid full name.";
+      }
+      if (!orgName.trim()) {
+        errs.orgName = "Please enter your organization or agency name.";
+      } else if (!/^[a-zA-Z0-9\s'\-\.,&]+$/.test(orgName.trim())) {
+        errs.orgName = "Please enter a valid organization or agency name.";
+      }
+    }
+
+    if (!email.trim() || !EMAIL_RE.test(email.trim())) {
+      errs.email = "Please provide your valid email address.";
+    }
+
+    if (!password) {
+      errs.password = mode === "signup" ? "Please create a password." : "Please enter your password.";
+    } else if (password.length < 8) {
+      errs.password = "Password must be at least 8 characters long.";
+    } else if (mode === "signup" && (!PASS_UPPER_RE.test(password) || !PASS_SPECIAL_RE.test(password))) {
+      errs.password = "Please enter a valid password.";
+    }
+
+    if (Object.keys(errs).length > 0) { setFieldErrors(errs); return; }
+    setFieldErrors({});
     setLoading(true);
+
     if (mode === "signup") {
       if (!disclaimerChecked) { setError("You must accept the ACORD disclaimer to create an account."); setLoading(false); return; }
-      if (!orgName.trim())    { setError("Organization or agency name is required."); setLoading(false); return; }
     }
     const endpoint = mode === "signup" ? "/api/auth/signup" : "/api/auth/login";
     const body     = mode === "signup"
@@ -228,7 +264,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
             <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px" }}>
               <img src="/primble-logo.webp" alt="Primble" style={{ height: "32px", width: "auto" }} />
             </div>
-            <p className="step-subtitle">{mode === "signin" ? "Sign in to access your documents" : "Get started with 3 free downloads"}</p>
+            <p className="step-subtitle">{mode === "signin" ? "Sign in to access your packages" : "Get started with three free packages"}</p>
           </div>
           {error    && (<div className="alert alert-error"><span>{error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
           {resetMsg && <div className="alert alert-success"><span>✅ {resetMsg}</span></div>}
@@ -249,27 +285,30 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
             </div>
           </div>
           <div style={{ textAlign: "center", margin: "12px 0", color: "#64748b", fontSize: "13px" }}><b>or continue with email </b></div>
-          <form onSubmit={handleEmailAuth} className="auth-form">
+          <form onSubmit={handleEmailAuth} className="auth-form" noValidate>
             {mode === "signup" && (
               <>
                 <div className="form-group">
                   <label>Full Name</label>
-                  <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Jane Smith" required className="form-input" />
+                  <input type="text" value={fullName} onChange={(e) => { setFullName(e.target.value); clearFieldError("fullName"); }} placeholder="Jane Smith" className={`form-input${fieldErrors.fullName ? " input-field-error" : ""}`} />
+                  {fieldErrors.fullName && <span className="field-error-msg">{fieldErrors.fullName}</span>}
                 </div>
                 <div className="form-group">
-                  <label>Organization / Agency Name <span className="field-required">*</span></label>
-                  <input type="text" value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Smith Insurance Agency LLC" required className="form-input" />
+                  <label>Organization / Agency Name</label>
+                  <input type="text" value={orgName} onChange={(e) => { setOrgName(e.target.value); clearFieldError("orgName"); }} placeholder="Smith Insurance Agency LLC" className={`form-input${fieldErrors.orgName ? " input-field-error" : ""}`} />
+                  {fieldErrors.orgName && <span className="field-error-msg">{fieldErrors.orgName}</span>}
                 </div>
               </>
             )}
             <div className="form-group">
-              <label>Email <span className="field-required">*</span></label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required className="form-input" />
+              <label>{mode === "signin" ? "Username (email)" : "Email"}</label>
+              <input type="text" value={email} onChange={(e) => { setEmail(e.target.value); clearFieldError("email"); }} placeholder="you@example.com" className={`form-input${fieldErrors.email ? " input-field-error" : ""}`} />
+              {fieldErrors.email && <span className="field-error-msg">{fieldErrors.email}</span>}
             </div>
             <div className="form-group">
               <label>Password</label>
               <div style={{ position: "relative", width: "100%", display: "block" }}>
-                <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)} placeholder={mode === "signup" ? "Min 8 chars, 1 uppercase, 1 special" : "••••••••"} required className="form-input" style={{ width: "100%", boxSizing: "border-box", paddingRight: "40px" }} />
+                <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => { setPassword(e.target.value); clearFieldError("password"); }} placeholder={mode === "signup" ? "Min 8 chars, 1 uppercase, 1 special" : "••••••••"} className={`form-input${fieldErrors.password ? " input-field-error" : ""}`} style={{ width: "100%", boxSizing: "border-box", paddingRight: "40px" }} />
                 <button type="button" onClick={() => setShowPassword(v => !v)} style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", padding: "0", color: "#64748b", display: "flex", alignItems: "center", zIndex: 1 }} tabIndex={-1} aria-label={showPassword ? "Hide password" : "Show password"}>
                   {showPassword ? (
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
@@ -278,6 +317,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
                   )}
                 </button>
               </div>
+              {fieldErrors.password && <span className="field-error-msg">{fieldErrors.password}</span>}
             </div>
             {mode === "signup" && (
               <div className="acord-disclaimer-box">

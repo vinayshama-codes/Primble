@@ -1648,7 +1648,7 @@ body {
     max-width: calc(100vw - 32px);
   }
   .user-menu {
-    gap: 6px;
+    gap: 6px !important;
   }
 }
 
@@ -1682,10 +1682,57 @@ body {
   .header-btn-login {
     padding: 7px 14px !important;
     font-size: 13px !important;
+    white-space: nowrap;
   }
   .header-btn-signup {
     padding: 8px 16px !important;
     font-size: 13px !important;
+    white-space: nowrap;
+  }
+  /* Auth modal: compact spacing on small screens */
+  .auth-modal .modal-inner {
+    padding: 52px 14px 16px;
+  }
+  .auth-header {
+    margin-bottom: 14px;
+  }
+  .auth-google {
+    margin-bottom: 12px;
+  }
+  .auth-form {
+    gap: 14px;
+  }
+  .auth-switch {
+    margin-top: 14px;
+  }
+  .acord-disclaimer-box {
+    padding: 10px;
+    margin: 4px 0;
+    font-size: 12px;
+  }
+  /* Hero eyebrow label: reduce letter-spacing on small screens */
+  .hero-eyebrow-label {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+  }
+}
+
+@media (max-width: 380px) {
+  .landing-header {
+    padding: 10px 12px;
+  }
+  .header-btn-login {
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+    white-space: nowrap;
+  }
+  .header-btn-signup {
+    padding: 6px 12px !important;
+    font-size: 12px !important;
+    white-space: nowrap;
+  }
+  .user-menu {
+    gap: 4px !important;
   }
 }
 
@@ -2064,6 +2111,8 @@ body {
 .btn-stub { opacity: 0.4; cursor: not-allowed; background: #e5e7eb; border: none; border-radius: 4px; padding: 6px 12px; font-size: 12px; }
 .field-required { color: #ef4444; }
 .field-warning { font-size: 11px; color: #ef4444; margin-top: 4px; display: block; }
+.field-error-msg { display: block; font-size: 12px; color: #ef4444; margin-top: 4px; }
+.input-field-error { border-color: #ef4444 !important; }
 
 
 
@@ -2643,7 +2692,19 @@ body {
   letter-spacing: -0.02em;
   line-height: 1.15;
   margin-bottom: 36px;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+/* Responsive overrides must live AFTER the base rule to win the cascade */
+@media (max-width: 900px) {
+  .pricing-section-h1 { font-size: 32px; }
+}
+@media (max-width: 768px) {
+  .pricing-section-h1 { font-size: 28px; margin-bottom: 24px; }
+}
+@media (max-width: 480px) {
+  .pricing-section-h1 { font-size: 22px; margin-bottom: 20px; }
 }
 .mkt-hero-compact {
   padding-bottom: 48px;
