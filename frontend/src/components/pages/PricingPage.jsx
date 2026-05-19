@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { API_BASE } from "../../config/constants";
 import { PLANS } from "../billing/plans";
+import ContactModal from "../account/ContactModal";
 
 const PLAN_ORDER = ["essentials", "professional", "business", "enterprise"];
 
@@ -8,6 +9,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
   const [annual, setAnnual]           = useState(false);
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [showContactSales, setShowContactSales] = useState(false);
 
   const handleManageBilling = async () => {
     if (!openBillingPortal) return;
@@ -37,7 +39,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
 
   const handleSelect = async (planId) => {
     if (planId === "enterprise") {
-      window.location.href = "mailto:sales@primble.ai?subject=Enterprise Plan Inquiry";
+      setShowContactSales(true);
       return;
     }
     if (!token) {
@@ -69,6 +71,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
   const anyLoading = !!loadingPlan;
 
   return (
+    <>
     <main className="mkt-page">
 
       {/* HERO */}
@@ -186,5 +189,9 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
       </section>
 
     </main>
+    {showContactSales && (
+      <ContactModal user={user} onClose={() => setShowContactSales(false)} />
+    )}
+  </>
   );
 }

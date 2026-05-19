@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { API_BASE } from "../../config/constants";
 import { PLANS } from "./plans";
+import ContactModal from "../account/ContactModal";
 
 const CheckIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#059669", flexShrink: 0, marginTop: 2 }}>
@@ -18,6 +19,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
   const [billing, setBilling]         = useState("annual");
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [showContactSales, setShowContactSales] = useState(false);
 
   const handleManageBilling = async () => {
     if (!openBillingPortal) return;
@@ -28,7 +30,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
 
   const handleSelect = async (planId) => {
     if (planId === "enterprise") {
-      window.location.href = "mailto:sales@primble.ai?subject=Enterprise Plan Inquiry";
+      setShowContactSales(true);
       return;
     }
     setLoadingPlan(planId);
@@ -58,6 +60,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
   };
 
   return (
+    <>
     <div className="modal-overlay">
       <div className="modal-content upgrade-modal upgrade-modal-wide" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose} disabled={anyLoading}>✕</button>
@@ -213,5 +216,9 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
         </div>
       </div>
     </div>
+    {showContactSales && (
+      <ContactModal user={user} onClose={() => setShowContactSales(false)} />
+    )}
+  </>
   );
 }

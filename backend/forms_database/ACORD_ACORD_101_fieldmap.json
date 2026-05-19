@@ -1,0 +1,20 @@
+{
+  "Form_EditionIdentifier_A": null,
+  "Producer_CustomerIdentifier_A": null,
+  "Producer_FullName_A": null,
+  "Policy_PolicyNumberIdentifier_A": null,
+  "Insurer_FullName_A": null,
+  "Insurer_NAICCode_A": null,
+  "NamedInsured_FullName_A": null,
+  "NamedInsured_FullName_B": null,
+  "NamedInsured_FullName_C": null,
+  "NamedInsured_FullName_D": null,
+  "Policy_EffectiveDate_A": null,
+  "AdditionalRemark_RemarkText_A": null,
+  "Location_ProducerIdentifier_A": null,
+  "Form_CurrentPageNumber_A": null,
+  "Form_TotalPageNumber_A": null,
+  "AdditionalRemark_FormIdentifier_A": null,
+  "AdditionalRemark_FormName_A": null,
+  "__schema_version__": "v5"
+}

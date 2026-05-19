@@ -1692,22 +1692,22 @@ body {
   }
   /* Auth modal: compact spacing on small screens */
   .auth-modal .modal-inner {
-    padding: 52px 14px 16px;
+    padding: 36px 14px 16px;
   }
   .auth-header {
-    margin-bottom: 14px;
-  }
-  .auth-google {
     margin-bottom: 12px;
   }
+  .auth-google {
+    margin-bottom: 10px;
+  }
   .auth-form {
-    gap: 14px;
+    gap: 11px;
   }
   .auth-switch {
-    margin-top: 14px;
+    margin-top: 10px;
   }
   .acord-disclaimer-box {
-    padding: 10px;
+    padding: 10px 12px;
     margin: 4px 0;
     font-size: 12px;
   }
@@ -1734,6 +1734,27 @@ body {
   }
   .user-menu {
     gap: 4px !important;
+  }
+  /* iPhone SE and similarly small screens: extra compact auth modal */
+  .auth-modal .modal-inner {
+    padding: 30px 12px 12px;
+  }
+  .auth-header {
+    margin-bottom: 10px;
+  }
+  .auth-google {
+    margin-bottom: 8px;
+  }
+  .auth-form {
+    gap: 9px;
+  }
+  .auth-switch {
+    margin-top: 8px;
+  }
+  .acord-disclaimer-box {
+    padding: 8px 10px;
+    margin: 3px 0;
+    font-size: 11px;
   }
 }
 
