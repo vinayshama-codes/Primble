@@ -261,7 +261,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-inner">
           <div className="auth-header">
-            <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px" }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: "6px" }}>
               <img src="/primble-logo.webp" alt="Primble" style={{ height: "32px", width: "auto" }} />
             </div>
             <p className="step-subtitle">{mode === "signin" ? "Sign in to access your packages" : "Get started with three free packages"}</p>
@@ -284,7 +284,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
               </div>
             </div>
           </div>
-          <div style={{ textAlign: "center", margin: "12px 0", color: "#64748b", fontSize: "13px" }}><b>or continue with email </b></div>
+          <div style={{ textAlign: "center", margin: "6px 0", color: "#64748b", fontSize: "13px" }}><b>or continue with email </b></div>
           <form onSubmit={handleEmailAuth} className="auth-form" noValidate>
             {mode === "signup" && (
               <>
