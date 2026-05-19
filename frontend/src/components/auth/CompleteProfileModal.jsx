@@ -26,6 +26,7 @@ export default function CompleteProfileModal({ pendingToken, user, onComplete })
       });
       const data = await res.json();
       if (res.ok && data.success) {
+        if (data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
         onComplete(data.user || { ...user, organization_name: orgName.trim(), acord_disclaimer_accepted: true });
       } else {
         setError(data.detail || data.message || "Failed to save profile. Please try again.");

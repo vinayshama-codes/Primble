@@ -97,7 +97,10 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
       const res  = await fetch(`${API_BASE}${endpoint}`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = await res.json();
       if (res.status === 202 && data.requires_verification) { setLoading(false); setNeedsVerify(true); }
-      else if (res.ok && data.success) { setTransitioning(true); onSuccess(data.user); }
+      else if (res.ok && data.success) {
+        if (data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
+        setTransitioning(true); onSuccess(data.user);
+      }
       else if (data.requires_verification) { setLoading(false); setNeedsVerify(true); }
       else { setLoading(false); setError(extractError(data.detail) || data.message || "Authentication failed"); }
     } catch { setLoading(false); setError("Network error. Please try again."); }
@@ -110,7 +113,10 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
     try {
       const res  = await fetch(`${API_BASE}/api/auth/verify-email`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code: verifyCode }) });
       const data = await res.json();
-      if (res.ok && data.success) { setTransitioning(true); onSuccess(data.user); }
+      if (res.ok && data.success) {
+        if (data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
+        setTransitioning(true); onSuccess(data.user);
+      }
       else { setLoading(false); setError(extractError(data.detail) || "Invalid code"); }
     } catch { setLoading(false); setError("Network error."); }
   };
@@ -147,6 +153,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
         if (data.profile_incomplete) {
           onSuccess(data.user, true, data.pending_token || null);
         } else {
+          if (data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
           setTransitioning(true);
           onSuccess(data.user, false, null);
         }

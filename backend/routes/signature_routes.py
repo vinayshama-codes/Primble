@@ -50,7 +50,19 @@ async def get_signature(current_user: dict = Depends(get_current_user)):
     sig = dict(row).get("signature_data") if row else None
     try:
         decrypted = decrypt_field(sig)
-    except Exception:
+    except Exception as _exc:
+        _sig_prefix = sig[:10] if sig else "None"
+        _has_enc = sig.startswith("enc:") if sig else False
+        logger.error(
+            "get_signature: decrypt_field failed for user=%s — "
+            "error=%s  sig_prefix=%r  has_enc_prefix=%s  "
+            "FIELD_ENCRYPTION_KEY set=%s",
+            current_user["id"],
+            type(_exc).__name__,
+            _sig_prefix,
+            _has_enc,
+            bool(os.getenv("FIELD_ENCRYPTION_KEY")),
+        )
         decrypted = None
     return {"success": True, "signature_data": decrypted}
 
