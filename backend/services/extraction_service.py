@@ -534,6 +534,7 @@ async def _cache_set(key: str, value: dict) -> None:
 DOC_TYPE_KEYWORDS: Dict[str, List[Tuple[str, float]]] = {
     "dec_page": [
         ("declarations page", 3.0), ("dec page", 3.0), ("policy declarations", 3.0),
+        ("declaration", 3.0),
         ("declarations", 2.0), ("coverage summary", 2.0), ("insuring agreement", 2.0),
         ("policy period", 1.5), ("named insured", 1.0), ("policy number", 0.5),
     ],

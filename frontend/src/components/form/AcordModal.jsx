@@ -736,7 +736,7 @@ export default function AcordModal({
   };
 
   const _resetSqsState = () => {
-    setPackageSqs(null); setDismissingRec(null); setDismissReason("");
+    setPackageSqs(null);
     setDismissedRecs(new Set()); setShowDownloadPreflight(false);
     setPreflightRecs([]); setPreflightOverrideReason(""); setPreflightCallback(null);
     setSqsNarrative("");
