@@ -617,6 +617,8 @@ export default function AcordModal({
   const [signedForms, setSignedForms] = useState(new Set());
   const [showGenerateOverlay, setShowGenerateOverlay] = useState(false);
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
+  const [jobDoneToast, setJobDoneToast] = useState(null); // { kind: "upload"|"generate", ok: bool }
+  const _jobDoneRef = useRef(null);
   const [showAcordModal, setShowAcordModal] = useState(false);
   const [acordModalAction, setAcordModalAction] = useState(null);
   const [acordLicenseChecked, setAcordLicenseChecked] = useState(false);
@@ -914,6 +916,15 @@ export default function AcordModal({
       if (typeof Notification !== "undefined" && Notification.permission === "default") {
         Notification.requestPermission().catch(() => {});
       }
+      // Register the notification service worker so we can use
+      // registration.showNotification() — the reliable path on Chromium.
+      if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+        navigator.serviceWorker.getRegistration("/notification-sw.js").then((existing) => {
+          if (!existing) {
+            navigator.serviceWorker.register("/notification-sw.js").catch((e) => console.log("[Primble notify] SW register failed:", e));
+          }
+        }).catch(() => {});
+      }
     } catch {}
   };
   const _setTitleBadge = (on) => {
@@ -922,23 +933,74 @@ export default function AcordModal({
       document.title = on ? `(1) ${base}` : base;
     } catch {}
   };
-  const _notifyJobDone = (kind, ok) => {
+  const _notifyJobDone = async (kind, ok) => {
     const title = ok ? "Primble — Ready" : "Primble — Action needed";
     const body = ok
       ? (kind === "generate" ? "Your ACORD forms are ready to review." : "Your documents have finished processing.")
       : "There was an issue with your submission. Please reopen to review.";
+    let osNotified = false;
+    // Log diagnostics so we can see why a notification didn't appear
+    // (Windows Focus Assist, Chrome SW requirement, etc.).
     try {
-      if (typeof document !== "undefined" && document.hidden) _setTitleBadge(true);
-      if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
-        // eslint-disable-next-line no-new
-        new Notification(title, { body, tag: "primble-job", silent: false });
+      console.log("[Primble notify]", {
+        hasNotification: typeof Notification !== "undefined",
+        permission: typeof Notification !== "undefined" ? Notification.permission : "n/a",
+        hidden: typeof document !== "undefined" ? document.hidden : "n/a",
+        hasSW: typeof navigator !== "undefined" && "serviceWorker" in navigator,
+      });
+    } catch {}
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      // On Chrome/Edge, `new Notification()` called directly from a page
+      // sometimes succeeds silently (no toast, no error) — the only reliable
+      // path is via a ServiceWorkerRegistration.showNotification. Try the
+      // SW path first, fall back to the constructor.
+      try {
+        if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg && typeof reg.showNotification === "function") {
+            await reg.showNotification(title, { body, tag: "primble-job", silent: false, requireInteraction: false });
+            osNotified = true;
+          }
+        }
+      } catch (e) { console.log("[Primble notify] SW path failed:", e); }
+      if (!osNotified) {
+        try {
+          // eslint-disable-next-line no-new
+          const n = new Notification(title, { body, tag: "primble-job", silent: false, requireInteraction: false });
+          n.onerror = (e) => console.log("[Primble notify] Notification error:", e);
+          osNotified = true;
+        } catch (e) { console.log("[Primble notify] constructor failed:", e); }
       }
+    }
+    try {
+      if (typeof document !== "undefined" && document.hidden) {
+        // Tab is in the background — set title badge so they see "(1) Primble"
+        // when scanning their tab strip, and queue the in-app toast for when
+        // they return (regardless of whether the OS notification fired).
+        _setTitleBadge(true);
+        _jobDoneRef.current = { kind, ok };
+      } else if (!osNotified) {
+        // Tab is focused but OS notification didn't fire (permission not
+        // granted, blocked by Focus Assist, etc.) — fall back to the in-app
+        // toast so they still see it.
+        setJobDoneToast({ kind, ok });
+      }
+      // If tab is focused AND OS notification fired, the OS toast is enough —
+      // no in-app toast (avoids the duplicate-on-same-tab issue).
     } catch {}
   };
 
-  // Clear title badge when user comes back to the tab
+  // When user returns to tab: clear badge and show in-app toast (no permission needed)
   useEffect(() => {
-    const onVis = () => { if (!document.hidden) _setTitleBadge(false); };
+    const onVis = () => {
+      if (!document.hidden) {
+        _setTitleBadge(false);
+        if (_jobDoneRef.current) {
+          setJobDoneToast(_jobDoneRef.current);
+          _jobDoneRef.current = null;
+        }
+      }
+    };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
@@ -1006,6 +1068,7 @@ export default function AcordModal({
 
   const handleUpload = async () => {
     if (!files.length) { setError("Select at least one file"); return; }
+    _requestNotificationPermission();
     setLoading(true); setError(null); setShowUploadOverlay(true);
     const fd = new FormData(); files.forEach(f => fd.append("files", f));
     try {
@@ -1018,17 +1081,15 @@ export default function AcordModal({
       if (res.status === 202) {
         const queued = await res.json();
         _persistActiveJob(queued.job_id, "upload");
-        _requestNotificationPermission();
         let job;
         try { job = await _pollJobStatus(queued.job_id); }
         finally { _clearActiveJob(); }
-        if (document.hidden) _notifyJobDone("upload", true);
+        _notifyJobDone("upload", true);
         const sid = job.result?.session_id || queued.session_id;
         const extRes = await fetch(`${API_BASE}/api/session/${sid}/extraction-result`, { credentials: "include" });
         if (!extRes.ok) { setError("Upload processing failed. Please try again."); return; }
         data = await extRes.json();
       } else {
-        _requestNotificationPermission();
         data = await res.json();
       }
       if (!data.success) {
@@ -1045,7 +1106,7 @@ export default function AcordModal({
         setError(data.message || "Upload failed");
         return;
       }
-      if (document.hidden) _notifyJobDone("upload", true);
+      _notifyJobDone("upload", true);
       setSessionId(data.session_id); setDocSummary(data.doc_summary || []); setFlags(data.flags || {});
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
@@ -1067,6 +1128,7 @@ export default function AcordModal({
   const handleGenerateAll = async () => {
     const ids = Array.from(checkedFormIds);
     if (!ids.length) { setError("Select at least one form"); return; }
+    _requestNotificationPermission();
     setLoading(true); setError(null); setShowGenerateOverlay(true);
     try {
       const res = await fetch(`${API_BASE}/api/select-forms-bulk`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, form_ids: ids }) });
@@ -1080,20 +1142,18 @@ export default function AcordModal({
       if (res.status === 202) {
         const queued = await res.json();
         _persistActiveJob(queued.job_id, "generate");
-        _requestNotificationPermission();
         try { await _pollJobStatus(queued.job_id); }
         finally { _clearActiveJob(); }
-        if (document.hidden) _notifyJobDone("generate", true);
+        _notifyJobDone("generate", true);
         const sessRes = await fetch(`${API_BASE}/api/session/${sessionId}`, { credentials: "include" });
         if (!sessRes.ok) { setError("Form generation failed. Please try again."); return; }
         const sessData = await sessRes.json();
         data = { success: true, generated: sessData.generated_forms, form_ids: Object.keys(sessData.generated_forms || {}), cross_issues: sessData.cross_issues, package_sqs: null };
       } else {
-        _requestNotificationPermission();
         data = await res.json();
       }
       if (!data.success) { setError(data.detail || data.message || "Form generation failed"); return; }
-      if (document.hidden) _notifyJobDone("generate", true);
+      _notifyJobDone("generate", true);
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
       if (data.package_sqs) setPackageSqs(data.package_sqs);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");
@@ -1256,6 +1316,25 @@ export default function AcordModal({
       )}
       {showAcordModal && renderAcordLicenseModal()}
       {showARQModal && <ARQModal sessionId={sessionId} token={token} questions={arqQuestions} onClose={() => setShowARQModal(false)} onSuccess={() => { setShowARQModal(false); refreshArqData(); }} />}
+      {jobDoneToast && (
+        <div style={{ position: "fixed", top: 24, right: 24, zIndex: 100002, display: "flex", alignItems: "flex-start", gap: 12, background: "rgba(253,242,248,0.97)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", border: "1px solid rgba(230,27,132,0.25)", borderRadius: 14, padding: "14px 18px 14px 16px", boxShadow: "0 8px 32px rgba(230,27,132,0.18), 0 2px 8px rgba(0,0,0,0.07)", maxWidth: 320, animation: "slideDown 0.22s ease-out" }}>
+          <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#E61B84,#C0157A)", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>
+            <span style={{ color: "#fff", fontSize: 15, fontWeight: 700 }}>✓</span>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#9d174d", marginBottom: 3 }}>
+              {jobDoneToast.ok ? "Primble — Ready" : "Action needed"}
+            </div>
+            <div style={{ fontSize: 12.5, color: "#be185d", lineHeight: 1.45 }}>
+              {jobDoneToast.ok
+                ? (jobDoneToast.kind === "generate" ? "Your ACORD forms are ready to review." : "Your documents have finished processing.")
+                : "There was an issue with your submission. Please review."}
+            </div>
+          </div>
+          <button onClick={() => setJobDoneToast(null)} style={{ flexShrink: 0, background: "none", border: "none", cursor: "pointer", color: "#be185d", fontSize: 16, lineHeight: 1, padding: "2px 4px", opacity: 0.55, marginTop: -2 }} onMouseEnter={e => e.currentTarget.style.opacity = "1"} onMouseLeave={e => e.currentTarget.style.opacity = "0.55"}>✕</button>
+          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 3, borderRadius: "0 0 14px 14px", background: "linear-gradient(90deg,#E61B84,#C0157A)" }} />
+        </div>
+      )}
       {downloadPreflightLoading && <ProcessStageOverlay stages={["Checking recommendations", "Loading SQS summary"]} advanceAfter={1800} />}
       {showDownloadPreflight && (
         <DownloadPreflightModal

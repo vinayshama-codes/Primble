@@ -177,6 +177,22 @@ async def llm_slot():
             _thread_sem.release()
         return
 
+    # When called from a ThreadPoolExecutor thread (asyncio.run() creates a
+    # fresh event loop that doesn't own the module-level Redis connection),
+    # skip Redis entirely and go straight to the thread semaphore — avoids
+    # the "bound to a different event loop" error cascade.
+    if threading.current_thread() is not threading.main_thread():
+        acquired = await _acquire_thread_sem(_ACQUIRE_TIMEOUT_S)
+        if not acquired:
+            raise asyncio.TimeoutError(
+                f"llm_limiter: no slot available within {_ACQUIRE_TIMEOUT_S:.0f}s"
+            )
+        try:
+            yield
+        finally:
+            _thread_sem.release()
+        return
+
     # Distributed path — poll the Lua acquire until success or timeout.
     # If Redis consistently raises (e.g. event-loop mismatch in an executor
     # thread), fall back to the thread semaphore after 3 consecutive errors

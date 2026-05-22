@@ -54,13 +54,6 @@
   "Producer_AuthorizedRepresentative_Signature_A": "contact_name",
   "NamedInsured_Signature_A": null,
   "NamedInsured_SignatureDate_A": null,
-<<<<<<< HEAD
-  "GeneralLiability_ClaimsMade_UninterruptedCoverageEntryDate_A": "retro_date",
-  "Producer_AuthorizedRepresentative_FullName_A": "contact_name",
-  "__ai_mapped__": [],
-  "__schema_version__": "v5"
-=======
   "__schema_version__": "v5",
   "__ai_mapped__": []
->>>>>>> 72330da06fe13661cf0e2bd462e08300db8ea531
 }
