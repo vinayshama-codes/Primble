@@ -19,7 +19,7 @@ jobs:
         image: postgres:15
         env:
           POSTGRES_USER: acordly
-          POSTGRES_PASSWORD: ${{ secrets.CI_POSTGRES_PASSWORD }}
+          POSTGRES_PASSWORD: acordly_ci
           POSTGRES_DB: acordly_test
         ports:
           - 5432:5432
@@ -30,7 +30,7 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: ${{ secrets.CI_DATABASE_URL }}
+      DATABASE_URL: postgresql://acordly:acordly_ci@localhost:5432/acordly_test
       ENVIRONMENT: test
       JOB_QUEUE_BACKEND: memory
       SECRET_KEY: ${{ secrets.CI_SECRET_KEY }}
@@ -73,7 +73,7 @@ jobs:
         run: alembic upgrade --sql head > /dev/null
         env:
           # alembic needs a URL even for --sql mode
-          DATABASE_URL: ${{ secrets.CI_DATABASE_URL }}
+          DATABASE_URL: postgresql://acordly:acordly_ci@localhost:5432/acordly_test
 
       - name: Migration apply (real DB)
         run: alembic upgrade head
@@ -95,10 +95,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node 20
+      - name: Set up Node 24
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
