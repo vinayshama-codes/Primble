@@ -29,7 +29,7 @@ export default function ARQStatusPanel({ arqSessions, token, onRefresh }) {
   return (
     <div style={{ marginTop: 12 }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: "#64748b", marginBottom: 8 }}>
-        📧 Sent Questionnaires
+        Sent Questionnaires
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {arqSessions.map((arq) => {
@@ -52,7 +52,7 @@ export default function ARQStatusPanel({ arqSessions, token, onRefresh }) {
                   </div>
                 </div>
                 <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 12, border: `1px solid ${sc.border}`, background: sc.bg, color: sc.color, flexShrink: 0 }}>
-                  {displayStatus === "submitted" ? "✓ Submitted" : displayStatus === "expired" ? "Expired" : "⏳ Pending"}
+                  {displayStatus === "submitted" ? "✓ Submitted" : displayStatus === "expired" ? "Expired" : "Pending"}
                 </span>
               </div>
 
@@ -62,7 +62,7 @@ export default function ARQStatusPanel({ arqSessions, token, onRefresh }) {
                   disabled={reminding === arq.id}
                   style={{ marginTop: 8, fontSize: 11, fontWeight: 600, color: "#4f7cff", background: "none", border: "1px solid #4f7cff", borderRadius: 6, padding: "3px 10px", cursor: reminding === arq.id ? "wait" : "pointer", opacity: reminding === arq.id ? 0.6 : 1 }}
                 >
-                  {reminding === arq.id ? "Sending…" : "🔔 Send Reminder"}
+                  {reminding === arq.id ? "Sending…" : "Send Reminder"}
                   {arq.reminder_count > 0 && ` (${arq.reminder_count} sent)`}
                 </button>
               )}

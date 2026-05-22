@@ -4,7 +4,7 @@ services:
     runtime: python
     rootDir: backend
     buildCommand: "pip install -r requirements.txt"
-    startCommand: "gunicorn main:app -w ${WEB_CONCURRENCY:-2} -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --timeout 120 --keep-alive 65 --graceful-timeout 30"
+    startCommand: "gunicorn main:app -w ${WEB_CONCURRENCY:-2} -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --timeout 600 --keep-alive 65 --graceful-timeout 30 --worker-tmp-dir /dev/shm"
     healthCheckPath: /api/health
     envVars:
       - key: ENVIRONMENT
@@ -13,8 +13,43 @@ services:
         value: "2"
       - key: JOB_QUEUE_BACKEND
         value: db
+      - key: ENABLE_ASYNC_PROCESSING
+        value: "true"
       - key: SCHEDULER_ENABLED
         value: "false"
+      - key: MAX_CONCURRENT_HEAVY_OPS
+        value: "8"
+      # GLOBAL (Redis-distributed) cap on in-flight OpenAI chat completions.
+      # All web workers + the background worker share this single budget, so
+      # the number does NOT multiply by WEB_CONCURRENCY any more.
+      # Tier 1 (500 RPM, ~1-3 s/call): 10 is the safe ceiling.
+      # Tier 2 (5,000 RPM): bump to 40-50 in the dashboard, no code change.
+      # Tier 3 (15,000 RPM): 100+.
+      - key: LLM_MAX_CONCURRENT
+        value: "10"
+      # Max seconds a request will wait for a free LLM slot before raising.
+      # 90s absorbs Tier 1 bursts without prematurely failing user requests.
+      - key: LLM_ACQUIRE_TIMEOUT
+        value: "90"
+      - key: DB_POOL_MIN
+        value: "2"
+      # Bumped from 10 → 20: each in-flight heavy job can hold a connection
+      # for 60-120s during LLM calls, so 8 heavy slots × ~1.5 connections/job
+      # ≈ 12 needed, +6 headroom for status reads. Stays well under Supabase
+      # Pro's 500-connection cap.
+      - key: DB_POOL_MAX
+        value: "20"
+      # Optional: point this at Supabase's session-mode pooler (port 5432)
+      # to enable PostgreSQL LISTEN/NOTIFY for instant worker wake-up. The
+      # main DATABASE_URL should stay on transaction mode (port 6543).
+      - key: DATABASE_URL_DIRECT
+        sync: false
+      # OCR_PROVIDER stays on easyocr until paid OCR is provisioned.
+      # easyocr loads ~400 MB of model weights per process; with
+      # WEB_CONCURRENCY=2 that's ~800 MB just for OCR — needs Render
+      # Standard (2 GB) at minimum.
+      - key: OCR_PROVIDER
+        value: "easyocr"
       - key: DATABASE_URL
         sync: false
       - key: GOOGLE_CLIENT_ID
@@ -24,6 +59,8 @@ services:
       - key: STRIPE_WEBHOOK_SECRET
         sync: false
       - key: OPENAI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
         sync: false
       - key: FIELD_ENCRYPTION_KEY
         sync: false
@@ -41,6 +78,13 @@ services:
         sync: false
       - key: STORAGE_BUCKET
         sync: false
+      - key: SENTRY_DSN
+        sync: false
+      # Async upload staging uses Supabase Storage (S3-compatible API — no AWS).
+      # STORAGE_ENDPOINT, STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY, STORAGE_BUCKET
+      # are set as Render dashboard secrets (sync: false above) on both web + worker.
+      # CRITICAL: Ensure DATABASE_URL points to a Render Postgres Starter plan ($7/mo) or higher.
+      # The free Postgres plan expires after 90 days and will cause DATA LOSS.
 
   - type: worker
     name: acordly-worker
@@ -48,6 +92,7 @@ services:
     rootDir: backend
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python worker.py"
+    numInstances: 2
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -55,9 +100,53 @@ services:
         value: db
       - key: WEB_CONCURRENCY
         value: "1"
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      # Safety-net interval; with LISTEN/NOTIFY enabled the worker normally
+      # dispatches within milliseconds of enqueue. This poll only catches
+      # the rare window where the LISTEN connection is reconnecting and
+      # the periodic stuck-job watchdog sweep.
+      - key: WORKER_POLL_INTERVAL
+        value: "5"
+      - key: WORKER_MAX_JOBS_PER_CYCLE
+        value: "5"
+      - key: MAX_CONCURRENT_HEAVY_OPS
+        value: "4"
+      # Same GLOBAL Redis-distributed cap as the web service. Keep both
+      # processes set to the SAME value — they share the budget, they don't
+      # each get their own. Tier 1 = 10; Tier 2 = 40-50.
+      - key: LLM_MAX_CONCURRENT
+        value: "10"
+      - key: LLM_ACQUIRE_TIMEOUT
+        value: "90"
+      - key: WORKER_MAX_JOB_RETRIES
+        value: "5"
+      - key: WORKER_FORM_GEN_CONCURRENCY
+        value: "4"
+      # Watchdog sweep interval (seconds). Every 5 minutes the worker scans
+      # for jobs stuck in 'processing' beyond STUCK_JOB_THRESHOLD_MINUTES
+      # and resets them to 'pending' so they get reprocessed.
+      - key: WORKER_WATCHDOG_INTERVAL
+        value: "300"
+      - key: STUCK_JOB_THRESHOLD_MINUTES
+        value: "30"
+      - key: DB_POOL_MIN
+        value: "2"
+      - key: DB_POOL_MAX
+        value: "20"
+      # Session-mode (port 5432) URL for the LISTEN/NOTIFY connection.
+      # Required because PgBouncer transaction mode does not pass NOTIFY
+      # through. If unset, the worker falls back to pure polling.
+      - key: DATABASE_URL_DIRECT
+        sync: false
+      # OCR_PROVIDER stays on easyocr (free) until paid OCR is provisioned.
+      - key: OCR_PROVIDER
+        value: "easyocr"
       - key: DATABASE_URL
         sync: false
       - key: OPENAI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
         sync: false
       - key: FIELD_ENCRYPTION_KEY
         sync: false
@@ -71,7 +160,9 @@ services:
         sync: false
       - key: STORAGE_BUCKET
         sync: false
-      - key: AWS_ACCESS_KEY_ID
+      - key: SENTRY_DSN
         sync: false
-      - key: AWS_SECRET_ACCESS_KEY
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: STRIPE_SECRET_KEY
         sync: false

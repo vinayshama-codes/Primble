@@ -19,8 +19,17 @@ _OCR_MAX_WORKERS = (os.cpu_count() or 2) * 2
 _OCR_EXECUTOR = ThreadPoolExecutor(max_workers=_OCR_MAX_WORKERS)
 
 # Circuit breakers for external OCR providers
-_textract_cb = CircuitBreaker(failure_threshold=3, recovery_timeout=60, name="textract")
 _vision_cb   = CircuitBreaker(failure_threshold=3, recovery_timeout=60, name="google_vision")
+
+_web_concurrency = int(os.getenv("WEB_CONCURRENCY", "1"))
+if OCR_PROVIDER == "easyocr" and _web_concurrency > 1:
+    logger.warning(
+        "ocr_service: OCR_PROVIDER=easyocr with WEB_CONCURRENCY=%d — "
+        "EasyOCR loads ~400 MB of model weights per worker process. "
+        "This may cause OOM on Render Starter (512 MB) and tight memory on Standard (2 GB). "
+        "Consider setting OCR_PROVIDER=google in your environment.",
+        _web_concurrency,
+    )
 
 # ---------------------------------------------------------------------------
 # OCR confidence thresholds
@@ -160,66 +169,10 @@ def _ocr_google_vision(img_path: str) -> Tuple[str, List[str], int]:
         return "", [], 0
 
 
-_textract_client = None
-
-
-def _get_textract_client():
-    global _textract_client
-    if _textract_client is None:
-        import boto3
-        _textract_client = boto3.client(
-            "textract",
-            region_name=os.getenv("AWS_REGION", "us-east-1"),
-            config=boto3.session.Config(connect_timeout=30, read_timeout=30),
-        )
-    return _textract_client
-
-
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(min=1, max=10),
-    retry=retry_if_exception_type(Exception),
-    reraise=True,
-)
-def _ocr_aws_textract_attempt(img_path: str) -> Tuple[str, List[str], int]:
-    """Single attempt — called by _ocr_aws_textract which owns the CB and error boundary."""
-    c = _get_textract_client()
-    with open(img_path, "rb") as f:
-        content = f.read()
-    response  = c.detect_document_text(Document={"Bytes": content})
-    blocks    = response["Blocks"]
-    full_text = "\n".join(b["Text"] for b in blocks if b["BlockType"] == "LINE").strip()
-
-    low_conf: List[str] = []
-    word_blocks = [b for b in blocks if b["BlockType"] == "WORD"]
-    total       = len(word_blocks)
-    for b in word_blocks:
-        word_text = b["Text"]
-        penalty   = _numeric_correction_score(word_text)
-        adj_conf  = max(0.0, b.get("Confidence", 100.0) / 100.0 - penalty)
-        if adj_conf < OCR_CONFIDENCE_THRESHOLD:
-            low_conf.append(_normalize_token(word_text))
-    return full_text, low_conf, total
-
-
-def _ocr_aws_textract(img_path: str) -> Tuple[str, List[str], int]:
-    if _textract_cb.opened:
-        logger.warning(f"ocr_service: Textract circuit OPEN — skipping OCR for {img_path}")
-        return "", [], 0
-    try:
-        # call() records success/failure on the circuit breaker automatically
-        return _textract_cb.call(_ocr_aws_textract_attempt, img_path)
-    except Exception as ex:
-        logger.error(f"AWS Textract error on {img_path}: {ex}")
-        return "", [], 0
-
-
 def _run_ocr_provider(img_path: str) -> Tuple[str, List[str], int]:
     """Dispatch to the configured OCR provider (sync, called via executor)."""
     if OCR_PROVIDER == "google":
         return _ocr_google_vision(img_path)
-    elif OCR_PROVIDER == "aws":
-        return _ocr_aws_textract(img_path)
     else:
         return _ocr_easyocr(img_path)
 

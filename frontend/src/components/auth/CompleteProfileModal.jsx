@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { API_BASE } from "../../config/constants";
 
-export default function CompleteProfileModal({ token, user, onComplete }) {
+export default function CompleteProfileModal({ pendingToken, user, onComplete }) {
   const [orgName, setOrgName]                     = useState("");
   const [disclaimerChecked, setDisclaimerChecked] = useState(false);
   const [error, setError]                         = useState("");
@@ -18,11 +18,16 @@ export default function CompleteProfileModal({ token, user, onComplete }) {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ organization_name: orgName.trim(), acord_disclaimer_accepted: true }),
+        body: JSON.stringify({
+          organization_name: orgName.trim(),
+          acord_disclaimer_accepted: true,
+          ...(pendingToken ? { pending_token: pendingToken } : {}),
+        }),
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        onComplete({ ...user, organization_name: orgName.trim(), acord_disclaimer_accepted: true });
+        if (data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
+        onComplete(data.user || { ...user, organization_name: orgName.trim(), acord_disclaimer_accepted: true });
       } else {
         setError(data.detail || data.message || "Failed to save profile. Please try again.");
       }
@@ -38,7 +43,7 @@ export default function CompleteProfileModal({ token, user, onComplete }) {
             <h2 className="step-title">Complete Your Profile</h2>
             <p className="step-subtitle">One more step before you get started.</p>
           </div>
-          {error && (<div className="alert alert-error"><span>⚠️ {error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
+          {error && (<div className="alert alert-error"><span>{error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
           <form onSubmit={handleSubmit} className="auth-form">
             <div className="form-group">
               <label>Organization / Agency Name <span className="field-required">*</span></label>

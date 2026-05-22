@@ -34,7 +34,7 @@ async def generate_ai_cover_narrative(
     _cover_cache_key = "cover_ai:" + hashlib.md5(
         f"{applicant}|{','.join(sorted(form_ids))}|{avg_sqs}|{org_name}".encode()
     ).hexdigest()
-    _cached_cover = _cache_get(_cover_cache_key)
+    _cached_cover = await _cache_get(_cover_cache_key)
     if _cached_cover:
         return _cached_cover
     prompt  = f"""You are an expert commercial insurance underwriting analyst.
@@ -75,7 +75,7 @@ Return ONLY the JSON object."""
                 "sqs_reasoning": result.get("sqs_reasoning", ""),
                 "ai_block":      result.get("ai_block", {}),
             }
-            _cache_set(_cover_cache_key, result)
+            await _cache_set(_cover_cache_key, result)
             return result
     except Exception as ex:
         logger.error(f"Cover page AI generation failed: {ex}")
@@ -121,7 +121,7 @@ async def generate_lite_cover_narrative(
     _lite_cache_key = "cover_lite:" + hashlib.md5(
         f"{_lite_applicant}|{score}|{org_name}|{','.join(sorted(str(x) for x in hard_stops))}".encode()
     ).hexdigest()
-    _cached_lite = _cache_get(_lite_cache_key)
+    _cached_lite = await _cache_get(_lite_cache_key)
     if _cached_lite:
         return _cached_lite
     prompt  = f"""You are an expert commercial insurance underwriting analyst.
@@ -164,7 +164,7 @@ Return ONLY the JSON object."""
                 "sqs_reasoning": result.get("sqs_reasoning", ""),
                 "ai_block":      result.get("ai_block", {}),
             }
-            _cache_set(_lite_cache_key, result)
+            await _cache_set(_lite_cache_key, result)
             return result
     except Exception as ex:
         logger.error(f"Lite cover narrative generation failed: {ex}")

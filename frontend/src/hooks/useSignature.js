@@ -5,12 +5,12 @@ import { getSignature } from "../api/authApi";
 // each login, so persistence across sessions provides no UX benefit and increases
 // the XSS blast radius by leaving sensitive bitmap data on disk.
 export function useSignature(token, user) {
-  const [savedSignature, setSavedSignature] = useState(null);
+  const [savedSignature, setSavedSignature] = useState(
+    () => sessionStorage.getItem("acordly_signature") || null
+  );
 
   useEffect(() => {
     if (!user) return;
-    const cached = sessionStorage.getItem("acordly_signature");
-    if (cached) setSavedSignature(cached);
     getSignature(token)
       .then((data) => {
         if (data?.signature_data) {

@@ -211,7 +211,8 @@ _EXTRACT_SCHEMA = (
     '  "garagekeeper_coll_deductible": string or null,\n'
     '  "auto_dealers_inventory_value": string or null,\n'
     # ── WC Application (ACORD 130) ────────────────────────────────────────
-    '  "wc_description_of_operations": string or null\n'
+    '  "wc_description_of_operations": string or null,\n'
+    '  "state_of_operations": string or null\n'
     '},\n\n'
     '"flags": {\n'
     '  "is_commercial_policy": boolean, "has_general_liability": boolean,\n'
@@ -305,6 +306,10 @@ _EXTRACT_PROMPT_PREFIX = (
     '  has_dealers_coverage: true if document mentions dealers physical damage, dealer inventory, or floorplan coverage.\n'
     '  has_garage_liability: true if document shows a garage liability limit (applies to auto dealers and service shops).\n'
     '  has_garage_keepers: true if document mentions garagekeepers or coverage for vehicles in the insured\'s custody.\n\n'
+    'RULE 7 — state_of_operations: Set this to the two-letter US state code (e.g. "CA", "CO", "TX") where the insured\'s '
+    'primary operations are located. Determine this from the mailing address, physical address, garaging address, '
+    'or any explicit state reference in the document. If multiple states appear, use the state in the mailing or '
+    'physical address of the named insured. Return null only if no state can be determined.\n\n'
     'Return ONLY a valid JSON object with exactly these two top-level keys:\n\n'
     + _EXTRACT_SCHEMA
     + '\n\nReturn ONLY the JSON object. No markdown fences, no explanation, no extra text. '
@@ -457,15 +462,17 @@ def _lru_set(key: str, value: dict) -> None:
 
 # ── Redis cache (optional) ────────────────────────────────────────────────────
 try:
-    import redis as _redis_lib
+    import redis.asyncio as _aioredis
+    from redis.asyncio.connection import ConnectionPool
     from config.settings import REDIS_URL as _REDIS_URL
-    _redis = _redis_lib.from_url(
+    _redis = _aioredis.Redis(connection_pool=ConnectionPool.from_url(
         _REDIS_URL,
-        socket_connect_timeout=2,
-        socket_timeout=2,
+        max_connections=20,
+        socket_connect_timeout=5,
+        socket_timeout=5,
+        retry_on_timeout=True,
         decode_responses=True,
-    )
-    _redis.ping()
+    ))
     logger.info(f"extract_facts: Redis cache connected ({_REDIS_URL})")
 except Exception as _redis_init_err:
     logger.warning(
@@ -489,7 +496,7 @@ def _cache_key(text: str, model: str, ctx_hash: str, lct_hash: str) -> str:
 _REDIS_CACHE_TTL = 3600  # Redis L2 TTL — shorter than LRU to bound cross-worker staleness
 
 
-def _cache_get(key: str) -> Optional[dict]:
+async def _cache_get(key: str) -> Optional[dict]:
     # L1: check in-process LRU first (fastest, no network)
     hit = _lru_get(key)
     if hit is not None:
@@ -497,7 +504,7 @@ def _cache_get(key: str) -> Optional[dict]:
     # L2: check Redis (shared across workers)
     if _redis is not None:
         try:
-            raw = _redis.get(f"extract:{key}")
+            raw = await _redis.get(f"extract:{key}")
             if raw:
                 value = json.loads(raw)
                 _lru_set(key, value)  # promote into L1
@@ -507,12 +514,12 @@ def _cache_get(key: str) -> Optional[dict]:
     return None
 
 
-def _cache_set(key: str, value: dict) -> None:
+async def _cache_set(key: str, value: dict) -> None:
     # Write to both L1 and L2 so all workers share the result immediately
     _lru_set(key, value)
     if _redis is not None:
         try:
-            _redis.setex(f"extract:{key}", _REDIS_CACHE_TTL, json.dumps(value))
+            await _redis.setex(f"extract:{key}", _REDIS_CACHE_TTL, json.dumps(value))
         except Exception as ex:
             logger.warning(f"Redis set failed, in-process only: {ex}")
 
@@ -691,7 +698,7 @@ def _validate_parsed(result: dict, context: str) -> dict:
         # List → validate + normalize for known fields
         if isinstance(v, list):
 
-            # 🔥 FIX: normalize locations (list of dict → list of string)
+            # FIX: normalize locations (list of dict → list of string)
             if field == "locations":
                 if all(isinstance(x, dict) for x in v):
                     try:
@@ -1227,7 +1234,7 @@ async def extract_facts(
     ).hexdigest()[:8]
     ck = _cache_key(text, ACTIVE_MODEL, ctx_hash, lct_hash)
 
-    cached = _cache_get(ck)
+    cached = await _cache_get(ck)
     if cached is not None:
         logger.debug(f"extract_facts cache hit {ck[:8]}")
         return cached
@@ -1268,7 +1275,7 @@ async def extract_facts(
     if manual_conf:
         result["manual_confirmation_required"] = manual_conf
 
-    _cache_set(ck, result)
+    await _cache_set(ck, result)
     return result
 
 
@@ -1992,6 +1999,18 @@ async def _run_extraction(
 
     result = _merge_list_fields(merge_partials, list_keys=_LONG_DOC_LIST_KEYS)
 
+    # Full-text coverage verification — log so operators can confirm no silent truncation.
+    if extraction_complete:
+        total_chunk_chars = sum(
+            p.get("_char_end", 0) - p.get("_char_start", 0) for p in merge_partials
+        )
+        coverage_pct = total_chunk_chars / len(text) if len(text) > 0 else 1.0
+        logger.info(
+            "_run_extraction FULL_COVERAGE doc_type='%s' chunks=%d "
+            "total_chars=%d chunk_chars=%d coverage=%.1f%%",
+            doc_type, len(chunks), len(text), total_chunk_chars, coverage_pct * 100,
+        )
+
     # Attach audit metadata so callers can surface warnings to the user.
     if not extraction_complete:
         result["extraction_incomplete"] = True
@@ -2107,12 +2126,106 @@ async def extract_facts_long(
     return result
 
 
+# ── Source confidence by data type ────────────────────────────────────────────
+# Maps each fact field to the ordered list of doc types that are authoritative
+# for that field. The first matching doc type in a multi-doc upload wins.
+# Fields not listed fall back to the primary doc (legacy behaviour).
+_FIELD_CONFIDENCE_SOURCES: Dict[str, Tuple[str, ...]] = {
+    # Dec page: authoritative for existing policy data, carrier, limits, named insured
+    "named_insured":          ("dec_page", "application"),
+    "carrier":                ("dec_page", "quote"),
+    "policy_number":          ("dec_page",),
+    "policy_effective_date":  ("dec_page", "application"),
+    "policy_expiration_date": ("dec_page", "application"),
+    "coverage_limits":        ("dec_page", "quote"),
+    "premium":                ("dec_page", "quote"),
+    "lines_of_business":      ("dec_page", "application"),
+
+    # Application/supplement: authoritative for current operations, exposures, underwriting
+    "business_description":          ("application", "dec_page"),
+    "annual_revenue":                ("application",),
+    "annual_payroll":                ("application",),
+    "wc_payroll_by_state":           ("application",),
+    "num_employees":                 ("application",),
+    "gl_class_codes_by_location":    ("application",),
+    "wc_class_codes":                ("application",),
+    "fein":                          ("application", "dec_page"),
+    "years_in_business":             ("application", "dec_page"),
+    "entity_type":                   ("application", "dec_page"),
+
+    # Loss run: authoritative for claims history
+    "loss_history":         ("loss_run", "dec_page"),
+    "has_losses":           ("loss_run", "dec_page"),
+    "prior_coverage_by_line": ("loss_run", "dec_page"),
+
+    # SOV/schedule: authoritative for locations, property values, assets
+    "property_locations":   ("schedule", "application"),
+    "locations":            ("schedule", "application"),
+    "inland_marine_items":  ("schedule",),
+}
+
+
+def _get_authoritative_doc(docs: List[dict], field: str) -> Optional[dict]:
+    """Return the doc most authoritative for *field*, or None if no doc has the field."""
+    preference = _FIELD_CONFIDENCE_SOURCES.get(field)
+    if not preference:
+        return None
+    # Index docs by doc_type (first doc of each type wins if duplicates)
+    by_type: Dict[str, dict] = {}
+    for d in docs:
+        by_type.setdefault(d.get("doc_type", "unknown"), d)
+    for dt in preference:
+        if dt in by_type and not _is_empty(by_type[dt].get("facts", {}).get(field)):
+            return by_type[dt]
+    return None
+
+
+def detect_source_conflicts(docs: List[dict]) -> List[str]:
+    """
+    Compare field values across documents. Return human-readable conflict messages
+    for fields that have materially different non-empty values from two or more docs.
+    Only checks scalar fields (not lists) to keep noise low.
+    """
+    if len(docs) < 2:
+        return []
+
+    conflicts: List[str] = []
+    all_keys: set = set()
+    for d in docs:
+        all_keys.update(d.get("facts", {}).keys())
+
+    for field in sorted(all_keys):
+        if field in _LIST_FIELDS:
+            continue
+        values_by_doc: List[Tuple[str, object]] = []
+        for d in docs:
+            v = d.get("facts", {}).get(field)
+            if _is_empty(v):
+                continue
+            values_by_doc.append((d.get("doc_type", "unknown"), v))
+        if len(values_by_doc) < 2:
+            continue
+        # Normalise to string for comparison
+        unique_vals = {str(v).strip().lower() for _, v in values_by_doc}
+        if len(unique_vals) > 1:
+            sources = ", ".join(f"{dt}={val}" for dt, val in values_by_doc[:3])
+            conflicts.append(
+                f"Conflicting values for '{field}' across documents — {sources}. "
+                "Review and confirm the correct value."
+            )
+    return conflicts
+
+
 # ── Multi-doc merge ───────────────────────────────────────────────────────────
 
 def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     """
-    Multi-document merge. Non-primary docs scored via _merge_list_fields.
-    Primary applied last and always wins on conflict.
+    Multi-document merge with field-level source confidence.
+
+    For each field, the value is taken from the most authoritative doc type
+    (per _FIELD_CONFIDENCE_SOURCES) rather than blindly applying the primary doc.
+    Fields without a confidence mapping fall back to the legacy primary-wins
+    behaviour. List fields are always merged across all docs.
     """
     if not docs:
         return {}, {}
@@ -2131,9 +2244,21 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
         mf = {}
         mg = {}
 
+    # Apply primary doc as legacy fallback for unmapped fields
     for k, v in primary.get("facts", {}).items():
         if not _is_empty(v):
             mf[k] = v
+
+    # Override with field-level authoritative sources when a better doc exists
+    if len(docs) > 1:
+        for field in list(mf.keys()):
+            if field in _LIST_FIELDS:
+                continue
+            auth_doc = _get_authoritative_doc(docs, field)
+            if auth_doc and auth_doc["filename"] != primary["filename"]:
+                auth_val = auth_doc.get("facts", {}).get(field)
+                if not _is_empty(auth_val):
+                    mf[field] = auth_val
 
     for k, v in primary.get("flags", {}).items():
         if isinstance(v, bool):

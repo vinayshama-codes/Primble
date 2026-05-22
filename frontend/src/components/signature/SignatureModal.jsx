@@ -128,7 +128,7 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
       <div className="modal-content" style={{ maxWidth: 520 }} onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-inner">
-          <h2 className="step-title" style={{ marginBottom: 6 }}>✍️ Your Signature</h2>
+          <h2 className="step-title" style={{ marginBottom: 6 }}>Your Signature</h2>
           <p className="step-subtitle" style={{ marginBottom: 20 }}>
             Saved once, auto-applied to ACORD forms when you choose to sign.
           </p>
@@ -145,7 +145,7 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
                   fontWeight: mode === m ? 700 : 500, fontSize: 13, cursor: "pointer",
                 }}
               >
-                {m === "draw" ? "✏️ Draw" : "📁 Upload Image"}
+                {m === "draw" ? "Draw" : "Upload Image"}
               </button>
             ))}
           </div>
@@ -190,7 +190,7 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
               )}
             </div>
           )}
-          {error && <div className="alert alert-error" style={{ marginTop: 12 }}><span>⚠️ {error}</span></div>}
+          {error && <div className="alert alert-error" style={{ marginTop: 12 }}><span>{error}</span></div>}
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button className="btn btn-modal-primary" style={{ flex: 1 }} onClick={handleSave} disabled={saving}>
               {saving ? (
@@ -198,7 +198,7 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
                   <span style={{ width: 14, height: 14, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
                   Saving...
                 </span>
-              ) : "💾 Save Signature"}
+              ) : "Save Signature"}
             </button>
             <button className="btn btn-modal-secondary" onClick={onClose}>Cancel</button>
           </div>

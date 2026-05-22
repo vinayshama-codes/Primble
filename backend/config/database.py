@@ -46,6 +46,10 @@ async def create_pool() -> None:
     global _pool
     _env = os.getenv("ENVIRONMENT", "development").lower()
     _ssl = "require" if _env == "production" else None
+    # statement_cache_size=0 is required when connecting through PgBouncer in
+    # transaction mode (Supabase pooled URL, port 6543). PgBouncer does not
+    # support prepared statements across connections; asyncpg's cache causes
+    # "prepared statement already exists" errors without this setting.
     _pool = await asyncpg.create_pool(
         DATABASE_URL,
         min_size=_POOL_MIN,
@@ -56,8 +60,13 @@ async def create_pool() -> None:
         max_inactive_connection_lifetime=min(_POOL_MAX_INACTIVE_LIFETIME, 120),
         ssl=_ssl,
         init=_init_conn,
+        statement_cache_size=0,
     )
-    logger.info(f"asyncpg pool created (min={_POOL_MIN}, max={_POOL_MAX}, ssl={_ssl})")
+    # Fast-fail startup if the DB is unreachable rather than serving requests that
+    # will all fail at the query layer.
+    async with _pool.acquire() as _conn:
+        await _conn.execute("SELECT 1")
+    logger.info(f"asyncpg pool created and verified (min={_POOL_MIN}, max={_POOL_MAX}, ssl={_ssl})")
 
 
 # ASYNC-SAFE
@@ -270,6 +279,16 @@ async def init_db() -> None:
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_used_at TEXT",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ip_address TEXT",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent TEXT",
+            # retry_count: incremented each time a job is requeued due to semaphore-full or transient error
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0",
+            # priority: lower number = higher priority. 1=urgent (paid/retries), 5=default, 9=background.
+            # Workers select in (priority ASC, created_at ASC) order so urgent jobs preempt standard ones.
+            "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 5",
+            # Composite index that matches the worker's claim query so list_pending() does an index scan
+            # instead of a table scan once the jobs table grows past a few thousand rows.
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_pending_priority ON jobs(priority ASC, created_at ASC) WHERE status = 'pending'",
+            # Index for the watchdog's stuck-job sweep — finds 'processing' rows whose updated_at is old.
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_jobs_processing_updated ON jobs(updated_at) WHERE status = 'processing'",
         ]:
             try:
                 await conn.execute(stmt)

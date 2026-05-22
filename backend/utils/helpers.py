@@ -46,7 +46,7 @@ def check_payment_access(payment_status: str, action: str = "form") -> None:
     from fastapi import HTTPException
     ps = (payment_status or "ok").lower()
     if ps == "archived":
-        raise HTTPException(403, "Account archived due to non-payment. Contact support@acordly.ai to reactivate.")
+        raise HTTPException(403, "Account archived due to non-payment. Contact support@primble.ai to reactivate.")
     if ps == "suspended":
         raise HTTPException(403, "Account suspended due to non-payment. Please update your billing to restore access.")
     if ps == "soft_locked" and action == "upload":

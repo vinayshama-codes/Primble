@@ -17,8 +17,7 @@ from services.cover_service import generate_ai_cover_narrative, build_cover_page
 from services.pdf_service import regenerate_pdf_for_form
 from services.stripe_service import evaluate_package_limit, create_overage_invoice_item
 from services.sqs_service import calculate_sqs
-from services import s3_service
-from utils.crypto import decrypt_field
+from utils.crypto import decrypt_field, decrypt_field_soft
 from utils.rate_limiter import check_download_rate_limit
 from utils.helpers import check_payment_access
 
@@ -45,7 +44,8 @@ async def confirm_acord_license(
     )
     return {"success": True, "acord_license_confirmed": True}
 
-_COVER_CACHE: dict = {}
+from cachetools import TTLCache
+_COVER_CACHE = TTLCache(maxsize=256, ttl=3600)
 
 _DEDUP_WINDOW_SECONDS = 300
 
@@ -57,14 +57,14 @@ except Exception:
 _dedup_seen: dict = {}
 
 
-def _acquire_download_lock(user_id: str, session_id: str, form_ids_hash: str) -> bool:
+async def _acquire_download_lock(user_id: str, session_id: str, form_ids_hash: str) -> bool:
     """Return True (and acquire lock) if this is a fresh download; False if duplicate."""
     key = f"dl_counted:{user_id}:{session_id}:{form_ids_hash}"
     now = time.time()
 
     if _dl_redis is not None:
         try:
-            acquired = _dl_redis.set(key, "1", nx=True, ex=_DEDUP_WINDOW_SECONDS)
+            acquired = await _dl_redis.set(key, "1", nx=True, ex=_DEDUP_WINDOW_SECONDS)
             return bool(acquired)
         except Exception as ex:
             logger.warning("download dedup Redis error, using in-process fallback: %s", ex)
@@ -109,7 +109,7 @@ async def download_pdf(
     include_cover: bool = Query(True),
     current_user: dict = Depends(get_current_user),
 ):
-    check_download_rate_limit(current_user["id"])
+    await check_download_rate_limit(current_user["id"])
     fresh = await _refresh_user(current_user["id"])
     if not fresh:
         raise HTTPException(401, "User not found")
@@ -131,10 +131,10 @@ async def download_pdf(
         raise HTTPException(403, "Access denied")
     generated      = proc_session.get("generated_forms", {})
     form_name      = generated.get(form_id, {}).get("form_name", form_id)
-    user_signature = decrypt_field(fresh.get("signature_data")) or None
-    facts       = proc_session.get("facts", {})
+    user_signature = decrypt_field_soft(fresh.get("signature_data")) or None
+    facts       = proc_session.get("facts") or {}
     flags       = proc_session.get("flags", {})
-    org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
+    org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Primble User"
     sqs_results = {form_id: generated[form_id].get("sqs", {})} if form_id in generated else {}
 
     _ck = _cover_cache_key(facts, [form_id], sqs_results, flags)
@@ -157,9 +157,6 @@ async def download_pdf(
             _COVER_CACHE[_ck] = ai_content
             logger.debug(f"cover narrative cached for key {_ck[:8]}")
 
-        # S3 upload fire-and-forget (don't block the response on it)
-        _loop.run_in_executor(None, s3_service.upload_pdf, session_id, form_id, pdf_bytes)
-
         cover_pdf = await _loop.run_in_executor(
             None, build_cover_page_pdf,
             facts, flags, sqs_results, [form_id], org_name,
@@ -169,14 +166,13 @@ async def download_pdf(
         def _build_zip():
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.writestr("00_Acordly_Cover_Page.pdf", cover_pdf)
+                zf.writestr("00_Primble_Cover_Page.pdf", cover_pdf)
                 zf.writestr(f"{form_id}_FILLED.pdf", pdf_bytes)
             buf.seek(0)
             return buf
     else:
         # No cover — just the filled form PDF
         pdf_bytes = await _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature)
-        _loop.run_in_executor(None, s3_service.upload_pdf, session_id, form_id, pdf_bytes)
 
         def _build_zip():
             buf = io.BytesIO()
@@ -189,7 +185,7 @@ async def download_pdf(
 
     _ids_hash        = hashlib.md5(form_id.encode()).hexdigest()[:8]
     _already_counted = bool(proc_session.get("package_counted_at"))
-    if not _already_counted and _acquire_download_lock(fresh["id"], session_id, _ids_hash):
+    if not _already_counted and await _acquire_download_lock(fresh["id"], session_id, _ids_hash):
         _now_iso = datetime.now(timezone.utc).isoformat()
         await upd_processing_session(session_id, {"package_counted_at": _now_iso})
         async with get_pool().acquire() as conn:
@@ -244,7 +240,7 @@ async def download_all(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    check_download_rate_limit(current_user["id"])
+    await check_download_rate_limit(current_user["id"])
     fresh = await _refresh_user(current_user["id"])
     if not fresh:
         raise HTTPException(401, "User not found")
@@ -268,19 +264,18 @@ async def download_all(
     if not generated:
         raise HTTPException(400, "No forms generated yet")
 
-    user_signature = decrypt_field(fresh.get("signature_data")) or None
+    user_signature = decrypt_field_soft(fresh.get("signature_data")) or None
     acord_pdfs = {}
     for fid in generated.keys():
         try:
             acord_pdfs[fid] = regenerate_pdf_for_form(proc_session, fid, force=True, user_signature=user_signature)
-            s3_service.upload_pdf(session_id, fid, acord_pdfs[fid])
         except Exception as ex:
             logger.error(f"Skipping {fid}: {ex}")
 
     sqs_results = {fid: generated[fid].get("sqs", {}) for fid in generated}
-    facts    = proc_session.get("facts", {})
+    facts    = proc_session.get("facts") or {}
     flags    = proc_session.get("flags", {})
-    org_name = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
+    org_name = fresh.get("organization_name") or fresh.get("full_name") or "Primble User"
 
     _ck = _cover_cache_key(facts, list(generated.keys()), sqs_results, flags)
     ai_content = _COVER_CACHE.get(_ck)
@@ -294,14 +289,14 @@ async def download_all(
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("00_Acordly_Cover_Page.pdf", cover_pdf)
+        zf.writestr("00_Primble_Cover_Page.pdf", cover_pdf)
         for fid, pb in acord_pdfs.items():
             zf.writestr(f"{fid}_FILLED.pdf", pb)
     zip_buf.seek(0)
 
     _ids_hash        = hashlib.md5((",".join(sorted(generated.keys()))).encode()).hexdigest()[:8]
     _already_counted = bool(proc_session.get("package_counted_at"))
-    if not _already_counted and _acquire_download_lock(fresh["id"], session_id, _ids_hash):
+    if not _already_counted and await _acquire_download_lock(fresh["id"], session_id, _ids_hash):
         _now_iso = datetime.now(timezone.utc).isoformat()
         await upd_processing_session(session_id, {"package_counted_at": _now_iso})
         async with get_pool().acquire() as conn:
@@ -347,7 +342,7 @@ async def download_all(
 
     return Response(
         content=zip_buf.getvalue(), media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=ACORD_Package_Acordly.zip", **extra_headers},
+        headers={"Content-Disposition": "attachment; filename=ACORD_Package_Primble.zip", **extra_headers},
     )
 
 
@@ -359,7 +354,7 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    facts       = proc_session.get("facts", {})
+    facts       = proc_session.get("facts") or {}
     flags       = proc_session.get("flags", {})
     hard_stops  = proc_session.get("hard_stops", [])
     soft_stops  = proc_session.get("soft_stops", [])
@@ -397,12 +392,12 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
-    facts       = proc_session.get("facts", {})
+    facts       = proc_session.get("facts") or {}
     flags       = proc_session.get("flags", {})
     hard_stops  = proc_session.get("hard_stops", [])
     soft_stops  = proc_session.get("soft_stops", [])
     tier2_score = proc_session.get("tier2_score", 50)
-    org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Acordly User"
+    org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Primble User"
 
     clarity_result  = proc_session.get("clarity_result", {})
     generated_forms = proc_session.get("generated_forms", {})
@@ -447,7 +442,7 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
         if not _already_counted:
             pkg_eval = await evaluate_package_limit(fresh)
             _ids_hash = hashlib.md5(b"cover").hexdigest()[:8]
-            if _acquire_download_lock(fresh["id"], session_id, _ids_hash):
+            if await _acquire_download_lock(fresh["id"], session_id, _ids_hash):
                 _now_iso = datetime.now(timezone.utc).isoformat()
                 await upd_processing_session(session_id, {"package_counted_at": _now_iso})
                 async with get_pool().acquire() as conn:
@@ -481,5 +476,5 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
 
     return Response(
         content=cover_pdf, media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=Acordly_SQS_Cover_Sheet.pdf", **extra_headers},
+        headers={"Content-Disposition": "attachment; filename=Primble_SQS_Cover_Sheet.pdf", **extra_headers},
     )

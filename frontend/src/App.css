@@ -135,6 +135,10 @@ body {
 .udrop-header-initial {
   font-size: 14px; font-weight: 800; color: #0f172a; line-height: 1.2;
 }
+.udrop-header-name {
+  font-size: 13px; font-weight: 700; color: #0f172a; line-height: 1.2;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;
+}
 .udrop-header-email {
   font-size: 11.5px; color: #64748b; font-weight: 500;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -299,11 +303,29 @@ body {
 }
 .btn-dark:hover { background: var(--dark-medium); transform: translateY(-2px); }
 
+.hero-wrapper {
+  background: rgba(230, 27, 132, 0.08);
+  width: 100%;
+  font-family: 'Montserrat', sans-serif;
+}
 .hero {
   text-align: center;
   padding: 60px 20px 52px;
   max-width: 1000px;
   margin: 0 auto;
+}
+.hero-tagline {
+  font-size: 18px;
+  color: var(--text-secondary);
+  margin: 0 auto 16px;
+  max-width: 520px;
+  line-height: 1.5;
+}
+.hero-free-copy {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0 auto 28px;
+  max-width: 400px;
 }
 .hero-badge {
   display: inline-block;
@@ -325,6 +347,28 @@ body {
   margin-bottom: 24px;
   color: #2d2d2d;
   letter-spacing: -0.03em;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.hero-eyebrow-label {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 16px;
+}
+.hero-h1-main {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 52px;
+  font-weight: 800;
+  line-height: 1.1;
+  margin-bottom: 20px;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .hero-p {
   max-width: 600px;
@@ -494,7 +538,7 @@ body {
 .modal-close:hover {
   background: var(--primary); color: var(--white); transform: rotate(90deg);
 }
-.modal-inner { padding: 60px 40px 40px; }
+.modal-inner { padding: 28px 40px 28px; }
 
 /* ==================== AUTH MODAL (NEW) ==================== */
 .auth-modal {
@@ -502,13 +546,37 @@ body {
 }
 .auth-header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 14px;
 }
+.auth-header .step-subtitle { margin-top: 4px; }
 .auth-google {
   display: flex;
   justify-content: center;
-  margin-bottom: 24px;
+  margin-bottom: 10px;
 }
+.google-btn-custom {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border: 1px solid var(--light-gray);
+  border-radius: var(--radius-md);
+  background: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  color: #1e293b;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  box-sizing: border-box;
+}
+.google-btn-custom:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
 .auth-divider {
   text-align: center;
   position: relative;
@@ -535,12 +603,12 @@ body {
 .auth-form {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 11px;
 }
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 .form-group label {
   font-size: 14px;
@@ -548,7 +616,7 @@ body {
   color: var(--text-primary);
 }
 .form-input {
-  padding: 12px 16px;
+  padding: 10px 14px;
   border: 1px solid var(--light-gray);
   border-radius: var(--radius-md);
   font-size: 15px;
@@ -567,7 +635,7 @@ body {
 
 .auth-switch {
   text-align: center;
-  margin-top: 24px;
+  margin-top: 10px;
   font-size: 14px;
   color: var(--text-secondary);
 }
@@ -971,7 +1039,7 @@ body {
 /* ==================== EDITOR LAYOUT ==================== */
 .editor-layout {
   display: grid;
-  grid-template-columns: 380px 1fr;
+  grid-template-columns: 300px 1fr;
   gap: 0;
   height: 75vh;
   overflow: hidden;
@@ -1478,25 +1546,39 @@ body {
   }
 }
 
+@media (max-width: 900px) {
+  .hero-h1 { font-size: 58px; }
+  .hero-h1-main { font-size: 40px; }
+  .pricing-section-h1 { font-size: 32px; white-space: normal; }
+}
+
 @media (max-width: 768px) {
   .landing-header {
-    padding: 16px 24px;
-    flex-direction: column;
-    gap: 16px;
+    padding: 12px 16px;
   }
   .header-left {
-    flex-direction: column;
-    gap: 16px;
+    gap: 8px;
   }
   .nav {
     flex-wrap: wrap;
     justify-content: center;
   }
   .hero {
-    padding: 40px 20px 32px;
+    padding: 40px 16px 32px;
   }
   .hero-h1 {
-    font-size: 46px;
+    font-size: 56px;
+    color: #0f172a;
+    font-weight: 800;
+  }
+  .hero-h1-main {
+    font-size: 36px;
+  }
+  .hero-tagline {
+    font-size: 16px;
+  }
+  .hero-free-copy {
+    font-size: 13px;
   }
   .hero-trust {
     flex-direction: column;
@@ -1555,6 +1637,124 @@ body {
   }
   .upgrade-modal {
     max-width: 100%;
+  }
+  .modal-overlay {
+    padding: 8px;
+  }
+  .modal-content {
+    max-height: 95vh;
+    border-radius: 16px;
+  }
+  .udrop-panel {
+    max-width: calc(100vw - 32px);
+  }
+  .user-menu {
+    gap: 6px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-h1 {
+    font-size: 48px;
+    color: #0f172a;
+    font-weight: 800;
+  }
+  .hero-h1-main {
+    font-size: 30px;
+  }
+  .pricing-section-h1 {
+    font-size: 24px;
+    white-space: normal;
+  }
+  .hero-tagline {
+    font-size: 15px;
+  }
+  .hero-free-copy {
+    font-size: 13px;
+  }
+  .hero-p {
+    font-size: 16px;
+    margin-bottom: 24px;
+  }
+  .btn-primary {
+    padding: 14px 28px;
+    font-size: 16px;
+  }
+  .header-btn-login {
+    padding: 7px 14px !important;
+    font-size: 13px !important;
+    white-space: nowrap;
+  }
+  .header-btn-signup {
+    padding: 8px 16px !important;
+    font-size: 13px !important;
+    white-space: nowrap;
+  }
+  /* Auth modal: compact spacing on small screens */
+  .auth-modal .modal-inner {
+    padding: 36px 14px 16px;
+  }
+  .auth-header {
+    margin-bottom: 12px;
+  }
+  .auth-google {
+    margin-bottom: 10px;
+  }
+  .auth-form {
+    gap: 11px;
+  }
+  .auth-switch {
+    margin-top: 10px;
+  }
+  .acord-disclaimer-box {
+    padding: 10px 12px;
+    margin: 4px 0;
+    font-size: 12px;
+  }
+  /* Hero eyebrow label: reduce letter-spacing on small screens */
+  .hero-eyebrow-label {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+  }
+}
+
+@media (max-width: 380px) {
+  .landing-header {
+    padding: 10px 12px;
+  }
+  .header-btn-login {
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+    white-space: nowrap;
+  }
+  .header-btn-signup {
+    padding: 6px 12px !important;
+    font-size: 12px !important;
+    white-space: nowrap;
+  }
+  .user-menu {
+    gap: 4px !important;
+  }
+  /* iPhone SE and similarly small screens: extra compact auth modal */
+  .auth-modal .modal-inner {
+    padding: 30px 12px 12px;
+  }
+  .auth-header {
+    margin-bottom: 10px;
+  }
+  .auth-google {
+    margin-bottom: 8px;
+  }
+  .auth-form {
+    gap: 9px;
+  }
+  .auth-switch {
+    margin-top: 8px;
+  }
+  .acord-disclaimer-box {
+    padding: 8px 10px;
+    margin: 3px 0;
+    font-size: 11px;
   }
 }
 
@@ -1918,9 +2118,9 @@ body {
 .acord-notice-close { background: none; border: none; cursor: pointer; color: #92400e; font-size: 14px; }
 .acord-disclaimer-box {
   background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
-  padding: 14px; margin: 12px 0; font-size: 13px;
+  padding: 10px 12px; margin: 6px 0; font-size: 12px;
 }
-.acord-disclaimer-label { display: flex; gap: 10px; cursor: pointer; line-height: 1.5; }
+.acord-disclaimer-label { display: flex; gap: 10px; cursor: pointer; line-height: 1.4; }
 .acord-disclaimer-checkbox { margin-top: 3px; flex-shrink: 0; }
 .acord-license-modal { max-width: 520px; }
 .acord-license-icon { font-size: 36px; text-align: center; margin-bottom: 8px; }
@@ -1933,6 +2133,8 @@ body {
 .btn-stub { opacity: 0.4; cursor: not-allowed; background: #e5e7eb; border: none; border-radius: 4px; padding: 6px 12px; font-size: 12px; }
 .field-required { color: #ef4444; }
 .field-warning { font-size: 11px; color: #ef4444; margin-top: 4px; display: block; }
+.field-error-msg { display: block; font-size: 12px; color: #ef4444; margin-top: 4px; }
+.input-field-error { border-color: #ef4444 !important; }
 
 
 
@@ -1980,7 +2182,88 @@ body {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
+
+/* ── Collapsible sidebar ── */
+.editor-layout.sidebar-closed {
+  grid-template-columns: 1fr;
+}
+.editor-layout.sidebar-closed .editor-sidebar {
+  display: none;
+}
+
+/* On desktop: sidebar is always visible, hide toggle buttons */
+@media (min-width: 769px) {
+  .editor-layout.sidebar-closed {
+    grid-template-columns: 300px 1fr;
+  }
+  .editor-layout.sidebar-closed .editor-sidebar {
+    display: block !important;
+  }
+  .sidebar-open-btn,
+  .sidebar-close-btn {
+    display: none !important;
+  }
+}
+.sidebar-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 18px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 6px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.sidebar-close-btn:hover {
+  color: #E61B84;
+  background: rgba(230,0,122,0.08);
+}
+.sidebar-open-btn {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 72px;
+  background: #E61B84;
+  border: none;
+  border-radius: 0 10px 10px 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #fff;
+  z-index: 10;
+  box-shadow: 3px 0 12px rgba(230,27,132,0.35);
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.sidebar-open-btn:hover {
+  background: #C0157A;
+  box-shadow: 3px 0 18px rgba(230,27,132,0.5);
+}
+.sidebar-open-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #fff;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1.1;
+  pointer-events: none;
+}
+
 /* ── SQS compact overrides inside sidebar ── */
 .editor-sidebar .sqs-display {
   padding: 14px;
@@ -2247,6 +2530,21 @@ body {
   box-shadow: 0 8px 24px rgba(230,0,122,0.4);
 }
 
+@media (max-width: 640px) {
+  .db-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .db-header .db-header-title {
+    white-space: nowrap;
+  }
+  .db-header .db-primary-btn {
+    width: 100%;
+    text-align: center;
+    white-space: nowrap;
+  }
+}
+
 /* ── Empty state ── */
 .db-empty-state {
   text-align: center;
@@ -2405,18 +2703,30 @@ body {
 /* Hero */
 .mkt-hero {
   text-align: center;
-  padding: 48px 20px 16px;
-  max-width: 860px;
+  padding: 72px 20px 40px;
+  max-width: 900px;
   margin: 0 auto;
 }
 .pricing-section-h1 {
-  font-size: 42px;
-  font-weight: 700;
-  color: #2d2d2d;
+  font-size: 32px;
+  font-weight: 800;
+  color: #1a1a1a;
   letter-spacing: -0.02em;
   line-height: 1.15;
-  margin-bottom: 32px;
-  white-space: nowrap;
+  margin-bottom: 36px;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+/* Responsive overrides must live AFTER the base rule to win the cascade */
+@media (max-width: 900px) {
+  .pricing-section-h1 { font-size: 32px; }
+}
+@media (max-width: 768px) {
+  .pricing-section-h1 { font-size: 28px; margin-bottom: 24px; }
+}
+@media (max-width: 480px) {
+  .pricing-section-h1 { font-size: 22px; margin-bottom: 20px; }
 }
 .mkt-hero-compact {
   padding-bottom: 48px;
@@ -3776,4 +4086,303 @@ body {
   .lite-stops-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── Mobile editor: full-width form viewer ── */
+@media (max-width: 768px) {
+  .editor-layout-fullpage {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .editor-layout.editor-layout-fullpage {
+    grid-template-columns: 1fr;
+    height: auto;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* On mobile the sidebar overlays the form instead of pushing it */
+  .editor-layout {
+    display: flex !important;
+    flex-direction: row;
+    position: relative;
+  }
+
+  .editor-sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    width: 85vw;
+    max-width: 320px;
+    height: 100%;
+    z-index: 200;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.18);
+    overflow-y: auto;
+  }
+
+  .editor-layout.sidebar-closed .editor-sidebar {
+    display: none;
+  }
+
+  .editor-main {
+    flex: 1;
+    min-height: 0;
+    width: 100% !important;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* PDF viewer fills editor-main on mobile */
+  .editor-main > div {
+    flex: 1;
+    min-height: 0;
+    height: 100%;
+  }
+
+  /* sidebar-open-btn visible and accessible on mobile */
+  .sidebar-open-btn {
+    width: 32px;
+    height: 88px;
+    font-size: 20px;
+    z-index: 100;
+  }
+
+  /* FIX 2: Bigger, clearer X close button inside SQS sidebar on mobile */
+  .sidebar-close-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+    border-radius: 8px;
+    color: #475569;
+    background: rgba(100,116,139,0.08);
+  }
+  .sidebar-close-btn:hover,
+  .sidebar-close-btn:active {
+    color: #E61B84;
+    background: rgba(230,0,122,0.12);
+  }
+
+  /* FIX 1: PDF viewer toolbar — stack into two rows, no overflow on mobile */
+  .pdfviewer-toolbar-top {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 6px !important;
+    padding: 8px 10px !important;
+  }
+
+  /* Form name row — full width, allow name to breathe */
+  .pdfviewer-toolbar-top > div:first-child {
+    width: 100%;
+    min-width: 0;
+  }
+
+  /* Action buttons — full width row, wrap freely */
+  .pdfviewer-toolbar-actions {
+    width: 100%;
+    flex-wrap: wrap !important;
+    gap: 5px !important;
+    justify-content: flex-start !important;
+  }
+
+  /* Slightly smaller buttons on mobile so they all fit */
+  .pdfviewer-toolbar-actions button {
+    font-size: 11px !important;
+    padding: 5px 8px !important;
+  }
+
+  /* Edit-mode hint banner — tighter on mobile */
+  .pdfviewer-edit-hint {
+    padding: 4px 10px !important;
+    gap: 8px !important;
+    row-gap: 4px !important;
+  }
+
+  /* Canvas container — full width, horizontal scroll if PDF wider than screen */
+  .pdfviewer-canvas-container {
+    padding: 8px !important;
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    justify-content: flex-start !important;
+    align-items: flex-start !important;
+  }
+
+  /* Canvas wrapper — allow wider than viewport so user can scroll horizontally */
+  .pdfviewer-canvas-wrapper {
+    max-width: none !important;
+  }
+}
+
+/* ==================== ACCOUNT SETTINGS & CONTACT MODALS ==================== */
+
+.acct-modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2000;
+  padding: 16px;
+}
+
+.acct-modal {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.18);
+  width: 100%; max-width: 480px;
+  max-height: 90vh; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+
+.acct-modal--sm {
+  max-width: 420px;
+}
+
+.acct-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 24px 0;
+}
+
+.acct-modal-title {
+  font-size: 18px; font-weight: 800; color: #0f172a; line-height: 1.2;
+}
+
+.acct-modal-close {
+  background: none; border: none; cursor: pointer;
+  color: #94a3b8; padding: 4px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+.acct-modal-close:hover { color: #0f172a; background: #f1f5f9; }
+
+.acct-modal-body {
+  padding: 20px 24px 24px;
+  display: flex; flex-direction: column; gap: 0;
+}
+
+.acct-section { padding-bottom: 4px; }
+
+.acct-section-title {
+  font-size: 13px; font-weight: 700; color: #64748b;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin-bottom: 14px;
+}
+
+.acct-divider {
+  height: 1px; background: #f1f5f9; margin: 20px 0;
+}
+
+.acct-form {
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+.acct-field {
+  display: flex; flex-direction: column; gap: 5px;
+}
+
+.acct-label {
+  font-size: 12.5px; font-weight: 700; color: #475569;
+}
+
+.acct-input {
+  width: 100%; padding: 9px 12px;
+  border: 1.5px solid #e2e8f0; border-radius: 8px;
+  font-size: 14px; color: #0f172a; background: #fff;
+  outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: inherit;
+}
+.acct-input:focus { border-color: #E61B84; box-shadow: 0 0 0 3px rgba(230,27,132,0.1); }
+
+.acct-input--readonly {
+  background: #f8fafc; color: #64748b; cursor: default;
+}
+.acct-input--readonly:focus { border-color: #e2e8f0; box-shadow: none; }
+
+.acct-textarea {
+  width: 100%; padding: 9px 12px;
+  border: 1.5px solid #e2e8f0; border-radius: 8px;
+  font-size: 14px; color: #0f172a; background: #fff;
+  outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+  font-family: inherit; resize: vertical; min-height: 100px;
+}
+.acct-textarea:focus { border-color: #E61B84; box-shadow: 0 0 0 3px rgba(230,27,132,0.1); }
+
+.acct-field-hint {
+  font-size: 11.5px; color: #94a3b8; font-weight: 500;
+}
+
+.acct-error {
+  font-size: 13px; color: #dc2626; font-weight: 600;
+  background: #fff1f2; border-radius: 7px; padding: 8px 12px;
+}
+
+.acct-success {
+  font-size: 13px; color: #15803d; font-weight: 600;
+  background: #f0fdf4; border-radius: 7px; padding: 8px 12px;
+}
+
+.acct-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 18px; border-radius: 9px;
+  font-size: 13.5px; font-weight: 700; cursor: pointer;
+  border: none; transition: background 0.15s, opacity 0.15s;
+  width: 100%;
+}
+.acct-btn:disabled { opacity: 0.6; cursor: wait; }
+
+.acct-btn--primary { background: #0f172a; color: #fff; }
+.acct-btn--primary:hover:not(:disabled) { background: #1e293b; }
+
+.acct-btn--secondary {
+  background: #fff; color: #0f172a;
+  border: 1.5px solid #e2e8f0;
+}
+.acct-btn--secondary:hover:not(:disabled) { background: #f8fafc; }
+
+.acct-spinner {
+  width: 13px; height: 13px;
+  border: 2px solid currentColor; border-top-color: transparent;
+  border-radius: 50%; display: inline-block;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Plan row in Account Settings */
+.acct-plan-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; background: #f8fafc;
+  border: 1px solid #e2e8f0; border-radius: 10px;
+  margin-bottom: 12px;
+}
+.acct-plan-name {
+  font-size: 14px; font-weight: 700; color: #0f172a;
+}
+.acct-plan-cycle {
+  font-size: 12px; color: #64748b; margin-top: 2px;
+}
+.acct-plan-badge {
+  font-size: 11px; font-weight: 700; padding: 3px 10px;
+  border-radius: 20px;
+}
+.acct-plan-badge--paid { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.acct-plan-badge--free { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+
+/* Contact sent state */
+.contact-sent {
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center; padding: 16px 0;
+}
+.contact-sent-icon {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: #f0fdf4; display: flex; align-items: center; justify-content: center;
+  margin-bottom: 16px;
+}
+.contact-sent-title {
+  font-size: 18px; font-weight: 800; color: #0f172a; margin-bottom: 8px;
+}
+.contact-sent-body {
+  font-size: 14px; color: #64748b; line-height: 1.5;
+}
 }

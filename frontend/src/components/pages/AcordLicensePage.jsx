@@ -47,7 +47,7 @@ export default function AcordLicensePage() {
           <span className="mkt-hero-accent">Not a product feature.</span>
         </h1>
         <p className="mkt-hero-p">
-          Using ACORD forms requires a valid organizational license from ACORD directly. This is a contractual requirement that exists independently of your Acordly subscription.
+          Using ACORD forms requires a valid organizational license from ACORD directly. This is a contractual requirement that exists independently of your Primble subscription.
         </p>
 
         {/* Warning notice */}
@@ -58,7 +58,7 @@ export default function AcordLicensePage() {
             </svg>
           </div>
           <p className="mkt-license-notice-text">
-            <strong>Acordly does not sell ACORD licenses.</strong> The license must be obtained directly from ACORD by your organization before you can generate or download ACORD-branded forms.
+            <strong>Primble does not sell ACORD licenses.</strong> The license must be obtained directly from ACORD by your organization before you can generate or download ACORD-branded forms.
           </p>
         </div>
       </section>
@@ -87,7 +87,7 @@ export default function AcordLicensePage() {
                   </div>
                   <div>
                     <div className="mkt-license-point-title">Using, reproducing, or distributing requires a license</div>
-                    <div className="mkt-license-point-desc">Populating, generating, or submitting ACORD forms - including through software like Acordly - requires your organization to hold a valid license agreement with ACORD. This is true regardless of the tool you use to fill the forms.</div>
+                    <div className="mkt-license-point-desc">Populating, generating, or submitting ACORD forms - including through software like Primble - requires your organization to hold a valid license agreement with ACORD. This is true regardless of the tool you use to fill the forms.</div>
                   </div>
                 </div>
                 <div className="mkt-license-point">
@@ -95,8 +95,8 @@ export default function AcordLicensePage() {
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                   </div>
                   <div>
-                    <div className="mkt-license-point-title">Separate from your Acordly subscription</div>
-                    <div className="mkt-license-point-desc">The ACORD organizational license is a contractual agreement between your organization and ACORD. It is entirely separate from your Acordly account or subscription tier.</div>
+                    <div className="mkt-license-point-title">Separate from your Primble subscription</div>
+                    <div className="mkt-license-point-desc">The ACORD organizational license is a contractual agreement between your organization and ACORD. It is entirely separate from your Primble account or subscription tier.</div>
                   </div>
                 </div>
               </div>

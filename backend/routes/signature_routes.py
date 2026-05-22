@@ -48,7 +48,23 @@ async def get_signature(current_user: dict = Depends(get_current_user)):
             current_user["id"],
         )
     sig = dict(row).get("signature_data") if row else None
-    return {"success": True, "signature_data": decrypt_field(sig)}
+    try:
+        decrypted = decrypt_field(sig)
+    except Exception as _exc:
+        _sig_prefix = sig[:10] if sig else "None"
+        _has_enc = sig.startswith("enc:") if sig else False
+        logger.error(
+            "get_signature: decrypt_field failed for user=%s — "
+            "error=%s  sig_prefix=%r  has_enc_prefix=%s  "
+            "FIELD_ENCRYPTION_KEY set=%s",
+            current_user["id"],
+            type(_exc).__name__,
+            _sig_prefix,
+            _has_enc,
+            bool(os.getenv("FIELD_ENCRYPTION_KEY")),
+        )
+        decrypted = None
+    return {"success": True, "signature_data": decrypted}
 
 
 @router.post("/api/apply-signature/{session_id}/{form_id}")
@@ -96,9 +112,14 @@ async def apply_signature(
             field_data[field_name] = ""
             confidence[field_name] = "filled"
 
+    # Use the already-filled PDF bytes so values are never lost on re-generation
+    existing_bytes = r.get("pdf_bytes")
+    if existing_bytes is not None and not isinstance(existing_bytes, bytes):
+        existing_bytes = bytes(existing_bytes)
+
     try:
         signed_pdf = await asyncio.get_event_loop().run_in_executor(
-            None, inject_signature_into_pdf, tpl, field_data, confidence, sig
+            None, inject_signature_into_pdf, tpl, field_data, confidence, sig, existing_bytes
         )
     except Exception as ex:
         logger.error(f"apply-signature error form={form_id}: {ex}", exc_info=True)

@@ -25,4 +25,5 @@ async def get_job_status(
         "status": job["status"],
         "progress_message": job.get("progress_message"),
         "error": job.get("error_message"),
+        "result": job.get("result"),
     })

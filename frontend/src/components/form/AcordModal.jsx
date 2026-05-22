@@ -28,10 +28,10 @@ const PACKAGE_PILLAR_LABELS = {
 };
 
 const REC_TYPE_STYLE = {
-  hard_stop:    { bg: "#fdf2f8", border: "#f9a8d4", color: "#000", icon: "🚫" },
-  soft_warning: { bg: "#fdf2f8", border: "#f9a8d4", color: "#000", icon: "⚠️" },
-  missing_field:{ bg: "#fdf2f8", border: "#f9a8d4", color: "#000", icon: "📋" },
-  suggestion:   { bg: "#fdf2f8", border: "#f9a8d4", color: "#000", icon: "💡" },
+  hard_stop:    { bg: "#fdf2f8", border: "#f9a8d4", color: "#000" },
+  soft_warning: { bg: "#fdf2f8", border: "#f9a8d4", color: "#000" },
+  missing_field:{ bg: "#fdf2f8", border: "#f9a8d4", color: "#000" },
+  suggestion:   { bg: "#fdf2f8", border: "#f9a8d4", color: "#000" },
 };
 
 const FALLBACK_CHAT_REPLY = "I'm not sure about that. Please contact your agent or broker for assistance.";
@@ -41,7 +41,7 @@ function DeleteConfirmModal({ onConfirm, onCancel }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.7)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ background: "#fff", borderRadius: 16, padding: "32px 28px", maxWidth: 400, width: "100%", boxShadow: "0 24px 60px rgba(0,0,0,0.25)", animation: "slideUp 0.2s ease-out" }}>
-        <div style={{ width: 52, height: 52, borderRadius: "50%", background: "#fef2f2", border: "2px solid #fecaca", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, margin: "0 auto 18px" }}>🗑️</div>
+        <div style={{ width: 52, height: 52, borderRadius: "50%", background: "#fef2f2", border: "2px solid #fecaca", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, margin: "0 auto 18px" }}></div>
         <h3 style={{ textAlign: "center", fontSize: 18, fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>Delete Session?</h3>
         <p style={{ textAlign: "center", fontSize: 14, color: "#64748b", lineHeight: 1.6, marginBottom: 24 }}>This submission package will be permanently deleted and cannot be recovered.</p>
         <div style={{ display: "flex", gap: 10 }}>
@@ -120,7 +120,7 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
               onMouseEnter={e => { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.color = "#fff"; }}
               onMouseLeave={e => { e.currentTarget.style.background = "rgba(230,0,122,0.08)"; e.currentTarget.style.color = "#E61B84"; }}>✕</button>
           </div>
-          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 16, color: "#dc2626", fontSize: 13 }}>⚠️ {error}</div>}
+          {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Client Email <span style={{ color: "#E61B84" }}>*</span></label>
@@ -233,7 +233,6 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss }) {
   return (
     <div style={{ background: st.bg, border: `1px solid ${st.border}`, borderRadius: 8, padding: "8px 10px", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
-        <span style={{ fontSize: 12, flexShrink: 0, marginTop: 1 }}>{st.icon}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{msg}</div>
           {impact > 0 && <div style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>+{impact} pts if fixed</div>}
@@ -274,18 +273,15 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ background: "#fff", borderRadius: 16, padding: "28px 28px 24px", maxWidth: 520, width: "100%", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column", gap: 0, maxHeight: "88vh", overflow: "hidden" }}>
         <div style={{ flexShrink: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <div style={{ width: 40, height: 40, borderRadius: "50%", background: openRecs.length > 0 ? "#fef3c7" : "#f0fdf4", border: `2px solid ${openRecs.length > 0 ? "#fde68a" : "#bbf7d0"}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>{openRecs.length > 0 ? "⚠️" : "✅"}</div>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
-              <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length > 0 ? `${openRecs.length} item${openRecs.length !== 1 ? "s" : ""} flagged — review before downloading` : "All clear — review the SQS summary below"}</div>
-            </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
+            <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length > 0 ? `${openRecs.length} item${openRecs.length !== 1 ? "s" : ""} flagged — review before downloading` : "All clear — review the SQS summary below"}</div>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
           {hardRecs.length > 0 && (
             <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>🚫 Hard Stops ({hardRecs.length})</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>Hard Stops ({hardRecs.length})</div>
               {hardRecs.map((r, i) => (
                 <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0" }}>• {r.message}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (–{r.score_impact} pts)</span> : ""}</div>
               ))}
@@ -293,7 +289,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
           )}
           {softRecs.length > 0 && (
             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>⚠️ Open Recommendations ({softRecs.length})</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>Open Recommendations ({softRecs.length})</div>
               {softRecs.map((r, i) => (
                 <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0" }}>• {r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> (+{r.score_impact} pts if fixed)</span> : ""}</div>
               ))}
@@ -301,7 +297,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
           )}
           {narrative && (
             <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "16px 18px", marginTop: softRecs.length > 0 || hardRecs.length > 0 ? 10 : 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 10 }}>📊 SQS Analysis Summary</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 10 }}>SQS Analysis Summary</div>
               <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.75, margin: 0 }}>{narrative.replace(/\n+/g, " ").trim()}</p>
             </div>
           )}
@@ -401,10 +397,10 @@ function DashboardStep({ token, onResume, onNewPackage }) {
   const globalAvg  = stats.avg_sqs_score;
 
   const tips = [
-    "Upload source documents as PDFs — Acordly pre-fills ACORD fields automatically.",
-    "Generate multiple ACORD forms from a single submission in one pass.",
-    "Add e-signatures directly inside the form editor before downloading.",
-    "Download completed packages as a single merged PDF.",
+    "Upload client documents, applications, loss runs, schedules, or other submission materials.",
+    "Let Primble extract key data and check the package for missing or inconsistent information.",
+    "Resolve quality findings with guided client follow-up before finalizing the package.",
+    "Download underwriting-ready forms, supporting materials, and/or a submission brief once the package is complete.",
   ];
 
   return (
@@ -443,9 +439,9 @@ function DashboardStep({ token, onResume, onNewPackage }) {
             <div className="db-empty-state">
               <div className="db-empty-topbar" />
               <p className="db-empty-title">No packages yet</p>
-              <p className="db-empty-desc">Upload your first submission documents — Acordly will extract data and fill ACORD forms automatically.</p>
+              <p className="db-empty-desc">Upload your first submission package to extract key data, check submission quality, and prepare underwriting-ready forms and materials.</p>
               <div className="db-empty-steps">
-                {[["Upload docs", "AI extracts data", "Download forms"]].flat().map((label, i, arr) => (
+                {[["Upload docs", "Check quality", "Fix issues", "Generate forms"]].flat().map((label, i, arr) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <div className="db-empty-step-pill">{label}</div>
                     {i < arr.length - 1 && <span className="db-empty-step-arrow">→</span>}
@@ -573,11 +569,14 @@ export default function AcordModal({
   fullPage = false,
 }) {
   const dropRef = useRef(null);
+  const fileInputRef = useRef(null);
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [processingStage, setProcessingStage] = useState("");
   const [step, setStep] = useState(resumeSessionId ? "resuming" : "dashboard");
+  const [showUploadOverlay, setShowUploadOverlay] = useState(false);
+  const [showSlowUploadMsg, setShowSlowUploadMsg] = useState(false);
 
   useEffect(() => {
     if (step === "editor") {
@@ -589,11 +588,19 @@ export default function AcordModal({
     return () => { document.body.style.overflow = ""; };
   }, [step]);
 
+  useEffect(() => {
+    if (!showUploadOverlay) { setShowSlowUploadMsg(false); return; }
+    const t = setTimeout(() => setShowSlowUploadMsg(true), 5000);
+    return () => clearTimeout(t);
+  }, [showUploadOverlay]);
+
   const [error, setError] = useState(null);
   const [sessionId, setSessionId] = useState(resumeSessionId || null);
   const [docSummary, setDocSummary] = useState([]);
   const [flags, setFlags] = useState({});
   const [hardStops, setHardStops] = useState([]);
+  const [canProceedWithWarning, setCanProceedWithWarning] = useState(false);
+  const [warningStops, setWarningStops] = useState([]);
   const [softStops, setSoftStops] = useState([]);
   const [tier2Score, setTier2Score] = useState(null);
   const [tier2Missing, setTier2Missing] = useState([]);
@@ -608,7 +615,6 @@ export default function AcordModal({
   const [pkgStatusMsg, setPkgStatusMsg] = useState("");
   const [pkgStatusType, setPkgStatusType] = useState("");
   const [signedForms, setSignedForms] = useState(new Set());
-  const [showUploadOverlay, setShowUploadOverlay] = useState(false);
   const [showGenerateOverlay, setShowGenerateOverlay] = useState(false);
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
   const [showAcordModal, setShowAcordModal] = useState(false);
@@ -633,6 +639,7 @@ export default function AcordModal({
   const [liteSqsData, setLiteSqsData] = useState(null);
   const [liteGenerating, setLiteGenerating] = useState(false);
   const [liteCoverLoading, setLiteCoverLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 900);
 
   // ── SQS enhancement state ──────────────────────────────────────────────────
   const [packageSqs, setPackageSqs] = useState(null);
@@ -670,7 +677,10 @@ export default function AcordModal({
     fetch(`${API_BASE}/api/session/${resumeSessionId}`, { credentials: "include", signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
+        const isEssentials = user?.subscription_tier === "essentials";
+        if (isEssentials && data?.session_id) {
+          setSessionId(resumeSessionId); setStep("lite");
+        } else if (!isEssentials && data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
           setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
@@ -735,6 +745,7 @@ export default function AcordModal({
   const resetToUpload = () => {
     setFiles([]); setSessionId(null); setStep("upload"); setError(null);
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]);
+    setCanProceedWithWarning(false); setWarningStops([]);
     setTier2Score(null); setTier2Missing([]); setRecommendations([]);
     setAllAvailableForms([]); setCheckedFormIds(new Set());
     setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]);
@@ -791,7 +802,13 @@ export default function AcordModal({
 
   const triggerEnterprisePopup = (buttonEl) => {
     const rect = buttonEl.getBoundingClientRect();
-    setEnterprisePopupPos({ top: rect.top, left: rect.right + 12 });
+    const popupWidth = 210;
+    const spaceRight = window.innerWidth - rect.right - 12;
+    const left = spaceRight >= popupWidth
+      ? rect.right + 12
+      : Math.max(8, rect.left - popupWidth - 4);
+    const top = Math.min(rect.top, window.innerHeight - 110);
+    setEnterprisePopupPos({ top, left });
     setShowEnterprisePopup(true);
   };
 
@@ -867,7 +884,7 @@ export default function AcordModal({
       if (!res.ok) { setError("Download failed"); return; }
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
       const blob = await res.blob(); const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = "ACORD_Package_Acordly.zip";
+      const a = document.createElement("a"); a.href = url; a.download = "ACORD_Package_Primble.zip";
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       await refreshUser();
       if (pkgStatus) { setPkgStatusMsg(pkgMsg); setPkgStatusType(pkgStatus); setTimeout(() => setPkgStatusMsg(""), 12000); }
@@ -881,23 +898,169 @@ export default function AcordModal({
     if (res.ok) { const data = await res.json(); onUserUpdate(data); }
   };
 
+  // ── Walk-away workflow helpers ────────────────────────────────────────────
+  // Persist active job so we can resume polling after a page reload, and notify
+  // the user (browser notification + tab-title badge) when the job completes
+  // while the tab is hidden.
+  const _ACTIVE_JOB_KEY = "primble_active_job";
+  const _persistActiveJob = (jobId, kind) => {
+    try { localStorage.setItem(_ACTIVE_JOB_KEY, JSON.stringify({ jobId, kind, ts: Date.now() })); } catch {}
+  };
+  const _clearActiveJob = () => {
+    try { localStorage.removeItem(_ACTIVE_JOB_KEY); } catch {}
+  };
+  const _requestNotificationPermission = () => {
+    try {
+      if (typeof Notification !== "undefined" && Notification.permission === "default") {
+        Notification.requestPermission().catch(() => {});
+      }
+    } catch {}
+  };
+  const _setTitleBadge = (on) => {
+    try {
+      const base = document.title.replace(/^\(\d+\)\s*/, "");
+      document.title = on ? `(1) ${base}` : base;
+    } catch {}
+  };
+  const _notifyJobDone = (kind, ok) => {
+    const title = ok ? "Primble — Ready" : "Primble — Action needed";
+    const body = ok
+      ? (kind === "generate" ? "Your ACORD forms are ready to review." : "Your documents have finished processing.")
+      : "There was an issue with your submission. Please reopen to review.";
+    try {
+      if (typeof document !== "undefined" && document.hidden) _setTitleBadge(true);
+      if (typeof Notification !== "undefined" && Notification.permission === "granted" && document.hidden) {
+        // eslint-disable-next-line no-new
+        new Notification(title, { body, tag: "primble-job", silent: false });
+      }
+    } catch {}
+  };
+
+  // Clear title badge when user comes back to the tab
+  useEffect(() => {
+    const onVis = () => { if (!document.hidden) _setTitleBadge(false); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  // Poll /api/jobs/{jobId}/status until completed or failed. Throws on failure or timeout.
+  // iOS Safari aggressively drops fetch when the tab backgrounds or the
+  // cellular link blips. Treat transient network/5xx errors as "skip this
+  // tick" rather than aborting the whole flow — the backend job is still
+  // running. Only definitive errors (401/403/404, job=failed) terminate.
+  const _pollJobStatus = async (jobId, maxAttempts = 100, interval = 3000) => {
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 8;  // ~24s of network blips tolerated
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise(r => setTimeout(r, interval));
+      let res;
+      try {
+        res = await fetch(`${API_BASE}/api/jobs/${jobId}/status`, { credentials: "include" });
+      } catch (e) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) throw e;
+        continue;
+      }
+      if (res.status === 401 || res.status === 403) throw new Error("Session expired during processing. Please sign in again.");
+      if (res.status === 404) throw new Error("Job not found");
+      if (!res.ok) {
+        consecutiveErrors++;
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) throw new Error(`Job poll failed: ${res.status}`);
+        continue;
+      }
+      consecutiveErrors = 0;
+      const job = await res.json();
+      if (job.status === "completed") return job;
+      if (job.status === "failed") throw new Error(job.error || "Processing failed on the server");
+    }
+    throw new Error("Processing timed out. Please try again.");
+  };
+
+  // Resume polling for an active job left in localStorage after a page reload.
+  // Silent: doesn't show overlays — when the job finishes we notify via browser
+  // notification + tab-title badge so the user knows to come back.
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const raw = localStorage.getItem(_ACTIVE_JOB_KEY);
+      if (!raw) return;
+      const { jobId, kind, ts } = JSON.parse(raw) || {};
+      if (!jobId) { _clearActiveJob(); return; }
+      // Drop stale entries (>30 min old) — covers crashed/timed-out jobs
+      if (ts && (Date.now() - ts) > 30 * 60 * 1000) { _clearActiveJob(); return; }
+      (async () => {
+        try {
+          await _pollJobStatus(jobId);
+          if (cancelled) return;
+          _notifyJobDone(kind || "upload", true);
+        } catch {
+          if (cancelled) return;
+          _notifyJobDone(kind || "upload", false);
+        } finally {
+          if (!cancelled) _clearActiveJob();
+        }
+      })();
+    } catch {}
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line
+
   const handleUpload = async () => {
     if (!files.length) { setError("Select at least one file"); return; }
     setLoading(true); setError(null); setShowUploadOverlay(true);
     const fd = new FormData(); files.forEach(f => fd.append("files", f));
     try {
       const res = await fetch(`${API_BASE}/api/upload-declaration`, { method: "POST", credentials: "include", body: fd });
-      const data = await res.json();
-      if (res.status === 401) { setError("Session expired. Please sign in again."); setTimeout(() => { localStorage.removeItem("acordly_token"); window.location.reload(); }, 2000); return; }
-      if (res.status === 403) { if (data.upgrade_required) { onShowUpgrade(); return; } const msg = data.detail || data.message || "Access blocked."; if (msg.includes("suspended")) setError("Your account is suspended."); else if (msg.includes("archived")) setError("Account archived. Contact support."); else if (msg.includes("soft_locked") || msg.includes("locked")) setError("Account Disabled — please update billing."); else setError(msg); return; }
-      if (!data.success) { if (data.gate === "tier1_fail") { setHardStops(data.missing_fields || []); setStep("stopped"); } else setError(data.message || "Upload failed"); return; }
+      if (res.status === 401) { setError("Session expired. Please sign in again."); setTimeout(() => { try { localStorage.removeItem("acordly_tk"); sessionStorage.removeItem("acordly_tk"); } catch {} window.location.reload(); }, 2000); return; }
+      if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.upgrade_required) { onShowUpgrade(); return; } const msg = d.detail || d.message || "Access blocked."; if (msg.includes("suspended")) setError("Your account is suspended."); else if (msg.includes("archived")) setError("Account archived. Contact support."); else if (msg.includes("soft_locked") || msg.includes("locked")) setError("Account Disabled — please update billing."); else setError(msg); return; }
+      if (res.status === 429) { setError("Server busy — too many concurrent uploads. Please wait 30 seconds and try again."); return; }
+      if (res.status >= 500) { setError("Server error during upload. Please try again. If this persists, the file may be too large or complex."); return; }
+      let data;
+      if (res.status === 202) {
+        const queued = await res.json();
+        _persistActiveJob(queued.job_id, "upload");
+        _requestNotificationPermission();
+        let job;
+        try { job = await _pollJobStatus(queued.job_id); }
+        finally { _clearActiveJob(); }
+        if (document.hidden) _notifyJobDone("upload", true);
+        const sid = job.result?.session_id || queued.session_id;
+        const extRes = await fetch(`${API_BASE}/api/session/${sid}/extraction-result`, { credentials: "include" });
+        if (!extRes.ok) { setError("Upload processing failed. Please try again."); return; }
+        data = await extRes.json();
+      } else {
+        _requestNotificationPermission();
+        data = await res.json();
+      }
+      if (!data.success) {
+        // tier1_fail is no longer returned — backend now surfaces missing
+        // ACORD 125 fields as soft warnings on the recommendations / lite SQS
+        // screens. Keep a tolerant fallback in case an old backend responds.
+        if (data.gate === "tier1_fail") {
+          setSoftStops((data.missing_fields || []).map(m => `ACORD 125 minimum field missing: ${m}`));
+          setHardStops([]);
+          setRecommendations(data.recommendations || []);
+          setStep(user?.subscription_tier === "essentials" ? "lite" : "recommendations");
+          return;
+        }
+        setError(data.message || "Upload failed");
+        return;
+      }
+      if (document.hidden) _notifyJobDone("upload", true);
       setSessionId(data.session_id); setDocSummary(data.doc_summary || []); setFlags(data.flags || {});
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []);
+      setCanProceedWithWarning(!!data.can_proceed_with_warning);
+      setWarningStops(data.warning_stops || []);
       setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
       setRecommendations(data.recommendations || []); setAllAvailableForms(data.all_available_forms || []);
       setCheckedFormIds(new Set());
       setStep(user?.subscription_tier === "essentials" ? "lite" : "recommendations");
-    } catch (e) { setError("Upload failed: " + e.message); }
+    } catch (e) {
+      if (e.message === "Failed to fetch" || e.name === "TypeError") {
+        setError("Upload failed: could not reach the server. Check your connection, or the file may be too large. Please try again.");
+      } else {
+        setError("Upload failed: " + e.message);
+      }
+    }
     finally { setLoading(false); setShowUploadOverlay(false); }
   };
 
@@ -907,18 +1070,45 @@ export default function AcordModal({
     setLoading(true); setError(null); setShowGenerateOverlay(true);
     try {
       const res = await fetch(`${API_BASE}/api/select-forms-bulk`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, form_ids: ids }) });
-      const data = await res.json();
       if (res.status === 403) {
-        const msg = data.detail || data.message || "";
+        const d = await res.json().catch(() => ({}));
+        const msg = d.detail || d.message || "";
         if (msg.toLowerCase().includes("lite")) { setStep("lite"); return; }
         setError(msg || "Access blocked. Please update your billing."); return;
       }
+<<<<<<< HEAD
       if (!data.success) { setError(data.detail || data.message || "Form generation failed"); return; }
+=======
+      let data;
+      if (res.status === 202) {
+        const queued = await res.json();
+        _persistActiveJob(queued.job_id, "generate");
+        _requestNotificationPermission();
+        try { await _pollJobStatus(queued.job_id); }
+        finally { _clearActiveJob(); }
+        if (document.hidden) _notifyJobDone("generate", true);
+        const sessRes = await fetch(`${API_BASE}/api/session/${sessionId}`, { credentials: "include" });
+        if (!sessRes.ok) { setError("Form generation failed. Please try again."); return; }
+        const sessData = await sessRes.json();
+        data = { success: true, generated: sessData.generated_forms, form_ids: Object.keys(sessData.generated_forms || {}), cross_issues: sessData.cross_issues, package_sqs: null };
+      } else {
+        _requestNotificationPermission();
+        data = await res.json();
+      }
+      if (!data.success) { setError(data.detail || data.message || "Form generation failed"); return; }
+      if (document.hidden) _notifyJobDone("generate", true);
+>>>>>>> 72330da06fe13661cf0e2bd462e08300db8ea531
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
       if (data.package_sqs) setPackageSqs(data.package_sqs);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");
       const readyMap = {}; (data.form_ids || []).forEach(fid => { readyMap[fid] = false; }); setPdfLoading(readyMap);
-    } catch (e) { setError("Generation failed: " + e.message); }
+    } catch (e) {
+      if (e.message === "Failed to fetch" || e.name === "TypeError") {
+        setError("Generation failed: could not reach the server. Your documents are still loaded — click Generate again to retry.");
+      } else {
+        setError("Generation failed: " + e.message + " — click Generate again to retry.");
+      }
+    }
     finally { setLoading(false); setShowGenerateOverlay(false); }
   };
 
@@ -1003,6 +1193,7 @@ export default function AcordModal({
       const openRecs = recsData?.open_recommendations || [];
       const narrativeData = narrativeRes.status === "fulfilled" && narrativeRes.value.ok ? await narrativeRes.value.json() : null;
       if (narrativeData?.narrative) setSqsNarrative(narrativeData.narrative);
+      if (openRecs.length === 0) { downloadFn(); return; }
       setPreflightRecs(openRecs);
       setPreflightOverrideReason("");
       setPreflightCallback(() => downloadFn);
@@ -1027,16 +1218,17 @@ export default function AcordModal({
   const handleDownloadAll = () => gatedDownload(() => _runPreflightThenDownload(() => _doDownloadAll()));
 
   const handleLiteCoverSheet = async () => {
-    setLiteCoverLoading(true);
+    setLiteCoverLoading(true); setShowDownloadOverlay(true);
     try {
       const res = await fetch(`${API_BASE}/api/lite/cover-sheet/${sessionId}`, { credentials: "include" });
+      if (res.status === 403) { onShowUpgrade(); return; }
       if (!res.ok) { setError("Failed to generate cover sheet."); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = "Acordly_SQS_Cover_Sheet.pdf";
+      const a = document.createElement("a"); a.href = url; a.download = "Primble_SQS_Cover_Sheet.pdf";
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     } catch { setError("Download failed. Please try again."); }
-    finally { setLiteCoverLoading(false); }
+    finally { setLiteCoverLoading(false); setShowDownloadOverlay(false); }
   };
 
   return (
@@ -1089,7 +1281,7 @@ export default function AcordModal({
         <div className="modal-content acord-license-modal" onClick={e => e.stopPropagation()}>
           <button className="modal-close" onClick={() => { setShowAcordModal(false); setAcordLicenseChecked(false); }}>✕</button>
           <div className="modal-inner">
-            <div className="acord-license-icon">⚖️</div>
+            <div className="acord-license-icon"></div>
             <h2 className="acord-license-title">ACORD® License Confirmation</h2>
             <div className="acord-license-body">
               <p>ACORD® Forms are copyrighted material owned by ACORD Corporation and are licensed, not sold. By continuing, you confirm that you or your organization maintain a valid ACORD license permitting the use of these forms.</p>
@@ -1104,9 +1296,9 @@ export default function AcordModal({
             </button>
             <div className="acord-stub-actions">
               <span className="acord-stub-label">Coming soon:</span>
-              <button className="btn-stub" disabled>✉ Email</button>
-              <button className="btn-stub" disabled>🔗 Share</button>
-              <button className="btn-stub" disabled>📠 Fax</button>
+              <button className="btn-stub" disabled>Email</button>
+              <button className="btn-stub" disabled>Share</button>
+              <button className="btn-stub" disabled>Fax</button>
             </div>
             <button className="btn btn-modal-secondary btn-block" onClick={() => { setShowAcordModal(false); setAcordLicenseChecked(false); }}>Cancel</button>
           </div>
@@ -1118,8 +1310,22 @@ export default function AcordModal({
   function renderContent() {
     return (
       <>
-        {showUploadOverlay && <ProcessStageOverlay stages={["Reading your documents…", "Extracting facts with AI…"]} advanceAfter={3500} />}
-        {showGenerateOverlay && <ProcessStageOverlay stages={[`Selecting ${checkedFormIds.size} form${checkedFormIds.size !== 1 ? "s" : ""}…`, "Generating with AI…"]} advanceAfter={3000} />}
+        {showUploadOverlay && (
+          <>
+            <ProcessStageOverlay stages={["Reading your documents…", "Extracting facts…"]} advanceAfter={3500} />
+            <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", zIndex: 100001, background: "rgba(253,242,248,0.96)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", color: "#9d174d", padding: "14px 32px", borderRadius: 16, fontSize: 13.5, fontStyle: "italic", fontWeight: 500, textAlign: "center", maxWidth: 480, boxShadow: "0 8px 32px rgba(230,27,132,0.15), 0 2px 8px rgba(0,0,0,0.06)", border: "1px solid rgba(230,27,132,0.22)", pointerEvents: "none", letterSpacing: "0.01em", lineHeight: 1.55 }}>
+              Quality takes time. But not as much time if you were still doing this manually.
+            </div>
+          </>
+        )}
+        {showGenerateOverlay && (
+          <>
+            <ProcessStageOverlay stages={[`Selecting ${checkedFormIds.size} form${checkedFormIds.size !== 1 ? "s" : ""}…`, "Generating form…"]} advanceAfter={3000} />
+            <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", zIndex: 100001, background: "rgba(253,242,248,0.96)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", color: "#9d174d", padding: "14px 32px", borderRadius: 16, fontSize: 13.5, fontStyle: "italic", fontWeight: 500, textAlign: "center", maxWidth: 480, boxShadow: "0 8px 32px rgba(230,27,132,0.15), 0 2px 8px rgba(0,0,0,0.06)", border: "1px solid rgba(230,27,132,0.22)", pointerEvents: "none", letterSpacing: "0.01em", lineHeight: 1.55 }}>
+              Quality takes time. But not as much time if you were still doing this manually.
+            </div>
+          </>
+        )}
         {showDownloadOverlay && <ProcessStageOverlay stages={["Preparing your form…", "Packaging for download…"]} advanceAfter={2000} />}
 
         {loading && !showUploadOverlay && !showGenerateOverlay && !showDownloadOverlay && step !== "editor" && (
@@ -1129,41 +1335,51 @@ export default function AcordModal({
         {user && user.subscription_tier === "free" && step !== "upload" && step !== "dashboard" && (
           <div className={`freemium-banner ${user.downloads_remaining === 0 ? "freemium-depleted" : ""}`}>
             {user.downloads_remaining > 0
-              ? <><span className="freemium-icon">🎉</span><span className="freemium-text">{user.downloads_remaining} free download{user.downloads_remaining > 1 ? "s" : ""} remaining</span></>
-              : <><span className="freemium-icon">🚀</span><span className="freemium-text">Free limit reached — upgrade to continue</span><button className="freemium-upgrade-btn" onClick={onShowUpgrade}>Upgrade Now</button></>}
+              ? <><span className="freemium-text">{user.downloads_remaining} free download{user.downloads_remaining > 1 ? "s" : ""} remaining</span></>
+              : <><span className="freemium-text">Free limit reached — upgrade to continue</span><button className="freemium-upgrade-btn" onClick={onShowUpgrade}>Upgrade Now</button></>}
           </div>
         )}
 
         {inOverage && (
           <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "9px 14px", fontSize: 12, color: "#92400e", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-            📋 <span>You're in overage territory — each additional download will be billed on your next invoice.</span>
+            <span>You're in overage territory — each additional download will be billed on your next invoice.</span>
           </div>
         )}
 
         {user && user.subscription_tier !== "free" && (() => {
           const ps = user.payment_status;
           if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived — <a href="mailto:support@primble.ai">Contact support</a> to restore.</div>;
-          if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">🚫 Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
-          if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">🔒 Account Disabled — Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
+          if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
+          if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">Account Disabled — Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
           if (ps === "failed") {
             const daysFailed = user.payment_failed_at ? Math.floor((Date.now() - new Date(user.payment_failed_at).getTime()) / 86400000) : 0;
-            if (daysFailed >= 7) return <div className="payment-status-banner payment-status-failed" style={{ background: "#fef2f2", borderColor: "#fca5a5", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap" }}>🚨 Payment still overdue — account will be restricted soon.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Update billing now</button></div>;
-            return <div className="payment-status-banner payment-status-failed">⚠️ Payment overdue —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
+            if (daysFailed >= 7) return <div className="payment-status-banner payment-status-failed" style={{ background: "#fef2f2", borderColor: "#fca5a5", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap" }}>Payment still overdue — account will be restricted soon.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Update billing now</button></div>;
+            return <div className="payment-status-banner payment-status-failed">Payment overdue —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
           }
           return null;
         })()}
 
         {pkgStatusMsg && (
           <div className="overage-inline-notice" style={{ background: pkgStatusType === "overage" ? "#fefce8" : "#f0fdf4", borderColor: pkgStatusType === "overage" ? "#fde047" : "#86efac", color: pkgStatusType === "overage" ? "#713f12" : "#14532d" }}>
-            <span>{pkgStatusType === "overage" ? "💳" : "📦"}</span>
+            <span></span>
             <span>{pkgStatusMsg}{" "}<button onClick={() => setPkgStatusMsg("")} style={{ background: "none", border: "none", cursor: "pointer", color: "inherit", fontWeight: 700, fontSize: 12, textDecoration: "underline" }}>Dismiss</button></span>
           </div>
         )}
 
         {error && (
-          <div className="alert alert-error">
-            <span>⚠️ {error}</span>
-            <button className="alert-close" onClick={() => setError(null)}>✕</button>
+          <div className="alert alert-error" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            <span style={{ flex: 1 }}>{error}</span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {step === "recommendations" && checkedFormIds.size > 0 && (
+                <button
+                  onClick={() => { setError(null); handleGenerateAll(); }}
+                  style={{ padding: "5px 14px", background: "#E61B84", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  Retry Generation
+                </button>
+              )}
+              <button className="alert-close" onClick={() => setError(null)}>✕</button>
+            </div>
           </div>
         )}
 
@@ -1224,7 +1440,7 @@ export default function AcordModal({
                         <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>{sqs.tier || "Submission Scored"}</div>
                         {rd && (
                           <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 12px", borderRadius: 20, border: `1px solid ${rs.border}`, background: rs.bg, color: rs.color, fontSize: 12, fontWeight: 700, marginBottom: 12 }}>
-                            {{ auto_quote: "✅", review: "🔍", full_review: "📋", hold: "🚫" }[rd]} {routingLabel[rd] || rd}
+                            {routingLabel[rd] || rd}
                           </div>
                         )}
                         {/* Breakdown pillars */}
@@ -1335,7 +1551,9 @@ export default function AcordModal({
           if (freeExhausted) {
             return (
               <div style={{ maxWidth: 560, margin: "0 auto", textAlign: "center", padding: "60px 24px" }}>
-                <div style={{ width: 72, height: 72, borderRadius: 20, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, margin: "0 auto 20px" }}>🚀</div>
+                <div style={{ width: 72, height: 72, borderRadius: 20, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="17 11 12 6 7 11"/><line x1="12" y1="6" x2="12" y2="18"/></svg>
+                </div>
                 <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", marginBottom: 10 }}>Free Limit Reached</h2>
                 <p style={{ fontSize: 15, color: "#64748b", marginBottom: 28, lineHeight: 1.6 }}>You've used all your free downloads. Upgrade to keep generating ACORD packages.</p>
                 <button onClick={onShowUpgrade}
@@ -1377,9 +1595,10 @@ export default function AcordModal({
                 padding: "8px",
               }}>
                 {/* Drop target */}
-                <input type="file" id="file-upload" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,application/pdf,application/zip,image/*" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ display: "none" }} />
-                <label htmlFor="file-upload"
+                <input ref={fileInputRef} type="file" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,application/pdf,application/zip,image/*" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }} />
+                <label
                   ref={dropRef}
+                  onClick={() => { if (!uploadBlocked) fileInputRef.current?.click(); }}
                   style={{
                     display: "block",
                     position: "relative",
@@ -1490,11 +1709,11 @@ export default function AcordModal({
         {step === "stopped" && (
           <div className="modal-step">
             <div className="stop-banner stop-hard">
-              <div className="stop-icon">🚫</div>
+              <div className="stop-icon"></div>
               <h2 className="stop-title">Submission Blocked — Minimum Fields Missing</h2>
               <p className="stop-subtitle">ACORD 125 cannot be generated. Missing:</p>
             </div>
-            <div className="stop-fields">{hardStops.map((f, i) => <div key={i} className="stop-field-item"><span className="stop-field-icon">✗</span><span>{f}</span></div>)}</div>
+            <div className="stop-fields">{hardStops.map((f, i) => <div key={i} className="stop-field-item"><span className="stop-field-icon"></span><span>{f}</span></div>)}</div>
             <p className="stop-advice">Upload documents that include these fields, then try again.</p>
             <button className="btn btn-modal-primary" onClick={resetToUpload}>← Upload New Documents</button>
           </div>
@@ -1510,10 +1729,9 @@ export default function AcordModal({
               <div className="doc-summary-title">DOCUMENTS PROCESSED</div>
               <div className="doc-chips">
                 {docSummary.map((d, i) => (
-                  <div key={i} className={`doc-chip ${d.is_primary ? "doc-primary" : ""}`}>
+                  <div key={i} className="doc-chip">
                     <span className="doc-type-badge">{d.doc_type.replace(/_/g, " ")}</span>
                     <span className="doc-filename">{d.filename}</span>
-                    {d.is_primary && <span className="doc-primary-tag">Primary</span>}
                   </div>
                 ))}
               </div>
@@ -1532,6 +1750,19 @@ export default function AcordModal({
                     {softStops.map((s, i) => <div key={i} className="stop-item stop-item-soft">- {s}</div>)}
                   </div>
                 )}
+              </div>
+            )}
+            {canProceedWithWarning && warningStops.length > 0 && (
+              <div className="stops-banner stops-warning" style={{ margin: "8px 0", padding: "12px 16px", background: "#fffbeb", border: "1px solid #f59e0b", borderRadius: 8 }}>
+                <div className="stops-title" style={{ color: "#b45309", fontWeight: 600, marginBottom: 6 }}>
+                  Incomplete Submission — Review Before Generating
+                </div>
+                {warningStops.map((s, i) => (
+                  <div key={i} className="stop-item" style={{ color: "#92400e", fontSize: 13, marginBottom: 2 }}>- {s}</div>
+                ))}
+                <div style={{ marginTop: 10, fontSize: 13, color: "#78350f" }}>
+                  This submission is missing information typically required for property coverage. Forms can still be generated, but the underwriter may request additional data.
+                </div>
               </div>
             )}
             {tier2Score !== null && (
@@ -1618,8 +1849,19 @@ export default function AcordModal({
         )}
 
         {step === "editor" && (
-          <div className="editor-layout editor-layout-fullpage">
+          <div className={`editor-layout editor-layout-fullpage${!sidebarOpen ? " sidebar-closed" : ""}`}>
             <div className="editor-sidebar" style={{ background: "#fff", borderRight: "1px solid #e2e8f0", padding: 0, gap: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid #f1f5f9", background: "#fafbfc" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, background: "rgba(230,27,132,0.1)" }}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                    </svg>
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", letterSpacing: "0.01em" }}>SQS &amp; Actions</span>
+                </div>
+                <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} title="Hide panel">✕</button>
+              </div>
               <div style={{ padding: "14px 14px 12px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Generated Forms</span>
@@ -1636,8 +1878,8 @@ export default function AcordModal({
                         onMouseLeave={e => { if (!isActive) e.currentTarget.style.background = "transparent"; }}>
                         <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? "#E61B84" : "#1e293b" }}>
                           {fd?.form_name || fid}
-                          {signedForms.has(fid) && <span style={{ color: "#10b981" }}> ✍</span>}
-                          {pdfLoading[fid] ? <span style={{ color: "#f59e0b" }}> ⏳</span> : <span style={{ color: "#10b981" }}> ✓</span>}
+                          {signedForms.has(fid) && <span style={{ color: "#10b981", fontSize: 10 }}> (signed)</span>}
+                          {pdfLoading[fid] ? <span style={{ color: "#f59e0b", fontSize: 10 }}> (loading)</span> : <span style={{ color: "#10b981", fontSize: 10 }}> (ready)</span>}
                         </div>
                         {sq && <div style={{ display: "flex", gap: 6, marginTop: 2 }}><span style={{ fontSize: 10, fontWeight: 700, color: gradeColor(sq.grade) }}>{sq.sqs_score} {sq.grade}</span><span style={{ fontSize: 10, color: "#94a3b8" }}>{sq.tier}</span></div>}
                       </div>
@@ -1691,7 +1933,7 @@ export default function AcordModal({
                     {/* ── Session delta ── */}
                     {packageSqs && packageSqs.sqs_history?.length > 1 && (
                       <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "6px 10px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                        <span style={{ fontSize: 14 }}>{packageSqs.delta_this_session >= 0 ? "📈" : "📉"}</span>
+                        <span style={{ fontSize: 14 }}></span>
                         <div>
                           <span style={{ fontSize: 11, fontWeight: 700, color: packageSqs.delta_this_session >= 0 ? "#059669" : "#dc2626" }}>
                             {packageSqs.delta_this_session >= 0 ? "+" : ""}{packageSqs.delta_this_session} pts this session
@@ -1706,7 +1948,7 @@ export default function AcordModal({
                     {/* ── Routing decision ── */}
                     {activeSqs.routing_decision && (
                       <div style={{ padding: "5px 9px", borderRadius: 7, fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, background: "#fdf2f8", color: "#000", border: "1px solid #f9a8d4", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                        {{ auto_quote: "✅ Auto-Route to Quoting", review: "🔍 Light Review", full_review: "📋 Full Underwriter Review", hold: "🚫 Hold — Remediation Required" }[activeSqs.routing_decision]}
+                        {{ auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Underwriter Review", hold: "Hold — Remediation Required" }[activeSqs.routing_decision]}
                       </div>
                     )}
 
@@ -1723,7 +1965,7 @@ export default function AcordModal({
                                   {SQS_LABELS[key] || key}
                                   <span style={{ color: "#94a3b8" }}> ({SQS_WEIGHTS[key] || 0}%)</span>
                                   {docSourced.has(key) && (
-                                    <span title="Sourced from uploaded documents — editing form fields won't change this" style={{ marginLeft: 4, fontSize: 9, color: "#94a3b8", cursor: "help" }}>📄</span>
+                                    <span title="Sourced from uploaded documents — editing form fields won't change this" style={{ marginLeft: 4, fontSize: 9, color: "#94a3b8", cursor: "help" }}>(doc)</span>
                                   )}
                                 </span>
                                 <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>
@@ -1733,7 +1975,7 @@ export default function AcordModal({
                               </div>
                             </div>
                           ))}
-                          <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2 }}>📄 = sourced from uploaded docs, not form edits</div>
+                          <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2 }}>(doc) = sourced from uploaded docs, not form edits</div>
                         </div>
                       );
                     })()}
@@ -1789,7 +2031,7 @@ export default function AcordModal({
                     {/* ── Issues ── */}
                     {activeSqs.issues?.length > 0 && (
                       <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "7px 10px", marginBottom: 8, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#000", marginBottom: 3 }}>⚠️ Issues</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#000", marginBottom: 3 }}>Issues</div>
                         {activeSqs.issues.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#000", padding: "1px 0" }}>• {s}</div>)}
                       </div>
                     )}
@@ -1824,7 +2066,7 @@ export default function AcordModal({
                   <div style={{ padding: "12px 14px" }}>
                     <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 8, padding: "8px 10px", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: "#000", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>Cross-Form Validation</div>
-                      {crossIssues.map((iss, i) => <div key={i} style={{ fontSize: 12, padding: "3px 0", color: "#000" }}>{iss.type === "hard_stop" ? "🚫" : "⚠️"} {iss.message}</div>)}
+                      {crossIssues.map((iss, i) => <div key={i} style={{ fontSize: 12, padding: "3px 0", color: "#000" }}>{iss.message}</div>)}
                     </div>
                   </div>
                 </>
@@ -1977,6 +2219,11 @@ export default function AcordModal({
             </div>
 
             <div className="editor-main">
+              {!sidebarOpen && (
+                <button className="sidebar-open-btn" onClick={() => setSidebarOpen(true)} title="Show SQS &amp; Actions">
+                  <span className="sidebar-open-label">SQS &amp; ACTIONS</span>
+                </button>
+              )}
               <PDFJsViewer
                 key={activeFormId}
                 pdfUrl={`${API_BASE}/api/get-pdf/${sessionId}/${activeFormId}`}

@@ -9,6 +9,13 @@ const ChevronDown = ({ rotated }) => (
 );
 
 
+const PlanIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="#E61B84" stroke="#E61B84" strokeWidth="1.5"
+    strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  </svg>
+);
+
 const SignOutIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
     strokeLinecap="round" strokeLinejoin="round">
@@ -37,8 +44,9 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal }) {
   const limit = user?.packages_limit ?? 0;
   const tierLabel = TIER_LABELS[tier] || tier;
   const isFree = tier === "free";
-  const noPackages = isFree || limit === 0;
-  const pct = !noPackages ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const isUnlimited = !isFree && limit === 0;
+  const noPackages = isFree;
+  const pct = (!isFree && limit > 0) ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const barColor = pct >= 90 ? "#ef4444" : pct >= 70 ? "#f59e0b" : "#10b981";
 
   const handleCancel = async () => {
@@ -73,13 +81,19 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal }) {
             <span className="udrop-plan-usage-label">
               {tier === "essentials" ? "Scores Used" : "Packages Used"}
             </span>
-            <span className="udrop-plan-usage-count">{used} / {limit}</span>
+            <span className="udrop-plan-usage-count">
+              {isUnlimited ? `${used} used` : `${used} / ${limit}`}
+            </span>
           </div>
-          <div className="udrop-plan-bar-track">
-            <div className="udrop-plan-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
-          </div>
-          {pct >= 90 && (
-            <div className="udrop-plan-usage-warn">⚠️ Approaching limit</div>
+          {!isUnlimited && (
+            <>
+              <div className="udrop-plan-bar-track">
+                <div className="udrop-plan-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
+              </div>
+              {pct >= 90 && (
+                <div className="udrop-plan-usage-warn">Approaching limit</div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -137,6 +151,8 @@ function UserDropdown({
   setUpgradeFailed,
   setUpgradeChecking,
   setUser,
+  onAccountSettings,
+  onContactPrimble,
 }) {
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -172,11 +188,11 @@ function UserDropdown({
 
   const statusBadge = (() => {
     if (upgradeChecking) return (
-      <div className="udrop-status udrop-status--warning">⏳ Activating plan…</div>
+      <div className="udrop-status udrop-status--warning">Activating plan…</div>
     );
     if (upgradeFailed) return (
       <div className="udrop-status udrop-status--error">
-        ⚠️ Activation pending
+        Activation pending
         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
           <button className="udrop-link" onClick={() => {
             setUpgradeFailed(false);
@@ -204,7 +220,7 @@ function UserDropdown({
     );
     if (user.payment_status === "suspended") return (
       <div className="udrop-status udrop-status--error">
-        🚫 Account suspended —{" "}
+        Account suspended —{" "}
         <button onClick={openBillingPortal} disabled={billingPortalLoading} className="udrop-link">
           {billingPortalLoading && <BillingSpinner />}Restore billing
         </button>
@@ -212,7 +228,7 @@ function UserDropdown({
     );
     if (user.payment_status === "soft_locked") return (
       <div className="udrop-status udrop-status--warning">
-        🔒 Account disabled — please{" "}
+        Account disabled — please{" "}
         <button onClick={openBillingPortal} disabled={billingPortalLoading} className="udrop-link">
           {billingPortalLoading && <BillingSpinner />}update billing
         </button>
@@ -224,7 +240,7 @@ function UserDropdown({
         : 0;
       return (
         <div className={`udrop-status ${daysOverdue >= 7 ? "udrop-status--error" : "udrop-status--warning"}`}>
-          {daysOverdue >= 7 ? "🚨 Payment still overdue — account will be restricted soon." : "⚠️ Payment overdue —"}{" "}
+          {daysOverdue >= 7 ? "Payment still overdue — account will be restricted soon." : "Payment overdue —"}{" "}
           <button onClick={openBillingPortal} disabled={billingPortalLoading} className="udrop-link">
             {billingPortalLoading && <BillingSpinner />}{daysOverdue >= 7 ? "Update billing now" : "Update billing"}
           </button>
@@ -239,21 +255,17 @@ function UserDropdown({
       {/* Trigger pill */}
       <button className="udrop-trigger" onClick={() => setOpen(p => !p)}>
         <span className="udrop-avatar">{initials}</span>
-        <span className="udrop-trigger-text">
-          <span className="udrop-trigger-initial">{initials}</span>
-          <span className="udrop-email-preview">{user.email}</span>
-        </span>
         <ChevronDown rotated={open} />
       </button>
 
       {open && (
         <div className="udrop-panel">
 
-          {/* ── Header: avatar + email ── */}
+          {/* ── Header: avatar + name + email ── */}
           <div className="udrop-header">
             <span className="udrop-avatar udrop-avatar--lg">{initials}</span>
             <div className="udrop-header-info">
-              <span className="udrop-header-initial">{initials}</span>
+              {user.full_name && <span className="udrop-header-name">{user.full_name}</span>}
               <span className="udrop-header-email">{user.email}</span>
             </div>
           </div>
@@ -265,23 +277,29 @@ function UserDropdown({
           {/* ── Actions ── */}
           <div className="udrop-section udrop-actions">
 
-            {/* Signature */}
+            {/* 1. Account Settings */}
+            <button
+              className="udrop-item"
+              onClick={() => { setOpen(false); onAccountSettings(); }}
+            >
+              <span className="udrop-item-label">Account Settings</span>
+            </button>
+
+            {/* 2. Manage Signature */}
             <button
               className="udrop-item"
               onClick={() => { setOpen(false); onSignatureClick(); }}
             >
-              <span className="udrop-item-icon">✍️</span>
               <span className="udrop-item-label">{savedSignature ? "Manage Signature" : "Add Signature"}</span>
             </button>
 
-            {/* Plan */}
+            {/* 3. Edit Subscription / Select */}
             {user.subscription_tier === "free" ? (
               <button
-                className="udrop-item udrop-item--upgrade"
+                className="udrop-item"
                 onClick={() => { setOpen(false); onUpgradeClick(); }}
               >
-                <span className="udrop-item-icon">⭐</span>
-                <span className="udrop-item-label">Upgrade Plan</span>
+                <span className="udrop-item-label">Select a plan</span>
               </button>
             ) : (
               <>
@@ -289,12 +307,10 @@ function UserDropdown({
                   className={`udrop-item udrop-item--submenu ${showPlan ? "udrop-item--active" : ""}`}
                   onClick={() => setShowPlan(p => !p)}
                 >
-                  <span className="udrop-item-icon">✅</span>
-                  <span className="udrop-item-label">My Plan</span>
+                  <span className="udrop-item-label">Edit Subscription</span>
                   <ChevronDown rotated={showPlan} />
                 </button>
 
-                {/* Inline accordion expansion */}
                 {showPlan && (
                   <InlinePlanPanel
                     user={user}
@@ -304,11 +320,19 @@ function UserDropdown({
                 )}
               </>
             )}
+
+            {/* 4. Contact Primble */}
+            <button
+              className="udrop-item"
+              onClick={() => { setOpen(false); onContactPrimble(); }}
+            >
+              <span className="udrop-item-label">Contact Primble</span>
+            </button>
           </div>
 
           <div className="udrop-divider" />
 
-          {/* ── Sign out ── */}
+          {/* ── 5. Sign Out ── */}
           <div className="udrop-section">
             <button
               className="udrop-item udrop-item--danger"
@@ -342,7 +366,7 @@ export default function Header({
   onSignatureClick, onUpgradeClick, onLogout, onHome, onSignUp, onLogIn,
   openBillingPortal, upgradeChecking, upgradeFailed,
   setUpgradeFailed, setUpgradeChecking, setUser,
-  onNavigate,
+  onNavigate, onAccountSettings, onContactPrimble,
 }) {
   return (
     <header className="landing-header">
@@ -372,11 +396,13 @@ export default function Header({
           setUpgradeFailed={setUpgradeFailed}
           setUpgradeChecking={setUpgradeChecking}
           setUser={setUser}
+          onAccountSettings={onAccountSettings}
+          onContactPrimble={onContactPrimble}
         />
       ) : (
         <div className="user-menu" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={onLogIn} style={{ background: "none", border: "1.5px solid #e0e0e0", cursor: "pointer", fontSize: 15, fontWeight: 600, color: "#0f172a", padding: "9px 22px", borderRadius: 999, transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = "#E61B84"; e.currentTarget.style.color = "#E61B84"; }} onMouseLeave={e => { e.currentTarget.style.borderColor = "#e0e0e0"; e.currentTarget.style.color = "#0f172a"; }}>Log in</button>
-          <button onClick={onSignUp} style={{ background: "#E61B84", border: "none", cursor: "pointer", fontSize: 15, fontWeight: 600, color: "#fff", padding: "10px 26px", borderRadius: 999, boxShadow: "0 4px 14px rgba(230,27,132,0.3)", transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.transform = "translateY(-1px)"; }} onMouseLeave={e => { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.transform = "none"; }}>Upgrade</button>
+          <button className="header-btn-login" onClick={onLogIn} style={{ background: "none", border: "1.5px solid #e0e0e0", cursor: "pointer", fontSize: 15, fontWeight: 600, color: "#0f172a", padding: "9px 22px", borderRadius: 999, transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = "#E61B84"; e.currentTarget.style.color = "#E61B84"; }} onMouseLeave={e => { e.currentTarget.style.borderColor = "#e0e0e0"; e.currentTarget.style.color = "#0f172a"; }}>Log in</button>
+          <button className="header-btn-signup" onClick={onSignUp} style={{ background: "#E61B84", border: "none", cursor: "pointer", fontSize: 15, fontWeight: 600, color: "#fff", padding: "10px 26px", borderRadius: 999, boxShadow: "0 4px 14px rgba(230,27,132,0.3)", transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.transform = "translateY(-1px)"; }} onMouseLeave={e => { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.transform = "none"; }}>Get Started</button>
         </div>
       )}
     </header>

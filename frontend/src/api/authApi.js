@@ -15,7 +15,9 @@ export async function loginUser(email, password) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
-  return { ok: res.ok, status: res.status, data: await _json(res) };
+  const data = await _json(res);
+  if (res.ok && data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
+  return { ok: res.ok, status: res.status, data };
 }
 
 export async function signupUser(payload) {
@@ -35,7 +37,9 @@ export async function googleAuthUser(credential, nonce) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ credential, nonce }),
   });
-  return { ok: res.ok, status: res.status, data: await _json(res) };
+  const data = await _json(res);
+  if (res.ok && data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
+  return { ok: res.ok, status: res.status, data };
 }
 
 export async function fetchGoogleNonce() {
@@ -52,7 +56,9 @@ export async function verifyEmailCode(email, code) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, code }),
   });
-  return { ok: res.ok, status: res.status, data: await _json(res) };
+  const data = await _json(res);
+  if (res.ok && data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
+  return { ok: res.ok, status: res.status, data };
 }
 
 export async function resendVerification(email) {
@@ -91,10 +97,13 @@ export async function completeProfile(organization_name, acord_disclaimer_accept
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ organization_name, acord_disclaimer_accepted }),
   });
-  return { ok: res.ok, data: await _json(res) };
+  const data = await _json(res);
+  if (res.ok && data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
+  return { ok: res.ok, data };
 }
 
 export async function logoutUser() {
+  try { localStorage.removeItem("acordly_tk"); sessionStorage.removeItem("acordly_tk"); } catch {}
   await fetch(`${API_BASE}/api/auth/logout`, {
     method: "POST",
     credentials: "include",

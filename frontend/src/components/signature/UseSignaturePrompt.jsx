@@ -4,7 +4,7 @@ export default function UseSignaturePrompt({ signature, onApply, onManage, onClo
       <div className="modal-content" style={{ maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="modal-inner" style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 36, marginBottom: 8 }}>✍️</div>
+          <div style={{ fontSize: 36, marginBottom: 8 }}></div>
           <h2 className="step-title" style={{ marginBottom: 8 }}>Apply Your Signature?</h2>
           <p style={{ fontSize: 13, color: "#64748b", marginBottom: 20 }}>
             Your saved signature will be applied to all signature fields in this form.

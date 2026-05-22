@@ -23,6 +23,8 @@ import UpgradeModal           from "./components/billing/UpgradeModal";
 import SignatureModal         from "./components/signature/SignatureModal";
 import ClientQuestionnaire    from "./components/arq/ClientQuestionnaire";
 import ErrorBoundary          from "./components/layout/ErrorBoundary";
+import AccountSettingsModal   from "./components/account/AccountSettingsModal";
+import ContactModal           from "./components/account/ContactModal";
 
 export default function App() {
   const path = window.location.pathname;
@@ -38,6 +40,26 @@ export default function App() {
         <AppContent />
       </GoogleOAuthProvider>
     </ErrorBoundary>
+  );
+}
+
+function AppLoadingOverlay({ label }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(255,255,255,0.97)",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", zIndex: 99999, gap: 24,
+    }}>
+      <div style={{
+        width: 52, height: 52, borderRadius: "50%",
+        border: "4px solid #e2e8f0", borderTopColor: "#e61b84",
+        animation: "spin 0.9s linear infinite",
+      }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#e61b84" }} />
+        <span style={{ fontSize: 16, fontWeight: 700, color: "#1e293b" }}>{label}</span>
+      </div>
+    </div>
   );
 }
 
@@ -78,8 +100,12 @@ function AppContent() {
   const [showAuthModal,       setShowAuthModal]       = useState(false);
   const [authModalMode,       setAuthModalMode]       = useState("signin");
   const [showCompleteProfile, setShowCompleteProfile] = useState(false);
+  const [pendingGoogleToken,  setPendingGoogleToken]  = useState(null);
+  const [pendingGoogleUser,   setPendingGoogleUser]   = useState(null);
   const [showUpgradeModal,    setShowUpgradeModal]    = useState(false);
   const [showSignatureModal,  setShowSignatureModal]  = useState(false);
+  const [showAccountSettings, setShowAccountSettings] = useState(false);
+  const [showContactModal,    setShowContactModal]    = useState(false);
   const [signingIn,           setSigningIn]           = useState(false);
   const [headerError,         setHeaderError]         = useState("");
   const [resumeSessionId,     setResumeSessionId]     = useState(null);
@@ -147,12 +173,12 @@ function AppContent() {
         const applied = data.credited || data.already_applied;
         setOverageToast(applied
           ? `✅ ${qty} extra package${qty !== "1" ? "s" : ""} added!`
-          : `⚠️ Could not verify payment. Contact support if packages were not credited.`);
+          : `Could not verify payment. Contact support if packages were not credited.`);
         setTimeout(() => setOverageToast(null), 8000);
         if (savedSid && applied) { setResumeSessionId(savedSid); setShowModal(true); }
       })
       .catch(() => {
-        setOverageToast("⚠️ Payment received but could not auto-credit. Please refresh.");
+        setOverageToast("Payment received but could not auto-credit. Please refresh.");
         setTimeout(() => setOverageToast(null), 8000);
         if (savedSid) { setResumeSessionId(savedSid); setShowModal(true); }
       });
@@ -168,7 +194,7 @@ function AppContent() {
     } catch { setPortalRedirecting(false); setHeaderError("Network error. Please try again."); }
   };
 
-  const handleGetStarted = (planId, billingCycle) => {
+  const handleGetStarted = (planId, billingCycle, authMode) => {
     if (planId) {
       sessionStorage.setItem("acordly_pending_plan", planId);
       sessionStorage.setItem("acordly_pending_billing_cycle", billingCycle || "monthly");
@@ -182,6 +208,7 @@ function AppContent() {
         window.history.pushState({ acordly: true }, "");
       }
     } else {
+      setAuthModalMode(authMode === "signup" ? "signup" : "signin");
       setShowAuthModal(true);
     }
   };
@@ -244,19 +271,9 @@ function AppContent() {
         </div>
       )}
 
-      {resumeLoading && (
-        <div style={{ position: "fixed", inset: 0, background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
-          <div className="loading-spinner" style={{ width: 40, height: 40, marginBottom: 16 }} />
-          <p style={{ color: "#64748b", fontSize: 15, fontWeight: 500 }}>Restoring your session...</p>
-        </div>
-      )}
+      {resumeLoading && <AppLoadingOverlay label="Restoring your session..." />}
 
-      {signingIn && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(255,255,255,0.97)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
-          <div className="loading-spinner" style={{ width: 40, height: 40, marginBottom: 16 }} />
-          <p style={{ color: "#64748b", fontSize: "15px", fontWeight: 500 }}>Signing you in...</p>
-        </div>
-      )}
+      {signingIn && <AppLoadingOverlay label="Signing you in..." />}
 
       {/* Persistent header — always visible */}
       <Header
@@ -270,9 +287,11 @@ function AppContent() {
         onLogIn={() => { setAuthModalMode("signin"); setShowAuthModal(true); }}
         onNavigate={handleNavigate}
         onHome={() => { setMarketingPage(null); setShowModal(false); }}
+        onAccountSettings={() => setShowAccountSettings(true)}
+        onContactPrimble={() => setShowContactModal(true)}
       />
       {headerError && (
-        <div className="header-error-bar">⚠️ {headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
+        <div className="header-error-bar">{headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
       )}
 
       {/* Page content — switches between landing, marketing pages, and app */}
@@ -304,28 +323,38 @@ function AppContent() {
         <AuthModal
           initialMode={authModalMode}
           onClose={() => setShowAuthModal(false)}
-          onSuccess={(usr, profileIncomplete) => {
-            login(usr);
+          onSuccess={(usr, profileIncomplete, pendingToken) => {
             setShowAuthModal(false);
-            setSigningIn(true);
-            setTimeout(async () => {
-              setSigningIn(false);
-              const pendingResume = sessionStorage.getItem("acordly_resume_after_login");
-              sessionStorage.removeItem("acordly_resume_after_login");
-              const hasPendingPlan = !!sessionStorage.getItem("acordly_pending_plan");
-              if (profileIncomplete)       { setShowCompleteProfile(true); }
-              else if (hasPendingPlan)     { await triggerPendingCheckout(); }
-              else if (pendingResume)      { setResumeSessionId(pendingResume); setShowModal(true); }
-              else                         { setShowModal(true); }
-            }, 80);
+            if (profileIncomplete) {
+              setPendingGoogleToken(pendingToken || null);
+              setPendingGoogleUser(usr || null);
+              setShowCompleteProfile(true);
+            } else {
+              login(usr);
+              setSigningIn(true);
+              setTimeout(async () => {
+                setSigningIn(false);
+                const pendingResume = sessionStorage.getItem("acordly_resume_after_login");
+                sessionStorage.removeItem("acordly_resume_after_login");
+                const hasPendingPlan = !!sessionStorage.getItem("acordly_pending_plan");
+                if (hasPendingPlan)   { await triggerPendingCheckout(); }
+                else if (pendingResume) { setResumeSessionId(pendingResume); setShowModal(true); }
+                else                  { setShowModal(true); }
+              }, 80);
+            }
           }}
         />
       )}
 
-      {showCompleteProfile && user && (
-        <CompleteProfileModal token={token} user={user}
+      {showCompleteProfile && (
+        <CompleteProfileModal
+          pendingToken={pendingGoogleToken}
+          user={user || pendingGoogleUser}
           onComplete={async (u) => {
-            setUser(u); setShowCompleteProfile(false);
+            login(u);
+            setShowCompleteProfile(false);
+            setPendingGoogleToken(null);
+            setPendingGoogleUser(null);
             const hasPendingPlan = !!sessionStorage.getItem("acordly_pending_plan");
             if (hasPendingPlan) { await triggerPendingCheckout(); } else { setShowModal(true); }
           }}
@@ -344,6 +373,22 @@ function AppContent() {
         <SignatureModal token={token} existingSignature={savedSignature}
           onClose={() => setShowSignatureModal(false)}
           onSaved={(sig) => { updateSignature(sig); setShowSignatureModal(false); }}
+        />
+      )}
+
+      {showAccountSettings && user && (
+        <AccountSettingsModal
+          user={user}
+          onClose={() => setShowAccountSettings(false)}
+          onUserUpdate={setUser}
+          openBillingPortal={openBillingPortal}
+        />
+      )}
+
+      {showContactModal && user && (
+        <ContactModal
+          user={user}
+          onClose={() => setShowContactModal(false)}
         />
       )}
     </div>

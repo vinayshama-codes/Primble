@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { API_BASE } from "../../config/constants";
 import { PLANS } from "./plans";
+import ContactModal from "../account/ContactModal";
 
 const CheckIcon = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#059669", flexShrink: 0, marginTop: 2 }}>
@@ -18,6 +19,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
   const [billing, setBilling]         = useState("annual");
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [showContactSales, setShowContactSales] = useState(false);
 
   const handleManageBilling = async () => {
     if (!openBillingPortal) return;
@@ -28,7 +30,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
 
   const handleSelect = async (planId) => {
     if (planId === "enterprise") {
-      window.location.href = "mailto:sales@primble.ai?subject=Enterprise Plan Inquiry";
+      setShowContactSales(true);
       return;
     }
     setLoadingPlan(planId);
@@ -51,7 +53,14 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
 
   const anyLoading = !!loadingPlan;
 
+  const getCtaLabel = (plan) => {
+    if (plan.id === "enterprise") return "Contact sales";
+    if (!user || user.subscription_tier === "free") return "Select";
+    return "Upgrade";
+  };
+
   return (
+    <>
     <div className="modal-overlay">
       <div className="modal-content upgrade-modal upgrade-modal-wide" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose} disabled={anyLoading}>✕</button>
@@ -63,7 +72,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
               Choose a plan
             </div>
             <h2 style={{ fontSize: 28, fontWeight: 700, color: "var(--text-primary)", letterSpacing: "-0.02em", marginBottom: 8 }}>
-              Transparent pricing. Clear mechanics.
+              Transparent pricing. Designed to scale.
             </h2>
             {user?.subscription_tier === "free" && user?.downloads_remaining <= 0 && (
               <p style={{ fontSize: 15, color: "var(--text-secondary)", marginBottom: 0 }}>
@@ -147,8 +156,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
                     <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 2 }}>Billed annually</div>
                   )}
 
-                  <div style={{ fontSize: 12, color: "var(--primary)", fontWeight: 600, marginTop: 4, marginBottom: 2 }}>{plan.packageCount}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 2 }}>Overage: {plan.overage}</div>
+                  <div style={{ fontSize: 12, color: "var(--primary)", fontWeight: 600, marginTop: 4, marginBottom: 8 }}>{plan.packageCount}</div>
 
                   <button
                     onClick={() => handleSelect(plan.id)}
@@ -180,7 +188,7 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
                         <span style={{ width: 13, height: 13, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
                         Opening cart…
                       </>
-                    ) : plan.cta}
+                    ) : getCtaLabel(plan)}
                   </button>
 
                   <div style={{ height: 1, background: "var(--light-gray)", margin: "18px 0" }} />
@@ -208,5 +216,9 @@ export default function UpgradeModal({ token, user, onClose, onError, openBillin
         </div>
       </div>
     </div>
+    {showContactSales && (
+      <ContactModal user={user} onClose={() => setShowContactSales(false)} />
+    )}
+  </>
   );
 }

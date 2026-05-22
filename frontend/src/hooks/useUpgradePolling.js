@@ -21,6 +21,12 @@ export function useUpgradePolling(shouldPoll, setUser, setUpgradeChecking, setUp
     const backoffDelay = (attempt) => Math.min(BASE_DELAY * Math.pow(1.5, attempt), 15000);
 
     const pollMe = () => {
+      if (document.visibilityState !== "visible") {
+        // Tab is in background — skip this cycle but keep scheduling so it resumes when visible.
+        if (attempts < MAX_POLL) setTimeout(pollMe, backoffDelay(attempts));
+        else tryVerifyFallback();
+        return;
+      }
       attempts++;
       fetch(`${API_BASE}/api/auth/me`, { credentials: "include" })
         .then((r) => (r.ok ? r.json() : null))

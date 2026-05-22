@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import secrets
@@ -13,7 +14,7 @@ from config.database import get_pool
 from config.settings import GOOGLE_CLIENT_ID, SESSION_TTL_H as _SESSION_TTL_H
 from models.schemas import (
     SignupRequest, LoginRequest, VerifyEmailRequest,
-    GoogleAuthRequest, CompleteProfileRequest,
+    GoogleAuthRequest, CompleteProfileRequest, UpdateProfileRequest,
 )
 from services.auth_service import (
     hash_password, verify_password, create_session_token, get_current_user,
@@ -22,7 +23,7 @@ from services.auth_service import (
 )
 from services.email_service import send_verification_email, _send_generic_email
 from utils.helpers import generate_verification_code
-from utils.validators import validate_work_email, validate_password
+from utils.validators import validate_password
 from utils.rate_limiter import check_auth_rate_limit, get_client_ip, _redis as _rate_limiter_redis
 from repositories.audit_repository import write_audit_log
 
@@ -39,6 +40,41 @@ _NONCE_TTL = 300  # seconds
 # In-process nonce store used when Redis is unavailable.
 # Maps nonce -> (fingerprint, expires_at_monotonic)
 _nonce_store: dict = {}
+
+# Pending Google sign-up tokens — holds Google identity until profile is completed.
+# Keyed by a random token; expires after 10 minutes.
+_PENDING_TOKEN_TTL = 600
+_pending_store: dict = {}
+
+
+async def _pending_set(token: str, google_id: str, email: str, name: str) -> None:
+    import time as _time, json as _json
+    payload = {"google_id": google_id, "email": email, "name": name,
+               "expires_at": _time.monotonic() + _PENDING_TOKEN_TTL}
+    _pending_store[token] = payload
+    if _auth_redis is not None:
+        try:
+            await _auth_redis.setex(f"pending:{token}", _PENDING_TOKEN_TTL, _json.dumps(
+                {"google_id": google_id, "email": email, "name": name}
+            ))
+        except Exception:
+            pass
+
+
+async def _pending_pop(token: str) -> dict | None:
+    import time as _time, json as _json
+    entry = _pending_store.pop(token, None)
+    if entry and entry["expires_at"] > _time.monotonic():
+        return entry
+    if _auth_redis is not None:
+        try:
+            raw = await _auth_redis.getdel(f"pending:{token}")
+            if raw:
+                return _json.loads(raw)
+        except Exception:
+            pass
+    return None
+
 
 # Account lockout configuration (SOC 2 CC6.1)
 _LOCKOUT_MAX_FAILURES = 10
@@ -57,10 +93,10 @@ def _nonce_fingerprint(request: Request) -> str:
     return hashlib.sha256(f"{ip}:{ua}".encode()).hexdigest()
 
 
-def _nonce_set(nonce: str, fingerprint: str) -> None:
+async def _nonce_set(nonce: str, fingerprint: str) -> None:
     if _rate_limiter_redis is not None:
         try:
-            _rate_limiter_redis.setex(f"oauth_nonce:{nonce}", _NONCE_TTL, fingerprint)
+            await _rate_limiter_redis.setex(f"oauth_nonce:{nonce}", _NONCE_TTL, fingerprint)
             return
         except Exception:
             pass
@@ -68,11 +104,11 @@ def _nonce_set(nonce: str, fingerprint: str) -> None:
     _nonce_store[nonce] = (fingerprint, time.monotonic() + _NONCE_TTL)
 
 
-def _nonce_pop(nonce: str):
+async def _nonce_pop(nonce: str):
     """Return stored fingerprint and remove the nonce atomically. Returns None if not found."""
     if _rate_limiter_redis is not None:
         try:
-            return _rate_limiter_redis.getdel(f"oauth_nonce:{nonce}")
+            return await _rate_limiter_redis.getdel(f"oauth_nonce:{nonce}")
         except Exception:
             pass
     import time
@@ -91,13 +127,13 @@ def _lockout_key(email: str) -> str:
     return f"login_failures:{_email_hash(email)}"
 
 
-def _check_lockout(email: str) -> None:
+async def _check_lockout(email: str) -> None:
     """Raise 429 if the account is currently locked out."""
     key = _lockout_key(email)
     redis = _auth_redis or _rate_limiter_redis
     if redis is not None:
         try:
-            val = redis.get(key)
+            val = await redis.get(key)
             if val is not None:
                 count = int(val)
                 if count >= _LOCKOUT_MAX_FAILURES:
@@ -121,14 +157,14 @@ def _check_lockout(email: str) -> None:
             )
 
 
-def _record_failed_login(email: str) -> bool:
+async def _record_failed_login(email: str) -> bool:
     """Increment failure counter. Returns True if this attempt triggers lockout."""
     key = _lockout_key(email)
     redis = _auth_redis or _rate_limiter_redis
     if redis is not None:
         try:
-            count = redis.incr(key)
-            redis.expire(key, _LOCKOUT_WINDOW_S)
+            count = await redis.incr(key)
+            await redis.expire(key, _LOCKOUT_WINDOW_S)
             return int(count) >= _LOCKOUT_MAX_FAILURES
         except Exception:
             pass
@@ -140,12 +176,12 @@ def _record_failed_login(email: str) -> bool:
     return count >= _LOCKOUT_MAX_FAILURES
 
 
-def _clear_failed_logins(email: str) -> None:
+async def _clear_failed_logins(email: str) -> None:
     key = _lockout_key(email)
     redis = _auth_redis or _rate_limiter_redis
     if redis is not None:
         try:
-            redis.delete(key)
+            await redis.delete(key)
             return
         except Exception:
             pass
@@ -153,15 +189,15 @@ def _clear_failed_logins(email: str) -> None:
 
 
 def _send_lockout_notification(email: str) -> None:
-    subject   = "Acordly: Your account has been temporarily locked"
+    subject   = "Primble: Your account has been temporarily locked"
     body_txt  = (
-        "Multiple failed login attempts were detected on your Acordly account.\n\n"
+        "Multiple failed login attempts were detected on your Primble account.\n\n"
         "Your account has been temporarily locked for 15 minutes as a security precaution.\n\n"
         "If this was you, please wait and try again. If this was not you, consider resetting your password."
     )
     body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
   <h2 style="color:#dc2626;">Security Alert</h2>
-  <p>Multiple failed login attempts were detected on your <strong>Acordly</strong> account.</p>
+  <p>Multiple failed login attempts were detected on your <strong>Primble</strong> account.</p>
   <p>Your account has been <strong>temporarily locked for 15 minutes</strong> as a security precaution.</p>
   <p style="color:#64748b;font-size:13px;">If this was you, please wait and try again. If this was not you, <a href="#" style="color:#e6007a;">reset your password</a> immediately.</p>
 </div>"""
@@ -196,12 +232,9 @@ def _clear_session_cookie(response: JSONResponse) -> None:
 
 @router.post("/signup")
 async def signup(req: SignupRequest, request: Request):
-    check_auth_rate_limit(req.email.lower())
+    await check_auth_rate_limit(req.email.lower())
     if not req.acord_disclaimer_accepted:
         raise HTTPException(400, "You must accept the ACORD disclaimer to create an account.")
-    ok_email, email_msg = validate_work_email(req.email)
-    if not ok_email:
-        raise HTTPException(400, email_msg)
     if not req.organization_name or not req.organization_name.strip():
         raise HTTPException(400, "Organization or agency name is required.")
     ok, msg = validate_password(req.password)
@@ -231,7 +264,7 @@ async def signup(req: SignupRequest, request: Request):
                      verification_code = EXCLUDED.verification_code,
                      verification_expires = EXCLUDED.verification_expires,
                      acord_disclaimer_accepted_at = EXCLUDED.acord_disclaimer_accepted_at""",
-                pending_id, req.email, hash_password(req.password), req.full_name,
+                pending_id, req.email, await hash_password(req.password), req.full_name,
                 req.organization_name.strip(), code, expires, now, now,
             )
         except Exception:
@@ -247,7 +280,7 @@ async def signup(req: SignupRequest, request: Request):
 
 @router.post("/verify-email")
 async def verify_email(req: VerifyEmailRequest, request: Request):
-    check_auth_rate_limit(req.email.lower())
+    await check_auth_rate_limit(req.email.lower())
     async with get_pool().acquire() as conn:
         existing = await conn.fetchrow("SELECT id, email_verified FROM users WHERE email = $1", req.email)
         if existing and int(dict(existing).get("email_verified", 0) or 0):
@@ -304,6 +337,7 @@ async def verify_email(req: VerifyEmailRequest, request: Request):
     )
     resp = JSONResponse({
         "success": True,
+        "session_token": token,
         "user": {
             "id": user_id, "email": pending["email"],
             "full_name": pending.get("full_name", ""),
@@ -322,7 +356,7 @@ async def resend_verification(request: Request):
     email = body.get("email")
     if not email:
         raise HTTPException(400, "Email required")
-    check_auth_rate_limit(str(email).lower())
+    await check_auth_rate_limit(str(email).lower())
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM pending_signups WHERE email = $1", email)
@@ -344,8 +378,8 @@ async def resend_verification(request: Request):
 
 @router.post("/login")
 async def login(req: LoginRequest, request: Request):
-    check_auth_rate_limit(req.email.lower())
-    _check_lockout(req.email)
+    await check_auth_rate_limit(req.email.lower())
+    await _check_lockout(req.email)
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", req.email)
@@ -357,12 +391,12 @@ async def login(req: LoginRequest, request: Request):
                 "user.login_failed",
                 ip_address=request.client.host if request.client else None,
             )
-            triggered_lockout = _record_failed_login(req.email)
+            triggered_lockout = await _record_failed_login(req.email)
             if triggered_lockout:
                 _send_lockout_notification(req.email)
             raise HTTPException(401, "Invalid credentials")
         user = dict(row)
-        if not verify_password(req.password, user["password_hash"]):
+        if not await verify_password(req.password, user["password_hash"]):
             # Log failed attempt with hashed email — SOC 2 CC7.2
             await write_audit_log(
                 {"id": None, "email": _email_hash(req.email.lower()), "organization_name": "",
@@ -370,7 +404,7 @@ async def login(req: LoginRequest, request: Request):
                 "user.login_failed",
                 ip_address=request.client.host if request.client else None,
             )
-            triggered_lockout = _record_failed_login(req.email)
+            triggered_lockout = await _record_failed_login(req.email)
             if triggered_lockout:
                 _send_lockout_notification(req.email)
             raise HTTPException(401, "Invalid credentials")
@@ -385,7 +419,7 @@ async def login(req: LoginRequest, request: Request):
             datetime.now(timezone.utc).isoformat(), user["id"],
         )
 
-    _clear_failed_logins(req.email)
+    await _clear_failed_logins(req.email)
     token = await create_session_token(
         user["id"],
         ip_address=request.client.host if request.client else None,
@@ -399,6 +433,7 @@ async def login(req: LoginRequest, request: Request):
     used  = int(user.get("downloads_used", 0) or 0)
     resp  = JSONResponse({
         "success": True,
+        "session_token": token,
         "user": {
             "id": user["id"], "email": user["email"],
             "full_name": user.get("full_name", ""),
@@ -416,7 +451,7 @@ async def forgot_password(request: Request):
     email = (body.get("email") or "").strip().lower()
     if not email:
         raise HTTPException(400, "Email required")
-    check_auth_rate_limit(email)
+    await check_auth_rate_limit(email)
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
@@ -431,10 +466,10 @@ async def forgot_password(request: Request):
             )
             provider       = user.get("auth_provider", "email") or "email"
             is_google_only = provider == "google" and not user.get("password_hash")
-            subject   = "Set a password for your Acordly account" if is_google_only else "Reset your Acordly password"
+            subject   = "Set a password for your Primble account" if is_google_only else "Reset your Primble password"
             body_txt  = f"Your code: {code}\n\nExpires in 15 minutes."
             body_html = f"""<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
-  <h2>{'Set your Acordly password' if is_google_only else 'Reset your Acordly password'}</h2>
+  <h2>{'Set your Primble password' if is_google_only else 'Reset your Primble password'}</h2>
   <div style="background:#f1f5f9;border-radius:8px;padding:24px;text-align:center;margin:24px 0;">
     <span style="font-size:36px;font-weight:700;letter-spacing:8px;color:#0f172a;">{code}</span>
   </div>
@@ -453,7 +488,7 @@ async def reset_password(request: Request):
     new_pass = body.get("new_password") or ""
     if not email or not code or not new_pass:
         raise HTTPException(400, "email, code, and new_password are required")
-    check_auth_rate_limit(email)
+    await check_auth_rate_limit(email)
     valid_pw, pw_msg = validate_password(new_pass)
     if not valid_pw:
         raise HTTPException(400, pw_msg)
@@ -477,7 +512,7 @@ async def reset_password(request: Request):
             raise HTTPException(400, "Reset code invalid")
         await conn.execute(
             "UPDATE users SET password_hash=$1, verification_code=NULL, verification_expires=NULL, email_verified=1 WHERE email=$2",
-            hash_password(new_pass), email,
+            await hash_password(new_pass), email,
         )
 
     await revoke_all_sessions(user["id"])
@@ -490,11 +525,11 @@ async def reset_password(request: Request):
     try:
         _send_generic_email(
             email,
-            "Your Acordly password was changed",
-            "Your Acordly account password was successfully changed. If you did not do this, please contact support immediately.",
+            "Your Primble password was changed",
+            "Your Primble account password was successfully changed. If you did not do this, please contact support immediately.",
             """<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;">
   <h2>Password Changed</h2>
-  <p>Your <strong>Acordly</strong> account password was successfully changed.</p>
+  <p>Your <strong>Primble</strong> account password was successfully changed.</p>
   <p style="color:#dc2626;">If you did not make this change, please contact support immediately and reset your password.</p>
 </div>""",
         )
@@ -507,25 +542,24 @@ async def reset_password(request: Request):
 @router.get("/google/nonce")
 async def google_nonce(request: Request):
     """Issue a one-time nonce the frontend must include as the OAuth state parameter."""
-    check_auth_rate_limit(get_client_ip(request))
+    await check_auth_rate_limit(get_client_ip(request))
     nonce = secrets.token_urlsafe(32)
-    _nonce_set(nonce, _nonce_fingerprint(request))
+    await _nonce_set(nonce, _nonce_fingerprint(request))
     return {"nonce": nonce}
 
 
 @router.post("/google")
 async def google_auth(req: GoogleAuthRequest, request: Request):
-    check_auth_rate_limit(get_client_ip(request))
+    await check_auth_rate_limit(get_client_ip(request))
     try:
-        # Validate state/nonce sent by the frontend
-        nonce = getattr(req, "nonce", None)
-        if not nonce:
-            raise HTTPException(400, "Invalid or missing OAuth state/nonce")
-        stored_fp = _nonce_pop(nonce)
-        if stored_fp is None:
-            raise HTTPException(400, "Invalid or missing OAuth state/nonce")
-        if stored_fp != _nonce_fingerprint(request):
-            raise HTTPException(400, "OAuth nonce fingerprint mismatch")
+        # Validate state/nonce if the frontend sends one
+        nonce = req.nonce
+        if nonce:
+            stored_fp = await _nonce_pop(nonce)
+            if stored_fp is None:
+                raise HTTPException(400, "Invalid or missing OAuth state/nonce")
+            if stored_fp != _nonce_fingerprint(request):
+                raise HTTPException(400, "OAuth nonce fingerprint mismatch")
 
         cid    = GOOGLE_CLIENT_ID
         idinfo = id_token.verify_oauth2_token(req.credential, google_requests.Request(), cid, clock_skew_in_seconds=5)
@@ -539,15 +573,12 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
         if not email:
             raise ValueError("No email in token")
 
-        ok_email, email_msg = validate_work_email(email)
-        if not ok_email:
-            raise HTTPException(400, "Only organizational email accounts are supported. Please sign in with your work email.")
-
         async with get_pool().acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM users WHERE google_id = $1", google_id)
             if not row:
                 row = await conn.fetchrow("SELECT * FROM users WHERE email = $1", email)
                 if row:
+                    # Existing email-signup user connecting Google for the first time
                     uid = dict(row)["id"]
                     await conn.execute(
                         "UPDATE users SET google_id=$1, auth_provider='google', email_verified=1 WHERE id=$2",
@@ -555,14 +586,15 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
                     )
                     row = await conn.fetchrow("SELECT * FROM users WHERE id=$1", uid)
                 else:
-                    uid = str(uuid.uuid4())
-                    now = datetime.now(timezone.utc).isoformat()
-                    await conn.execute(
-                        "INSERT INTO users (id, email, google_id, full_name, auth_provider, email_verified, created_at, last_login) "
-                        "VALUES ($1,$2,$3,$4,'google',1,$5,$6)",
-                        uid, email, google_id, name, now, now,
-                    )
-                    row = await conn.fetchrow("SELECT * FROM users WHERE id=$1", uid)
+                    # Brand-new user — don't create the record yet; require profile completion first
+                    pending_token = secrets.token_urlsafe(32)
+                    await _pending_set(pending_token, google_id, email, name)
+                    return JSONResponse({
+                        "success": True,
+                        "profile_incomplete": True,
+                        "pending_token": pending_token,
+                        "user": {"email": email, "full_name": name},
+                    })
 
             user = dict(row)
             await conn.execute(
@@ -584,8 +616,19 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
         org_name           = user.get("organization_name") or ""
         disclaimer         = int(user.get("acord_disclaimer_accepted", 0) or 0)
         profile_incomplete = not org_name.strip() or not disclaimer
+        if profile_incomplete:
+            # Existing user with incomplete profile — issue pending token, no session yet
+            pending_token = secrets.token_urlsafe(32)
+            await _pending_set(pending_token, google_id, email, name)
+            return JSONResponse({
+                "success": True,
+                "profile_incomplete": True,
+                "pending_token": pending_token,
+                "user": {"email": email, "full_name": name},
+            })
         resp = JSONResponse({
-            "success": True, "profile_incomplete": profile_incomplete,
+            "success": True, "profile_incomplete": False,
+            "session_token": token,
             "user": {
                 "id": user["id"], "email": user["email"],
                 "full_name": user.get("full_name", ""),
@@ -608,32 +651,75 @@ async def complete_profile(
     req: CompleteProfileRequest,
     request: Request,
     acordly_session: str = Cookie(None),
-    current_user: dict = Depends(get_current_user),
 ):
     if not req.acord_disclaimer_accepted:
         raise HTTPException(400, "You must accept the ACORD disclaimer.")
     if not req.organization_name or not req.organization_name.strip():
         raise HTTPException(400, "Organization name is required.")
     now = datetime.now(timezone.utc).isoformat()
+    ip  = request.client.host if request.client else None
+    ua  = request.headers.get("user-agent")
+
+    if req.pending_token:
+        # New Google user — verify pending token then INSERT the record
+        identity = await _pending_pop(req.pending_token)
+        if not identity:
+            raise HTTPException(400, "Sign-up session expired. Please sign in with Google again.")
+        uid = str(uuid.uuid4())
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                "INSERT INTO users "
+                "(id, email, google_id, full_name, auth_provider, email_verified, "
+                " organization_name, acord_disclaimer_accepted, acord_disclaimer_accepted_at, "
+                " created_at, last_login) "
+                "VALUES ($1,$2,$3,$4,'google',1,$5,1,$6,$7,$8)",
+                uid, identity["email"], identity["google_id"], identity["name"],
+                req.organization_name.strip(), now, now, now,
+            )
+            row = await conn.fetchrow("SELECT * FROM users WHERE id=$1", uid)
+        user = dict(row)
+        await write_audit_log(user, "user.oauth_signup", ip_address=ip)
+        token = await create_session_token(uid, ip_address=ip, user_agent=ua)
+        resp  = JSONResponse({
+            "success": True,
+            "session_token": token,
+            "user": {
+                "id": user["id"], "email": user["email"],
+                "full_name": user.get("full_name", ""),
+                "organization_name": req.organization_name.strip(),
+                "subscription_tier": "free", "downloads_remaining": 3,
+                "acord_license_confirmed": False, "acord_disclaimer_accepted": True,
+            },
+        })
+        _set_session_cookie(resp, token)
+        return resp
+
+    # Existing user updating their profile (session-cookie path)
+    from services.auth_service import get_current_user as _get_current_user
+    current_user = await _get_current_user(acordly_session=acordly_session)
     async with get_pool().acquire() as conn:
         await conn.execute(
-            "UPDATE users SET organization_name=$1, acord_disclaimer_accepted=1, acord_disclaimer_accepted_at=$2 WHERE id=$3",
+            "UPDATE users SET organization_name=$1, acord_disclaimer_accepted=1, "
+            "acord_disclaimer_accepted_at=$2 WHERE id=$3",
             req.organization_name.strip(), now, current_user["id"],
         )
-
-    resp = JSONResponse({"success": True, "message": "Profile updated."})
+    new_token = None
     if acordly_session:
-        new_token = await rotate_session(
-            acordly_session,
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-        )
+        new_token = await rotate_session(acordly_session, ip_address=ip, user_agent=ua)
+    resp_dict = {"success": True, "message": "Profile updated."}
+    if new_token:
+        resp_dict["session_token"] = new_token
+    resp = JSONResponse(resp_dict)
+    if new_token:
         _set_session_cookie(resp, new_token)
     return resp
 
 
 @router.get("/me")
 async def get_me(current_user: dict = Depends(get_current_user)):
+    import asyncio as _asyncio
+    import json as _json
+    import hashlib as _hashlib
     import stripe as stripe_lib
     sub         = current_user.get("subscription_tier", "free") or "free"
     used        = int(current_user.get("downloads_used", 0) or 0)
@@ -644,9 +730,22 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     customer_id   = current_user.get("stripe_customer_id")
     stored_sub_id = current_user.get("stripe_subscription_id")
     if customer_id and sub not in ("free", None):
+        # 30-second Redis cache keyed by a short hash of the user ID to avoid
+        # blocking the event loop with a synchronous Stripe HTTP call on every request.
+        _me_cache_key = f"me:{_hashlib.sha256(current_user['id'].encode()).hexdigest()[:16]}"
+        if _auth_redis is not None:
+            try:
+                _cached = await _auth_redis.get(_me_cache_key)
+                if _cached:
+                    return _json.loads(_cached)
+            except Exception:
+                pass
+
         try:
             from config.settings import PLANS as _PLANS
-            active_subs = stripe_lib.Subscription.list(customer=customer_id, status="active", limit=1)
+            active_subs = await _asyncio.to_thread(
+                stripe_lib.Subscription.list, customer=customer_id, status="active", limit=1
+            )
             real_sub    = active_subs.data[0] if active_subs.data else None
             real_sub_id = getattr(real_sub, "id", None) if real_sub else None
             if real_sub_id and real_sub_id != stored_sub_id:
@@ -678,7 +777,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         except Exception:
             pass
 
-    return {
+    response = {
         "id": current_user["id"], "email": current_user["email"],
         "full_name": current_user.get("full_name", ""),
         "organization_name": current_user.get("organization_name", ""),
@@ -695,6 +794,62 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "payment_failed_at": current_user.get("payment_failed_at"),
         "overage_rate": int(current_user.get("overage_rate", 0) or 0),
     }
+
+    if customer_id and sub not in ("free", None) and _auth_redis is not None:
+        try:
+            _me_cache_key_store = f"me:{_hashlib.sha256(current_user['id'].encode()).hexdigest()[:16]}"
+            await _auth_redis.setex(_me_cache_key_store, 30, _json.dumps(response, default=str))
+        except Exception:
+            pass
+
+    return response
+
+
+@router.patch("/update-profile")
+async def update_profile(
+    req: UpdateProfileRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    updates = {}
+    if req.full_name is not None:
+        updates["full_name"] = req.full_name.strip()
+    if req.organization_name is not None:
+        updates["organization_name"] = req.organization_name.strip()
+    if not updates:
+        raise HTTPException(400, "No fields to update.")
+    set_clause = ", ".join(f"{k}=${i+1}" for i, k in enumerate(updates))
+    values = list(updates.values()) + [current_user["id"]]
+    async with get_pool().acquire() as conn:
+        await conn.execute(
+            f"UPDATE users SET {set_clause} WHERE id=${len(values)}",
+            *values,
+        )
+    return {"success": True, **updates}
+
+
+@router.post("/contact")
+async def contact_primble(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    body = await request.json()
+    from_email = (body.get("from_email") or "").strip()
+    subject    = (body.get("subject") or "").strip()
+    message    = (body.get("message") or "").strip()
+    if not subject or not message:
+        raise HTTPException(400, "Subject and message are required.")
+    full_msg = (
+        f"From: {current_user.get('full_name', '')} <{from_email or current_user['email']}>\n"
+        f"User ID: {current_user['id']}\n\n"
+        f"{message}"
+    )
+    _send_generic_email(
+        to_email="info@primble.com",
+        subject=f"[Primble Contact] {subject}",
+        body_txt=full_msg,
+        body_html=f"<pre style='font-family:sans-serif;white-space:pre-wrap'>{full_msg}</pre>",
+    )
+    return {"success": True}
 
 
 @router.post("/logout")
@@ -743,7 +898,7 @@ async def delete_account(
     if has_password:
         if not provided_pw:
             raise HTTPException(400, "Password confirmation is required to delete your account.")
-        if not verify_password(provided_pw, current_user["password_hash"]):
+        if not await verify_password(provided_pw, current_user["password_hash"]):
             raise HTTPException(403, "Incorrect password.")
 
     user_id     = current_user["id"]
@@ -757,15 +912,17 @@ async def delete_account(
             import stripe as _stripe
             if sub_id:
                 try:
-                    _stripe.Subscription.cancel(sub_id)
+                    await asyncio.to_thread(_stripe.Subscription.cancel, sub_id)
                     logger.info(f"delete_account: cancelled Stripe sub {sub_id} for user {user_id}")
                 except Exception as se:
                     logger.warning(f"delete_account: could not cancel sub {sub_id}: {se}")
             else:
-                subs = _stripe.Subscription.list(customer=customer_id, status="active", limit=10)
+                subs = await asyncio.to_thread(
+                    _stripe.Subscription.list, customer=customer_id, status="active", limit=10
+                )
                 for s in subs.data:
                     try:
-                        _stripe.Subscription.cancel(s.id)
+                        await asyncio.to_thread(_stripe.Subscription.cancel, s.id)
                     except Exception as se:
                         logger.warning(f"delete_account: could not cancel sub {s.id}: {se}")
         except Exception as ex:

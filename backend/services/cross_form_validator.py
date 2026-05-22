@@ -288,25 +288,31 @@ def _check_umbrella_attachment_stack(
     gl_eff  = _fv(facts, "effective_date")
     gl_exp  = _fv(facts, "expiration_date")
 
+    # Spec: misaligned effective/expiration dates = HARD STOP unless explained.
+    # An ACORD 101 narrative is treated as the "explained" exception.
+    _dates_explained = bool(_fv(facts, "acord101_remarks") or _fv(facts, "policy_period_explanation"))
+    _date_sev = "soft_warning" if _dates_explained else "hard_stop"
+
     if umb_eff and gl_eff and umb_eff != gl_eff:
         issues.append(_issue(
-            "soft_warning",
+            _date_sev,
             "umbrella_gl_period_misaligned",
             (
                 f"Umbrella effective date ({umb_eff}) does not match GL/policy "
                 f"effective date ({gl_eff}). Policy periods must align or be "
-                "explained."
+                "explained via ACORD 101."
             ),
             ["ACORD_125", "ACORD_131"],
         ))
 
     if umb_exp and gl_exp and umb_exp != gl_exp:
         issues.append(_issue(
-            "soft_warning",
+            _date_sev,
             "umbrella_gl_expiration_misaligned",
             (
                 f"Umbrella expiration date ({umb_exp}) does not match GL/policy "
-                f"expiration date ({gl_exp}). Periods must align or be explained."
+                f"expiration date ({gl_exp}). Periods must align or be explained "
+                "via ACORD 101."
             ),
             ["ACORD_125", "ACORD_131"],
         ))
@@ -502,12 +508,17 @@ def _check_acord125_always_present(
     issues: List[dict] = []
 
     if "ACORD_125" not in triggered_ids:
+        # NOTE: surfaced as a soft warning so the user can still proceed.
+        # The decision-tree spec calls this a hard stop, but the product
+        # intentionally lets brokers continue with a visible warning and
+        # complete the submission with missing baseline data.
         issues.append(_issue(
-            "hard_stop",
+            "soft_warning",
             "acord125_missing",
             (
-                "ACORD 125 (Commercial Insurance Application) is required for every "
-                "commercial submission. It was not included in the triggered forms."
+                "ACORD 125 (Commercial Insurance Application) was not detected. "
+                "It is normally required for every commercial submission — please "
+                "review the missing baseline data before generating forms."
             ),
             ["ACORD_125"],
         ))
@@ -569,8 +580,9 @@ def _check_crime_silent_exposure(
     num_emp = _to_int(_fv(facts, "num_employees")) or 0
 
     if has_cash_exposure or num_emp > 10:
+        # Spec: silent crime exposure = SOFT WARNING (not advisory)
         issues.append(_issue(
-            "advisory",
+            "soft_warning",
             "crime_silent_exposure",
             (
                 "The business description indicates potential employee dishonesty or "
@@ -604,8 +616,9 @@ def _check_cyber_silent_exposure(
     has_cyber_exposure = any(kw in ops for kw in cyber_keywords)
 
     if has_cyber_exposure:
+        # Spec: silent cyber exposure = SOFT WARNING (not advisory)
         issues.append(_issue(
-            "advisory",
+            "soft_warning",
             "cyber_silent_exposure",
             (
                 "Business operations indicate digital assets, customer data, or "
@@ -701,8 +714,9 @@ def _check_auto_symbol_to_exposure_alignment(
             bi_pa = _fv(facts, "bi_per_accident")
             pd_pa = _fv(facts, "pd_per_accident")
             if not all([bi_pp, bi_pa, pd_pa]):
+                # Spec: split limits incomplete = HARD STOP
                 issues.append({
-                    "type": "soft_warning",
+                    "type": "hard_stop",
                     "code": "auto_split_limits_incomplete",
                     "message": "Split liability structure selected but not all three limits (BI/person, BI/accident, PD/accident) defined",
                     "forms": ["ACORD_127"],
@@ -737,6 +751,19 @@ def _check_property_valuation_consistency(
     val_method = str(_fv(facts, "valuation_method") or "").lower()
     bldg_val   = _to_float(_fv(facts, "property_building_value"))
     year_built = _to_int(_fv(facts, "year_built"))
+
+    # Spec: valuation method missing on property submissions = SOFT BLOCK
+    # (prompt user to select RCV or ACV). Only flag when property coverage exists.
+    if not val_method and (bldg_val or _to_float(_fv(facts, "property_bpp_value"))):
+        issues.append(_issue(
+            "soft_warning",
+            "property_valuation_method_missing",
+            (
+                "Property valuation method is missing — select Replacement Cost "
+                "Value (RCV) or Actual Cash Value (ACV) for each property limit."
+            ),
+            ["ACORD_140"],
+        ))
 
     if not val_method or not bldg_val:
         return issues
@@ -943,6 +970,10 @@ def _check_umbrella_period_vs_auto_wc(
     if not umb_eff and not umb_exp:
         return issues
 
+    # Spec: underlying policy period misalignment = HARD STOP unless explained.
+    _dates_explained = bool(_fv(facts, "acord101_remarks") or _fv(facts, "policy_period_explanation"))
+    _date_sev = "soft_warning" if _dates_explained else "hard_stop"
+
     # Auto period alignment
     if "ACORD_127" in triggered_ids and flags.get("has_auto_coverage"):
         auto_eff = _fv(facts, "auto_effective_date")
@@ -950,24 +981,24 @@ def _check_umbrella_period_vs_auto_wc(
 
         if umb_eff and auto_eff and umb_eff != auto_eff:
             issues.append(_issue(
-                "soft_warning",
+                _date_sev,
                 "umbrella_auto_period_misaligned",
                 (
                     f"Umbrella effective date ({umb_eff}) does not match Auto "
                     f"policy effective date ({auto_eff}). Periods must align when "
-                    "umbrella attaches to Auto."
+                    "umbrella attaches to Auto (or be explained via ACORD 101)."
                 ),
                 ["ACORD_127", "ACORD_131"],
             ))
 
         if umb_exp and auto_exp and umb_exp != auto_exp:
             issues.append(_issue(
-                "soft_warning",
+                _date_sev,
                 "umbrella_auto_expiration_misaligned",
                 (
                     f"Umbrella expiration date ({umb_exp}) does not match Auto "
                     f"policy expiration date ({auto_exp}). Periods must align when "
-                    "umbrella attaches to Auto."
+                    "umbrella attaches to Auto (or be explained via ACORD 101)."
                 ),
                 ["ACORD_127", "ACORD_131"],
             ))
@@ -979,12 +1010,12 @@ def _check_umbrella_period_vs_auto_wc(
 
         if umb_eff and wc_eff and umb_eff != wc_eff:
             issues.append(_issue(
-                "soft_warning",
+                _date_sev,
                 "umbrella_wc_period_misaligned",
                 (
                     f"Umbrella effective date ({umb_eff}) does not match Workers "
                     f"Compensation effective date ({wc_eff}). Periods must align when "
-                    "umbrella attaches over WC."
+                    "umbrella attaches over WC (or be explained via ACORD 101)."
                 ),
                 ["ACORD_130", "ACORD_131"],
             ))
@@ -1402,8 +1433,272 @@ def _check_peril_specific_deductibles_referenced(
     return issues
 
 
+def _check_identity_address_distinction(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """
+    Spec: "physical vs mailing address distinctions must be explicit".
+    If only one of the two is captured but the dec page implies a separate
+    physical location (multiple locations or property coverage), surface a
+    soft warning.
+    """
+    issues: List[dict] = []
+
+    mailing = _fv(facts, "mailing_address")
+    physical = _fv(facts, "physical_address")
+    locations = _fv(facts, "locations") or []
+    loc_count = len(locations) if isinstance(locations, list) else 0
+
+    has_property_or_multi = (
+        flags.get("has_property_coverage")
+        or loc_count > 1
+        or flags.get("has_multiple_locations")
+    )
+
+    if mailing and not physical and has_property_or_multi:
+        issues.append(_issue(
+            "soft_warning",
+            "physical_vs_mailing_address_unclear",
+            (
+                "Mailing address is captured but physical operating address is "
+                "missing. For property or multi-location submissions, the physical "
+                "and mailing addresses must be explicitly distinguished."
+            ),
+            ["ACORD_125"],
+        ))
+
+    # Sanity: legal name and DBA captured identically — likely an extraction error
+    legal = (_fv(facts, "applicant_name") or "").strip().lower()
+    dba   = (_fv(facts, "dba_name") or "").strip().lower()
+    if legal and dba and legal == dba:
+        issues.append(_issue(
+            "advisory",
+            "legal_name_equals_dba",
+            (
+                "Legal named insured and DBA are identical — verify whether a "
+                "separate DBA exists or remove the duplicate value."
+            ),
+            ["ACORD_125"],
+        ))
+
+    return issues
+
+
+def _check_builders_risk_project_value(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """
+    Spec: "IF project_value_missing THEN block (HARD STOP) or require ACORD 101
+    with explanation."
+    """
+    issues: List[dict] = []
+
+    if "ACORD_133" not in triggered_ids and not flags.get("has_builders_risk"):
+        return issues
+
+    project_cost = _to_float(_fv(facts, "builders_risk_project_cost"))
+    if not project_cost:
+        # If an ACORD 101 narrative is provided, treat as soft instead of hard.
+        explained = bool(_fv(facts, "acord101_remarks"))
+        issues.append(_issue(
+            "soft_warning" if explained else "hard_stop",
+            "builders_risk_project_value_missing",
+            (
+                "Builders Risk (ACORD 133) requires a project value/cost. "
+                "Provide the total construction cost or attach an ACORD 101 "
+                "narrative explaining the project scope."
+            ),
+            ["ACORD_133"],
+        ))
+
+    return issues
+
+
+def _check_minimum_viable_cope_unit(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """
+    Spec: Minimum Viable COPE missing on a property submission = HARD STOP.
+    Emit a single rule-level hard stop listing exactly which fields are missing.
+    """
+    issues: List[dict] = []
+
+    if not flags.get("has_property_coverage"):
+        return issues
+    if "ACORD_140" not in triggered_ids:
+        return issues
+
+    has_bldg = bool(_fv(facts, "property_building_value"))
+    has_bpp  = bool(_fv(facts, "property_bpp_value"))
+
+    missing: List[str] = []
+    if not (_fv(facts, "locations") or _fv(facts, "property_locations") or _fv(facts, "mailing_address")):
+        missing.append("street address")
+    if not _fv(facts, "occupancy_type"):
+        missing.append("occupancy type")
+    if not _fv(facts, "construction_type"):
+        missing.append("construction type")
+    if flags.get("has_building_coverage", has_bldg) and not has_bldg:
+        missing.append("building value")
+    if flags.get("has_bpp_coverage", has_bpp) and not has_bpp:
+        missing.append("BPP value")
+
+    if missing:
+        issues.append(_issue(
+            "hard_stop",
+            "minimum_viable_cope_missing",
+            (
+                "Property submission missing Minimum Viable COPE: "
+                + ", ".join(missing)
+                + ". These fields are required to submit property to underwriting."
+            ),
+            ["ACORD_140"],
+        ))
+
+    return issues
+
+
+def _check_carrier_grade_cope_quality(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """
+    Spec: Carrier-Grade COPE quality fields (sprinkler, roof year, protection
+    class, fire dept type, distance to hydrant) are not hard stops but
+    influence SQS. Surface as soft warnings so they appear in the UI list.
+    """
+    issues: List[dict] = []
+
+    if not flags.get("has_property_coverage"):
+        return issues
+    if "ACORD_140" not in triggered_ids:
+        return issues
+
+    # Only emit when Minimum Viable COPE is satisfied — avoid noise on incomplete subs
+    if not (_fv(facts, "occupancy_type") and _fv(facts, "construction_type")):
+        return issues
+
+    missing_quality: List[str] = []
+    if not _fv(facts, "year_built"):
+        missing_quality.append("year built")
+    if not _fv(facts, "roof_year"):
+        missing_quality.append("roof year")
+    if _fv(facts, "sprinkler_system") in (None, ""):
+        missing_quality.append("sprinkler system")
+    if not _fv(facts, "fire_protection_class"):
+        missing_quality.append("protection class")
+
+    if len(missing_quality) >= 2:
+        issues.append(_issue(
+            "soft_warning",
+            "carrier_grade_cope_incomplete",
+            (
+                "Carrier-Grade COPE detail incomplete — missing: "
+                + ", ".join(missing_quality)
+                + ". Submission can proceed but SQS will be capped."
+            ),
+            ["ACORD_140"],
+        ))
+
+    return issues
+
+
+def _check_auto_agreed_value_schedule(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """
+    Spec: "If Agreed Value or Stated Amount is selected, vehicle schedule
+    confirmation is required."
+    """
+    issues: List[dict] = []
+
+    if "ACORD_127" not in triggered_ids:
+        return issues
+
+    pd_val = str(_fv(facts, "auto_physical_damage_valuation") or "").lower()
+    if not pd_val:
+        return issues
+
+    is_agreed_or_stated = (
+        "agreed" in pd_val
+        or "stated" in pd_val
+        or "guaranteed" in pd_val
+    )
+    if not is_agreed_or_stated:
+        return issues
+
+    vehicle_schedule = _fv(facts, "auto_vin_schedule") or _fv(facts, "vehicle_schedule")
+    has_schedule = bool(
+        vehicle_schedule and isinstance(vehicle_schedule, list) and len(vehicle_schedule) > 0
+    )
+
+    if not has_schedule:
+        issues.append(_issue(
+            "soft_warning",
+            "auto_agreed_value_requires_schedule",
+            (
+                f"Physical damage valuation is '{pd_val}' (Agreed Value / Stated "
+                "Amount). A confirmed vehicle schedule (VIN, year, make/model, "
+                "value) is required when this valuation method is selected."
+            ),
+            ["ACORD_127"],
+        ))
+
+    return issues
+
+
+def _check_certificate_requested_but_missing(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """
+    Spec: "Missing certificate when requested = user-facing failure
+    (but not an underwriting hard stop)." Emit as soft warning.
+    """
+    issues: List[dict] = []
+
+    cert_requested = (
+        flags.get("has_certificate_request")
+        or bool(_fv(facts, "certificate_holder"))
+        or bool(_fv(facts, "certificate_holder_address"))
+    )
+    if cert_requested and "ACORD_25" not in triggered_ids:
+        issues.append(_issue(
+            "soft_warning",
+            "certificate_requested_but_acord25_missing",
+            (
+                "A certificate of liability was requested (certificate holder "
+                "detected) but ACORD 25 is not in the selected forms. Add "
+                "ACORD 25 to satisfy the request."
+            ),
+            ["ACORD_25"],
+        ))
+
+    mortgagee = bool(_fv(facts, "mortgagee_name")) or bool(_fv(facts, "loss_payee_name"))
+    if (mortgagee or flags.get("has_property_coverage")) and (
+        "ACORD_28" not in triggered_ids and (mortgagee or flags.get("has_property_evidence_request"))
+    ):
+        if mortgagee:
+            issues.append(_issue(
+                "soft_warning",
+                "property_evidence_requested_but_acord28_missing",
+                (
+                    "A mortgagee/loss payee was detected but ACORD 28 (Evidence "
+                    "of Commercial Property Insurance) is not in the selected "
+                    "forms. Add ACORD 28 to satisfy the lender requirement."
+                ),
+                ["ACORD_28"],
+            ))
+
+    return issues
+
+
 _RULE_FUNCTIONS = [
     _check_acord125_always_present,
+    _check_identity_address_distinction,
+    _check_builders_risk_project_value,
+    _check_minimum_viable_cope_unit,
+    _check_carrier_grade_cope_quality,
+    _check_auto_agreed_value_schedule,
+    _check_certificate_requested_but_missing,
     _check_wc_payroll_reconciliation,
     _check_wc_multi_state_payroll_breakdown,
     _check_wc_gl_class_code_alignment,

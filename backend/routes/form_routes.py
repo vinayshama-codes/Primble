@@ -34,7 +34,7 @@ from services.pdf_service import (
 )
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
-    check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION,
+    check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION, classify_stops,
 )
 from services.audit_service import (
     log_recommendations_presented,
@@ -50,13 +50,66 @@ router = APIRouter(tags=["forms"])
 logger = logging.getLogger(__name__)
 
 
+async def _bg_lite_generate(session_id: str) -> None:
+    """Background task: generate the top recommended form for essentials users and store SQS in session."""
+    try:
+        session = await get_processing_session(session_id)
+        recommendations = session.get("recommendations", [])
+        form_ids = [r["form_id"] for r in recommendations][:1]
+        if not form_ids:
+            logger.info("bg_lite: session=%s no recommendations — skipping", session_id)
+            return
+
+        loop = asyncio.get_event_loop()
+        results = {}
+        for form_id in form_ids:
+            form_meta = next((f for f in session.get("all_forms", []) if f["form_id"] == form_id), None)
+            if not form_meta:
+                continue
+            try:
+                tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
+            except ValueError:
+                continue
+            if not os.path.exists(tpl):
+                continue
+            try:
+                result = await loop.run_in_executor(None, process_single_form, form_meta, session)
+                results[form_id] = result
+            except Exception as ex:
+                logger.error("bg_lite: form generation error form=%s session=%s: %s", form_id, session_id, ex)
+
+        if not results:
+            logger.warning("bg_lite: no forms generated for session=%s", session_id)
+            return
+
+        cross_issues_raw = cross_validate(session.get("facts", {}), session.get("flags", {}), form_ids)
+        seen_msgs, cross_issues = set(), []
+        for issue in cross_issues_raw:
+            msg = issue.get("message", "")
+            if msg not in seen_msgs:
+                seen_msgs.add(msg)
+                cross_issues.append(issue)
+
+        await upd_processing_session(session_id, {
+            "selected_form_ids": form_ids,
+            "generated_forms": results,
+            "active_form_id": form_ids[0] if form_ids else None,
+            "cross_issues_last": cross_issues,
+        })
+        sqs_list = [r["sqs"] for r in results.values() if r.get("sqs")]
+        avg_score = int(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
+        logger.info("bg_lite: session=%s form=%s sqs=%d", session_id, form_ids[0], avg_score)
+    except Exception as ex:
+        logger.error("bg_lite: unexpected error session=%s: %s", session_id, ex)
+
+
 # ASYNC-SAFE
 @router.post("/api/upload-declaration")
 async def upload_declaration(
     files: List[UploadFile] = File(...),
     current_user: dict = Depends(get_current_user),
 ):
-    check_upload_rate_limit(current_user["id"])
+    await check_upload_rate_limit(current_user["id"])
 
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
@@ -67,7 +120,7 @@ async def upload_declaration(
         r = dict(row)
         ps = r.get("payment_status", "ok") or "ok"
         if ps == "suspended":   raise HTTPException(403, "Account suspended due to non-payment.")
-        if ps == "archived":    raise HTTPException(403, "Account archived. Contact support@acordly.ai.")
+        if ps == "archived":    raise HTTPException(403, "Account archived. Contact support@primble.ai.")
         if ps == "soft_locked": raise HTTPException(403, "Account disabled. Please update your billing.")
         if r.get("subscription_tier", "free") == "free" and int(r.get("downloads_used", 0) or 0) >= 3:
             from fastapi.responses import JSONResponse as _JSONResponse
@@ -145,53 +198,13 @@ async def upload_declaration(
         if not all_paths:
             raise HTTPException(400, "No supported files found")
 
+        # Acquire the heavy semaphore for synchronous processing.
         _sem_token = await try_acquire_heavy()
         if not _sem_token:
             raise HTTPException(
                 429,
                 "Server busy — too many concurrent requests. Please retry in 30 seconds.",
                 headers={"Retry-After": "30"},
-            )
-
-        if ENABLE_ASYNC_PROCESSING:
-            from services.s3_service import upload_source_file, is_configured as _s3_ok
-            if not _s3_ok():
-                raise HTTPException(
-                    503,
-                    "Async processing requires S3 storage. Set AWS_S3_BUCKET or disable ENABLE_ASYNC_PROCESSING.",
-                )
-            _upload_id = uuid.uuid4().hex
-            s3_keys    = []
-            for path in all_paths:
-                fname = os.path.basename(path)
-                try:
-                    data = await asyncio.get_event_loop().run_in_executor(
-                        None, lambda p=path: open(p, "rb").read()
-                    )
-                    key = await asyncio.get_event_loop().run_in_executor(
-                        None, upload_source_file, data, fname, _upload_id
-                    )
-                    if key is None:
-                        raise HTTPException(503, "Failed to upload files to S3 for async processing.")
-                    s3_keys.append(key)
-                except HTTPException:
-                    raise
-                except Exception:
-                    raise HTTPException(503, "Failed to stage files for async processing.")
-
-            _queue       = get_job_queue()
-            _in_flight = await _queue.count_user_active_jobs(current_user["id"])
-            if _in_flight >= 5:
-                raise HTTPException(429, "Too many jobs in progress. Please wait.")
-            _job_payload = {
-                "s3_keys": s3_keys,
-                "user_id": str(current_user["id"]),
-            }
-            _job_id     = await _queue.enqueue(JOB_TYPE_EXTRACTION, _job_payload, str(current_user["id"]))
-            _async_mode = True
-            return JSONResponse(
-                status_code=202,
-                content={"job_id": _job_id, "session_id": None, "poll_url": f"/api/jobs/{_job_id}/status"},
             )
 
         _queue = get_job_queue()
@@ -228,20 +241,26 @@ async def upload_declaration(
         unique_low_conf    = pipeline_result["unique_low_conf"]
         sid                = pipeline_result["session_id"]
 
-        if not tier1_ok:
-            if _job_id:
-                await _queue.update_status(_job_id, STATUS_FAILED, error="tier1_validation_failed")
-            return JSONResponse({"success": False, "gate": "tier1_fail",
-                                  "message": "Submission missing required fields",
-                                  "missing_fields": tier1_missing, "flags": mflags})
+        # NOTE: Tier-1 / ACORD 125 baseline is no longer a hard gate.
+        # When required fields are missing, we surface them as soft warnings
+        # on the recommendations / SQS screens and let the broker continue.
+        if not tier1_ok and tier1_missing:
+            _tier1_warnings = [f"ACORD 125 minimum field missing: {m}" for m in tier1_missing]
+            soft_stops = list(soft_stops) + _tier1_warnings
 
         if _job_id:
             await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": sid})
+
+        # For essentials tier — auto-generate top form in background so SQS/ARQ are ready
+        if current_user.get("subscription_tier") == "essentials" and recommendations:
+            asyncio.ensure_future(_bg_lite_generate(sid))
 
         truncation_warnings = [
             {"filename": d["filename"], "warning": d["truncation_warning"]}
             for d in processed_docs if d.get("truncation_warning")
         ]
+
+        _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
 
         return JSONResponse({
             "success": True, "session_id": sid,
@@ -251,7 +270,10 @@ async def upload_declaration(
                               "truncation_warning": d.get("truncation_warning")} for d in processed_docs],
             "primary_doc": primary["filename"], "flags": mflags,
             "tier2_score": tier2_score, "tier2_missing": tier2_missing,
-            "hard_stops": hard_stops, "soft_stops": soft_stops,
+            "hard_stops": _remaining_hard,
+            "soft_stops": soft_stops + _downgraded,
+            "can_proceed_with_warning": _can_proceed_warn,
+            "warning_stops": _downgraded,
             "doc_conflicts": doc_conflicts,
             "recommendations": recommendations,
             "low_confidence_tokens": unique_low_conf,
@@ -275,7 +297,7 @@ async def upload_declaration(
         raise HTTPException(500, "Processing failed. Please try again.")
     finally:
         if _sem_token:
-            release_heavy(_sem_token)
+            await release_heavy(_sem_token)
         if not _async_mode:
             for _p in set(uploaded_paths) | set(all_paths):
                 try:
@@ -314,7 +336,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
 
-    check_upload_rate_limit(str(current_user["id"]))
+    await check_upload_rate_limit(str(current_user["id"]))
 
     _queue = get_job_queue()
     _in_flight = await _queue.count_user_active_jobs(current_user["id"])
@@ -334,34 +356,48 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             content={"job_id": _job_id, "session_id": req.session_id, "poll_url": f"/api/jobs/{_job_id}/status"},
         )
 
-    _sem_token = await try_acquire_heavy()
-    if not _sem_token:
-        raise HTTPException(
-            429,
-            "Server busy — too many concurrent requests. Please retry in 30 seconds.",
-            headers={"Retry-After": "30"},
-        )
-    results     = {}
+    # NOTE: We no longer acquire the global heavy-ops semaphore here.
+    # Concurrency is bounded per-user (count_user_active_jobs >= 5 above) and
+    # globally by the LLM rate-limit semaphore (utils/llm_limiter.py) which
+    # caps simultaneous OpenAI calls. Holding a heavy-ops slot for the whole
+    # multi-form request serialised users behind a 3-wide gate and made the
+    # 4th concurrent user receive HTTP 429 even though there was free capacity.
+    _sem_token = None
+    results      = {}
     combined_ids = req.form_ids
 
     try:
         loop = asyncio.get_event_loop()
-        for form_id in req.form_ids:
+
+        async def _generate_one(form_id: str):
             form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
             if not form_meta:
-                continue
+                return form_id, None
             try:
                 tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
             except ValueError:
                 logger.warning("form_routes: unsafe template path blocked for form %s", form_id)
-                continue
+                return form_id, None
             if not os.path.exists(tpl):
-                continue
+                return form_id, None
             try:
                 result = await loop.run_in_executor(None, process_single_form, form_meta, session)
-                results[form_id] = result
+                return form_id, result
             except Exception as ex:
                 logger.error(f"Error processing {form_id}: {ex}")
+                return form_id, None
+
+        gen_results = await asyncio.gather(
+            *[_generate_one(fid) for fid in req.form_ids],
+            return_exceptions=True,
+        )
+        for item in gen_results:
+            if isinstance(item, Exception):
+                logger.error(f"select_forms_bulk: gather exception: {item}")
+                continue
+            fid, result = item
+            if result is not None:
+                results[fid] = result
 
         if not results:
             await _queue.update_status(_job_id, STATUS_FAILED, error="No forms could be generated")
@@ -435,8 +471,10 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         logger.error(f"select_forms_bulk error [trace={get_trace_id()}]: {ex}", exc_info=True)
         raise HTTPException(500, "Form generation failed. Please try again.")
     finally:
+        # _sem_token is None in the new flow; release_heavy is a no-op then.
+        # Kept for safety in case future code paths re-acquire it.
         if _sem_token:
-            release_heavy(_sem_token)
+            await release_heavy(_sem_token)
 
 
 @router.post("/api/select-form")
@@ -683,7 +721,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         )
 
         from services.pdf_service import _ACORD_FIELD_RULES
-        updated_facts = dict(session["facts"])
+        updated_facts = dict(session.get("facts") or {})
         for pdf_field, new_val in req.field_updates.items():
             val_str = str(new_val).strip() if new_val is not None else ""
             for pattern, fact_key in _ACORD_FIELD_RULES:
@@ -787,7 +825,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         raise HTTPException(500, "PDF update failed. Please try again.")
     finally:
         if _sem_token:
-            release_heavy(_sem_token)
+            await release_heavy(_sem_token)
 
 
 @router.get("/api/session/{session_id}")
@@ -805,9 +843,59 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
                          "cross_issues": proc_session.get("cross_issues_last", [])})
 
 
+@router.get("/api/session/{session_id}/extraction-result")
+async def get_extraction_result(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return extraction data for a session after async processing completes.
+
+    Called by the frontend after polling a job to completion. Returns the same
+    shape as the synchronous /api/upload-declaration success response so the
+    frontend can use a single code path for both sync and async modes.
+    """
+    proc_session = await get_processing_session(session_id)
+    if proc_session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+
+    docs        = proc_session.get("docs", [])
+    primary_doc = proc_session.get("primary_doc", "")
+
+    doc_summary = [
+        {
+            "filename":              d.get("filename", ""),
+            "doc_type":              d.get("doc_type", ""),
+            "is_primary":            d.get("filename") == primary_doc,
+            "low_confidence_tokens": d.get("low_confidence_tokens", []),
+            "truncation_warning":    d.get("truncation_warning"),
+        }
+        for d in docs
+    ]
+
+    hard_stops = proc_session.get("hard_stops", [])
+    mflags     = proc_session.get("flags", {})
+    _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
+
+    return JSONResponse({
+        "success":               True,
+        "session_id":            session_id,
+        "doc_summary":           doc_summary,
+        "primary_doc":           primary_doc,
+        "flags":                 mflags,
+        "hard_stops":            _remaining_hard,
+        "soft_stops":            proc_session.get("soft_stops", []) + _downgraded,
+        "can_proceed_with_warning": _can_proceed_warn,
+        "warning_stops":         _downgraded,
+        "tier2_score":           proc_session.get("tier2_score"),
+        "tier2_missing":         proc_session.get("tier2_missing", []),
+        "recommendations":       proc_session.get("recommendations", []),
+        "all_available_forms":   proc_session.get("all_forms", []),
+        "low_confidence_tokens": proc_session.get("low_confidence_tokens", []),
+    })
+
+
 @router.get("/api/sessions/stats")
 async def session_stats(current_user: dict = Depends(get_current_user)):
-    check_payment_access(current_user.get("payment_status", "ok"), "form")
     async with get_pool().acquire() as conn:
         row = await conn.fetchrow(
             """
@@ -842,7 +930,7 @@ async def session_stats(current_user: dict = Depends(get_current_user)):
 @router.get("/api/sessions")
 async def list_sessions(current_user: dict = Depends(get_current_user)):
     if (current_user.get("payment_status") or "ok") == "archived":
-        raise HTTPException(403, "Account archived due to non-payment. Contact support@acordly.ai to reactivate.")
+        raise HTTPException(403, "Account archived due to non-payment. Contact support@primble.ai to reactivate.")
     from repositories.session_repository import list_sessions_for_user
     sessions = await list_sessions_for_user(str(current_user["id"]))
     return JSONResponse({"success": True, "sessions": sessions})
@@ -1059,49 +1147,3 @@ async def clarity_analyze(
     })
 
 
-_PRESIGN_ALLOWED_EXTS = {".pdf", ".zip", ".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
-_EXT_TO_CONTENT_TYPE = {
-    ".pdf":  "application/pdf",
-    ".zip":  "application/zip",
-    ".jpg":  "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png":  "image/png",
-    ".bmp":  "image/bmp",
-    ".tiff": "image/tiff",
-    ".tif":  "image/tiff",
-    ".webp": "image/webp",
-}
-
-
-@router.post("/api/upload/presign")
-async def get_presigned_upload_url(
-    request: Request,
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Return a presigned S3 POST URL for direct browser-to-S3 upload.
-    """
-    from services.s3_service import generate_presigned_upload_url, is_configured as _s3_ok
-
-    if not _s3_ok():
-        raise HTTPException(503, "S3 is not configured. Use the multipart upload endpoint instead.")
-
-    check_payment_access(current_user.get("payment_status", "ok"), "upload")
-    check_upload_rate_limit(str(current_user["id"]))
-
-    body     = await request.json()
-    filename = (body.get("filename") or "").strip()
-    if not filename:
-        raise HTTPException(400, "filename is required")
-
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in _PRESIGN_ALLOWED_EXTS:
-        raise HTTPException(400, f"File type '{ext}' is not supported. Allowed: {', '.join(sorted(_PRESIGN_ALLOWED_EXTS))}")
-
-    content_type = _EXT_TO_CONTENT_TYPE.get(ext, "application/octet-stream")
-    upload_id    = uuid.uuid4().hex
-    result       = generate_presigned_upload_url(filename, upload_id, content_type)
-    if result is None:
-        raise HTTPException(503, "Could not generate upload URL. Please try again.")
-
-    return JSONResponse({"success": True, **result})

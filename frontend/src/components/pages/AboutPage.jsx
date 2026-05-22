@@ -16,7 +16,7 @@ export default function AboutPage({ onGetStarted, onNavigate }) {
 
       {/* HERO */}
       <section className="mkt-hero">
-        <div className="mkt-hero-eyebrow" style={{ fontSize: "1rem" }}>About Acordly</div>
+        <div className="mkt-hero-eyebrow" style={{ fontSize: "1rem" }}>About Primble</div>
         <h1 className="mkt-hero-h1">
           Source document to ACORD package<br />
           <span className="mkt-hero-accent">No manual re-entry</span>

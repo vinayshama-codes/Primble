@@ -39,9 +39,7 @@ def dlq_inspect(
 ):
     """Peek at failed jobs sitting in the dead-letter queue.
 
-    Returns up to `limit` messages (max 10 per SQS API constraint).
-    Only available when JOB_QUEUE_BACKEND=sqs and SQS_DLQ_URL is set.
-    Messages are NOT consumed — they remain in the DLQ.
+    Returns up to `limit` messages. Messages are NOT consumed — they remain in the DLQ.
     """
     from services.job_queue import get_job_queue
     queue = get_job_queue()

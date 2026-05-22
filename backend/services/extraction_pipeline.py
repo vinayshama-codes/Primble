@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from services.ocr_service import extract_text
 from services.extraction_service import (
     extract_facts_long, identify_doc_type, merge_facts, select_primary_truth,
+    detect_source_conflicts,
 )
 from utils.table_extractor import extract_tables_from_pdf
 from services.form_service import (
@@ -156,14 +157,21 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
         doc_type  = identify_doc_type(text)
         raw       = await extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
         extracted = _validate_extraction_output(raw, doc_type)
+        # Strip the UUID prefix (added in form_routes.py for storage safety) so the
+        # user sees the original filename, not "abc123_originalname.pdf".
+        _raw_basename = os.path.basename(path)
+        _parts = _raw_basename.split("_", 1)
+        _display_name = _parts[1] if len(_parts) == 2 and len(_parts[0]) == 32 and _parts[0].isalnum() else _raw_basename
+
         processed_docs.append({
-            "filename":              os.path.basename(path),
+            "filename":              _display_name,
             "path":                  path,
             "doc_type":              doc_type,
             "text":                  text,
             "facts":                 extracted.get("facts", {}),
             "flags":                 extracted.get("flags", {}),
             "low_confidence_tokens": low_conf,
+            "manual_confirmation_required": extracted.get("manual_confirmation_required") or [],
             "truncation_warning":    extracted.get("truncation_warning"),
         })
 
@@ -193,6 +201,15 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
             else:
                 hard_stops = list(hard_stops) + [issue]
 
+    # ── Cross-document source conflicts ─────────────────────────────────────
+    # Surface field-level discrepancies between uploaded documents so the
+    # broker can reconcile before submission rather than silently overwriting.
+    if len(processed_docs) > 1:
+        source_conflicts = detect_source_conflicts(processed_docs)
+        if source_conflicts:
+            logger.info("Source conflicts detected across docs: %d", len(source_conflicts))
+            soft_stops = list(soft_stops) + source_conflicts
+
     all_forms       = load_all_forms()
     available_forms = filter_available_forms(all_forms)
     combined_text   = " ".join(d.get("text", "") for d in processed_docs)
@@ -210,6 +227,22 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
         hard_stops = list(hard_stops) + cf_hard
     if cf_soft:
         soft_stops = list(soft_stops) + cf_soft
+
+    # ── OCR low-confidence gate ─────────────────────────────────────────────
+    # Spec: critical fields (business name, address, FEIN, policy dates,
+    # property values) at OCR confidence below 90% must be surfaced for
+    # manual confirmation. We aggregate per-doc manual_confirmation_required
+    # lists into the soft_stops stream so the UI shows them as warnings.
+    _ocr_review_fields: list[str] = []
+    for d in processed_docs:
+        for fld in d.get("manual_confirmation_required") or []:
+            if fld not in _ocr_review_fields:
+                _ocr_review_fields.append(fld)
+    if _ocr_review_fields:
+        soft_stops = list(soft_stops) + [
+            f"Low OCR confidence on critical field — confirm: {fld}"
+            for fld in _ocr_review_fields
+        ]
 
     sid = await new_processing_session({
         "user_id":              user_id,

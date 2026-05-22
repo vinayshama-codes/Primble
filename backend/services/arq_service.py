@@ -570,6 +570,7 @@ async def generate_arq_questions(
     hard_stops: list,
     soft_stops: list,
 ) -> List[dict]:
+    facts = facts or {}
     missing_fields: dict = {}
     field_current_values: dict = {}
 

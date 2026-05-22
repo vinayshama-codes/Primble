@@ -81,7 +81,7 @@ export default function PlanModal({ user, token, onClose, onChangePlan, anchorRe
             <div style={{ width: `${pct}%`, height: "100%", background: barColor, borderRadius: 999, transition: "width 0.4s ease" }} />
           </div>
           {pct >= 90 && (
-            <div style={{ fontSize: 11, color: "#b45309", marginTop: 4, fontWeight: 600 }}>⚠️ Approaching limit</div>
+            <div style={{ fontSize: 11, color: "#b45309", marginTop: 4, fontWeight: 600 }}>Approaching limit</div>
           )}
         </div>
       )}

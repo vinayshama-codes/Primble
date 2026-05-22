@@ -34,6 +34,19 @@ elif _env == "production":
 else:
     ALLOWED_ORIGINS = list({FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"})
 
+_dev_origin_regex = (
+    r"^https?://("
+    r"localhost|127\.0\.0\.1|0\.0\.0\.0|"
+    r"10(?:\.\d{1,3}){3}|"
+    r"192\.168(?:\.\d{1,3}){2}|"
+    r"172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}"
+    r")(?::\d+)?$"
+)
+CORS_ALLOW_ORIGIN_REGEX = (
+    os.getenv("CORS_ALLOW_ORIGIN_REGEX", "").strip()
+    or (None if _env == "production" else _dev_origin_regex)
+)
+
 MAX_UPLOAD_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 MAX_FILES_PER_UPLOAD  = int(os.getenv("MAX_FILES_PER_UPLOAD", "10"))
 
@@ -191,20 +204,25 @@ async def _openai_chat(
     _retries: int,
 ) -> str:
     import openai as _openai
+    from utils.llm_limiter import get_llm_semaphore
     _timeout = float(os.getenv("LLM_REQUEST_TIMEOUT", "120"))
     client = _openai.AsyncOpenAI(
         api_key=os.getenv("OPENAI_API_KEY", ""),
         http_client=httpx.AsyncClient(timeout=_timeout),
     )
+    # Global concurrency cap smooths bursts under OpenAI Tier 1 RPM limits.
+    # Slot is acquired per-attempt so it is released BEFORE the retry sleep,
+    # letting other callers proceed instead of freezing all slots during backoff.
     last_ex = None
     for attempt in range(_retries + 1):
         try:
-            r = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            async with get_llm_semaphore():
+                r = await client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
             return (r.choices[0].message.content or "").strip()
         except Exception as ex:
             last_ex = ex
@@ -215,7 +233,7 @@ async def _openai_chat(
                 logger.warning(
                     f"OpenAI {'timeout' if is_timeout else status} on attempt {attempt+1}, retrying in {wait}s: {ex}"
                 )
-                await asyncio.sleep(wait)  # non-blocking
+                await asyncio.sleep(wait)  # non-blocking; slot NOT held during sleep
             else:
                 break
     raise last_ex

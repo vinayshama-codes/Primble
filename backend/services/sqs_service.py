@@ -214,7 +214,25 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         if not _fv(facts, "wc_payroll") and not _fv(facts, "total_payroll"):
             soft.append("Workers Comp detected but payroll is missing")
         if flags.get("wc_has_monopolistic_state"):
-            soft.append("Monopolistic WC state detected (ND/OH/WA/WY) — must use state fund")
+            # Spec: Monopolistic WC (ND/OH/WA/WY) — soft if state-fund is acknowledged;
+            # HARD STOP if private-carrier WC is being requested for those states.
+            private_wc_requested = bool(
+                flags.get("wc_private_carrier_requested")
+                or flags.get("wc_requested_private_carrier")
+                or (_fv(facts, "wc_carrier_type") or "").lower() in ("private", "voluntary")
+            )
+            state_fund_ack = bool(
+                flags.get("wc_state_fund_acknowledged")
+                or _fv(facts, "wc_state_fund_acknowledged")
+            )
+            if private_wc_requested and not state_fund_ack:
+                hard.append(
+                    "Monopolistic WC state (ND/OH/WA/WY) requires the state fund — "
+                    "private-carrier WC cannot be quoted. Remove private-carrier "
+                    "request or acknowledge state-fund handling."
+                )
+            else:
+                soft.append("Monopolistic WC state detected (ND/OH/WA/WY) — must use state fund")
             if not _fv(facts, "wc_monopolistic_payroll"):
                 hard.append("Monopolistic WC state detected but wc_monopolistic_payroll breakdown is missing")
         if flags.get("wc_multi_state") and not _fv(facts, "wc_payroll_by_state"):
@@ -291,6 +309,57 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
             )
 
     return hard, soft
+
+
+# ── Hard-stop classification for non-property submissions ─────────────────────
+
+# Hard stops that MUST remain hard regardless of coverage type.
+_ALWAYS_HARD_PATTERNS: Tuple[str, ...] = (
+    "fein_conflict",
+    "FEIN mismatch",
+    "Umbrella detected but no underlying",
+    "auto_umbrella_attachment_failure",
+    "auto_split_limits_incomplete",
+    "Umbrella SIR",
+    "WC payroll differs from total payroll",
+    "Location count mismatch",
+    "Monopolistic WC state detected but wc_monopolistic_payroll",
+)
+
+
+def classify_stops(
+    hard_stops: List[str],
+    flags: dict,
+) -> Tuple[bool, List[str], List[str]]:
+    """Classify hard stops for the submission type.
+
+    For non-property submissions (no has_property_coverage flag), property-related
+    hard stops are downgraded to soft warnings and the caller may allow the user
+    to proceed with a confirmation.
+
+    Returns:
+        can_proceed_with_warning : True if all remaining hard stops are soft-downgraded
+        remaining_hard_stops     : stops that are still truly blocking
+        downgraded_to_warnings   : stops moved from hard → soft for this path
+    """
+    has_property = bool(flags.get("has_property_coverage"))
+
+    if has_property or not hard_stops:
+        # Property submissions: all hard stops remain hard.
+        return False, list(hard_stops), []
+
+    remaining_hard: List[str] = []
+    downgraded:     List[str] = []
+
+    for stop in hard_stops:
+        is_always_hard = any(pat in stop for pat in _ALWAYS_HARD_PATTERNS)
+        if is_always_hard:
+            remaining_hard.append(stop)
+        else:
+            downgraded.append(stop)
+
+    can_proceed = len(remaining_hard) == 0
+    return can_proceed, remaining_hard, downgraded
 
 
 # ── Risk transfer compliance checklist ───────────────────────────────────────
@@ -556,7 +625,9 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
             "Verify or add ACORD 101 explanation."
         )
 
-    for key in ("entity_type", "mailing_address"):
+    # Spec: address mapping — compare physical_address across docs too,
+    # not just mailing_address, so the distinction between the two is preserved.
+    for key in ("entity_type", "mailing_address", "physical_address"):
         vals = {_fv(d["facts"], key) for d in docs if _fv(d["facts"], key)}
         if len(vals) > 1:
             issues.append(
@@ -755,15 +826,6 @@ def _calculate_cope_score(facts: dict, flags: dict) -> int:
     return int(60 + (sum(carrier_cope) / len(carrier_cope)) * 40)
 
 
-# ── Weight normalization ──────────────────────────────────────────────────────
-
-def normalize_weights(base_weights: dict, override: dict) -> dict:
-    """Normalize weights to sum to 1.0 after override."""
-    w = {**base_weights, **override}
-    total = sum(w.values())
-    return {k: v / total for k, v in w.items()}
-
-
 # ── Package-level SQS ─────────────────────────────────────────────────────────
 
 # SPEC-COMPLIANT WEIGHTS (matches decision tree specification v2.1.0+)
@@ -774,23 +836,6 @@ SPEC_PILLAR_WEIGHTS = {
     "loss_history_alignment":  0.15,    # Claims vs exposures
     "umbrella_limit_adequacy": 0.10,    # Underlying limits vs umbrella
     "narrative_quality":       0.10,    # ACORD 101 clarity
-}
-
-# LEGACY WEIGHTS (kept for backward compatibility)
-BASE_PILLAR_WEIGHTS = {
-    "data_integrity": 0.35,
-    "exposure_cope":  0.25,
-    "consistency":    0.20,
-    "loss_history":   0.15,
-    "narrative":      0.05
-}
-
-LOB_WEIGHT_OVERRIDES = {
-    "contractor":     {"exposure_cope": 0.30, "data_integrity": 0.30},
-    "restaurant":     {},
-    "technology":     {"narrative": 0.10, "exposure_cope": 0.20},
-    "transportation": {"exposure_cope": 0.30},
-    "generic":        {}
 }
 
 
@@ -875,13 +920,12 @@ def calculate_package_sqs(
         raw = min(raw, 85)
     raw = max(0, raw)
 
-    # Tier determination
+    # Tier determination — spec: 90 / 75 / 60 / <60
     tier = (
         "Carrier-Ready" if raw >= 90 else
-        "Quote-Ready"   if raw >= 78 else
-        "Review-Ready"  if raw >= 62 else
-        "At-Risk"       if raw >= 45 else
-        "Incomplete"
+        "Review-Ready"  if raw >= 75 else
+        "At-Risk"       if raw >= 60 else
+        "Decline-Prone"
     )
 
     # SQS history management
@@ -900,9 +944,35 @@ def calculate_package_sqs(
     # Delta calculation
     delta = raw - history[0]["score"] if len(history) > 1 else 0
 
-    # Top recommendations (merged from all components)
-    all_recs = list(tier1_missing) + list(tier2_missing) + list(p4_recs)
-    top_recs = all_recs[:5]
+    # Top recommendations — spec: Top-3 ranked risk drivers with actionable steps.
+    # Rank: pick the 3 lowest-scoring pillars (<90) and surface the most relevant
+    # missing field per pillar.
+    _pillar_scores = {
+        "structural_completeness": p1,
+        "exposure_consistency":    p2,
+        "property_integrity":      p3,
+        "loss_history_alignment":  p4,
+        "umbrella_limit_adequacy": p5,
+        "narrative_quality":       p6,
+    }
+    _ranked_pillars = [
+        (k, v) for k, v in sorted(_pillar_scores.items(), key=lambda x: x[1]) if v < 90
+    ][:3]
+
+    _miss_by_pillar = {
+        "structural_completeness": list(tier1_missing) + list(tier2_missing),
+        "loss_history_alignment":  list(p4_recs),
+    }
+    top_recs: List[dict] = []
+    for pillar, score in _ranked_pillars:
+        miss_list = _miss_by_pillar.get(pillar, [])
+        action = miss_list[0] if miss_list else f"Improve {pillar.replace('_', ' ')}"
+        top_recs.append({
+            "pillar":  pillar,
+            "score":   score,
+            "action":  action,
+            "missing": miss_list[:3],
+        })
 
     return {
         "package_sqs_score": raw,
@@ -1015,13 +1085,12 @@ def calculate_package_sqs_spec_compliant(
         raw = min(raw, 85)
     raw = max(0, raw)
 
-    # Tier determination
+    # Tier determination — spec: 90 / 75 / 60 / <60
     tier = (
         "Carrier-Ready" if raw >= 90 else
-        "Quote-Ready" if raw >= 78 else
-        "Review-Ready" if raw >= 62 else
-        "At-Risk" if raw >= 45 else
-        "Incomplete"
+        "Review-Ready"  if raw >= 75 else
+        "At-Risk"       if raw >= 60 else
+        "Decline-Prone"
     )
 
     # SQS history

@@ -17,25 +17,12 @@ US_STATES = {
 
 MONOPOLISTIC_WC_STATES = {"ND", "OH", "WA", "WY"}
 
-PERSONAL_EMAIL_DOMAINS = {
-    "gmail.com","yahoo.com","hotmail.com","outlook.com","icloud.com",
-    "live.com","aol.com","msn.com","ymail.com","mail.com",
-    "protonmail.com","proton.me","tutanota.com","zoho.com",
-}
-
 _DATE_FORMATS = ["%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y", "%m-%d-%Y", "%d/%m/%Y"]
 
 
 # ---------------------------------------------------------------------------
 # Individual validators — each returns (ok: bool, message: str)
 # ---------------------------------------------------------------------------
-
-def validate_work_email(email: str) -> Tuple[bool, str]:
-    """Reject obviously personal email domains for producer/contact fields."""
-    domain = email.lower().split("@")[-1] if "@" in email else ""
-    if domain in PERSONAL_EMAIL_DOMAINS:
-        return False, f"Please use a work email. Personal domains ({domain}) are not accepted."
-    return True, ""
 
 
 def validate_password(password: str) -> Tuple[bool, str]:

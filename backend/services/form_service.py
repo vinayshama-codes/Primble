@@ -72,10 +72,25 @@ def _infer_primary_state(facts: dict) -> Optional[str]:
     Returns a 2-letter state code (CA, CO, etc.) or None.
 
     Priority:
+    0. LLM-extracted state_of_operations field (most reliable)
     1. Extract from mailing_address or physical_address using US address patterns
     2. Check first location in locations list
     3. Check wc_payroll_by_state (first/dominant state)
     """
+    state_val = facts.get("state_of_operations")
+    if state_val:
+        if isinstance(state_val, dict):
+            state_val = (
+                state_val.get("primary") or
+                state_val.get("state") or
+                state_val.get("value") or
+                next(iter(state_val.values()), None)
+            )
+        if state_val and isinstance(state_val, str):
+            code = state_val.upper().strip()[:2]
+            if code in US_STATES:
+                return code
+
     for key in ("mailing_address", "physical_address"):
         state = _extract_state_code(_fv(facts, key))
         if state:
@@ -376,7 +391,8 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         return any(m["form_id"] == form_id for m in matches)
 
     def _add(form_id: str, form_name: str, trigger_weight: float,
-             trigger_reason: str, template_pending: bool = False) -> None:
+             trigger_reason: str, template_pending: bool = False,
+             needs_state_confirmation: bool = False) -> None:
         confidence, reason = _compute_confidence(form_id, facts, trigger_weight, triggered=True)
         entry: dict = {
             "form_id":        form_id,
@@ -391,6 +407,8 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         entry["fields_total"]  = total
         if template_pending:
             entry["template_pending"] = True
+        if needs_state_confirmation:
+            entry["needs_state_confirmation"] = True
         matches.append(entry)
 
     # ── Always required ────────────────────────────────────────────────────────
@@ -401,11 +419,38 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
 
     # ── Flag-based (trigger_weight 0.95) ──────────────────────────────────────
 
-    if flags.get("has_general_liability") or flags.get("is_contractor"):
+    # Keyword fallback sets used when the LLM-derived flag is missing but the
+    # raw document text contains GL / Auto / Property signals.
+    _126_kw = {
+        "general liability", "premises-operations", "premises/operations",
+        "products/completed", "products-completed", "personal & advertising injury",
+        "personal and advertising injury", "bodily injury", "property damage",
+        "additional insured", "subcontract", "class code", "acord 126",
+    }
+    _127_kw = {
+        "business auto", "commercial auto", "hired auto", "non-owned",
+        "non owned", "garage operations", "vehicle schedule", "auto liability",
+        "fleet", "vin ", "year/make/model", "year make model", "acord 127",
+    }
+    _140_kw = {
+        "building limit", "bpp", "business personal property",
+        "construction type", "sprinkler", "sprinklered", "roof year",
+        "business income", "year built", "fire protection class",
+        "protection class", "acord 140",
+    }
+
+    if (flags.get("has_general_liability")
+            or flags.get("is_contractor")
+            or any(kw in search for kw in _126_kw)):
+        _gl_reason = (
+            "has_general_liability or is_contractor flag detected"
+            if (flags.get("has_general_liability") or flags.get("is_contractor"))
+            else "general liability keywords detected in document text"
+        )
         _add("ACORD_126",
              "ACORD 126 - Commercial General Liability Section",
              trigger_weight=0.95,
-             trigger_reason="has_general_liability or is_contractor flag detected")
+             trigger_reason=_gl_reason)
 
     if flags.get("has_workers_comp"):
         _add("ACORD_130",
@@ -414,11 +459,17 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              trigger_reason="has_workers_comp flag detected",
              template_pending=True)
 
-    if flags.get("has_auto_coverage"):
+    if (flags.get("has_auto_coverage")
+            or any(kw in search for kw in _127_kw)):
+        _auto_reason = (
+            "has_auto_coverage flag detected"
+            if flags.get("has_auto_coverage")
+            else "auto / vehicle keywords detected in document text"
+        )
         _add("ACORD_127",
              "ACORD 127 - Business Auto Section",
              trigger_weight=0.95,
-             trigger_reason="has_auto_coverage flag detected",
+             trigger_reason=_auto_reason,
              template_pending=True)
 
     if flags.get("has_umbrella"):
@@ -428,11 +479,17 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              trigger_reason="has_umbrella flag detected",
              template_pending=True)
 
-    if flags.get("has_property_coverage"):
+    if (flags.get("has_property_coverage")
+            or any(kw in search for kw in _140_kw)):
+        _prop_reason = (
+            "has_property_coverage flag detected"
+            if flags.get("has_property_coverage")
+            else "property / COPE keywords detected in document text"
+        )
         _add("ACORD_140",
              "ACORD 140 - Commercial Property Section",
              trigger_weight=0.95,
-             trigger_reason="has_property_coverage flag detected")
+             trigger_reason=_prop_reason)
 
     if flags.get("has_certificate_request") or flags.get("is_certificate_doc"):
         _add("ACORD_25",
@@ -474,12 +531,14 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         elif primary_state is None:
             _add("ACORD_137_CA",
                  "ACORD 137 CA - Commercial Auto Coverages / Limits Section",
-                 trigger_weight=0.80,
-                 trigger_reason="commercial auto coverage signals detected (state not detected, offering California variant)")
+                 trigger_weight=0.65,
+                 trigger_reason="commercial auto coverage signals detected (state not detected, offering California variant)",
+                 needs_state_confirmation=True)
             _add("ACORD_137_CO",
                  "ACORD 137 CO - Commercial Auto Coverages / Limits Section",
-                 trigger_weight=0.80,
-                 trigger_reason="commercial auto coverage signals detected (state not detected, offering Colorado variant)")
+                 trigger_weight=0.65,
+                 trigger_reason="commercial auto coverage signals detected (state not detected, offering Colorado variant)",
+                 needs_state_confirmation=True)
 
     # ACORD 138 - Garage and Dealers Coverages / Limits (state-variant aware)
     _garage_138_kw = {
@@ -510,12 +569,14 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         elif primary_state is None:
             _add("ACORD_138_CA",
                  "ACORD 138 CA - Garage and Dealers Coverages / Limits Section",
-                 trigger_weight=0.80,
-                 trigger_reason="garage/dealers coverage signals detected (state not detected, offering California variant)")
+                 trigger_weight=0.65,
+                 trigger_reason="garage/dealers coverage signals detected (state not detected, offering California variant)",
+                 needs_state_confirmation=True)
             _add("ACORD_138_CO",
                  "ACORD 138 CO - Garage and Dealers Coverages / Limits Section",
-                 trigger_weight=0.80,
-                 trigger_reason="garage/dealers coverage signals detected (state not detected, offering Colorado variant)")
+                 trigger_weight=0.65,
+                 trigger_reason="garage/dealers coverage signals detected (state not detected, offering Colorado variant)",
+                 needs_state_confirmation=True)
 
     # ACORD 101 — Additional Remarks (complex trigger logic unchanged)
     _101_reasons: List[str] = []
@@ -586,24 +647,9 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              trigger_reason="inland marine flag or equipment / cargo keywords detected",
              template_pending=True)
 
-    # ACORD 137 — Crime / Fidelity
-    _137_crime_kw = {
-        "crime", "employee dishonesty", "money and securities", "forgery",
-        "fidelity", "erisa bond", "commercial crime", "theft", "burglary",
-        "robbery", "acord 137",
-    }
-    if (not _already_matched("ACORD_137_CA")
-            and (flags.get("has_crime") or any(kw in search for kw in _137_crime_kw))):
-        _add("ACORD_137_CA",
-             "ACORD 137 CA - Commercial Auto Coverages / Limits Section",
-             trigger_weight=0.85,
-             trigger_reason="crime/fidelity coverage signals detected",
-             template_pending=True)
-        _add("ACORD_137_CO",
-             "ACORD 137 CO - Commercial Auto Coverages / Limits Section",
-             trigger_weight=0.85,
-             trigger_reason="crime/fidelity coverage signals detected",
-             template_pending=True)
+    # TODO: Add a dedicated crime/fidelity ACORD form (e.g. ACORD 140 or a crime-specific form)
+    # once the correct form template is added to forms_database. ACORD 137 is a commercial
+    # AUTO form and must NOT be used for crime/fidelity coverage detection.
 
     # ACORD 138 — Cyber / Network Security
     _138_cyber_kw = {

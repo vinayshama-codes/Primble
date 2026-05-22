@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { API_BASE } from "../../config/constants";
 import { PLANS } from "../billing/plans";
+import ContactModal from "../account/ContactModal";
 
 const PLAN_ORDER = ["essentials", "professional", "business", "enterprise"];
 
@@ -8,6 +9,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
   const [annual, setAnnual]           = useState(false);
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [showContactSales, setShowContactSales] = useState(false);
 
   const handleManageBilling = async () => {
     if (!openBillingPortal) return;
@@ -27,16 +29,17 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
   };
 
   const getCtaLabel = (plan) => {
-    if (!token) return plan.id === "enterprise" ? "Contact sales" : "Upgrade";
+    if (plan.id === "enterprise") return "Contact sales";
+    if (!token) return "Select";
     const state = getPlanState(plan.id);
     if (state === "current") return "Current plan";
-    if (plan.id === "enterprise") return "Contact sales";
-    return state === "upgrade" ? "Upgrade" : "Downgrade";
+    if (currentTier === "free" || currentIdx === -1) return "Select";
+    return "Upgrade";
   };
 
   const handleSelect = async (planId) => {
     if (planId === "enterprise") {
-      window.location.href = "mailto:sales@primble.ai?subject=Enterprise Plan Inquiry";
+      setShowContactSales(true);
       return;
     }
     if (!token) {
@@ -68,10 +71,11 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
   const anyLoading = !!loadingPlan;
 
   return (
+    <>
     <main className="mkt-page">
 
       {/* HERO */}
-      <section className="mkt-hero" style={{ paddingTop: 0, paddingBottom: 16 }}>
+      <section className="mkt-hero" style={{ paddingTop: 64, paddingBottom: 0 }}>
         <h1 className="pricing-section-h1">Choose the Plan That Fits Your Business</h1>
         {token && user?.subscription_tier && user.subscription_tier !== "free" && openBillingPortal && (
           <p style={{ fontSize: 13, color: "#64748b", marginTop: 8 }}>
@@ -139,8 +143,7 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
                     <div className="mkt-plan-billed">Billed annually</div>
                   )}
 
-                  <div style={{ fontSize: 12, color: "var(--primary)", fontWeight: 600, margin: "6px 0 2px" }}>{plan.packageCount}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 4 }}>Overage: {plan.overage}</div>
+                  <div style={{ fontSize: 12, color: "var(--primary)", fontWeight: 600, margin: "6px 0 8px" }}>{plan.packageCount}</div>
 
                   <button
                     className={plan.featured ? "btn-primary mkt-plan-cta" : "mkt-plan-cta mkt-plan-cta-outline"}
@@ -186,5 +189,9 @@ export default function PricingPage({ onGetStarted, token, user, onError, openBi
       </section>
 
     </main>
+    {showContactSales && (
+      <ContactModal user={user} onClose={() => setShowContactSales(false)} />
+    )}
+  </>
   );
 }

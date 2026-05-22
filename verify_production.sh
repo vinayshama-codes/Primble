@@ -5,7 +5,7 @@ echo "=================================="
 PASS=0; FAIL=0; WARN=0
 check_pass() { echo "✅ PASS: $1"; PASS=$((PASS+1)); }
 check_fail() { echo "❌ FAIL: $1"; FAIL=$((FAIL+1)); }
-check_warn() { echo "⚠️  WARN: $1"; WARN=$((WARN+1)); }
+check_warn() { echo "WARN: $1"; WARN=$((WARN+1)); }
 
 echo "--- DATABASE ---"
 _db_query() {
@@ -92,7 +92,7 @@ grep -q "^[^#]*init_db()" backend/main.py 2>/dev/null && check_fail "init_db() r
 
 echo ""
 echo "=================================="
-echo "✅ PASS: $PASS  ❌ FAIL: $FAIL  ⚠️ WARN: $WARN"
+echo "✅ PASS: $PASS  ❌ FAIL: $FAIL  WARN: $WARN"
 [ $FAIL -eq 0 ] && echo "Status: PRODUCTION READY" && exit 0
 [ $FAIL -le 3 ] && echo "Status: CONDITIONAL — fix ❌ items" && exit 1
 echo "Status: NOT READY — too many critical failures"; exit 2

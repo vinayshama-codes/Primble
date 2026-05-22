@@ -7,7 +7,25 @@ import NoSignaturePrompt from "../signature/NoSignaturePrompt";
 const PDFJS_CDN    = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
+// pdf.js loads PDFs inside a Web Worker that does NOT inherit the main-thread
+// fetch interceptor. On iOS Safari (ITP), the cross-site session cookie is
+// blocked, so the worker's PDF fetch returns 401 and the preview silently
+// stays in "Loading PDF…". Reading the bearer token here and passing it via
+// httpHeaders gives the worker an auth channel that survives ITP.
+const _readSessionToken = () => {
+  try { return localStorage.getItem("acordly_tk") || sessionStorage.getItem("acordly_tk") || null; }
+  catch { return null; }
+};
+const _pdfAuthHeaders = () => {
+  const t = _readSessionToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
+
 const YELLOW_REQUIRED = new Set(["NamedInsured_Signature_A", "NamedInsured_SignatureDate_A"]);
+const CONTAINER_PADDING = 24;
+
+const getMobileRenderWidth = (avail) =>
+  window.innerWidth <= 768 ? Math.max(avail * 1.8, 680) : avail;
 
 export default function PDFJsViewer({
   pdfUrl, formName, onFormNav, sessionId, formId, token,
@@ -90,7 +108,7 @@ export default function PDFJsViewer({
     pdfUrlRef.current = pdfUrl;
     setLoadError(false); setLoadingStage("loading");
     const url  = `${pdfUrl}?_r=${Date.now()}`;
-    const task = window.pdfjsLib.getDocument({ url, withCredentials: true });
+    const task = window.pdfjsLib.getDocument({ url, withCredentials: true, httpHeaders: _pdfAuthHeaders() });
     task.promise
       .then(doc => { setPdfDoc(doc); setTotalPages(doc.numPages); })
       .catch(err => {
@@ -113,8 +131,8 @@ export default function PDFJsViewer({
       try {
         const page   = await pdfDoc.getPage(pageNum);
         const canvas = canvasRef.current; if (!canvas) return;
-        const avail  = containerRef.current ? containerRef.current.clientWidth - 48 : 720;
-        const scale  = Math.min(2.2, Math.max(1.0, avail / page.getViewport({ scale: 1 }).width));
+        const avail  = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
+        const scale  = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
         const vp     = page.getViewport({ scale });
         canvas.width = vp.width; canvas.height = vp.height;
         renderScaleRef.current = scale;
@@ -328,10 +346,9 @@ export default function PDFJsViewer({
             updateHighlightCounts(fieldsRef.current, fieldConfLabelRef.current, clientFilledRef.current, fieldValuesRef.current);
           });
           wrap.appendChild(cb);
-        } else if (isChecked) {
-          // View mode: the backend removes /AP so the PDF canvas renders nothing
-          // inside the checkbox. Draw a solid black tick here so it's always
-          // visible and correctly coloured regardless of the PDF's appearance stream.
+        } else if (isChecked && hl) {
+          // View mode with highlight (opaque background hides PDF canvas): draw a
+          // tick so the checkmark is visible over the highlight colour.
           const mark = document.createElement("div");
           const markSize = Math.min(ch * 0.78, 12);
           mark.style.cssText = `position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:${markSize}px;line-height:1;color:#000;font-weight:900;font-family:Arial,sans-serif;user-select:none;pointer-events:none;`;
@@ -400,10 +417,10 @@ export default function PDFJsViewer({
       if (res.ok) {
         setApplySigStage("rendering");
         const freshUrl = `${pdfUrlRef.current || pdfUrl}?_sig=${Date.now()}`;
-        const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, withCredentials: true }).promise;
+        const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, withCredentials: true, httpHeaders: _pdfAuthHeaders() }).promise;
         const page     = await newDoc.getPage(pageNum);
-        const avail    = containerRef.current ? containerRef.current.clientWidth - 48 : 720;
-        const scale    = Math.min(2.2, Math.max(1.0, avail / page.getViewport({ scale: 1 }).width));
+        const avail    = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
+        const scale    = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
         const vp       = page.getViewport({ scale });
         const off      = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
         const offCtx   = off.getContext("2d"); offCtx.fillStyle = "#fff"; offCtx.fillRect(0,0,off.width,off.height);
@@ -471,12 +488,12 @@ export default function PDFJsViewer({
 
   const _loadPdfInBackground = (currentValues) => {
     if (!pdfjsReady) return;
-    window.pdfjsLib.getDocument({ url: `${pdfUrlRef.current || pdfUrl}?_r=${Date.now()}`, withCredentials: true }).promise
+    window.pdfjsLib.getDocument({ url: `${pdfUrlRef.current || pdfUrl}?_r=${Date.now()}`, withCredentials: true, httpHeaders: _pdfAuthHeaders() }).promise
       .then(async newDoc => {
         try {
           const page    = await newDoc.getPage(pageNum);
-          const avail   = containerRef.current ? containerRef.current.clientWidth - 48 : 720;
-          const scale   = Math.min(2.2, Math.max(1.0, avail / page.getViewport({ scale: 1 }).width));
+          const avail   = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
+          const scale   = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
           const vp      = page.getViewport({ scale });
           const off     = document.createElement("canvas"); off.width = vp.width; off.height = vp.height;
           await page.render({ canvasContext: off.getContext("2d"), viewport: vp, renderInteractiveForms: false }).promise;
@@ -526,9 +543,9 @@ export default function PDFJsViewer({
       {showSignPrompt === "none" && <NoSignaturePrompt onSetup={() => { setShowSignPrompt(null); onOpenSignatureModal(); }} onClose={() => setShowSignPrompt(null)} />}
 
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
+      <div className="pdfviewer-toolbar-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
-          <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>📄 {formName}</span>
+          <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>{formName}</span>
           {fieldsLoaded && (
             <>
               {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>🟡 {highlightCounts.yellow} required</span>}
@@ -538,26 +555,26 @@ export default function PDFJsViewer({
           )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+        <div className="pdfviewer-toolbar-actions" style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
           {saveStatus === "saving" && <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}><span style={{ width: 10, height: 10, border: "2px solid #f59e0b", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Saving…</span>}
           {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>✓ Saved</span>}
-          {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>⚠ Failed</span>}
+          {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>Failed</span>}
 
           <button onClick={handleRefresh} disabled={loadingStage !== "idle"}
             title="Refresh — picks up client-submitted answers and shows green highlights"
             style={{ display: "flex", alignItems: "center", gap: 3, padding: "4px 9px", borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#8b93b0", fontSize: 11, fontWeight: 600, cursor: loadingStage !== "idle" ? "wait" : "pointer", fontFamily: "inherit" }}>
-            🔄 Refresh
+            Refresh
           </button>
 
           <button onClick={handleToggleEditMode} disabled={saveStatus === "saving" || saveStatus === "generating"}
             style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${editMode ? "#f59e0b" : "#2a3047"}`, background: editMode ? "rgba(245,158,11,0.15)" : "#252a3d", color: editMode ? "#f59e0b" : "#8b93b0", fontSize: 12, fontWeight: 600, cursor: (saveStatus === "saving" || saveStatus === "generating") ? "wait" : "pointer", fontFamily: "inherit", opacity: (saveStatus === "saving" || saveStatus === "generating") ? 0.7 : 1 }}>
-            ✏️ {editMode ? "Done Editing" : "Edit Fields"}
+            {editMode ? "Done Editing" : "Edit Fields"}
           </button>
 
           <button onClick={handleSignClick} disabled={applyingSign}
             title={isSignedLocal ? "Signature applied — enter edit mode to remove" : savedSignature ? "Apply your saved signature" : "Set up a signature"}
             style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${isSignedLocal ? "#10b981" : "rgba(230,0,122,0.4)"}`, background: isSignedLocal ? "rgba(16,185,129,0.1)" : "rgba(230,0,122,0.08)", color: isSignedLocal ? "#10b981" : "#E61B84", fontSize: 12, fontWeight: 600, cursor: applyingSign ? "wait" : "pointer", fontFamily: "inherit", opacity: applyingSign ? 0.7 : 1 }}>
-            {applyingSign ? <><span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Signing…</> : isSignedLocal ? "✓ Signed" : "✍ Sign"}
+            {applyingSign ? <><span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Signing…</> : isSignedLocal ? "Signed" : "Sign"}
           </button>
 
           {rendering && <span style={{ color: "#4f7cff", fontSize: 11 }}>Rendering…</span>}
@@ -576,23 +593,23 @@ export default function PDFJsViewer({
       </div>
 
       {editMode && (
-        <div style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ color: "#f59e0b", fontSize: 11 }}>✏️ Click any field to edit — "Done Editing" saves all changes</span>
+        <div className="pdfviewer-edit-hint" style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any field to edit — "Done Editing" saves all changes</span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,243,199,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🟡 Required field</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,226,226,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🩷 Low confidence</span></span>
           {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(187,247,208,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>✅ Client-filled</span></span>}
         </div>
       )}
 
-      <div ref={containerRef} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 24, background: "#252a3d", minHeight: 0 }}>
+      <div ref={containerRef} className="pdfviewer-canvas-container" style={{ flex: 1, overflowY: "auto", overflowX: "auto", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 12, background: "#252a3d", minHeight: 0 }}>
         {loadError ? (
-          <div style={{ color: "#6b7899", textAlign: "center", marginTop: 60 }}>⚠️ Could not load PDF preview.</div>
+          <div style={{ color: "#6b7899", textAlign: "center", marginTop: 60 }}>Could not load PDF preview.</div>
         ) : !pdfDoc ? (
           <div style={{ color: "#6b7899", textAlign: "center", marginTop: 60 }}>
             <div className="loading-spinner" style={{ margin: "0 auto 12px" }} />Loading PDF…
           </div>
         ) : (
-          <div style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2 }}>
+          <div className="pdfviewer-canvas-wrapper" style={{ position: "relative", display: "inline-block", lineHeight: 0, boxShadow: "0 8px 40px rgba(0,0,0,0.6)", borderRadius: 2 }}>
             <canvas ref={canvasRef} style={{ display: "block" }} />
             <div ref={overlayRef} style={{ position: "absolute", top: 0, left: 0, zIndex: 1, pointerEvents: editMode ? "all" : "none" }} />
             {saveStatus === "saving" && (
