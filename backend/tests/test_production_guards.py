@@ -28,7 +28,7 @@ def _stub_module(name, **attrs):
     sys.modules[name] = mod
     return mod
 
-for _pkg in ("boto3", "botocore", "stripe", "easyocr", "cv2", "camelot",
+for _pkg in ("stripe", "easyocr", "cv2", "camelot",
              "google.auth", "google.oauth2", "google_auth_oauthlib",
              "reportlab", "reportlab.lib", "reportlab.lib.pagesizes",
              "reportlab.platypus", "pikepdf", "pdfplumber"):

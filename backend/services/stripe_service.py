@@ -53,7 +53,7 @@ def create_overage_invoice_item(user: dict, overage_rate_cents: int) -> bool:
             customer=user.get("stripe_customer_id"),
             amount=overage_rate_cents,
             currency="usd",
-            description=f"Acordly {tier_label} — 1 overage ACORD package (@ ${overage_rate_cents/100:.2f})",
+            description=f"Primble {tier_label} — 1 overage ACORD package (@ ${overage_rate_cents/100:.2f})",
             metadata={"user_id": user["id"], "user_email": user.get("email", ""), "plan": sub, "type": "overage_package"},
         )
         logger.info(f"Overage invoice item queued: user={user['id']} amount={overage_rate_cents}¢")

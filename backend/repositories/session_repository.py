@@ -9,20 +9,12 @@ from typing import Optional
 from config.database import get_pool
 from fastapi import HTTPException
 from services.extraction_service import _fv
-from services.s3_service import (
-    download_pdf        as _s3_download,
-    download_pdf_async  as _s3_download_async,
-    upload_pdf          as _s3_upload,
-    upload_pdf_async    as _s3_upload_async,
-    is_configured       as _s3_configured,
-)
 from cryptography.fernet import InvalidToken as _InvalidToken
 
 from utils.crypto import encrypt_field, decrypt_field
 
 _FACTS_PREFIX = "enc:"
 
-_IS_PROD = os.getenv("ENVIRONMENT", "development").lower() == "production"
 
 logger = logging.getLogger(__name__)
 
@@ -96,14 +88,9 @@ async def _session_from_db(data: dict, sid: str) -> dict:
         )
     generated = data.get("generated_forms", {})
     for row in rows:
-        row   = dict(row)
-        fid   = row["form_id"]
-        s3_key = row.get("s3_key")
-        pb    = None
-        if s3_key:
-            pb = await _s3_download_async(s3_key)
-        if pb is None and row.get("pdf_bytes"):
-            pb = bytes(row["pdf_bytes"])
+        row = dict(row)
+        fid = row["form_id"]
+        pb  = bytes(row["pdf_bytes"]) if row.get("pdf_bytes") else None
         if pb is not None and fid in generated:
             generated[fid]["pdf_bytes"] = pb
     return data
@@ -115,56 +102,21 @@ async def _save_pdf_bytes(sid: str, generated: dict) -> None:
         return
     now = datetime.now(timezone.utc).isoformat()
 
-    # Phase 1: upload to S3 outside the DB transaction to avoid holding a DB
-    # connection open during network I/O.
-    s3_results: dict = {}  # fid -> (s3_key | None, pdf_bytes | None)
-    for fid, form_data in generated.items():
-        pb = form_data.get("pdf_bytes")
-        if pb is None:
-            continue
-        if _s3_configured():
-            s3_key = await _s3_upload_async(sid, fid, pb)
-            if s3_key:
-                s3_results[fid] = (s3_key, None)
-                continue
-            if _IS_PROD:
-                logger.error(
-                    "S3 PDF upload failed for session %s form %s in production", sid, fid
-                )
-                raise HTTPException(503, "PDF storage failed. Please try again.")
-            logger.warning(
-                "S3 PDF upload failed for session %s form %s — BYTEA fallback",
-                sid, fid,
-            )
-        s3_results[fid] = (None, pb)
-
-    if not s3_results:
-        return
-
-    # Phase 2: persist the keys/bytes in a short-lived DB transaction — no S3 I/O here.
     async with get_pool().acquire() as conn:
         async with conn.transaction():
-            for fid, (s3_key, pb) in s3_results.items():
-                if s3_key:
-                    await conn.execute(
-                        """INSERT INTO session_pdf_bytes
-                               (session_id, form_id, pdf_bytes, s3_key, updated_at)
-                           VALUES ($1,$2,NULL,$3,$4)
-                           ON CONFLICT (session_id, form_id)
-                           DO UPDATE SET pdf_bytes=NULL, s3_key=EXCLUDED.s3_key,
-                                         updated_at=EXCLUDED.updated_at""",
-                        sid, fid, s3_key, now,
-                    )
-                else:
-                    await conn.execute(
-                        """INSERT INTO session_pdf_bytes
-                               (session_id, form_id, pdf_bytes, updated_at)
-                           VALUES ($1,$2,$3,$4)
-                           ON CONFLICT (session_id, form_id)
-                           DO UPDATE SET pdf_bytes=EXCLUDED.pdf_bytes,
-                                         updated_at=EXCLUDED.updated_at""",
-                        sid, fid, pb, now,
-                    )
+            for fid, form_data in generated.items():
+                pb = form_data.get("pdf_bytes")
+                if pb is None:
+                    continue
+                await conn.execute(
+                    """INSERT INTO session_pdf_bytes
+                           (session_id, form_id, pdf_bytes, updated_at)
+                       VALUES ($1,$2,$3,$4)
+                       ON CONFLICT (session_id, form_id)
+                       DO UPDATE SET pdf_bytes=EXCLUDED.pdf_bytes,
+                                     updated_at=EXCLUDED.updated_at""",
+                    sid, fid, pb, now,
+                )
 
 
 # ASYNC-SAFE

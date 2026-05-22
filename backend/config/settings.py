@@ -204,20 +204,25 @@ async def _openai_chat(
     _retries: int,
 ) -> str:
     import openai as _openai
+    from utils.llm_limiter import get_llm_semaphore
     _timeout = float(os.getenv("LLM_REQUEST_TIMEOUT", "120"))
     client = _openai.AsyncOpenAI(
         api_key=os.getenv("OPENAI_API_KEY", ""),
         http_client=httpx.AsyncClient(timeout=_timeout),
     )
+    # Global concurrency cap smooths bursts under OpenAI Tier 1 RPM limits.
+    # Slot is acquired per-attempt so it is released BEFORE the retry sleep,
+    # letting other callers proceed instead of freezing all slots during backoff.
     last_ex = None
     for attempt in range(_retries + 1):
         try:
-            r = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            async with get_llm_semaphore():
+                r = await client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
             return (r.choices[0].message.content or "").strip()
         except Exception as ex:
             last_ex = ex
@@ -228,7 +233,7 @@ async def _openai_chat(
                 logger.warning(
                     f"OpenAI {'timeout' if is_timeout else status} on attempt {attempt+1}, retrying in {wait}s: {ex}"
                 )
-                await asyncio.sleep(wait)  # non-blocking
+                await asyncio.sleep(wait)  # non-blocking; slot NOT held during sleep
             else:
                 break
     raise last_ex

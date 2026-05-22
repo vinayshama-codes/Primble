@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -16,15 +17,17 @@ logger = logging.getLogger(__name__)
 
 # ── Redis client — used for auth cache AND token revocation ───────────────────
 try:
-    import redis as _redis_lib
+    import redis.asyncio as _aioredis
+    from redis.asyncio.connection import ConnectionPool
     from config.settings import REDIS_URL as _REDIS_URL
-    _auth_redis = _redis_lib.from_url(
+    _auth_redis = _aioredis.Redis(connection_pool=ConnectionPool.from_url(
         _REDIS_URL,
-        socket_connect_timeout=2,
-        socket_timeout=2,
+        max_connections=20,
+        socket_connect_timeout=5,
+        socket_timeout=5,
+        retry_on_timeout=True,
         decode_responses=True,
-    )
-    _auth_redis.ping()
+    ))
     logger.info(f"auth_service: Redis connected ({_REDIS_URL})")
 except Exception as _redis_init_err:
     logger.warning(
@@ -38,12 +41,13 @@ _INACTIVITY_TIMEOUT_H  = int(os.getenv("SESSION_INACTIVITY_TIMEOUT_H", "2"))
 _REVOKED_KEY_PFX       = "revoked:"
 
 
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+async def hash_password(password: str) -> str:
+    result = await asyncio.to_thread(bcrypt.hashpw, password.encode(), bcrypt.gensalt())
+    return result.decode()
 
 
-def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
+async def verify_password(password: str, hashed: str) -> bool:
+    return await asyncio.to_thread(bcrypt.checkpw, password.encode(), hashed.encode())
 
 
 def _hash_token(token: str) -> str:
@@ -78,7 +82,7 @@ async def revoke_token(token: str) -> None:
 
     if _auth_redis is not None:
         try:
-            _auth_redis.setex(
+            await _auth_redis.setex(
                 f"{_REVOKED_KEY_PFX}{token_hash}",
                 int(timedelta(hours=_SESSION_TTL_H).total_seconds()),
                 "1",
@@ -91,7 +95,7 @@ async def revoke_token(token: str) -> None:
 
     if _auth_redis is not None:
         try:
-            _auth_redis.delete(f"auth:{token_hash}")
+            await _auth_redis.delete(f"auth:{token_hash}")
         except Exception:
             pass
 
@@ -108,12 +112,12 @@ async def revoke_all_sessions(user_id: str) -> None:
         for row in rows:
             token_hash = dict(row)["token"]
             try:
-                _auth_redis.setex(
+                await _auth_redis.setex(
                     f"{_REVOKED_KEY_PFX}{token_hash}",
                     int(timedelta(hours=_SESSION_TTL_H).total_seconds()),
                     "1",
                 )
-                _auth_redis.delete(f"auth:{token_hash}")
+                await _auth_redis.delete(f"auth:{token_hash}")
             except Exception as ex:
                 logger.warning(f"auth_service: Redis bulk-revoke failed for hash: {ex}")
 
@@ -129,7 +133,7 @@ async def invalidate_user_cache(user_id: str) -> None:
             )
         for row in rows:
             try:
-                _auth_redis.delete(f"auth:{dict(row)['token']}")
+                await _auth_redis.delete(f"auth:{dict(row)['token']}")
             except Exception as ex:
                 logger.warning(f"auth_service: cache invalidation failed for user={user_id}: {ex}")
     except Exception as ex:
@@ -162,11 +166,11 @@ async def rotate_session(
     return await create_session_token(user_id, ip_address=ip_address, user_agent=user_agent)
 
 
-def _is_token_revoked(token_hash: str) -> bool:
+async def _is_token_revoked(token_hash: str) -> bool:
     if _auth_redis is None:
         return False
     try:
-        return bool(_auth_redis.exists(f"{_REVOKED_KEY_PFX}{token_hash}"))
+        return bool(await _auth_redis.exists(f"{_REVOKED_KEY_PFX}{token_hash}"))
     except Exception as ex:
         logger.warning(f"auth_service: Redis revocation check failed: {ex}")
         return False
@@ -186,12 +190,12 @@ async def get_current_user(
 
     token_hash = _hash_token(raw_token)
 
-    if _is_token_revoked(token_hash):
+    if await _is_token_revoked(token_hash):
         raise HTTPException(401, "Token has been revoked")
 
     if _auth_redis is not None:
         try:
-            cached = _auth_redis.get(f"auth:{token_hash}")
+            cached = await _auth_redis.get(f"auth:{token_hash}")
             if cached:
                 return json.loads(cached)
         except Exception as ex:
@@ -232,7 +236,7 @@ async def get_current_user(
 
     if _auth_redis is not None:
         try:
-            _auth_redis.setex(f"auth:{token_hash}", _AUTH_CACHE_TTL, json.dumps(user, default=str))
+            await _auth_redis.setex(f"auth:{token_hash}", _AUTH_CACHE_TTL, json.dumps(user, default=str))
         except Exception as ex:
             logger.warning(f"auth_service: Redis set failed: {ex}")
 
@@ -252,7 +256,7 @@ async def get_user_from_token_request(
     if not raw_token:
         return None
     token_hash = _hash_token(raw_token)
-    if _is_token_revoked(token_hash):
+    if await _is_token_revoked(token_hash):
         return None
     async with get_pool().acquire() as conn:
         user = await conn.fetchrow(
@@ -277,7 +281,7 @@ async def validate_token_from_request(
     if not raw_token:
         return False
     token_hash = _hash_token(raw_token)
-    if _is_token_revoked(token_hash):
+    if await _is_token_revoked(token_hash):
         return False
     async with get_pool().acquire() as conn:
         sess = await conn.fetchrow(

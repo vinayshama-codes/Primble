@@ -1,3 +1,4 @@
+import concurrent.futures
 import io
 import json
 import logging
@@ -1789,19 +1790,25 @@ def _fill_unmatched_with_gpt(
     candidate_counts: Dict[str, Dict[str, int]] = {f: {} for f in field_list}
     all_raw_fields:   set                       = set()
 
-    # ── Build a field-spec line for the prompt ───────────────────────────────
+    # ── Partition eligible fields into singles and slot-groups ────────────────
+    # Slot-groups: fields sharing the same base name with _A/_B/…/_N suffixes.
+    # Singles:     everything else (no repeating siblings).
     _ROW_SUFFIX_RE = re.compile(r"^(.+)_([A-N])$")
 
-    # Pre-compute total slot count per base name across the eligible field list.
-    # e.g. {"NamedInsured_MailingAddress_LineOne": 3} when _A/_B/_C all appear.
-    _slot_counts: Dict[str, int] = {}
-    for _f in eligible_fields:
+    _base_to_slots: Dict[str, List[str]] = {}
+    for _f in field_list:
         _m = _ROW_SUFFIX_RE.match(_f)
         if _m:
-            _base = _m.group(1)
-            _slot_counts[_base] = _slot_counts.get(_base, 0) + 1
+            _base_to_slots.setdefault(_m.group(1), []).append(_f)
+    for _base in _base_to_slots:
+        _base_to_slots[_base].sort()          # _A, _B, _C, … always in order
+    _grouped_fields_set = {f for slots in _base_to_slots.values() for f in slots}
+
+    _ORDINALS = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th",
+                 "8th", "9th", "10th", "11th", "12th", "13th", "14th"]
 
     def _field_spec(f: str) -> str:
+        """Spec line for a single (non-grouped) field."""
         info = eligible_fields.get(f) or {}
         info = info if isinstance(info, dict) else {}
         tu   = info.get("tu", "")[:80]
@@ -1814,15 +1821,42 @@ def _fill_unmatched_with_gpt(
             spec += " (dropdown)"
         elif "/Btn" in ft:
             spec += " (checkbox — Yes/No)"
-        # Annotate row-suffixed fields with slot index and total so the LLM knows
-        # exactly how many distinct values to search for.
-        m = _ROW_SUFFIX_RE.match(f)
-        if m:
-            base    = m.group(1)
-            row_idx = ord(m.group(2)) - ord("A") + 1
-            total   = _slot_counts.get(base, 1)
-            spec += f" [slot {row_idx} of {total} — find the {row_idx}{'st' if row_idx == 1 else 'nd' if row_idx == 2 else 'rd' if row_idx == 3 else 'th'} distinct value for '{base}'; leave null if fewer than {row_idx} distinct values exist]"
         return spec
+
+    def _slot_group_block(base: str, active_slots: List[str]) -> str:
+        """Visual block for repeating-row siblings (_A/_B/_C …).
+
+        Rendering all siblings in one block forces the LLM to reason about
+        the full slot set before assigning values, preventing duplication
+        caused by identical per-field descriptions.
+        """
+        all_slots   = _base_to_slots.get(base, active_slots)
+        n_total     = len(all_slots)
+        info_a      = eligible_fields.get(active_slots[0]) or {}
+        info_a      = info_a if isinstance(info_a, dict) else {}
+        tu          = info_a.get("tu", "")[:80]
+        ft          = info_a.get("ft", "")
+        slot_labels = "/".join(f"_{chr(ord('A') + i)}" for i in range(n_total))
+
+        lines = [f"\n  ── REPEATING GROUP '{base}' ({n_total} slots: {slot_labels}) ──"]
+        if tu:
+            lines.append(f"  Description (same for all slots): {tu}")
+        if "/Ch" in ft:
+            lines.append("  Type: dropdown")
+        elif "/Btn" in ft:
+            lines.append("  Type: checkbox — return Yes/No for each slot")
+        lines.append(
+            f"  RULE: Find up to {n_total} DISTINCT values in the document.\n"
+            f"  Assign 1st distinct value → _A, 2nd → _B, and so on.\n"
+            f"  NEVER copy the same value into more than one slot.\n"
+            f"  Leave a slot null if fewer distinct values exist than its position."
+        )
+        for i, slot_field in enumerate(active_slots):
+            ordinal = _ORDINALS[i] if i < len(_ORDINALS) else f"{i + 1}th"
+            req     = " [REQUIRED]" if (eligible_fields.get(slot_field) or {}).get("required") else ""
+            lines.append(f"  - {slot_field}{req} → {ordinal} distinct value (null if < {i + 1} exist)")
+        lines.append("  ──────────────────────────────────────────")
+        return "\n".join(lines)
 
     # ── Prompt builder ───────────────────────────────────────────────────────
     _PROMPT_SKELETON = (
@@ -1847,42 +1881,90 @@ def _fill_unmatched_with_gpt(
         "  4. Dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
         "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n"
         "  6. List ALL fields you fill in raw_text_sourced.\n"
-        "  7. Fields ending in _A, _B, _C ... are SEPARATE row slots for DIFFERENT entries.\n"
-        "     Each such field is annotated '[slot N of T]' telling you there are T slots for\n"
-        "     that field type. Search the document carefully for EACH distinct value.\n"
+        "  7. REPEATING GROUP fields (shown as '── REPEATING GROUP … ──' blocks below):\n"
+        "     These are sibling fields sharing the same base name but different _A/_B/_C suffixes.\n"
+        "     They represent DISTINCT sequential entries — not repeated copies of one value.\n"
         "       a) Count how many DISTINCT values of that type appear in the document.\n"
-        "       b) Assign the 1st distinct value to _A, 2nd to _B, etc.\n"
-        "       c) If the document has fewer distinct values than slots, leave the extra\n"
-        "          slots null — do NOT duplicate a value to fill empty slots.\n"
-        "     Example: 3 slots for NamedInsured_Phone but only 2 phone numbers found →\n"
-        "       _A = first number, _B = second number, _C = null.\n\n"
+        "       b) Assign them in order: 1st distinct value → _A, 2nd → _B, 3rd → _C, …\n"
+        "       c) NEVER copy the same value into multiple slots — that is always wrong.\n"
+        "       d) If the document has fewer distinct values than slots, leave the extras null.\n"
+        "     Example: 3 slots for Insurer_FullName but only 2 insurer names found →\n"
+        "       _A = 'Acme Insurance', _B = 'Beta Insurance', _C = null.\n\n"
     )
     _SKELETON_CHARS = len(_PROMPT_SKELETON)
     # Fixed overhead per call: skeleton + fields header + footer
     _FIXED_OVERHEAD = _SKELETON_CHARS + 200
 
-    def _build_prompt(active_fields: List[str], raw_chunk: str, chunk_idx: int, total_chunks: int) -> str:
-        fields_block = "\n".join(_field_spec(f) for f in active_fields)
+    def _build_user_prompt(active_fields: List[str], raw_chunk: str, chunk_idx: int, total_chunks: int) -> str:
+        """Build the variable portion of the prompt (fields + document text).
+
+        The stable instructions live in _PROMPT_SKELETON and are passed as a
+        separate system message so OpenAI's automatic prompt caching can
+        reuse them across calls for the same form_id. On gpt-4o / gpt-4o-mini
+        any prefix ≥1024 tokens is cached automatically — combined with the
+        per-form skeleton + form-id this can cut input token cost ~50% and
+        TTFT noticeably on hot forms (ACORD 125 etc.).
+
+        Grouped repeating-slot fields are rendered as visual GROUP blocks so
+        the LLM can reason about all siblings at once before assigning values.
+        """
+        # Separate active_fields into singles and per-base slot groups
+        active_groups: Dict[str, List[str]] = {}
+        active_singles: List[str] = []
+        for f in active_fields:
+            _m = _ROW_SUFFIX_RE.match(f)
+            if _m and _m.group(1) in _base_to_slots:
+                active_groups.setdefault(_m.group(1), []).append(f)
+            else:
+                active_singles.append(f)
+        for _base in active_groups:
+            active_groups[_base].sort()
+
+        parts: List[str] = [_field_spec(f) for f in active_singles]
+        for _base, _slots in sorted(active_groups.items()):
+            parts.append(_slot_group_block(_base, _slots))
+
+        fields_block = "\n".join(parts)
         raw_section  = (
             f"\n\n=== RAW DOCUMENT TEXT (chunk {chunk_idx + 1}/{total_chunks}) ===\n{raw_chunk}"
             if raw_chunk else ""
         )
         return (
-            _PROMPT_SKELETON
-            + f"Fields to fill ({form_id}):\n{fields_block}"
+            f"Fields to fill ({form_id}):\n{fields_block}"
             + raw_section
             + '\n\nReturn ONLY valid JSON: {"values": {...}, "raw_text_sourced": [...]}'
         )
 
+    # Kept under the old name for any external callers; new code should use
+    # _build_user_prompt + _PROMPT_SKELETON as a system message.
+    def _build_prompt(active_fields: List[str], raw_chunk: str, chunk_idx: int, total_chunks: int) -> str:
+        return _PROMPT_SKELETON + _build_user_prompt(active_fields, raw_chunk, chunk_idx, total_chunks)
+
     # ── LLM caller with retry ─────────────────────────────────────────────────
     def _call_llm_sync(prompt: str) -> dict:
-        async def _inner(_p=prompt):
-            resp = await _client.chat.completions.create(
-                model=llm_model,
-                messages=[{"role": "user", "content": _p}],
-                temperature=GPT_TEMPERATURE,
-                response_format={"type": "json_object"},
-            )
+        # Split the historical single-prompt format back into (system, user)
+        # so OpenAI's automatic prefix caching can reuse the skeleton.
+        if prompt.startswith(_PROMPT_SKELETON):
+            system_msg = _PROMPT_SKELETON
+            user_msg   = prompt[_SKELETON_CHARS:]
+        else:
+            # Defensive fallback: caller built a prompt without the skeleton
+            # prefix (shouldn't happen, but don't break the call).
+            system_msg = _PROMPT_SKELETON
+            user_msg   = prompt
+
+        async def _inner(_s=system_msg, _u=user_msg):
+            from utils.llm_limiter import get_llm_semaphore
+            async with get_llm_semaphore():
+                resp = await _client.chat.completions.create(
+                    model=llm_model,
+                    messages=[
+                        {"role": "system", "content": _s},
+                        {"role": "user",   "content": _u},
+                    ],
+                    temperature=GPT_TEMPERATURE,
+                    response_format={"type": "json_object"},
+                )
             return resp.choices[0].message.content or ""
 
         import time as _time
@@ -1958,22 +2040,43 @@ def _fill_unmatched_with_gpt(
         logger.warning("gpt_fill: form=%s no raw_text provided — skipping GPT fill", form_id)
         return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": llm_model}
 
-    # ── Main loop: one LLM call per chunk ─────────────────────────────────────
-    for chunk_idx, raw_chunk in enumerate(raw_chunks):
-        # Only send fields not yet resolved in a previous chunk
-        active_fields = [f for f in field_list if not candidate_counts[f]]
-        if not active_fields:
-            logger.info("gpt_fill: all fields resolved — stopping at chunk %d/%d",
-                        chunk_idx + 1, len(raw_chunks))
-            break
+    # ── Parallel chunk dispatch ────────────────────────────────────────────────
+    # When there are multiple chunks, dispatch all LLM calls in parallel using a
+    # small thread pool (one thread per chunk, capped at 4).  Each call carries
+    # ALL still-unresolved fields; conflicts are resolved by majority vote in
+    # _absorb (already handles multi-chunk results correctly).
+    #
+    # For a single chunk this degenerates to a plain sequential call — no overhead.
+    _chunk_pool_size = min(len(raw_chunks), 4)
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=_chunk_pool_size, thread_name_prefix="gpt-fill-chunk"
+    ) as _chunk_pool:
+        def _dispatch_chunk(args):
+            chunk_idx, raw_chunk = args
+            active_fields = [f for f in field_list if not candidate_counts[f]]
+            if not active_fields:
+                return chunk_idx, {}, active_fields
+            prompt = _build_prompt(active_fields, raw_chunk, chunk_idx, len(raw_chunks))
+            logger.info(
+                "gpt_fill: chunk %d/%d form=%s active_fields=%d prompt_chars=%d",
+                chunk_idx + 1, len(raw_chunks), form_id, len(active_fields), len(prompt),
+            )
+            result = _call_llm_sync(prompt)
+            return chunk_idx, result, active_fields
 
-        prompt = _build_prompt(active_fields, raw_chunk, chunk_idx, len(raw_chunks))
-        logger.info(
-            "gpt_fill: chunk %d/%d form=%s active_fields=%d prompt_chars=%d",
-            chunk_idx + 1, len(raw_chunks), form_id, len(active_fields), len(prompt),
+        futures = {
+            _chunk_pool.submit(_dispatch_chunk, (i, chunk)): i
+            for i, chunk in enumerate(raw_chunks)
+        }
+        # Collect in submission order so _absorb sees results deterministically
+        ordered = sorted(
+            (f.result() for f in concurrent.futures.as_completed(futures)),
+            key=lambda x: x[0],
         )
-        result = _call_llm_sync(prompt)
-        _absorb(result, active_fields, chunk_label=f"{chunk_idx + 1}/{len(raw_chunks)}")
+
+    for chunk_idx, result, active_fields in ordered:
+        if active_fields:
+            _absorb(result, active_fields, chunk_label=f"{chunk_idx + 1}/{len(raw_chunks)}")
 
     # ── Conflict resolution ───────────────────────────────────────────────────
     # Among candidates from multiple chunks, the most-frequent value wins (majority vote).
@@ -1983,6 +2086,27 @@ def _fill_unmatched_with_gpt(
             continue
         # Majority vote across chunks — raw text is the ground truth
         all_filled[field] = max(candidates, key=lambda v: candidates[v])
+
+    # ── Deduplication: remove values duplicated across repeating-slot siblings ─
+    # Safety net for when the LLM assigns the same value to multiple _A/_B/_C
+    # slots despite the GROUP block instructions. Walk each group in slot order
+    # (_A first) and clear any slot whose value has already appeared in an
+    # earlier sibling.  Comparison is case-insensitive and whitespace-normalised.
+    for _base, _slots in _base_to_slots.items():
+        _seen: Dict[str, str] = {}  # normalised_value -> first slot that claimed it
+        for _slot_field in _slots:  # already sorted _A, _B, _C, …
+            _val = all_filled.get(_slot_field)
+            if _val is None:
+                continue
+            _key = str(_val).strip().lower()
+            if _key in _seen:
+                logger.info(
+                    "gpt_fill: dedup cleared duplicate '%s' from %s (same as %s)",
+                    _val, _slot_field, _seen[_key],
+                )
+                del all_filled[_slot_field]
+            else:
+                _seen[_key] = _slot_field
 
     # ── Audit log ─────────────────────────────────────────────────────────────
     for field, value in all_filled.items():

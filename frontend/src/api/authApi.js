@@ -16,7 +16,7 @@ export async function loginUser(email, password) {
     body: JSON.stringify({ email, password }),
   });
   const data = await _json(res);
-  if (res.ok && data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
+  if (res.ok && data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
   return { ok: res.ok, status: res.status, data };
 }
 
@@ -38,7 +38,7 @@ export async function googleAuthUser(credential, nonce) {
     body: JSON.stringify({ credential, nonce }),
   });
   const data = await _json(res);
-  if (res.ok && data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
+  if (res.ok && data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
   return { ok: res.ok, status: res.status, data };
 }
 
@@ -57,7 +57,7 @@ export async function verifyEmailCode(email, code) {
     body: JSON.stringify({ email, code }),
   });
   const data = await _json(res);
-  if (res.ok && data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
+  if (res.ok && data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
   return { ok: res.ok, status: res.status, data };
 }
 
@@ -98,12 +98,12 @@ export async function completeProfile(organization_name, acord_disclaimer_accept
     body: JSON.stringify({ organization_name, acord_disclaimer_accepted }),
   });
   const data = await _json(res);
-  if (res.ok && data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
+  if (res.ok && data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
   return { ok: res.ok, data };
 }
 
 export async function logoutUser() {
-  sessionStorage.removeItem("acordly_tk");
+  try { localStorage.removeItem("acordly_tk"); sessionStorage.removeItem("acordly_tk"); } catch {}
   await fetch(`${API_BASE}/api/auth/logout`, {
     method: "POST",
     credentials: "include",

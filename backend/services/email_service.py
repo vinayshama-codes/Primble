@@ -15,7 +15,7 @@ def _sanitize_header(value: str) -> str:
 
 def send_verification_email(email: str, code: str) -> bool:
     provider  = os.getenv("EMAIL_PROVIDER", "").lower()
-    from_addr = os.getenv("EMAIL_FROM", "noreply@acordly.ai")
+    from_addr = os.getenv("EMAIL_FROM", "noreply@primble.ai")
     subject   = "Your Verification Code"
     body_txt  = f"Your verification code is: {code}\n\nExpires in 10 minutes."
     body_html = f"""
@@ -217,6 +217,73 @@ def send_arq_submitted_notification(
     return _send_generic_email(producer_email, subject, body_txt, body_html)
 
 
+def send_processing_complete_email(
+    to_email: str,
+    user_name: str = "",
+    session_id: str = "",
+    kind: str = "upload",
+) -> bool:
+    """Notify the broker that an async processing job has finished.
+
+    kind="upload"   → extraction complete, ready to select forms
+    kind="generate" → ACORD form generation complete, ready to review/download
+    """
+    import os
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    session_link = f"{frontend_url}?resume_session={session_id}" if session_id else frontend_url
+
+    if kind == "generate":
+        subject  = "Your ACORD forms are ready"
+        headline = "ACORD forms ready to review"
+        message  = "Your selected ACORD forms have been generated and are ready to review and download."
+        cta      = "Open & Review Forms"
+    else:
+        subject  = "Your documents are processed"
+        headline = "Documents processed"
+        message  = "We finished reading your documents. Open Primble to select the forms you want to generate."
+        cta      = "Open Submission"
+
+    greeting = f"Hi {user_name}," if user_name and user_name.strip() else "Hi,"
+    body_txt = (
+        f"{greeting}\n\n"
+        f"{message}\n\n"
+        f"{session_link}\n\n"
+        f"The Primble Team"
+    )
+    body_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;">
+      <div style="max-width:520px;margin:40px auto;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,0.08);overflow:hidden;">
+        <div style="background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);padding:24px 28px;">
+          <p style="color:#e6007a;font-size:20px;font-weight:700;margin:0;">Primble</p>
+        </div>
+        <div style="padding:28px;">
+          <div style="background:#dcfce7;border:1px solid #86efac;border-radius:8px;padding:14px 16px;margin-bottom:20px;">
+            <p style="font-size:14px;color:#166534;margin:0;font-weight:600;">✅ {headline}</p>
+          </div>
+          <p style="font-size:15px;color:#475569;line-height:1.6;margin:0 0 16px 0;">{greeting}</p>
+          <p style="font-size:15px;color:#475569;line-height:1.6;margin:0 0 16px 0;">{message}</p>
+          <div style="text-align:center;margin:24px 0;">
+            <a href="{session_link}"
+               style="background:#e6007a;color:#fff;text-decoration:none;padding:12px 32px;border-radius:8px;font-size:15px;font-weight:600;display:inline-block;">
+              {cta}
+            </a>
+          </div>
+        </div>
+        <div style="background:#f8fafc;padding:14px 28px;border-top:1px solid #e2e8f0;text-align:center;">
+          <p style="font-size:11px;color:#94a3b8;margin:0;">
+            Powered by <a href="{frontend_url}" style="color:#e6007a;font-weight:600;text-decoration:none;">Primble</a>
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    return _send_generic_email(to_email, subject, body_txt, body_html)
+
+
 def _send_generic_email(
     to_email: str,
     subject: str,
@@ -228,7 +295,7 @@ def _send_generic_email(
     if provider is None:
         provider = os.getenv("EMAIL_PROVIDER", "").lower()
     if from_addr is None:
-        from_addr = os.getenv("EMAIL_FROM", "noreply@acordly.ai")
+        from_addr = os.getenv("EMAIL_FROM", "noreply@primble.ai")
 
     logger.info(f"Sending email provider={provider!r} to={to_email} subject={subject!r}")
 
@@ -249,7 +316,7 @@ def _send_generic_email(
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
-                    "User-Agent": "acordly-backend/1.0",
+                    "User-Agent": "primble-backend/1.0",
                 },
                 method="POST",
             )

@@ -44,8 +44,9 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal }) {
   const limit = user?.packages_limit ?? 0;
   const tierLabel = TIER_LABELS[tier] || tier;
   const isFree = tier === "free";
-  const noPackages = isFree || limit === 0;
-  const pct = !noPackages ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const isUnlimited = !isFree && limit === 0;
+  const noPackages = isFree;
+  const pct = (!isFree && limit > 0) ? Math.min(100, Math.round((used / limit) * 100)) : 0;
   const barColor = pct >= 90 ? "#ef4444" : pct >= 70 ? "#f59e0b" : "#10b981";
 
   const handleCancel = async () => {
@@ -80,13 +81,19 @@ function InlinePlanPanel({ user, onChangePlan, onBillingPortal }) {
             <span className="udrop-plan-usage-label">
               {tier === "essentials" ? "Scores Used" : "Packages Used"}
             </span>
-            <span className="udrop-plan-usage-count">{used} / {limit}</span>
+            <span className="udrop-plan-usage-count">
+              {isUnlimited ? `${used} used` : `${used} / ${limit}`}
+            </span>
           </div>
-          <div className="udrop-plan-bar-track">
-            <div className="udrop-plan-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
-          </div>
-          {pct >= 90 && (
-            <div className="udrop-plan-usage-warn">Approaching limit</div>
+          {!isUnlimited && (
+            <>
+              <div className="udrop-plan-bar-track">
+                <div className="udrop-plan-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
+              </div>
+              {pct >= 90 && (
+                <div className="udrop-plan-usage-warn">Approaching limit</div>
+              )}
+            </>
           )}
         </div>
       )}

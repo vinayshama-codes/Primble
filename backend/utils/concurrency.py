@@ -14,23 +14,27 @@ _WEB_CONCURRENCY:  int = int(os.getenv("WEB_CONCURRENCY", "1"))
 _SEM_KEY      = "heavy_ops_semaphore"
 _SEM_TTL_MS   = 300_000  # 300 seconds — auto-release if process crashes
 
-# ── Redis distributed semaphore (multi-worker mode) ───────────────────────────
+# ── Redis distributed semaphore ───────────────────────────────────────────────
+# Enabled whenever REDIS_URL points to a reachable Redis. Multi-worker mode
+# REQUIRES it; single-worker mode benefits from it too because multi-tab /
+# multi-user concurrency on localhost otherwise shares one in-process semaphore.
 _redis = None
-if _WEB_CONCURRENCY > 1:
-    try:
-        import redis as _redis_lib
-        from config.settings import REDIS_URL as _REDIS_URL
-        _redis = _redis_lib.from_url(
-            _REDIS_URL,
-            socket_connect_timeout=2,
-            socket_timeout=2,
-            decode_responses=True,
-        )
-        _redis.ping()
-        logger.info(f"concurrency: Redis distributed semaphore active ({_REDIS_URL})")
-    except Exception as _e:
-        logger.warning(f"concurrency: Redis unavailable ({_e}) — in-process semaphore only")
-        _redis = None
+try:
+    import redis.asyncio as _aioredis
+    from redis.asyncio.connection import ConnectionPool
+    from config.settings import REDIS_URL as _REDIS_URL
+    _redis = _aioredis.Redis(connection_pool=ConnectionPool.from_url(
+        _REDIS_URL,
+        max_connections=20,
+        socket_connect_timeout=5,
+        socket_timeout=5,
+        retry_on_timeout=True,
+        decode_responses=True,
+    ))
+    logger.info(f"concurrency: Redis distributed semaphore active ({_REDIS_URL})")
+except Exception as _e:
+    logger.warning(f"concurrency: Redis unavailable ({_e}) — in-process semaphore only")
+    _redis = None
 
 # ── In-process semaphore (single-worker fallback) ─────────────────────────────
 _heavy_sem: asyncio.Semaphore = None
@@ -46,7 +50,7 @@ def get_heavy_sem() -> asyncio.Semaphore:
 
 # ── Redis SET NX PX semaphore helpers ─────────────────────────────────────────
 
-def _redis_acquire() -> str | None:
+async def _redis_acquire() -> str | None:
     """
     Attempt to acquire one slot in the distributed semaphore.
     Uses SET NX PX on a unique token key.  Returns the token on success, None if full.
@@ -74,14 +78,14 @@ if count < maxn then
 end
 return 0
 """
-    result = _redis.eval(lua, 1, _SEM_KEY, now_ms, expiry_ms, _MAX_HEAVY, token)
+    result = await _redis.eval(lua, 1, _SEM_KEY, now_ms, expiry_ms, _MAX_HEAVY, token)
     return token if result == 1 else None
 
 
-def _redis_release(token: str) -> None:
+async def _redis_release(token: str) -> None:
     """Release a previously acquired distributed semaphore slot."""
     try:
-        _redis.zrem(_SEM_KEY, token)
+        await _redis.zrem(_SEM_KEY, token)
     except Exception as ex:
         logger.warning(f"concurrency: Redis release failed: {ex}")
 
@@ -99,7 +103,7 @@ async def try_acquire_heavy() -> "str | bool":
     Callers must pass the return value to release_heavy().
     """
     if _redis is not None:
-        token = _redis_acquire()
+        token = await _redis_acquire()
         return token if token else False
 
     sem = get_heavy_sem()
@@ -109,13 +113,13 @@ async def try_acquire_heavy() -> "str | bool":
     return True
 
 
-def release_heavy(token: "str | bool" = True) -> None:
+async def release_heavy(token: "str | bool" = True) -> None:
     """Release a previously acquired heavy-ops slot.
 
     Pass the value returned by try_acquire_heavy().
     """
     if _redis is not None and isinstance(token, str):
-        _redis_release(token)
+        await _redis_release(token)
         return
     # In-process path — token is True
     get_heavy_sem().release()
@@ -139,4 +143,4 @@ async def heavy_semaphore():
     try:
         yield
     finally:
-        release_heavy(token)
+        await release_heavy(token)

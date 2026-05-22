@@ -13,17 +13,20 @@ Usage:
   JOB_QUEUE_BACKEND=db python worker.py
 
 Required env vars:
-  Same as the API. In async mode AWS_S3_BUCKET must be set.
+  Same as the API. In async mode STORAGE_BUCKET (+ STORAGE_ENDPOINT/ACCESS_KEY/SECRET_KEY) must be set.
 
 Environment tuning:
   WORKER_POLL_INTERVAL         — seconds between polls (default 5)
   WORKER_MAX_JOBS_PER_CYCLE    — max jobs per iteration (default 3)
+  WORKER_FORM_GEN_CONCURRENCY  — max parallel forms per job (default 4)
 """
 import asyncio
+import concurrent.futures
 import logging
 import os
 import sys
 import tempfile
+import time
 import traceback
 
 from dotenv import load_dotenv
@@ -50,9 +53,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger("worker")
 
-_POLL_INTERVAL = int(os.getenv("WORKER_POLL_INTERVAL", "5"))
-_MAX_PER_CYCLE = int(os.getenv("WORKER_MAX_JOBS_PER_CYCLE", "3"))
-_BACKEND       = os.getenv("JOB_QUEUE_BACKEND", "local_file").lower()
+_POLL_INTERVAL        = int(os.getenv("WORKER_POLL_INTERVAL", "5"))
+_MAX_PER_CYCLE        = int(os.getenv("WORKER_MAX_JOBS_PER_CYCLE", "3"))
+_BACKEND              = os.getenv("JOB_QUEUE_BACKEND", "local_file").lower()
+_FORM_GEN_CONCURRENCY = int(os.getenv("WORKER_FORM_GEN_CONCURRENCY", "4"))
+_MAX_JOB_RETRIES      = int(os.getenv("WORKER_MAX_JOB_RETRIES", "5"))
+# Watchdog: how often to re-scan for stuck 'processing' jobs after startup
+# (also recovers jobs orphaned mid-shift by an OOM kill / deploy restart).
+_WATCHDOG_INTERVAL_S  = int(os.getenv("WORKER_WATCHDOG_INTERVAL", "300"))  # 5 min
+
+# Dedicated thread-pool for form generation (separate from OCR executor to avoid
+# saturation when both extraction and form-gen jobs run concurrently).
+_FORM_GEN_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=_FORM_GEN_CONCURRENCY,
+    thread_name_prefix="form-gen",
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -62,28 +77,77 @@ def _sanitize_error(ex: Exception) -> str:
     return f"{type(ex).__name__}: {str(ex)[:200]}"
 
 
+def _strip_uuid_prefixes(name: str) -> str:
+    """Strip leading UUID hex prefixes (32 alnum chars + underscore) from a filename."""
+    for _ in range(5):
+        parts = name.split("_", 1)
+        if len(parts) == 2 and len(parts[0]) == 32 and parts[0].isalnum():
+            name = parts[1]
+        else:
+            break
+    return name
+
+
+async def _notify_user_job_done(user_id: str, session_id: str, kind: str) -> None:
+    """Best-effort completion email. Never raises — failures are swallowed."""
+    if not user_id:
+        return
+    try:
+        from config.database import get_pool
+        from services.email_service import send_processing_complete_email
+        async with get_pool().acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT email, full_name FROM users WHERE id=$1", user_id
+            )
+        if not row:
+            return
+        email = (dict(row).get("email") or "").strip()
+        name  = (dict(row).get("full_name") or "").strip()
+        if not email:
+            return
+        await asyncio.get_running_loop().run_in_executor(
+            None, send_processing_complete_email, email, name, session_id or "", kind,
+        )
+    except Exception as ex:
+        logger.warning("notify_user_job_done failed (user=%s, kind=%s): %s", user_id, kind, ex)
+
+
 def _resolve_source_files(payload: dict) -> list:
-    """Return local file paths to process. Downloads from S3 if s3_keys present."""
-    s3_keys    = payload.get("s3_keys", [])
+    """Return [(local_path, s3_key_or_None), ...] ready for processing.
+
+    Sync jobs supply file_paths (local tmp files already on disk).
+    Async jobs supply s3_keys (uploaded to Supabase Storage by the web process);
+    these are downloaded to temp files so the extraction pipeline can read them.
+    """
     file_paths = payload.get("file_paths", [])
+    if file_paths:
+        return [(p, None) for p in file_paths if os.path.exists(p)]
 
-    if s3_keys:
-        from services.s3_service import download_source_file, delete_source_file
-        tmp_paths = []
-        for key in s3_keys:
-            data = download_source_file(key)
+    s3_keys = payload.get("s3_keys", [])
+    if not s3_keys:
+        return []
+
+    from services.s3_service import download_pdf as _s3_get, is_configured as _s3_ok
+    if not _s3_ok():
+        logger.error("Worker: job has s3_keys but STORAGE_BUCKET is not configured")
+        return []
+
+    pairs = []
+    for key in s3_keys:
+        try:
+            data = _s3_get(key)
             if data is None:
-                logger.warning("Worker: could not download S3 key %s — skipping", key)
+                logger.warning("Worker: failed to download s3_key=%s — skipping", key)
                 continue
-            suffix = os.path.splitext(key)[-1] or ".tmp"
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            tmp.write(data)
-            tmp.close()
-            tmp_paths.append((tmp.name, key))
-        return tmp_paths  # list of (local_path, s3_key) tuples
-
-    # file_paths: local disk files (sync mode / dev only)
-    return [(p, None) for p in file_paths if os.path.exists(p)]
+            suffix = os.path.splitext(key)[-1] or ".bin"
+            fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+            os.close(fd)
+            with open(tmp_path, "wb") as fh:
+                fh.write(data)
+            pairs.append((tmp_path, key))
+        except Exception as ex:
+            logger.error("Worker: error downloading s3_key=%s: %s", key, ex)
+    return pairs
 
 
 # ── Extraction job ─────────────────────────────────────────────────────────────
@@ -102,7 +166,6 @@ async def _process_extraction_job(job: dict, queue) -> None:
         return
 
     local_paths = [p for p, _ in source_pairs]
-    s3_keys_to_delete = [k for _, k in source_pairs if k]
 
     try:
         from services.extraction_pipeline import run_extraction_pipeline
@@ -126,6 +189,7 @@ async def _process_extraction_job(job: dict, queue) -> None:
 
         await queue.update_status(job_id, "completed", result={"session_id": result["session_id"]})
         logger.info("Job %s (extraction) completed: session_id=%s", job_id, result["session_id"])
+        await _notify_user_job_done(user_id, result["session_id"], "upload")
 
     except Exception as ex:
         err = _sanitize_error(ex)
@@ -135,20 +199,11 @@ async def _process_extraction_job(job: dict, queue) -> None:
         except Exception:
             pass
     finally:
-        # Delete temp files (S3 downloads)
         for path in local_paths:
             try:
                 os.unlink(path)
             except OSError:
                 pass
-        # Clean up S3 source files after successful or failed processing
-        if s3_keys_to_delete:
-            try:
-                from services.s3_service import delete_source_file
-                for key in s3_keys_to_delete:
-                    delete_source_file(key)
-            except Exception as ex:
-                logger.warning("Job %s: S3 cleanup failed: %s", job_id, ex)
 
 
 # ── Form generation job ────────────────────────────────────────────────────────
@@ -183,20 +238,47 @@ async def _process_form_generation_job(job: dict, queue) -> None:
             await queue.update_status(job_id, "failed", error="session_not_found")
             return
 
-        results = {}
-        for form_id in form_ids:
-            form_meta = next((f for f in session.get("all_forms", []) if f["form_id"] == form_id), None)
+        loop = asyncio.get_running_loop()
+
+        async def _generate_one(fid: str):
+            """Generate a single form; returns (fid, result) or (fid, None) on failure."""
+            form_meta = next(
+                (f for f in session.get("all_forms", []) if f["form_id"] == fid), None
+            )
             if not form_meta:
-                continue
+                logger.warning("Job %s: form_meta missing for %s", job_id, fid)
+                return fid, None
             tpl = _os.path.join(TEMPLATE_DIR, form_meta.get("template_file", ""))
             if not _os.path.exists(tpl):
-                logger.warning("Job %s: template missing for %s", job_id, form_id)
-                continue
+                logger.warning("Job %s: template missing for %s", job_id, fid)
+                return fid, None
             try:
-                result = process_single_form(form_meta, session)
-                results[form_id] = result
+                result = await loop.run_in_executor(
+                    _FORM_GEN_EXECUTOR, process_single_form, form_meta, session
+                )
+                return fid, result
             except Exception as ex:
-                logger.error("Job %s: form %s failed: %s", job_id, form_id, ex)
+                logger.error("Job %s: form %s failed: %s", job_id, fid, ex)
+                return fid, None
+
+        # Run all form-generation coroutines in parallel; individual failures are
+        # captured per-form (return_exceptions=True) so one failure doesn't cancel others.
+        gen_results = await asyncio.gather(
+            *[_generate_one(fid) for fid in form_ids],
+            return_exceptions=True,
+        )
+
+        results = {}
+        failed_form_ids = []
+        for item in gen_results:
+            if isinstance(item, Exception):
+                logger.error("Job %s: unexpected gather exception: %s", job_id, item)
+                continue
+            fid, result = item
+            if result is not None:
+                results[fid] = result
+            else:
+                failed_form_ids.append(fid)
 
         if not results:
             await queue.update_status(job_id, "failed", error="no_forms_generated")
@@ -232,11 +314,21 @@ async def _process_form_generation_job(job: dict, queue) -> None:
                 except Exception as ex:
                     logger.warning("Job %s: audit log failed for %s: %s", job_id, fid, ex)
 
-        await queue.update_status(
-            job_id, "completed",
-            result={"session_id": session_id, "form_ids": form_ids},
+        completion_result: dict = {"session_id": session_id, "form_ids": list(results.keys())}
+        if failed_form_ids:
+            completion_result["partial_failure"] = True
+            completion_result["failed_form_ids"] = failed_form_ids
+            logger.warning(
+                "Job %s (form_generation) partial: %d/%d forms succeeded, failed=%s",
+                job_id, len(results), len(form_ids), failed_form_ids,
+            )
+
+        await queue.update_status(job_id, "completed", result=completion_result)
+        logger.info(
+            "Job %s (form_generation) completed: session_id=%s forms=%s",
+            job_id, session_id, list(results.keys()),
         )
-        logger.info("Job %s (form_generation) completed: session_id=%s forms=%s", job_id, session_id, form_ids)
+        await _notify_user_job_done(user_id, session_id, "generate")
 
     except Exception as ex:
         err = _sanitize_error(ex)
@@ -253,25 +345,72 @@ async def _dispatch_with_semaphore(job: dict, queue) -> None:
     from utils.concurrency import try_acquire_heavy, release_heavy
     acquired = await try_acquire_heavy()
     if not acquired:
-        logger.warning("Heavy semaphore full, delaying job %s", job["job_id"])
+        job_id = job["job_id"]
+        # Increment retry counter before deciding whether to requeue or dead-letter.
+        try:
+            new_count = await queue.increment_retry_count(job_id)
+        except (AttributeError, Exception) as inc_ex:
+            # Fallback for backends that don't support increment_retry_count
+            logger.debug("increment_retry_count unsupported: %s", inc_ex)
+            new_count = job.get("retry_count", 0) + 1
+
+        if new_count > _MAX_JOB_RETRIES:
+            logger.error(
+                "job_dead_lettered job_id=%s retry_count=%d max_retries=%d reason=semaphore_always_full",
+                job_id, new_count, _MAX_JOB_RETRIES,
+            )
+            try:
+                await queue.update_status(
+                    job_id, "failed",
+                    error=f"dead_lettered_after_{new_count}_retries:semaphore_always_full",
+                )
+            except Exception as dl_ex:
+                logger.error("Failed to dead-letter job %s: %s", job_id, dl_ex)
+        else:
+            logger.warning(
+                "Heavy semaphore full, requeueing job %s (retry %d/%d)",
+                job_id, new_count, _MAX_JOB_RETRIES,
+            )
+            try:
+                await queue.update_status(job_id, "pending")
+            except Exception as requeue_ex:
+                logger.error("Failed to requeue job %s: %s", job_id, requeue_ex)
+        await asyncio.sleep(2)
         return
     try:
         await _dispatch_job(job, queue)
     finally:
-        release_heavy(acquired)
+        await release_heavy(acquired)
 
 
 async def _dispatch_job(job: dict, queue) -> None:
     job_type = job.get("job_type", "")
     job_id   = job["job_id"]
+    user_id  = job.get("user_id", "")
+    # Mask user_id to last 6 chars for SOC2 log compliance
+    user_id_masked = f"***{user_id[-6:]}" if len(user_id) > 6 else "***"
 
-    if job_type == "extraction":
-        await _process_extraction_job(job, queue)
-    elif job_type == "form_generation":
-        await _process_form_generation_job(job, queue)
-    else:
-        logger.warning("Job %s: unknown job_type=%r — marking failed", job_id, job_type)
-        await queue.update_status(job_id, "failed", error=f"unknown_job_type:{job_type}")
+    t_start = time.monotonic()
+    logger.info(
+        "job_start job_id=%s job_type=%s user=%s",
+        job_id, job_type, user_id_masked,
+    )
+
+    try:
+        if job_type == "extraction":
+            await _process_extraction_job(job, queue)
+        elif job_type == "form_generation":
+            await _process_form_generation_job(job, queue)
+        else:
+            logger.warning("Job %s: unknown job_type=%r — marking failed", job_id, job_type)
+            await queue.update_status(job_id, "failed", error=f"unknown_job_type:{job_type}")
+            return
+    finally:
+        duration = time.monotonic() - t_start
+        logger.info(
+            "job_end job_id=%s job_type=%s user=%s duration_s=%.1f",
+            job_id, job_type, user_id_masked, duration,
+        )
 
 
 # ── SQS polling mode ──────────────────────────────────────────────────────────
@@ -328,29 +467,151 @@ async def _run_sqs_loop(queue) -> None:
                     logger.warning("Failed to delete SQS msg job %s: %s", jid, ex)
 
 
-# ── DB / file polling mode ────────────────────────────────────────────────────
+# ── Watchdog ───────────────────────────────────────────────────────────────────
 
-async def _run_poll_loop(queue, once: bool = False) -> None:
-    logger.info("Worker poll mode (backend=%s, interval=%ds)", _BACKEND, _POLL_INTERVAL)
+async def _run_watchdog(queue) -> None:
+    """Periodically reset jobs orphaned in 'processing' by crashed workers.
+
+    Runs as a background task alongside the main poll/listen loop. Each
+    sweep finds jobs with status='processing' whose updated_at is older
+    than STUCK_JOB_THRESHOLD_MINUTES and flips them back to 'pending' so
+    the next dispatch picks them up.
+    """
+    reset_fn = getattr(queue, "reset_stuck_jobs", None)
+    if reset_fn is None:
+        logger.info("Watchdog: backend has no reset_stuck_jobs — disabled")
+        return
+    # First sweep runs immediately at startup; subsequent sweeps every
+    # _WATCHDOG_INTERVAL_S. This catches orphans from the previous crash
+    # before we begin claiming new work.
     while True:
         try:
-            pending = await queue.list_pending(limit=_MAX_PER_CYCLE)
+            await reset_fn()
         except Exception as ex:
-            logger.error("list_pending error: %s — retrying in %ds", ex, _POLL_INTERVAL)
-            if once:
-                return
-            await asyncio.sleep(_POLL_INTERVAL)
-            continue
+            logger.error("Watchdog sweep failed: %s", ex)
+        await asyncio.sleep(_WATCHDOG_INTERVAL_S)
 
-        if pending:
-            logger.info("Dispatching %d pending job(s)", len(pending))
-            await asyncio.gather(*[_dispatch_with_semaphore(j, queue) for j in pending], return_exceptions=True)
-        else:
-            logger.debug("No pending jobs")
 
-        if once:
-            return
-        await asyncio.sleep(_POLL_INTERVAL)
+# ── DB / file polling mode ────────────────────────────────────────────────────
+
+async def _drain_pending(queue) -> int:
+    """Pull and dispatch one batch of pending jobs. Returns count dispatched."""
+    try:
+        pending = await queue.list_pending(limit=_MAX_PER_CYCLE)
+    except Exception as ex:
+        logger.error("list_pending error: %s", ex)
+        return 0
+    if not pending:
+        return 0
+    logger.info("Dispatching %d pending job(s)", len(pending))
+    await asyncio.gather(
+        *[_dispatch_with_semaphore(j, queue) for j in pending],
+        return_exceptions=True,
+    )
+    return len(pending)
+
+
+async def _listen_for_notify(wake_event: asyncio.Event) -> None:
+    """Background task: LISTEN on PostgreSQL acordly_jobs channel.
+
+    Sets wake_event each time a NOTIFY arrives so the main loop dispatches
+    immediately instead of waiting for the next poll tick. Falls back to
+    pure polling if LISTEN fails (older Postgres, PgBouncer in transaction
+    mode without session-mode passthrough, etc.).
+
+    Note on PgBouncer: LISTEN/NOTIFY require a dedicated session, so this
+    function opens a direct connection (NOT through the asyncpg pool) on
+    the same DATABASE_URL. If your DATABASE_URL points to PgBouncer
+    transaction mode (port 6543) you should set DATABASE_URL_DIRECT to the
+    session-mode URL (port 5432) for this listener only.
+    """
+    import asyncpg
+    from config.settings import DATABASE_URL
+    from repositories.job_repository import JOB_NOTIFY_CHANNEL
+
+    listen_url = os.getenv("DATABASE_URL_DIRECT") or DATABASE_URL
+    _env = os.getenv("ENVIRONMENT", "development").lower()
+    _ssl = "require" if _env == "production" else None
+
+    while True:
+        conn = None
+        try:
+            conn = await asyncpg.connect(listen_url, ssl=_ssl, statement_cache_size=0)
+
+            def _on_notify(_conn, _pid, _channel, payload):
+                logger.debug("NOTIFY received: channel=%s payload=%s", _channel, payload)
+                wake_event.set()
+
+            await conn.add_listener(JOB_NOTIFY_CHANNEL, _on_notify)
+            logger.info("Worker LISTEN active on channel '%s'", JOB_NOTIFY_CHANNEL)
+            # Keep the connection alive forever — asyncpg dispatches NOTIFY
+            # callbacks on its internal reader task while we just sleep.
+            while True:
+                await asyncio.sleep(60)
+                # Cheap keep-alive that detects dead TCP sockets behind NAT
+                try:
+                    await conn.execute("SELECT 1")
+                except Exception:
+                    break
+        except Exception as ex:
+            logger.warning(
+                "LISTEN connection error (%s) — retrying in 10s; poll loop continues",
+                ex,
+            )
+        finally:
+            if conn is not None:
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
+        await asyncio.sleep(10)
+
+
+async def _run_poll_loop(queue, once: bool = False) -> None:
+    """Hybrid LISTEN + poll loop.
+
+    The listener fires wake_event on NOTIFY, dropping dispatch latency from
+    WORKER_POLL_INTERVAL seconds to ~milliseconds. The poll fallback covers:
+      (a) backends without NOTIFY support (local_file, sqs handled elsewhere),
+      (b) the brief window when the LISTEN connection is reconnecting,
+      (c) stuck jobs reset by the watchdog (which does not NOTIFY).
+    """
+    logger.info(
+        "Worker poll mode (backend=%s, interval=%ds, max_per_cycle=%d)",
+        _BACKEND, _POLL_INTERVAL, _MAX_PER_CYCLE,
+    )
+
+    if once:
+        await _drain_pending(queue)
+        return
+
+    wake_event: asyncio.Event = asyncio.Event()
+    # Only the DB backend supports NOTIFY; for local_file we just poll.
+    listener_task: asyncio.Task | None = None
+    if _BACKEND == "db":
+        listener_task = asyncio.create_task(_listen_for_notify(wake_event))
+
+    try:
+        while True:
+            # Drain everything currently pending. Loop so a single NOTIFY can
+            # pull more than one job if the queue accumulated during the
+            # previous dispatch.
+            while await _drain_pending(queue) > 0:
+                pass
+
+            # Wait for either: a NOTIFY (instant), or the poll interval (safety net).
+            wake_event.clear()
+            try:
+                await asyncio.wait_for(wake_event.wait(), timeout=_POLL_INTERVAL)
+            except asyncio.TimeoutError:
+                pass  # poll tick — fall through to drain
+    finally:
+        if listener_task is not None:
+            listener_task.cancel()
+            try:
+                await listener_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -361,10 +622,45 @@ async def main() -> None:
     from services.job_queue import get_job_queue
     queue = get_job_queue()
 
-    if _BACKEND == "sqs" and not once:
-        await _run_sqs_loop(queue)
-    else:
-        await _run_poll_loop(queue, once=once)
+    # Initialise the asyncpg pool for backends that use it. The watchdog
+    # and DB-backed queue both need it; for local_file we skip silently.
+    if _BACKEND == "db":
+        try:
+            from config.database import create_pool
+            await create_pool()
+        except Exception as ex:
+            logger.error("Worker: failed to initialise DB pool: %s", ex)
+            raise
+
+    # Startup watchdog sweep: recover any jobs orphaned in 'processing' by a
+    # previous crash before we begin claiming new work. Run BEFORE entering
+    # the main loop so the first dispatch cycle includes the recovered jobs.
+    reset_fn = getattr(queue, "reset_stuck_jobs", None)
+    if reset_fn is not None:
+        try:
+            recovered = await reset_fn()
+            if recovered:
+                logger.warning("Worker startup: recovered %d stuck job(s)", recovered)
+        except Exception as ex:
+            logger.error("Worker startup watchdog failed: %s", ex)
+
+    # Periodic watchdog runs alongside the main loop in non-once mode.
+    watchdog_task: asyncio.Task | None = None
+    if not once and reset_fn is not None:
+        watchdog_task = asyncio.create_task(_run_watchdog(queue))
+
+    try:
+        if _BACKEND == "sqs" and not once:
+            await _run_sqs_loop(queue)
+        else:
+            await _run_poll_loop(queue, once=once)
+    finally:
+        if watchdog_task is not None:
+            watchdog_task.cancel()
+            try:
+                await watchdog_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 if __name__ == "__main__":

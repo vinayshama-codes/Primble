@@ -98,7 +98,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
       const data = await res.json();
       if (res.status === 202 && data.requires_verification) { setLoading(false); setNeedsVerify(true); }
       else if (res.ok && data.success) {
-        if (data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
+        if (data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
         setTransitioning(true); onSuccess(data.user);
       }
       else if (data.requires_verification) { setLoading(false); setNeedsVerify(true); }
@@ -114,7 +114,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
       const res  = await fetch(`${API_BASE}/api/auth/verify-email`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, code: verifyCode }) });
       const data = await res.json();
       if (res.ok && data.success) {
-        if (data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
+        if (data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
         setTransitioning(true); onSuccess(data.user);
       }
       else { setLoading(false); setError(extractError(data.detail) || "Invalid code"); }
@@ -153,7 +153,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
         if (data.profile_incomplete) {
           onSuccess(data.user, true, data.pending_token || null);
         } else {
-          if (data.session_token) sessionStorage.setItem("acordly_tk", data.session_token);
+          if (data.session_token) { try { localStorage.setItem("acordly_tk", data.session_token); sessionStorage.setItem("acordly_tk", data.session_token); } catch {} }
           setTransitioning(true);
           onSuccess(data.user, false, null);
         }

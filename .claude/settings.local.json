@@ -87,7 +87,17 @@
       "Bash(python -c \"from cryptography.fernet import Fernet; print\\(Fernet.generate_key\\(\\).decode\\(\\)\\)\")",
       "Bash(grep -i \"\\\\.py$\")",
       "Bash(git restore *)",
-      "Read(//c/c/Users/lenovo/Desktop/Primble/frontend/**)"
+      "Read(//c/c/Users/lenovo/Desktop/Primble/frontend/**)",
+      "Bash(python -c \"from cachetools import TTLCache; print\\('cachetools OK:', TTLCache\\)\")",
+      "Bash(python -c \"import tiktoken; print\\('tiktoken OK:', tiktoken.__version__\\)\")",
+      "Bash(python -m py_compile services/cross_form_validator.py services/sqs_service.py services/form_service.py services/extraction_pipeline.py routes/form_routes.py)",
+      "Bash(python -c \"from backend.services.cross_form_validator import run_cross_form_validation, split_cross_form_issues, _RULE_FUNCTIONS; print\\('rules:', len\\(_RULE_FUNCTIONS\\)\\); from backend.services.sqs_service import SPEC_PILLAR_WEIGHTS, classify_stops, check_doc_consistency, calculate_package_sqs; print\\('weights:', SPEC_PILLAR_WEIGHTS\\); from backend.services.form_service import match_forms_deterministic; print\\('form_service OK'\\); from backend.services.extraction_pipeline import run_extraction_pipeline; print\\('pipeline OK'\\)\")",
+      "Bash(python -c \"from services.cross_form_validator import run_cross_form_validation, split_cross_form_issues, _RULE_FUNCTIONS; print\\('rules:', len\\(_RULE_FUNCTIONS\\)\\); from services.sqs_service import SPEC_PILLAR_WEIGHTS, classify_stops, check_doc_consistency, calculate_package_sqs, calculate_package_sqs_spec_compliant; print\\('weights:', SPEC_PILLAR_WEIGHTS\\); from services.form_service import match_forms_deterministic; print\\('form_service OK'\\); from services.extraction_pipeline import run_extraction_pipeline; print\\('pipeline OK'\\)\")",
+      "Bash(grep -E \"\\\\.\\(sql|py\\)$\")",
+      "Bash(git -C c:/Users/lenovo/Desktop/Primble log --oneline -20)",
+      "Bash(git -C c:/Users/lenovo/Desktop/Primble show --stat e4dde8e)",
+      "Bash(git -C c:/Users/lenovo/Desktop/Primble diff e4dde8e~1 e4dde8e -- frontend/src/components/auth/AuthModal.jsx frontend/src/components/auth/CompleteProfileModal.jsx frontend/src/components/form/AcordModal.jsx)",
+      "Bash(git -C c:/Users/lenovo/Desktop/Primble diff e4dde8e~1 e4dde8e -- backend/routes/signature_routes.py)"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",

@@ -7,6 +7,20 @@ import NoSignaturePrompt from "../signature/NoSignaturePrompt";
 const PDFJS_CDN    = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
 const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
+// pdf.js loads PDFs inside a Web Worker that does NOT inherit the main-thread
+// fetch interceptor. On iOS Safari (ITP), the cross-site session cookie is
+// blocked, so the worker's PDF fetch returns 401 and the preview silently
+// stays in "Loading PDF…". Reading the bearer token here and passing it via
+// httpHeaders gives the worker an auth channel that survives ITP.
+const _readSessionToken = () => {
+  try { return localStorage.getItem("acordly_tk") || sessionStorage.getItem("acordly_tk") || null; }
+  catch { return null; }
+};
+const _pdfAuthHeaders = () => {
+  const t = _readSessionToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
+
 const YELLOW_REQUIRED = new Set(["NamedInsured_Signature_A", "NamedInsured_SignatureDate_A"]);
 const CONTAINER_PADDING = 24;
 
@@ -94,7 +108,7 @@ export default function PDFJsViewer({
     pdfUrlRef.current = pdfUrl;
     setLoadError(false); setLoadingStage("loading");
     const url  = `${pdfUrl}?_r=${Date.now()}`;
-    const task = window.pdfjsLib.getDocument({ url, withCredentials: true });
+    const task = window.pdfjsLib.getDocument({ url, withCredentials: true, httpHeaders: _pdfAuthHeaders() });
     task.promise
       .then(doc => { setPdfDoc(doc); setTotalPages(doc.numPages); })
       .catch(err => {
@@ -403,7 +417,7 @@ export default function PDFJsViewer({
       if (res.ok) {
         setApplySigStage("rendering");
         const freshUrl = `${pdfUrlRef.current || pdfUrl}?_sig=${Date.now()}`;
-        const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, withCredentials: true }).promise;
+        const newDoc   = await window.pdfjsLib.getDocument({ url: freshUrl, withCredentials: true, httpHeaders: _pdfAuthHeaders() }).promise;
         const page     = await newDoc.getPage(pageNum);
         const avail    = containerRef.current ? containerRef.current.clientWidth - CONTAINER_PADDING : 720;
         const scale    = Math.min(2.2, Math.max(0.2, getMobileRenderWidth(avail) / page.getViewport({ scale: 1 }).width));
@@ -474,7 +488,7 @@ export default function PDFJsViewer({
 
   const _loadPdfInBackground = (currentValues) => {
     if (!pdfjsReady) return;
-    window.pdfjsLib.getDocument({ url: `${pdfUrlRef.current || pdfUrl}?_r=${Date.now()}`, withCredentials: true }).promise
+    window.pdfjsLib.getDocument({ url: `${pdfUrlRef.current || pdfUrl}?_r=${Date.now()}`, withCredentials: true, httpHeaders: _pdfAuthHeaders() }).promise
       .then(async newDoc => {
         try {
           const page    = await newDoc.getPage(pageNum);

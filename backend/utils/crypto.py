@@ -79,6 +79,19 @@ def decrypt_field(value: str | None) -> str | None:
         raise
 
 
+def decrypt_field_soft(value: str | None) -> str | None:
+    """Like decrypt_field but returns None instead of raising on key mismatch.
+
+    Use for optional fields (e.g. signature_data) where a stale ciphertext
+    from a previous key should not crash the request.
+    """
+    try:
+        return decrypt_field(value)
+    except InvalidToken:
+        logger.warning("decrypt_field_soft: could not decrypt value (key mismatch?), returning None")
+        return None
+
+
 # ---------------------------------------------------------------------------
 # KMS envelope-encryption stubs (v2 — not yet active)
 # ---------------------------------------------------------------------------

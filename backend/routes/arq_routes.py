@@ -176,7 +176,7 @@ async def send_arq(
 @router.get("/client-view/{token}")
 async def client_view(token: str, request: Request):
     client_ip = get_client_ip(request)
-    check_arq_public_rate_limit(client_ip)
+    await check_arq_public_rate_limit(client_ip)
 
     if not token or len(token) > 128 or not re.match(r"^[a-f0-9\-]+$", token):
         return JSONResponse({"success": False, "error": "not_found", "message": "Questionnaire not found."}, status_code=404)
@@ -246,7 +246,7 @@ async def client_view(token: str, request: Request):
 @router.patch("/draft/{token}")
 async def save_draft(token: str, request: Request):
     client_ip = get_client_ip(request)
-    check_arq_public_rate_limit(client_ip)
+    await check_arq_public_rate_limit(client_ip)
 
     if not token or len(token) > 128 or not re.match(r"^[a-f0-9\-]+$", token):
         return JSONResponse({"success": False, "message": "Invalid token."}, status_code=400)
@@ -281,7 +281,7 @@ async def save_draft(token: str, request: Request):
 @router.post("/submit/{token}")
 async def submit_arq(token: str, request: Request):
     client_ip = get_client_ip(request)
-    check_arq_submit_rate_limit(client_ip)
+    await check_arq_submit_rate_limit(client_ip)
 
     if not token or len(token) > 128:
         return JSONResponse({"success": False, "message": "Invalid token."}, status_code=400)
@@ -353,7 +353,7 @@ async def arq_chat(token: str, request: Request):
     from config.settings import groq_chat, LLM_MODEL
 
     client_ip = get_client_ip(request)
-    check_arq_chat_rate_limit(client_ip)
+    await check_arq_chat_rate_limit(client_ip)
 
     if not token or len(token) > 128 or not re.match(r"^[a-f0-9\-]+$", token):
         return JSONResponse({"success": False, "reply": "Session not found."}, status_code=404)
