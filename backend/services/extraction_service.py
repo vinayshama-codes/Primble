@@ -1236,7 +1236,7 @@ async def extract_facts(
 
     cached = await _cache_get(ck)
     if cached is not None:
-        logger.debug(f"extract_facts cache hit {ck[:8]}")
+        logger.info(f"extract_facts: cache HIT key={ck[:8]} — returning cached result, no LLM call")
         return cached
 
     low_conf_note = ""

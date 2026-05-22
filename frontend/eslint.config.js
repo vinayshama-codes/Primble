@@ -28,6 +28,8 @@ export default defineConfig([
       'no-empty': 'warn',
       'react-refresh/only-export-components': 'warn',
       'react-hooks/exhaustive-deps': 'warn',
+      'react-hooks/set-state-in-effect': 'warn',
+      'react-hooks/purity': 'warn',
     },
   },
 ])

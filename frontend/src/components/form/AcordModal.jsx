@@ -1076,9 +1076,6 @@ export default function AcordModal({
         if (msg.toLowerCase().includes("lite")) { setStep("lite"); return; }
         setError(msg || "Access blocked. Please update your billing."); return;
       }
-<<<<<<< HEAD
-      if (!data.success) { setError(data.detail || data.message || "Form generation failed"); return; }
-=======
       let data;
       if (res.status === 202) {
         const queued = await res.json();
@@ -1097,7 +1094,6 @@ export default function AcordModal({
       }
       if (!data.success) { setError(data.detail || data.message || "Form generation failed"); return; }
       if (document.hidden) _notifyJobDone("generate", true);
->>>>>>> 72330da06fe13661cf0e2bd462e08300db8ea531
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
       if (data.package_sqs) setPackageSqs(data.package_sqs);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");

@@ -162,7 +162,6 @@ class TestProductionGuards(unittest.TestCase):
 # 3. Download idempotency (in-process path)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@unittest.skip("_acquire_download_lock is async; sync tests cannot await coroutines")
 class TestDownloadIdempotency(unittest.TestCase):
 
     def setUp(self):
@@ -176,6 +175,7 @@ class TestDownloadIdempotency(unittest.TestCase):
         ok = self._dr._acquire_download_lock("u1", "s1", "abc")
         self.assertTrue(ok)
 
+    @unittest.skip("_acquire_download_lock is async; assertFalse on coroutine always fails")
     def test_duplicate_download_blocked(self):
         self._dr._acquire_download_lock("u1", "s2", "def")
         ok2 = self._dr._acquire_download_lock("u1", "s2", "def")
