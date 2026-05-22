@@ -949,6 +949,9 @@ export default function AcordModal({
         hasSW: typeof navigator !== "undefined" && "serviceWorker" in navigator,
       });
     } catch {}
+    // Use a unique tag per job so consecutive notifications aren't
+    // silently deduplicated (browsers collapse same-tag notifications).
+    const tag = `primble-job-${Date.now()}`;
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       // On Chrome/Edge, `new Notification()` called directly from a page
       // sometimes succeeds silently (no toast, no error) — the only reliable
@@ -956,9 +959,12 @@ export default function AcordModal({
       // SW path first, fall back to the constructor.
       try {
         if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
-          const reg = await navigator.serviceWorker.getRegistration();
+          // getRegistration(scope) — pass "/" so it matches the SW registered
+          // at /notification-sw.js regardless of the current page path.
+          const reg = await navigator.serviceWorker.getRegistration("/");
+          console.log("[Primble notify] SW reg:", reg);
           if (reg && typeof reg.showNotification === "function") {
-            await reg.showNotification(title, { body, tag: "primble-job", silent: false, requireInteraction: false });
+            await reg.showNotification(title, { body, tag, silent: false, requireInteraction: false });
             osNotified = true;
           }
         }
@@ -966,7 +972,7 @@ export default function AcordModal({
       if (!osNotified) {
         try {
           // eslint-disable-next-line no-new
-          const n = new Notification(title, { body, tag: "primble-job", silent: false, requireInteraction: false });
+          const n = new Notification(title, { body, tag, silent: false, requireInteraction: false });
           n.onerror = (e) => console.log("[Primble notify] Notification error:", e);
           osNotified = true;
         } catch (e) { console.log("[Primble notify] constructor failed:", e); }
