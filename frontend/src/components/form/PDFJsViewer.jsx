@@ -70,11 +70,31 @@ export default function PDFJsViewer({
   const [loadingStage,  setLoadingStage]  = useState("idle");
   const [pdfRefreshKey, setPdfRefreshKey] = useState(0);
   const [highlightCounts, setHighlightCounts] = useState({ pink: 0, yellow: 0, green: 0 });
+  const [toolbarHidden,  setToolbarHidden]  = useState(false);
+  const lastScrollTop = useRef(0);
 
   useEffect(() => { clientFilledRef.current = clientFilledFields; }, [clientFilledFields]);
   useEffect(() => { editModeRef.current = editMode; }, [editMode]);
   useEffect(() => { isSignedLocalRef.current = isSignedLocal; }, [isSignedLocal]);
   useEffect(() => { setIsSignedLocal(isSigned); }, [formId]); // eslint-disable-line
+
+  // Hide toolbar on scroll-down, reveal on scroll-up. Always show in edit mode.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (editModeRef.current) { setToolbarHidden(false); lastScrollTop.current = el.scrollTop; return; }
+      const st = el.scrollTop;
+      if (Math.abs(st - lastScrollTop.current) < 4) return; // ignore tiny jitter
+      setToolbarHidden(st > lastScrollTop.current && st > 40);
+      lastScrollTop.current = st;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []); // eslint-disable-line
+
+  // Always reveal toolbar when entering edit mode
+  useEffect(() => { if (editMode) setToolbarHidden(false); }, [editMode]);
 
   // Load PDF.js
   useEffect(() => {
@@ -542,64 +562,74 @@ export default function PDFJsViewer({
       {showSignPrompt === "use" && <UseSignaturePrompt signature={savedSignature} onApply={handleApplySignature} onManage={() => { setShowSignPrompt(null); onOpenSignatureModal(); }} onClose={() => setShowSignPrompt(null)} />}
       {showSignPrompt === "none" && <NoSignaturePrompt onSetup={() => { setShowSignPrompt(null); onOpenSignatureModal(); }} onClose={() => setShowSignPrompt(null)} />}
 
-      {/* Toolbar */}
-      <div className="pdfviewer-toolbar-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
-          <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>{formName}</span>
-          {fieldsLoaded && (
-            <>
-              {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>🟡 {highlightCounts.yellow} required</span>}
-              {highlightCounts.pink   > 0 && <span style={{ background: "rgba(254,226,226,0.9)", color: "#991b1b", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>🩷 {highlightCounts.pink} review</span>}
-              {highlightCounts.green  > 0 && <span style={{ background: "rgba(187,247,208,0.9)", color: "#166534", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>✅ {highlightCounts.green} client</span>}
-            </>
-          )}
+      {/* Toolbar — slides up when scrolling down, returns on scroll up */}
+      <div style={{
+        flexShrink: 0,
+        overflow: "hidden",
+        transform: toolbarHidden ? "translateY(-100%)" : "translateY(0)",
+        transition: "transform 0.28s cubic-bezier(0.4,0,0.2,1)",
+        willChange: "transform",
+        // Keep it in flow so the canvas area fills correctly, but collapse visually
+        maxHeight: toolbarHidden ? 0 : "none",
+      }}>
+        <div className="pdfviewer-toolbar-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
+            <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>{formName}</span>
+            {fieldsLoaded && (
+              <>
+                {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.yellow} required</span>}
+                {highlightCounts.pink   > 0 && <span style={{ background: "rgba(254,226,226,0.9)", color: "#991b1b", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.pink} review</span>}
+                {highlightCounts.green  > 0 && <span style={{ background: "rgba(187,247,208,0.9)", color: "#166534", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.green} client</span>}
+              </>
+            )}
+          </div>
+
+          <div className="pdfviewer-toolbar-actions" style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+            {saveStatus === "saving" && <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}><span style={{ width: 10, height: 10, border: "2px solid #f59e0b", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Saving…</span>}
+            {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>✓ Saved</span>}
+            {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>Failed</span>}
+
+            <button onClick={handleRefresh} disabled={loadingStage !== "idle"}
+              title="Refresh — picks up client-submitted answers and shows green highlights"
+              style={{ display: "flex", alignItems: "center", gap: 3, padding: "4px 9px", borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#8b93b0", fontSize: 11, fontWeight: 600, cursor: loadingStage !== "idle" ? "wait" : "pointer", fontFamily: "inherit" }}>
+              Refresh
+            </button>
+
+            <button onClick={handleToggleEditMode} disabled={saveStatus === "saving" || saveStatus === "generating"}
+              style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${editMode ? "#f59e0b" : "#2a3047"}`, background: editMode ? "rgba(245,158,11,0.15)" : "#252a3d", color: editMode ? "#f59e0b" : "#8b93b0", fontSize: 12, fontWeight: 600, cursor: (saveStatus === "saving" || saveStatus === "generating") ? "wait" : "pointer", fontFamily: "inherit", opacity: (saveStatus === "saving" || saveStatus === "generating") ? 0.7 : 1 }}>
+              {editMode ? "Done Editing" : "Edit Fields"}
+            </button>
+
+            <button onClick={handleSignClick} disabled={applyingSign}
+              title={isSignedLocal ? "Signature applied — enter edit mode to remove" : savedSignature ? "Apply your saved signature" : "Set up a signature"}
+              style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${isSignedLocal ? "#10b981" : "rgba(230,0,122,0.4)"}`, background: isSignedLocal ? "rgba(16,185,129,0.1)" : "rgba(230,0,122,0.08)", color: isSignedLocal ? "#10b981" : "#E61B84", fontSize: 12, fontWeight: 600, cursor: applyingSign ? "wait" : "pointer", fontFamily: "inherit", opacity: applyingSign ? 0.7 : 1 }}>
+              {applyingSign ? <><span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Signing…</> : isSignedLocal ? "Signed" : "Sign"}
+            </button>
+
+            {rendering && <span style={{ color: "#4f7cff", fontSize: 11 }}>Rendering…</span>}
+
+            <button onClick={() => goPage(pageNum - 1)} disabled={pageNum <= 1 || rendering} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
+            <span style={{ color: "#6b7899", fontSize: 12, minWidth: 44, textAlign: "center" }}>{totalPages ? `${pageNum}/${totalPages}` : "—"}</span>
+            <button onClick={() => goPage(pageNum + 1)} disabled={pageNum >= totalPages || rendering} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
+
+            {onFormNav?.total > 1 && (<>
+              <div style={{ width: 1, height: 18, background: "#2a3047", margin: "0 2px" }} />
+              <button onClick={onFormNav.goPrev} disabled={onFormNav.activeIdx <= 0} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>«</button>
+              <span style={{ color: "#4f7cff", fontSize: 11, fontWeight: 600 }}>Form {onFormNav.activeIdx + 1}/{onFormNav.total}</span>
+              <button onClick={onFormNav.goNext} disabled={onFormNav.activeIdx >= onFormNav.total - 1} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>»</button>
+            </>)}
+          </div>
         </div>
 
-        <div className="pdfviewer-toolbar-actions" style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-          {saveStatus === "saving" && <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}><span style={{ width: 10, height: 10, border: "2px solid #f59e0b", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Saving…</span>}
-          {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>✓ Saved</span>}
-          {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>Failed</span>}
-
-          <button onClick={handleRefresh} disabled={loadingStage !== "idle"}
-            title="Refresh — picks up client-submitted answers and shows green highlights"
-            style={{ display: "flex", alignItems: "center", gap: 3, padding: "4px 9px", borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#8b93b0", fontSize: 11, fontWeight: 600, cursor: loadingStage !== "idle" ? "wait" : "pointer", fontFamily: "inherit" }}>
-            Refresh
-          </button>
-
-          <button onClick={handleToggleEditMode} disabled={saveStatus === "saving" || saveStatus === "generating"}
-            style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${editMode ? "#f59e0b" : "#2a3047"}`, background: editMode ? "rgba(245,158,11,0.15)" : "#252a3d", color: editMode ? "#f59e0b" : "#8b93b0", fontSize: 12, fontWeight: 600, cursor: (saveStatus === "saving" || saveStatus === "generating") ? "wait" : "pointer", fontFamily: "inherit", opacity: (saveStatus === "saving" || saveStatus === "generating") ? 0.7 : 1 }}>
-            {editMode ? "Done Editing" : "Edit Fields"}
-          </button>
-
-          <button onClick={handleSignClick} disabled={applyingSign}
-            title={isSignedLocal ? "Signature applied — enter edit mode to remove" : savedSignature ? "Apply your saved signature" : "Set up a signature"}
-            style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${isSignedLocal ? "#10b981" : "rgba(230,0,122,0.4)"}`, background: isSignedLocal ? "rgba(16,185,129,0.1)" : "rgba(230,0,122,0.08)", color: isSignedLocal ? "#10b981" : "#E61B84", fontSize: 12, fontWeight: 600, cursor: applyingSign ? "wait" : "pointer", fontFamily: "inherit", opacity: applyingSign ? 0.7 : 1 }}>
-            {applyingSign ? <><span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Signing…</> : isSignedLocal ? "Signed" : "Sign"}
-          </button>
-
-          {rendering && <span style={{ color: "#4f7cff", fontSize: 11 }}>Rendering…</span>}
-
-          <button onClick={() => goPage(pageNum - 1)} disabled={pageNum <= 1 || rendering} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
-          <span style={{ color: "#6b7899", fontSize: 12, minWidth: 44, textAlign: "center" }}>{totalPages ? `${pageNum}/${totalPages}` : "—"}</span>
-          <button onClick={() => goPage(pageNum + 1)} disabled={pageNum >= totalPages || rendering} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
-
-          {onFormNav?.total > 1 && (<>
-            <div style={{ width: 1, height: 18, background: "#2a3047", margin: "0 2px" }} />
-            <button onClick={onFormNav.goPrev} disabled={onFormNav.activeIdx <= 0} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>«</button>
-            <span style={{ color: "#4f7cff", fontSize: 11, fontWeight: 600 }}>Form {onFormNav.activeIdx + 1}/{onFormNav.total}</span>
-            <button onClick={onFormNav.goNext} disabled={onFormNav.activeIdx >= onFormNav.total - 1} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>»</button>
-          </>)}
-        </div>
+        {editMode && (
+          <div className="pdfviewer-edit-hint" style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any field to edit — "Done Editing" saves all changes</span>
+            <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,243,199,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Required field</span></span>
+            <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,226,226,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Low confidence</span></span>
+            {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(187,247,208,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Client-filled</span></span>}
+          </div>
+        )}
       </div>
-
-      {editMode && (
-        <div className="pdfviewer-edit-hint" style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any field to edit — "Done Editing" saves all changes</span>
-          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,243,199,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🟡 Required field</span></span>
-          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,226,226,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>🩷 Low confidence</span></span>
-          {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(187,247,208,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>✅ Client-filled</span></span>}
-        </div>
-      )}
 
       <div ref={containerRef} className="pdfviewer-canvas-container" style={{ flex: 1, overflowY: "auto", overflowX: "auto", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 12, background: "#252a3d", minHeight: 0 }}>
         {loadError ? (

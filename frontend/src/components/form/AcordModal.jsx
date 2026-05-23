@@ -577,6 +577,7 @@ export default function AcordModal({
   const [step, setStep] = useState(resumeSessionId ? "resuming" : "dashboard");
   const [showUploadOverlay, setShowUploadOverlay] = useState(false);
   const [showSlowUploadMsg, setShowSlowUploadMsg] = useState(false);
+  const [jobToasts, setJobToasts] = useState([]);
 
   useEffect(() => {
     if (step === "editor") {
@@ -617,8 +618,6 @@ export default function AcordModal({
   const [signedForms, setSignedForms] = useState(new Set());
   const [showGenerateOverlay, setShowGenerateOverlay] = useState(false);
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
-  const [jobDoneToast, setJobDoneToast] = useState(null); // { kind: "upload"|"generate", ok: bool }
-  const _jobDoneRef = useRef(null);
   const [showAcordModal, setShowAcordModal] = useState(false);
   const [acordModalAction, setAcordModalAction] = useState(null);
   const [acordLicenseChecked, setAcordLicenseChecked] = useState(false);
@@ -911,21 +910,29 @@ export default function AcordModal({
   const _clearActiveJob = () => {
     try { localStorage.removeItem(_ACTIVE_JOB_KEY); } catch {}
   };
-  const _requestNotificationPermission = () => {
+  // Runs once per session — registers the SW and requests permission.
+  // Called on first upload/generate; subsequent calls are no-ops.
+  const _notifSetupDone = useRef(false);
+  const _swRegPromise = useRef(null);
+  const _requestNotificationPermission = async () => {
+    if (_notifSetupDone.current) return;
+    _notifSetupDone.current = true;
     try {
       if (typeof Notification !== "undefined" && Notification.permission === "default") {
-        Notification.requestPermission().catch(() => {});
-      }
-      // Register the notification service worker so we can use
-      // registration.showNotification() — the reliable path on Chromium.
-      if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
-        navigator.serviceWorker.getRegistration("/notification-sw.js").then((existing) => {
-          if (!existing) {
-            navigator.serviceWorker.register("/notification-sw.js").catch((e) => console.log("[Primble notify] SW register failed:", e));
-          }
-        }).catch(() => {});
+        // Await so the first _notifyJobDone after this resolves with the real
+        // permission state instead of racing the prompt and silently no-opping.
+        await Notification.requestPermission().catch(() => {});
       }
     } catch {}
+    if ("serviceWorker" in navigator) {
+      // Cache the registration promise so _notifyJobDone can await the same
+      // instance instead of looking it up (lookup by script-URL is unreliable —
+      // getRegistration() takes a scope, not the script path).
+      _swRegPromise.current = navigator.serviceWorker
+        .register("/notification-sw.js")
+        .then(reg => navigator.serviceWorker.ready.then(() => reg))
+        .catch(() => null);
+    }
   };
   const _setTitleBadge = (on) => {
     try {
@@ -933,80 +940,49 @@ export default function AcordModal({
       document.title = on ? `(1) ${base}` : base;
     } catch {}
   };
+  const _pushJobToast = (title, body, ok) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setJobToasts(prev => [...prev, { id, title, body, ok }]);
+    // Auto-dismiss after 6s; user can also click to dismiss.
+    setTimeout(() => {
+      setJobToasts(prev => prev.filter(t => t.id !== id));
+    }, 6000);
+  };
   const _notifyJobDone = async (kind, ok) => {
     const title = ok ? "Primble — Ready" : "Primble — Action needed";
     const body = ok
       ? (kind === "generate" ? "Your ACORD forms are ready to review." : "Your documents have finished processing.")
       : "There was an issue with your submission. Please reopen to review.";
-    let osNotified = false;
-    // Log diagnostics so we can see why a notification didn't appear
-    // (Windows Focus Assist, Chrome SW requirement, etc.).
+    // Always show in-page toast (every event, regardless of tab state).
+    _pushJobToast(title, body, ok);
+    // OS-level browser notification only when the tab is hidden.
+    if (typeof document !== "undefined" && !document.hidden) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    const tag = `primble-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     try {
-      console.log("[Primble notify]", {
-        hasNotification: typeof Notification !== "undefined",
-        permission: typeof Notification !== "undefined" ? Notification.permission : "n/a",
-        hidden: typeof document !== "undefined" ? document.hidden : "n/a",
-        hasSW: typeof navigator !== "undefined" && "serviceWorker" in navigator,
-      });
-    } catch {}
-    // Use a unique tag per job so consecutive notifications aren't
-    // silently deduplicated (browsers collapse same-tag notifications).
-    const tag = `primble-job-${Date.now()}`;
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-      // On Chrome/Edge, `new Notification()` called directly from a page
-      // sometimes succeeds silently (no toast, no error) — the only reliable
-      // path is via a ServiceWorkerRegistration.showNotification. Try the
-      // SW path first, fall back to the constructor.
-      try {
-        if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
-          // getRegistration(scope) — pass "/" so it matches the SW registered
-          // at /notification-sw.js regardless of the current page path.
-          const reg = await navigator.serviceWorker.getRegistration("/");
-          console.log("[Primble notify] SW reg:", reg);
-          if (reg && typeof reg.showNotification === "function") {
-            await reg.showNotification(title, { body, tag, silent: false, requireInteraction: false });
-            osNotified = true;
-          }
-        }
-      } catch (e) { console.log("[Primble notify] SW path failed:", e); }
-      if (!osNotified) {
-        try {
-          // eslint-disable-next-line no-new
-          const n = new Notification(title, { body, tag, silent: false, requireInteraction: false });
-          n.onerror = (e) => console.log("[Primble notify] Notification error:", e);
-          osNotified = true;
-        } catch (e) { console.log("[Primble notify] constructor failed:", e); }
+      // SW path is required on Chrome/Edge — new Notification() from a page
+      // context silently fails there after the first call without a SW.
+      // Await the cached registration set up in _requestNotificationPermission.
+      let reg = null;
+      if (_swRegPromise.current) {
+        reg = await _swRegPromise.current;
+      } else if ("serviceWorker" in navigator) {
+        // Fallback: try the controller / ready promise.
+        try { reg = await navigator.serviceWorker.ready; } catch {}
       }
-    }
-    try {
-      if (typeof document !== "undefined" && document.hidden) {
-        // Tab is in the background — set title badge so they see "(1) Primble"
-        // when scanning their tab strip, and queue the in-app toast for when
-        // they return (regardless of whether the OS notification fired).
-        _setTitleBadge(true);
-        _jobDoneRef.current = { kind, ok };
-      } else if (!osNotified) {
-        // Tab is focused but OS notification didn't fire (permission not
-        // granted, blocked by Focus Assist, etc.) — fall back to the in-app
-        // toast so they still see it.
-        setJobDoneToast({ kind, ok });
+      if (reg && typeof reg.showNotification === "function") {
+        await reg.showNotification(title, { body, tag, silent: false, requireInteraction: false });
+      } else {
+        // eslint-disable-next-line no-new
+        new Notification(title, { body, tag, silent: false });
       }
-      // If tab is focused AND OS notification fired, the OS toast is enough —
-      // no in-app toast (avoids the duplicate-on-same-tab issue).
-    } catch {}
+    } catch { /* notification blocked by OS/browser settings */ }
+    if (document.hidden) _setTitleBadge(true);
   };
 
-  // When user returns to tab: clear badge and show in-app toast (no permission needed)
+  // Clear the title badge when the user returns to the tab.
   useEffect(() => {
-    const onVis = () => {
-      if (!document.hidden) {
-        _setTitleBadge(false);
-        if (_jobDoneRef.current) {
-          setJobDoneToast(_jobDoneRef.current);
-          _jobDoneRef.current = null;
-        }
-      }
-    };
+    const onVis = () => { if (!document.hidden) _setTitleBadge(false); };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
@@ -1074,7 +1050,7 @@ export default function AcordModal({
 
   const handleUpload = async () => {
     if (!files.length) { setError("Select at least one file"); return; }
-    _requestNotificationPermission();
+    await _requestNotificationPermission();
     setLoading(true); setError(null); setShowUploadOverlay(true);
     const fd = new FormData(); files.forEach(f => fd.append("files", f));
     try {
@@ -1134,7 +1110,7 @@ export default function AcordModal({
   const handleGenerateAll = async () => {
     const ids = Array.from(checkedFormIds);
     if (!ids.length) { setError("Select at least one form"); return; }
-    _requestNotificationPermission();
+    await _requestNotificationPermission();
     setLoading(true); setError(null); setShowGenerateOverlay(true);
     try {
       const res = await fetch(`${API_BASE}/api/select-forms-bulk`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, form_ids: ids }) });
@@ -1322,25 +1298,6 @@ export default function AcordModal({
       )}
       {showAcordModal && renderAcordLicenseModal()}
       {showARQModal && <ARQModal sessionId={sessionId} token={token} questions={arqQuestions} onClose={() => setShowARQModal(false)} onSuccess={() => { setShowARQModal(false); refreshArqData(); }} />}
-      {jobDoneToast && (
-        <div style={{ position: "fixed", top: 24, right: 24, zIndex: 100002, display: "flex", alignItems: "flex-start", gap: 12, background: "rgba(253,242,248,0.97)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", border: "1px solid rgba(230,27,132,0.25)", borderRadius: 14, padding: "14px 18px 14px 16px", boxShadow: "0 8px 32px rgba(230,27,132,0.18), 0 2px 8px rgba(0,0,0,0.07)", maxWidth: 320, animation: "slideDown 0.22s ease-out" }}>
-          <div style={{ flexShrink: 0, width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg,#E61B84,#C0157A)", display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1 }}>
-            <span style={{ color: "#fff", fontSize: 15, fontWeight: 700 }}>✓</span>
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: "#9d174d", marginBottom: 3 }}>
-              {jobDoneToast.ok ? "Primble — Ready" : "Action needed"}
-            </div>
-            <div style={{ fontSize: 12.5, color: "#be185d", lineHeight: 1.45 }}>
-              {jobDoneToast.ok
-                ? (jobDoneToast.kind === "generate" ? "Your ACORD forms are ready to review." : "Your documents have finished processing.")
-                : "There was an issue with your submission. Please review."}
-            </div>
-          </div>
-          <button onClick={() => setJobDoneToast(null)} style={{ flexShrink: 0, background: "none", border: "none", cursor: "pointer", color: "#be185d", fontSize: 16, lineHeight: 1, padding: "2px 4px", opacity: 0.55, marginTop: -2 }} onMouseEnter={e => e.currentTarget.style.opacity = "1"} onMouseLeave={e => e.currentTarget.style.opacity = "0.55"}>✕</button>
-          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 3, borderRadius: "0 0 14px 14px", background: "linear-gradient(90deg,#E61B84,#C0157A)" }} />
-        </div>
-      )}
       {downloadPreflightLoading && <ProcessStageOverlay stages={["Checking recommendations", "Loading SQS summary"]} advanceAfter={1800} />}
       {showDownloadPreflight && (
         <DownloadPreflightModal
@@ -1352,6 +1309,39 @@ export default function AcordModal({
           onCancel={() => { setShowDownloadPreflight(false); setPreflightCallback(null); }}
           loading={loading}
         />
+      )}
+      {jobToasts.length > 0 && (
+        <div style={{
+          position: "fixed",
+          right: "max(16px, env(safe-area-inset-right))",
+          bottom: "max(16px, env(safe-area-inset-bottom))",
+          zIndex: 10000,
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          maxWidth: "calc(100vw - 32px)",
+          width: 340,
+          pointerEvents: "none",
+        }}>
+          {jobToasts.map(t => (
+            <div key={t.id}
+              onClick={() => setJobToasts(prev => prev.filter(x => x.id !== t.id))}
+              style={{
+                pointerEvents: "auto",
+                background: "#ffffff",
+                border: `1px solid ${t.ok ? "#f9a8d4" : "#fecaca"}`,
+                borderLeft: `4px solid ${t.ok ? "#e6007a" : "#dc2626"}`,
+                borderRadius: 10,
+                boxShadow: "0 10px 30px rgba(15,23,42,0.18), 0 2px 8px rgba(15,23,42,0.08)",
+                padding: "12px 14px",
+                cursor: "pointer",
+                animation: "slideDown 0.18s ease-out",
+              }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>{t.title}</div>
+              <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.4 }}>{t.body}</div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -1471,7 +1461,7 @@ export default function AcordModal({
           const liteReady = !liteGenerating && !!sqs;
           const liteGradeColor = g => ({ A: "#10b981", B: "#22c55e", C: "#f59e0b", D: "#f97316", F: "#ef4444" }[g] || "#94a3b8");
           const liteGradeBg = g => ({ A: "rgba(16,185,129,0.08)", B: "rgba(34,197,94,0.08)", C: "rgba(245,158,11,0.08)", D: "rgba(249,115,22,0.08)", F: "rgba(239,68,68,0.08)" }[g] || "rgba(148,163,184,0.08)");
-          const routingLabel = { auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Underwriter Review", hold: "Hold — Remediation Required" };
+          const routingLabel = { auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Package Review", hold: "Hold — Remediation Required" };
           const routingStyle = {
             auto_quote: { bg: "#dcfce7", color: "#166534", border: "#86efac" },
             review:     { bg: "#fef9c3", color: "#854d0e", border: "#fde047" },
@@ -2028,8 +2018,8 @@ export default function AcordModal({
 
                     {/* ── Routing decision ── */}
                     {activeSqs.routing_decision && (
-                      <div style={{ padding: "5px 9px", borderRadius: 7, fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, background: "#fdf2f8", color: "#000", border: "1px solid #f9a8d4", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                        {{ auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Underwriter Review", hold: "Hold — Remediation Required" }[activeSqs.routing_decision]}
+                      <div style={{ padding: "5px 9px", fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, color: "#000" }}>
+                        {{ auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Package Review", hold: "Hold — Remediation Required" }[activeSqs.routing_decision]}
                       </div>
                     )}
 
@@ -2156,7 +2146,19 @@ export default function AcordModal({
               <div style={{ height: 1, background: "#f1f5f9", margin: "0 14px" }} />
               <div style={{ padding: "12px 14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
 
-                {/* Collapsible secondary actions — above Send to Client */}
+                {/* Primary CTA — Client-in-the-Loop™ */}
+                <button onClick={handleOpenARQ} disabled={arqLoadingQ}
+                  style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: arqLoadingQ ? 0.7 : 1, boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", letterSpacing: "0.02em", transition: "all 0.2s" }}
+                  onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}>
+                  {arqLoadingQ
+                    ? <><span style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</>
+                    : <>Send to Client{arqNotifCount > 0 && <span style={{ background: "#fff", color: "#E61B84", borderRadius: 10, fontSize: 10, padding: "2px 7px", fontWeight: 800, marginLeft: 2 }}>{arqNotifCount}</span>}</>
+                  }
+                </button>
+                <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
+
+                {/* Collapsible secondary actions */}
                 <div style={{ borderRadius: 14, overflow: "hidden", border: actionsOpen ? "1.5px solid #f9a8d4" : "1.5px solid #fce7f3", boxShadow: actionsOpen ? "0 8px 28px rgba(230,0,122,0.18)" : "0 2px 8px rgba(230,0,122,0.08)", transition: "box-shadow 0.25s, border-color 0.25s" }}>
                   {/* Toggle header */}
                   <button
@@ -2275,18 +2277,6 @@ export default function AcordModal({
                     </div>
                   )}
                 </div>
-
-                {/* Primary CTA — Client-in-the-Loop™ */}
-                <button onClick={handleOpenARQ} disabled={arqLoadingQ}
-                  style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: arqLoadingQ ? 0.7 : 1, boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", letterSpacing: "0.02em", transition: "all 0.2s" }}
-                  onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}>
-                  {arqLoadingQ
-                    ? <><span style={{ width: 12, height: 12, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</>
-                    : <>Send to Client{arqNotifCount > 0 && <span style={{ background: "#fff", color: "#E61B84", borderRadius: 10, fontSize: 10, padding: "2px 7px", fontWeight: 800, marginLeft: 2 }}>{arqNotifCount}</span>}</>
-                  }
-                </button>
-                <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
 
                 {/* Dashboard — return to recent forms */}
                 <button onClick={goToDashboard}

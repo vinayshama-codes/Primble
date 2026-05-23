@@ -31,6 +31,11 @@ async def confirm_acord_license(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
+    # Idempotent: if already confirmed, skip the write and return success.
+    # This prevents spurious 500s when the client retries after a dropped connection.
+    if current_user.get("acord_license_confirmed"):
+        return {"success": True, "acord_license_confirmed": True}
+
     now = datetime.now(timezone.utc).isoformat()
     async with get_pool().acquire() as conn:
         await conn.execute(
