@@ -24,8 +24,12 @@ const _pdfAuthHeaders = () => {
 const YELLOW_REQUIRED = new Set(["NamedInsured_Signature_A", "NamedInsured_SignatureDate_A"]);
 const CONTAINER_PADDING = 24;
 
-const getMobileRenderWidth = (avail) =>
-  window.innerWidth <= 768 ? Math.max(avail * 1.8, 680) : avail;
+const getMobileRenderWidth = (avail) => {
+  const w = window.innerWidth;
+  if (w <= 360) return Math.max(avail * 1.6, 480);  // fold phones: wider for readability
+  if (w < 768)  return Math.max(avail * 1.8, 680);  // phones (up to but NOT including 768): h-scroll
+  return avail;                                       // tablets (768+) and desktop: fill available width
+};
 
 export default function PDFJsViewer({
   pdfUrl, formName, onFormNav, sessionId, formId, token,
@@ -572,51 +576,51 @@ export default function PDFJsViewer({
         // Keep it in flow so the canvas area fills correctly, but collapse visually
         maxHeight: toolbarHidden ? 0 : "none",
       }}>
-        <div className="pdfviewer-toolbar-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
-            <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>{formName}</span>
+        <div className="pdfviewer-toolbar-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "5px 10px", background: "#1e2436", borderBottom: "1px solid #2a3047", gap: 5, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", minWidth: 0 }}>
+            <span style={{ color: "#e8eaf2", fontSize: 11, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>{formName}</span>
             {fieldsLoaded && (
               <>
-                {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.yellow} required</span>}
-                {highlightCounts.pink   > 0 && <span style={{ background: "rgba(254,226,226,0.9)", color: "#991b1b", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.pink} review</span>}
-                {highlightCounts.green  > 0 && <span style={{ background: "rgba(187,247,208,0.9)", color: "#166534", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.green} client</span>}
+                {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 9, padding: "1px 5px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.yellow} req</span>}
+                {highlightCounts.pink   > 0 && <span style={{ background: "rgba(254,226,226,0.9)", color: "#991b1b", fontSize: 9, padding: "1px 5px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.pink} rev</span>}
+                {highlightCounts.green  > 0 && <span style={{ background: "rgba(187,247,208,0.9)", color: "#166534", fontSize: 9, padding: "1px 5px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.green} cli</span>}
               </>
             )}
           </div>
 
-          <div className="pdfviewer-toolbar-actions" style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-            {saveStatus === "saving" && <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#f59e0b", fontSize: 11, fontWeight: 600 }}><span style={{ width: 10, height: 10, border: "2px solid #f59e0b", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Saving…</span>}
-            {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 11, fontWeight: 600 }}>✓ Saved</span>}
-            {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>Failed</span>}
+          <div className="pdfviewer-toolbar-actions" style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+            {saveStatus === "saving" && <span style={{ display: "flex", alignItems: "center", gap: 2, color: "#f59e0b", fontSize: 10, fontWeight: 600 }}><span style={{ width: 9, height: 9, border: "2px solid #f59e0b", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Saving…</span>}
+            {saveStatus === "saved"   && <span style={{ color: "#22c55e", fontSize: 10, fontWeight: 600 }}>✓ Saved</span>}
+            {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 10, fontWeight: 600 }}>Failed</span>}
 
             <button onClick={handleRefresh} disabled={loadingStage !== "idle"}
               title="Refresh — picks up client-submitted answers and shows green highlights"
-              style={{ display: "flex", alignItems: "center", gap: 3, padding: "4px 9px", borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#8b93b0", fontSize: 11, fontWeight: 600, cursor: loadingStage !== "idle" ? "wait" : "pointer", fontFamily: "inherit" }}>
+              style={{ display: "flex", alignItems: "center", gap: 2, padding: "3px 7px", borderRadius: 5, border: "1px solid #2a3047", background: "#252a3d", color: "#8b93b0", fontSize: 10, fontWeight: 600, cursor: loadingStage !== "idle" ? "wait" : "pointer", fontFamily: "inherit" }}>
               Refresh
             </button>
 
             <button onClick={handleToggleEditMode} disabled={saveStatus === "saving" || saveStatus === "generating"}
-              style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${editMode ? "#f59e0b" : "#2a3047"}`, background: editMode ? "rgba(245,158,11,0.15)" : "#252a3d", color: editMode ? "#f59e0b" : "#8b93b0", fontSize: 12, fontWeight: 600, cursor: (saveStatus === "saving" || saveStatus === "generating") ? "wait" : "pointer", fontFamily: "inherit", opacity: (saveStatus === "saving" || saveStatus === "generating") ? 0.7 : 1 }}>
+              style={{ display: "flex", alignItems: "center", gap: 3, padding: "3px 8px", borderRadius: 5, border: `1px solid ${editMode ? "#f59e0b" : "#2a3047"}`, background: editMode ? "rgba(245,158,11,0.15)" : "#252a3d", color: editMode ? "#f59e0b" : "#8b93b0", fontSize: 10, fontWeight: 600, cursor: (saveStatus === "saving" || saveStatus === "generating") ? "wait" : "pointer", fontFamily: "inherit", opacity: (saveStatus === "saving" || saveStatus === "generating") ? 0.7 : 1 }}>
               {editMode ? "Done Editing" : "Edit Fields"}
             </button>
 
             <button onClick={handleSignClick} disabled={applyingSign}
               title={isSignedLocal ? "Signature applied — enter edit mode to remove" : savedSignature ? "Apply your saved signature" : "Set up a signature"}
-              style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${isSignedLocal ? "#10b981" : "rgba(230,0,122,0.4)"}`, background: isSignedLocal ? "rgba(16,185,129,0.1)" : "rgba(230,0,122,0.08)", color: isSignedLocal ? "#10b981" : "#E61B84", fontSize: 12, fontWeight: 600, cursor: applyingSign ? "wait" : "pointer", fontFamily: "inherit", opacity: applyingSign ? 0.7 : 1 }}>
-              {applyingSign ? <><span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Signing…</> : isSignedLocal ? "Signed" : "Sign"}
+              style={{ display: "flex", alignItems: "center", gap: 3, padding: "3px 8px", borderRadius: 5, border: `1px solid ${isSignedLocal ? "#10b981" : "rgba(230,0,122,0.4)"}`, background: isSignedLocal ? "rgba(16,185,129,0.1)" : "rgba(230,0,122,0.08)", color: isSignedLocal ? "#10b981" : "#E61B84", fontSize: 10, fontWeight: 600, cursor: applyingSign ? "wait" : "pointer", fontFamily: "inherit", opacity: applyingSign ? 0.7 : 1 }}>
+              {applyingSign ? <><span style={{ width: 9, height: 9, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Signing…</> : isSignedLocal ? "Signed" : "Sign"}
             </button>
 
-            {rendering && <span style={{ color: "#4f7cff", fontSize: 11 }}>Rendering…</span>}
+            {rendering && <span style={{ color: "#4f7cff", fontSize: 10 }}>Rendering…</span>}
 
-            <button onClick={() => goPage(pageNum - 1)} disabled={pageNum <= 1 || rendering} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
-            <span style={{ color: "#6b7899", fontSize: 12, minWidth: 44, textAlign: "center" }}>{totalPages ? `${pageNum}/${totalPages}` : "—"}</span>
-            <button onClick={() => goPage(pageNum + 1)} disabled={pageNum >= totalPages || rendering} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
+            <button onClick={() => goPage(pageNum - 1)} disabled={pageNum <= 1 || rendering} style={{ width: 24, height: 24, borderRadius: 5, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
+            <span style={{ color: "#6b7899", fontSize: 11, minWidth: 36, textAlign: "center" }}>{totalPages ? `${pageNum}/${totalPages}` : "—"}</span>
+            <button onClick={() => goPage(pageNum + 1)} disabled={pageNum >= totalPages || rendering} style={{ width: 24, height: 24, borderRadius: 5, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
 
             {onFormNav?.total > 1 && (<>
-              <div style={{ width: 1, height: 18, background: "#2a3047", margin: "0 2px" }} />
-              <button onClick={onFormNav.goPrev} disabled={onFormNav.activeIdx <= 0} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>«</button>
-              <span style={{ color: "#4f7cff", fontSize: 11, fontWeight: 600 }}>Form {onFormNav.activeIdx + 1}/{onFormNav.total}</span>
-              <button onClick={onFormNav.goNext} disabled={onFormNav.activeIdx >= onFormNav.total - 1} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center" }}>»</button>
+              <div style={{ width: 1, height: 16, background: "#2a3047", margin: "0 1px" }} />
+              <button onClick={onFormNav.goPrev} disabled={onFormNav.activeIdx <= 0} style={{ width: 24, height: 24, borderRadius: 5, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>«</button>
+              <span style={{ color: "#4f7cff", fontSize: 10, fontWeight: 600 }}>Form {onFormNav.activeIdx + 1}/{onFormNav.total}</span>
+              <button onClick={onFormNav.goNext} disabled={onFormNav.activeIdx >= onFormNav.total - 1} style={{ width: 24, height: 24, borderRadius: 5, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>»</button>
             </>)}
           </div>
         </div>
@@ -631,7 +635,7 @@ export default function PDFJsViewer({
         )}
       </div>
 
-      <div ref={containerRef} className="pdfviewer-canvas-container" style={{ flex: 1, overflowY: "auto", overflowX: "auto", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: 12, background: "#252a3d", minHeight: 0 }}>
+      <div ref={containerRef} className="pdfviewer-canvas-container" style={{ flex: 1, overflowY: "auto", overflowX: "auto", display: "flex", alignItems: "flex-start", padding: 12, background: "#252a3d", minHeight: 0 }}>
         {loadError ? (
           <div style={{ color: "#6b7899", textAlign: "center", marginTop: 60 }}>Could not load PDF preview.</div>
         ) : !pdfDoc ? (

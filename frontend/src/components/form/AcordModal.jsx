@@ -1270,7 +1270,7 @@ export default function AcordModal({
   };
 
   return (
-    <div style={{
+    <div className={step === "editor" ? "acord-modal-editor-root" : undefined} style={{
       background: "#f8fafc", width: "100%",
       ...(step === "editor"
         ? { height: "calc(100vh - 81px)", display: "flex", flexDirection: "column", overflow: "hidden" }
