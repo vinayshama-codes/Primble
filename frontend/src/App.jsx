@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import "./App.css";
 import "./styles/injected.js";
 import { GoogleOAuthProvider } from "@react-oauth/google";
@@ -114,6 +114,7 @@ function AppContent() {
   const [overageToast,        setOverageToast]        = useState(null);
   const [marketingPage,       setMarketingPage]       = useState(null);
   const [portalRedirecting,   setPortalRedirecting]   = useState(false);
+  const acordModalRef = useRef(null);
 
   // Parse Stripe redirect params once at mount; clear them from the URL immediately
   // so the hook is driven by confirmed Stripe redirects only, not arbitrary URL visits.
@@ -289,7 +290,13 @@ function AppContent() {
         onHome={() => { setMarketingPage(null); setShowModal(false); }}
         onAccountSettings={() => setShowAccountSettings(true)}
         onContactPrimble={() => setShowContactModal(true)}
-        onDashboard={user ? () => setShowModal(true) : undefined}
+        onDashboard={user ? () => {
+          if (acordModalRef.current) {
+            acordModalRef.current.goToDashboard();
+          } else {
+            setShowModal(true);
+          }
+        } : undefined}
       />
       {headerError && (
         <div className="header-error-bar">{headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
@@ -298,6 +305,7 @@ function AppContent() {
       {/* Page content — switches between landing, marketing pages, and app */}
       {showModal && user ? (
         <AcordModal
+          ref={acordModalRef}
           onClose={() => { setShowModal(false); setResumeSessionId(null); }}
           user={user} token={token} onUserUpdate={setUser}
           onShowUpgrade={() => setShowUpgradeModal(true)}

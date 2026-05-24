@@ -1762,46 +1762,19 @@ def _fill_unmatched_with_gpt(
     # ── Prompt builder ───────────────────────────────────────────────────────
     _PROMPT_SKELETON = (
         f"You are filling ACORD form {form_id} for an insurance submission.\n"
-        "You have TWO data sources, listed in strict PRIORITY ORDER:\n"
-        "  (1) EXTRACTED FACTS — a JSON object of structured key/value pairs already verified\n"
-        "      by an upstream document analyzer. These are the SOURCE OF TRUTH. Boolean flags\n"
-        "      (keys beginning with 'has_', 'is_', 'auto_has_', 'property_has_', 'wc_', etc.)\n"
-        "      are authoritative for Yes/No checkbox decisions.\n"
-        "  (2) RAW DOCUMENT TEXT — the cleaned OCR output. Use ONLY when EXTRACTED FACTS\n"
-        "      does not contain the answer for a given field.\n\n"
-        "PRIORITY RULE (mandatory):\n"
-        "  • If a field's value is present in EXTRACTED FACTS (under a matching or near-matching\n"
-        "    key), use that value verbatim. NEVER override an EXTRACTED FACTS value with a\n"
-        "    different value derived from raw text — facts already won majority vote across\n"
-        "    document chunks and are more reliable than re-reading raw OCR.\n"
-        "  • If EXTRACTED FACTS does not answer the field, search RAW DOCUMENT TEXT and copy\n"
-        "    the value verbatim.\n"
-        "  • If neither contains the value, return JSON null.\n\n"
-        "FACT-KEY MATCHING GUIDANCE:\n"
-        "  PDF field names follow ACORD naming (e.g. 'NamedInsured_FullName_A'). Match them\n"
-        "  to FACTS keys by semantic meaning, not exact spelling:\n"
-        "    - 'NamedInsured_FullName*'           → facts['applicant_name']\n"
-        "    - 'Producer_FullName*'               → facts['producer_name']\n"
-        "    - 'Policy_EffectiveDate*'            → facts['effective_date']\n"
-        "    - 'Policy_ExpirationDate*'           → facts['expiration_date']\n"
-        "    - 'NamedInsured_DBAName*'            → facts['dba_name']\n"
-        "    - '*EntityType*' / '*LegalEntity*'   → facts['entity_type']\n"
-        "    - '*NAICSCode*'                      → facts['naics_code']\n"
-        "    - '*SICCode*'                        → facts['sic_code']\n"
-        "    - 'BusinessInformation_*EmployeeCount' / '*NumberOfEmployees' → facts['num_employees']\n"
-        "    - '*AnnualRevenue*'                  → facts['total_revenue']\n"
-        "    - '*AnnualPayroll*' / '*Payroll*'    → facts['total_payroll']\n"
-        "    - '*YearsInBusiness*'                → facts['years_in_business']\n"
-        "    - '*OperationsDescription*'          → facts['operations_description']\n"
-        "    - '*CarrierName*' / 'Insurer_FullName' → facts['carrier_name']\n"
-        "    - 'Prior*' fields                    → facts['prior_*'] keys\n"
-        "    - LOB checkbox indicators            → facts['has_<line>'] booleans\n"
-        "  Apply the same semantic-match approach for any field not listed above.\n\n"
+        "You have two sources to fill fields from:\n"
+        "  1. EXTRACTED FACTS — structured JSON of key/value pairs already extracted from the\n"
+        "     document. Use a fact value when the field meaning matches the fact key.\n"
+        "     Boolean facts (has_general_liability, is_contractor, has_auto_coverage, etc.)\n"
+        "     directly answer Yes/No checkbox fields.\n"
+        "  2. RAW DOCUMENT TEXT — the full document text. Use this for any field not already\n"
+        "     answered by EXTRACTED FACTS.\n\n"
+        "PRIMARY RULE: Fill EVERY field you can from either source. "
+        "Copy values verbatim. Do not invent or paraphrase — if a value is not present in\n"
+        "either source, return JSON null for that field.\n\n"
         "Return exactly two keys:\n"
         '  "values":          {FieldName: <string value> OR JSON null}\n'
-        '  "raw_text_sourced":[FieldName, ...]   // include a field ONLY when its value\n'
-        "                                       // came from RAW DOCUMENT TEXT (source 2),\n"
-        "                                       // NOT when sourced from EXTRACTED FACTS.\n\n"
+        '  "raw_text_sourced":[FieldName, ...]  (list only fields whose value came from raw text)\n\n'
         "ABSENCE PROTOCOL — read carefully:\n"
         "  When a field's value is not present in the document text, you MUST use JSON null "
         "(the unquoted literal null). You MUST NOT return any of the following strings as a "
@@ -1980,9 +1953,15 @@ def _fill_unmatched_with_gpt(
         values      = result.get("values",          {}) or {}
         raw_sourced = set(result.get("raw_text_sourced", []) or [])
 
+        # DIAGNOSTIC: log first 30 entries of GPT response to understand what is returned
+        _diag_sample = {k: v for i, (k, v) in enumerate(values.items()) if i < 30}
+        logger.info("gpt_fill DIAG_RESPONSE: form=%s chunk=%s total_returned=%d sample=%s",
+                    form_id, chunk_label, len(values), json.dumps(_diag_sample, default=str)[:2000])
+
         filled_count    = 0
         rejected_count  = 0
         rejected_sample: List[str] = []
+        non_null_rejected: List[str] = []
         for field, value in values.items():
             if field not in sent:
                 continue
@@ -1990,6 +1969,9 @@ def _fill_unmatched_with_gpt(
                 rejected_count += 1
                 if len(rejected_sample) < 8:
                     rejected_sample.append(f"{field}={value!r}")
+                # Log non-null rejections separately — these are actual values being filtered
+                if value is not None and len(non_null_rejected) < 20:
+                    non_null_rejected.append(f"{field}={value!r}")
                 logger.debug(
                     "gpt_fill REJECT: form=%s chunk=%s field=%s value=%r",
                     form_id, chunk_label, field, value,
@@ -2011,6 +1993,11 @@ def _fill_unmatched_with_gpt(
                 "gpt_fill REJECT_SAMPLE: form=%s chunk=%s (%d shown of %d) %s",
                 form_id, chunk_label, len(rejected_sample), rejected_count,
                 "; ".join(rejected_sample),
+            )
+        if non_null_rejected:
+            logger.info(
+                "gpt_fill NON_NULL_REJECTED: form=%s chunk=%s (non-null values being filtered) %s",
+                form_id, chunk_label, "; ".join(non_null_rejected),
             )
 
     # ── Chunk sizing ──────────────────────────────────────────────────────────

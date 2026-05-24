@@ -1,5 +1,5 @@
 ﻿//AcordModal.jsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { API_BASE } from "../../config/constants";
 import { gradeColor, barColor } from "../../utils/formatters";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
@@ -562,12 +562,12 @@ function DashboardStep({ token, onResume, onNewPackage }) {
 }
 
 // ── Main AcordModal ────────────────────────────────────────────────────────
-export default function AcordModal({
+const AcordModal = forwardRef(function AcordModal({
   onClose, user, token, onUserUpdate, onShowUpgrade,
   resumeSessionId, savedSignature, onOpenSignatureModal,
   onOpenBillingPortal, billingPortalLoading,
   fullPage = false,
-}) {
+}, ref) {
   const fileInputRef = useRef(null);
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
@@ -762,6 +762,8 @@ export default function AcordModal({
     _resetSqsState();
   };
 
+  useImperativeHandle(ref, () => ({ goToDashboard }));
+
   const handleResumeSession = sid => {
     setLoading(true); setProcessingStage("Restoring session…"); setSessionId(sid);
     const ctrl = new AbortController();
@@ -908,6 +910,7 @@ export default function AcordModal({
   // SW registration is bootstrapped globally in main.jsx via window.__primbleSwReady,
   // so this helper only handles the Notification permission prompt.
   const _notifPermissionAsked = useRef(false);
+  const _permissionWarnedThisSession = useRef(false);
   const _requestNotificationPermission = async () => {
     if (_notifPermissionAsked.current) return;
     _notifPermissionAsked.current = true;
@@ -921,6 +924,19 @@ export default function AcordModal({
         // the real permission state instead of racing the OS prompt.
         const result = await Notification.requestPermission().catch(() => "default");
         console.info("[primble-notify] permission ->", result);
+      }
+      // If permission still isn't granted, show ONE diagnostic toast so the
+      // user understands why OS-level alerts in background tabs aren't firing.
+      // This is the single most common production-only failure mode: per-origin
+      // permission didn't carry over from localhost, and Chrome's "quieter UI"
+      // bell icon is easy to miss / dismiss.
+      if (Notification.permission !== "granted" && !_permissionWarnedThisSession.current) {
+        _permissionWarnedThisSession.current = true;
+        _pushJobToast(
+          "Background alerts are off",
+          "Click the lock or bell icon in your browser's address bar to allow notifications, then reload.",
+          false
+        );
       }
     } catch (err) {
       console.warn("[primble-notify] permission request threw:", err && err.message ? err.message : err);
@@ -1006,6 +1022,8 @@ export default function AcordModal({
         tag,
         silent: false,
         requireInteraction: true,
+        icon: "/primble-favicon.png",
+        badge: "/primble-favicon.png",
       });
       console.info("[primble-notify] showNotification ok, tag=", tag);
     } catch (err) {
@@ -1015,7 +1033,7 @@ export default function AcordModal({
       try {
         const target = reg.active || reg.waiting || reg.installing;
         if (target && target.postMessage) {
-          target.postMessage({ type: "SHOW_NOTIFICATION", title, body, tag, requireInteraction: true });
+          target.postMessage({ type: "SHOW_NOTIFICATION", title, body, tag, requireInteraction: true, icon: "/primble-favicon.png", badge: "/primble-favicon.png" });
         }
       } catch (e2) {
         console.error("[primble-notify] postMessage fallback failed:", e2 && e2.message ? e2.message : e2);
@@ -1371,15 +1389,38 @@ export default function AcordModal({
               onClick={() => setJobToasts(prev => prev.filter(x => x.id !== t.id))}
               style={{
                 pointerEvents: "auto",
+                position: "relative",
                 background: "#ffffff",
                 border: `1px solid ${t.ok ? "#f9a8d4" : "#fecaca"}`,
                 borderLeft: `4px solid ${t.ok ? "#e6007a" : "#dc2626"}`,
                 borderRadius: 10,
                 boxShadow: "0 10px 30px rgba(15,23,42,0.18), 0 2px 8px rgba(15,23,42,0.08)",
-                padding: "12px 14px",
+                padding: "12px 30px 12px 14px",
                 cursor: "pointer",
                 animation: "slideDown 0.18s ease-out",
               }}>
+              <button
+                type="button"
+                aria-label="Dismiss notification"
+                onClick={(e) => { e.stopPropagation(); setJobToasts(prev => prev.filter(x => x.id !== t.id)); }}
+                style={{
+                  position: "absolute",
+                  top: 6,
+                  right: 6,
+                  width: 22,
+                  height: 22,
+                  border: "none",
+                  borderRadius: "50%",
+                  background: "transparent",
+                  color: "#64748b",
+                  fontSize: 16,
+                  lineHeight: "20px",
+                  cursor: "pointer",
+                  padding: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}>×</button>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>{t.title}</div>
               <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.4 }}>{t.body}</div>
             </div>
@@ -2377,4 +2418,6 @@ export default function AcordModal({
       </>
     );
   }
-}
+});
+
+export default AcordModal;
