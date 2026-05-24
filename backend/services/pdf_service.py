@@ -145,13 +145,20 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     "UnderlyingPolicy_PolicyNumber":     _ScheduleDef("underlying_policies", "policy_no"),
 
     # ── Loss History (ACORD 125) ─────────────────────────────────────────────
-    "LossHistory_OccurrenceDate":    _ScheduleDef("loss_history", "date"),
-    "LossHistory_LossDescription":   _ScheduleDef("loss_history", "description"),
-    "LossHistory_Description":       _ScheduleDef("loss_history", "description"),
-    "LossHistory_TotalIncurred":     _ScheduleDef("loss_history", "amount"),
-    "LossHistory_AmountPaid":        _ScheduleDef("loss_history", "paid"),
-    "LossHistory_ClaimNumber":       _ScheduleDef("loss_history", "claim_number"),
-    "LossHistory_OpenIndicator":     _ScheduleDef("loss_history", "open"),
+    "LossHistory_OccurrenceDate":             _ScheduleDef("loss_history", "date"),
+    "LossHistory_ClaimDate":                  _ScheduleDef("loss_history", "claim_date"),
+    "LossHistory_LossDescription":            _ScheduleDef("loss_history", "description"),
+    "LossHistory_Description":                _ScheduleDef("loss_history", "description"),
+    "LossHistory_OccurrenceDescription":      _ScheduleDef("loss_history", "description"),
+    "LossHistory_TotalIncurred":              _ScheduleDef("loss_history", "amount"),
+    "LossHistory_AmountPaid":                 _ScheduleDef("loss_history", "paid"),
+    "LossHistory_PaidAmount":                 _ScheduleDef("loss_history", "paid"),
+    "LossHistory_ReservedAmount":             _ScheduleDef("loss_history", "reserved_amount"),
+    "LossHistory_ClaimNumber":                _ScheduleDef("loss_history", "claim_number"),
+    "LossHistory_LineOfBusiness":             _ScheduleDef("loss_history", "line_of_business"),
+    "LossHistory_OpenIndicator":              _ScheduleDef("loss_history", "open"),
+    "LossHistory_ClaimStatus_OpenCode":       _ScheduleDef("loss_history", "open_code"),
+    "LossHistory_ClaimStatus_SubrogationCode":_ScheduleDef("loss_history", "subrogation_code"),
 
     # ── Prior Coverage by Line (ACORD 125/126/127/130) ───────────────────────
     "PriorCoverage_TypeOfInsurance": _ScheduleDef("prior_coverage_by_line", "line"),
