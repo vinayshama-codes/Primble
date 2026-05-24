@@ -904,29 +904,61 @@ export default function AcordModal({
   const _clearActiveJob = () => {
     try { localStorage.removeItem(_ACTIVE_JOB_KEY); } catch {}
   };
-  // Runs once per session — registers the SW and requests permission.
-  // Called on first upload/generate; subsequent calls are no-ops.
-  const _notifSetupDone = useRef(false);
-  const _swRegPromise = useRef(null);
+  // Permission is prompted lazily on first user gesture (upload/generate).
+  // SW registration is bootstrapped globally in main.jsx via window.__primbleSwReady,
+  // so this helper only handles the Notification permission prompt.
+  const _notifPermissionAsked = useRef(false);
   const _requestNotificationPermission = async () => {
-    if (_notifSetupDone.current) return;
-    _notifSetupDone.current = true;
+    if (_notifPermissionAsked.current) return;
+    _notifPermissionAsked.current = true;
     try {
-      if (typeof Notification !== "undefined" && Notification.permission === "default") {
-        // Await so the first _notifyJobDone after this resolves with the real
-        // permission state instead of racing the prompt and silently no-opping.
-        await Notification.requestPermission().catch(() => {});
+      if (typeof Notification === "undefined") {
+        console.info("[primble-notify] Notification API unavailable");
+        return;
       }
-    } catch {}
-    if ("serviceWorker" in navigator) {
-      // Cache the registration promise so _notifyJobDone can await the same
-      // instance instead of looking it up (lookup by script-URL is unreliable —
-      // getRegistration() takes a scope, not the script path).
-      _swRegPromise.current = navigator.serviceWorker
-        .register("/notification-sw.js")
-        .then(reg => navigator.serviceWorker.ready.then(() => reg))
-        .catch(() => null);
+      if (Notification.permission === "default") {
+        // Must be awaited so the first _notifyJobDone after this resolves with
+        // the real permission state instead of racing the OS prompt.
+        const result = await Notification.requestPermission().catch(() => "default");
+        console.info("[primble-notify] permission ->", result);
+      }
+    } catch (err) {
+      console.warn("[primble-notify] permission request threw:", err && err.message ? err.message : err);
     }
+  };
+
+  // Resolve a working SW registration, with three fallbacks:
+  //   1. The global bootstrap promise from main.jsx (normal path).
+  //   2. navigator.serviceWorker.getRegistration("/") (root scope lookup).
+  //   3. Just-in-time register() (covers the case where the global bootstrap
+  //      hadn't run yet, e.g. instant resume-after-reload).
+  // Returns null only when all three fail; in that case the caller must NOT
+  // call new Notification(...) on Chromium because it silently no-ops in
+  // background tabs. Returning null is honest about "we cannot notify".
+  const _resolveSwRegistration = async () => {
+    if (!("serviceWorker" in navigator)) return null;
+    try {
+      if (window.__primbleSwReady) {
+        const reg = await window.__primbleSwReady;
+        if (reg && typeof reg.showNotification === "function") return reg;
+      }
+    } catch (err) {
+      console.warn("[primble-notify] __primbleSwReady failed:", err && err.message ? err.message : err);
+    }
+    try {
+      const existing = await navigator.serviceWorker.getRegistration("/");
+      if (existing && typeof existing.showNotification === "function") return existing;
+    } catch (err) {
+      console.warn("[primble-notify] getRegistration failed:", err && err.message ? err.message : err);
+    }
+    try {
+      const reg = await navigator.serviceWorker.register("/notification-sw.js", { scope: "/" });
+      await navigator.serviceWorker.ready;
+      if (reg && typeof reg.showNotification === "function") return reg;
+    } catch (err) {
+      console.error("[primble-notify] just-in-time register failed:", err && err.message ? err.message : err);
+    }
+    return null;
   };
   const _setTitleBadge = (on) => {
     try {
@@ -949,29 +981,50 @@ export default function AcordModal({
       : "There was an issue with your submission. Please reopen to review.";
     // Always show in-page toast (every event, regardless of tab state).
     _pushJobToast(title, body, ok);
+    // Title-badge runs even if the OS path fails, so a hidden tab still gets
+    // a visible "(1) Primble — …" hint when the user returns.
+    if (typeof document !== "undefined" && document.hidden) _setTitleBadge(true);
     // OS-level browser notification only when the tab is hidden.
     if (typeof document !== "undefined" && !document.hidden) return;
-    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    if (typeof Notification === "undefined") {
+      console.info("[primble-notify] skip: Notification API unavailable");
+      return;
+    }
+    if (Notification.permission !== "granted") {
+      console.info("[primble-notify] skip: permission=", Notification.permission);
+      return;
+    }
     const tag = `primble-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const reg = await _resolveSwRegistration();
+    if (!reg) {
+      // No SW available — Chrome/Edge will silently swallow new Notification()
+      // from a page context in a background tab, so we deliberately do NOT
+      // fall back to it. The in-page toast + title badge are the user-visible
+      // signal in this degraded case.
+      console.error("[primble-notify] no SW registration available, OS notification skipped");
+      return;
+    }
     try {
-      // SW path is required on Chrome/Edge — new Notification() from a page
-      // context silently fails there after the first call without a SW.
-      // Await the cached registration set up in _requestNotificationPermission.
-      let reg = null;
-      if (_swRegPromise.current) {
-        reg = await _swRegPromise.current;
-      } else if ("serviceWorker" in navigator) {
-        // Fallback: try the controller / ready promise.
-        try { reg = await navigator.serviceWorker.ready; } catch {}
+      await reg.showNotification(title, {
+        body,
+        tag,
+        silent: false,
+        requireInteraction: false,
+      });
+      console.info("[primble-notify] showNotification ok, tag=", tag);
+    } catch (err) {
+      console.error("[primble-notify] showNotification rejected:", err && err.message ? err.message : err);
+      // Last-ditch: postMessage to the SW so it can show the notification from
+      // its own context. Useful if the page lost some capability mid-flight.
+      try {
+        const target = reg.active || reg.waiting || reg.installing;
+        if (target && target.postMessage) {
+          target.postMessage({ type: "SHOW_NOTIFICATION", title, body, tag });
+        }
+      } catch (e2) {
+        console.error("[primble-notify] postMessage fallback failed:", e2 && e2.message ? e2.message : e2);
       }
-      if (reg && typeof reg.showNotification === "function") {
-        await reg.showNotification(title, { body, tag, silent: false, requireInteraction: false });
-      } else {
-        // eslint-disable-next-line no-new
-        new Notification(title, { body, tag, silent: false });
-      }
-    } catch { /* notification blocked by OS/browser settings */ }
-    if (document.hidden) _setTitleBadge(true);
+    }
   };
 
   // Clear the title badge when the user returns to the tab.

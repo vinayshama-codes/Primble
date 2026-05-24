@@ -1,5 +1,15 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!notification-sw\\.js|.*\\.(?:js|css|png|jpg|jpeg|webp|svg|ico|woff2?|map|json|txt)).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/notification-sw.js",
+      "headers": [
+        { "key": "Content-Type", "value": "application/javascript; charset=utf-8" },
+        { "key": "Service-Worker-Allowed", "value": "/" },
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    }
   ]
 }

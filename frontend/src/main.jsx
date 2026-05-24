@@ -28,6 +28,36 @@ import { API_BASE } from "./config/constants";
   };
 })();
 
+// Bootstrap the notification service worker on app start (independent of any
+// user gesture). We don't request Notification permission here — that still
+// happens lazily on the first upload/generate click. Registering early means:
+//   1. The SW exists before any resume-after-reload code path tries to use it.
+//   2. New deploys propagate the updated SW as soon as the user opens the app.
+//   3. registration.showNotification() always has a live registration to use.
+// Failures are logged but never block app boot.
+window.__primbleSwReady = (async () => {
+  if (typeof window === "undefined") return null;
+  if (!("serviceWorker" in navigator)) {
+    console.info("[primble-sw] serviceWorker API unavailable");
+    return null;
+  }
+  if (window.location.protocol !== "https:" && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+    console.warn("[primble-sw] non-https origin, SW registration skipped:", window.location.origin);
+    return null;
+  }
+  try {
+    const reg = await navigator.serviceWorker.register("/notification-sw.js", { scope: "/" });
+    // Trigger an update check on every load so deploys propagate.
+    try { reg.update().catch(() => {}); } catch {}
+    const active = await navigator.serviceWorker.ready;
+    console.info("[primble-sw] registered, scope=", active.scope);
+    return active;
+  } catch (err) {
+    console.error("[primble-sw] register failed:", err && err.message ? err.message : err);
+    return null;
+  }
+})();
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <App />

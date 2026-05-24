@@ -1762,12 +1762,46 @@ def _fill_unmatched_with_gpt(
     # ── Prompt builder ───────────────────────────────────────────────────────
     _PROMPT_SKELETON = (
         f"You are filling ACORD form {form_id} for an insurance submission.\n"
-        "You have one data source: the raw OCR document text provided below.\n\n"
-        "PRIMARY RULE: Extract values DIRECTLY from the raw document text. "
-        "Do not invent or paraphrase — copy values verbatim as they appear in the document.\n\n"
+        "You have TWO data sources, listed in strict PRIORITY ORDER:\n"
+        "  (1) EXTRACTED FACTS — a JSON object of structured key/value pairs already verified\n"
+        "      by an upstream document analyzer. These are the SOURCE OF TRUTH. Boolean flags\n"
+        "      (keys beginning with 'has_', 'is_', 'auto_has_', 'property_has_', 'wc_', etc.)\n"
+        "      are authoritative for Yes/No checkbox decisions.\n"
+        "  (2) RAW DOCUMENT TEXT — the cleaned OCR output. Use ONLY when EXTRACTED FACTS\n"
+        "      does not contain the answer for a given field.\n\n"
+        "PRIORITY RULE (mandatory):\n"
+        "  • If a field's value is present in EXTRACTED FACTS (under a matching or near-matching\n"
+        "    key), use that value verbatim. NEVER override an EXTRACTED FACTS value with a\n"
+        "    different value derived from raw text — facts already won majority vote across\n"
+        "    document chunks and are more reliable than re-reading raw OCR.\n"
+        "  • If EXTRACTED FACTS does not answer the field, search RAW DOCUMENT TEXT and copy\n"
+        "    the value verbatim.\n"
+        "  • If neither contains the value, return JSON null.\n\n"
+        "FACT-KEY MATCHING GUIDANCE:\n"
+        "  PDF field names follow ACORD naming (e.g. 'NamedInsured_FullName_A'). Match them\n"
+        "  to FACTS keys by semantic meaning, not exact spelling:\n"
+        "    - 'NamedInsured_FullName*'           → facts['applicant_name']\n"
+        "    - 'Producer_FullName*'               → facts['producer_name']\n"
+        "    - 'Policy_EffectiveDate*'            → facts['effective_date']\n"
+        "    - 'Policy_ExpirationDate*'           → facts['expiration_date']\n"
+        "    - 'NamedInsured_DBAName*'            → facts['dba_name']\n"
+        "    - '*EntityType*' / '*LegalEntity*'   → facts['entity_type']\n"
+        "    - '*NAICSCode*'                      → facts['naics_code']\n"
+        "    - '*SICCode*'                        → facts['sic_code']\n"
+        "    - 'BusinessInformation_*EmployeeCount' / '*NumberOfEmployees' → facts['num_employees']\n"
+        "    - '*AnnualRevenue*'                  → facts['total_revenue']\n"
+        "    - '*AnnualPayroll*' / '*Payroll*'    → facts['total_payroll']\n"
+        "    - '*YearsInBusiness*'                → facts['years_in_business']\n"
+        "    - '*OperationsDescription*'          → facts['operations_description']\n"
+        "    - '*CarrierName*' / 'Insurer_FullName' → facts['carrier_name']\n"
+        "    - 'Prior*' fields                    → facts['prior_*'] keys\n"
+        "    - LOB checkbox indicators            → facts['has_<line>'] booleans\n"
+        "  Apply the same semantic-match approach for any field not listed above.\n\n"
         "Return exactly two keys:\n"
         '  "values":          {FieldName: <string value> OR JSON null}\n'
-        '  "raw_text_sourced":[FieldName, ...]\n\n'
+        '  "raw_text_sourced":[FieldName, ...]   // include a field ONLY when its value\n'
+        "                                       // came from RAW DOCUMENT TEXT (source 2),\n"
+        "                                       // NOT when sourced from EXTRACTED FACTS.\n\n"
         "ABSENCE PROTOCOL — read carefully:\n"
         "  When a field's value is not present in the document text, you MUST use JSON null "
         "(the unquoted literal null). You MUST NOT return any of the following strings as a "
@@ -1807,8 +1841,47 @@ def _fill_unmatched_with_gpt(
         "       _A = \"Acme Insurance\", _B = \"Beta Insurance\", _C = null (unquoted).\n\n"
     )
     _SKELETON_CHARS = len(_PROMPT_SKELETON)
-    # Fixed overhead per call: skeleton + fields header + footer
-    _FIXED_OVERHEAD = _SKELETON_CHARS + 200
+
+    # ── Build a clean, PII-stripped JSON facts block once per call ───────────
+    # Strips PII keys, unwraps {value, confidence} envelopes, drops null/empty
+    # values. Booleans (flags merged via process_single_form) are preserved so
+    # GPT can correctly answer Yes/No checkbox fields that fell through Pass 1.
+    def _build_facts_block(_facts: dict) -> str:
+        clean: dict = {}
+        for _k, _v in (_facts or {}).items():
+            if _k in _PII_EXCLUDE_KEYS:
+                continue
+            # Unwrap annotated envelope from extraction_service._annotate_facts
+            if isinstance(_v, dict) and "value" in _v:
+                _v = _v.get("value")
+            if _v is None:
+                continue
+            if isinstance(_v, str):
+                if not _v.strip():
+                    continue
+                _v = _v.strip()
+            elif isinstance(_v, list) and len(_v) == 0:
+                continue
+            elif isinstance(_v, dict) and len(_v) == 0:
+                continue
+            clean[_k] = _v
+        try:
+            return json.dumps(clean, indent=2, ensure_ascii=False, default=str)
+        except Exception:
+            return "{}"
+
+    _facts_block_text = _build_facts_block(facts)
+    _facts_block_present = bool(_facts_block_text) and _facts_block_text != "{}"
+    _FACTS_SECTION_WRAPPER = (
+        "\n\n=== EXTRACTED FACTS (PRIMARY SOURCE — already verified by document analyzer) ===\n"
+        "\n=== END EXTRACTED FACTS ===\n"
+    )
+    _FACTS_BLOCK_CHARS = (
+        len(_facts_block_text) + len(_FACTS_SECTION_WRAPPER) if _facts_block_present else 0
+    )
+
+    # Fixed overhead per call: skeleton + fields header + footer + facts block
+    _FIXED_OVERHEAD = _SKELETON_CHARS + 200 + _FACTS_BLOCK_CHARS
 
     def _build_user_prompt(active_fields: List[str], raw_chunk: str, chunk_idx: int, total_chunks: int) -> str:
         """Build the variable portion of the prompt (fields + document text).
@@ -1840,12 +1913,18 @@ def _fill_unmatched_with_gpt(
             parts.append(_slot_group_block(_base, _slots))
 
         fields_block = "\n".join(parts)
+        facts_section = (
+            "\n\n=== EXTRACTED FACTS (PRIMARY SOURCE — already verified by document analyzer) ===\n"
+            f"{_facts_block_text}\n"
+            "=== END EXTRACTED FACTS ===\n"
+        ) if _facts_block_present else ""
         raw_section  = (
-            f"\n\n=== RAW DOCUMENT TEXT (chunk {chunk_idx + 1}/{total_chunks}) ===\n{raw_chunk}"
+            f"\n\n=== RAW DOCUMENT TEXT (SECONDARY SOURCE — chunk {chunk_idx + 1}/{total_chunks}) ===\n{raw_chunk}"
             if raw_chunk else ""
         )
         return (
             f"Fields to fill ({form_id}):\n{fields_block}"
+            + facts_section
             + raw_section
             + '\n\nReturn ONLY valid JSON: {"values": {...}, "raw_text_sourced": [...]}'
         )
