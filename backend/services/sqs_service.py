@@ -920,12 +920,13 @@ def calculate_package_sqs(
         raw = min(raw, 85)
     raw = max(0, raw)
 
-    # Tier determination — spec: 90 / 75 / 60 / <60
+    # Tier determination — spec: 90 / 80 / 70 / 60 / <60
     tier = (
-        "Carrier-Ready" if raw >= 90 else
-        "Review-Ready"  if raw >= 75 else
-        "At-Risk"       if raw >= 60 else
-        "Decline-Prone"
+        "Submission Ready" if raw >= 90 else
+        "Almost There"     if raw >= 80 else
+        "Needs Work"       if raw >= 70 else
+        "Major Gaps"       if raw >= 60 else
+        "Not Ready"
     )
 
     # SQS history management
@@ -1085,12 +1086,13 @@ def calculate_package_sqs_spec_compliant(
         raw = min(raw, 85)
     raw = max(0, raw)
 
-    # Tier determination — spec: 90 / 75 / 60 / <60
+    # Tier determination — spec: 90 / 80 / 70 / 60 / <60
     tier = (
-        "Carrier-Ready" if raw >= 90 else
-        "Review-Ready"  if raw >= 75 else
-        "At-Risk"       if raw >= 60 else
-        "Decline-Prone"
+        "Submission Ready" if raw >= 90 else
+        "Almost There"     if raw >= 80 else
+        "Needs Work"       if raw >= 70 else
+        "Major Gaps"       if raw >= 60 else
+        "Not Ready"
     )
 
     # SQS history
@@ -1774,10 +1776,11 @@ def calculate_sqs(
 
     # ── Tier and routing ──────────────────────────────────────────────────────
     tier, tc = (
-        ("Carrier-Ready", "green") if raw_score >= 90 else
-        ("Review-Ready", "yellow") if raw_score >= 75 else
-        ("At-Risk", "orange") if raw_score >= 60 else
-        ("Decline-Prone", "red")
+        ("Submission Ready", "green")  if raw_score >= 90 else
+        ("Almost There",     "yellow") if raw_score >= 80 else
+        ("Needs Work",       "orange") if raw_score >= 70 else
+        ("Major Gaps",       "red")    if raw_score >= 60 else
+        ("Not Ready",        "red")
     )
     routing = (
         "auto_quote" if raw_score > 85 else
@@ -1848,7 +1851,8 @@ One paragraph only. State the score tier, the main gap, and the single most impa
 
         raw = await groq_chat(
             LLM_MODEL,
-            [{"role": "user", "content": prompt}]
+            [{"role": "user", "content": prompt}],
+            max_tokens=1024,
         )
         return raw.strip()
 

@@ -842,6 +842,7 @@ async def _safe_json_parse(raw: str, context: str = "") -> dict:
                             + raw[:3000]
                         ),
                     }],
+                    max_tokens=16000,
                 )
             except Exception as repair_ex:
                 logger.error(f"_safe_json_parse: LLM repair call failed — {repair_ex}")
@@ -1268,7 +1269,7 @@ async def extract_facts(
         + _EXTRACT_PROMPT_SUFFIX
     )
 
-    raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
+    raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}], max_tokens=16000)
 
     result   = await _safe_json_parse(raw, context=f"key={ck[:8]}")
     annotated, manual_conf = _annotate_facts(result["facts"], low_confidence_tokens, source=source)
@@ -1642,7 +1643,7 @@ async def _run_reconciliation(conflicts: Dict[str, dict], result: dict) -> None:
             "Return ONLY a JSON object: {\"field_name\": \"chosen_value\"}.\n\n"
             "Conflicts:\n" + json.dumps(llm_conflicts, indent=2)
         )
-        raw      = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
+        raw      = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}], max_tokens=4096)
         resolved = _parse_flat_json(raw, context="reconciliation")
         for k, v in resolved.items():
             if k not in _OCR_CRITICAL_FIELDS or _is_empty(v):

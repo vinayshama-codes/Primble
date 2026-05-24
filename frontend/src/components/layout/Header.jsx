@@ -153,6 +153,7 @@ function UserDropdown({
   setUser,
   onAccountSettings,
   onContactPrimble,
+  onDashboard,
 }) {
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -328,6 +329,16 @@ function UserDropdown({
             >
               <span className="udrop-item-label">Contact Primble</span>
             </button>
+
+            {/* 5. Dashboard */}
+            {onDashboard && (
+              <button
+                className="udrop-item"
+                onClick={() => { setOpen(false); onDashboard(); }}
+              >
+                <span className="udrop-item-label">Dashboard</span>
+              </button>
+            )}
           </div>
 
           <div className="udrop-divider" />
@@ -366,7 +377,7 @@ export default function Header({
   onSignatureClick, onUpgradeClick, onLogout, onHome, onSignUp, onLogIn,
   openBillingPortal, upgradeChecking, upgradeFailed,
   setUpgradeFailed, setUpgradeChecking, setUser,
-  onNavigate, onAccountSettings, onContactPrimble,
+  onNavigate, onAccountSettings, onContactPrimble, onDashboard,
 }) {
   return (
     <header className="landing-header">
@@ -398,6 +409,7 @@ export default function Header({
           setUser={setUser}
           onAccountSettings={onAccountSettings}
           onContactPrimble={onContactPrimble}
+          onDashboard={onDashboard}
         />
       ) : (
         <div className="user-menu" style={{ display: "flex", alignItems: "center", gap: 10 }}>

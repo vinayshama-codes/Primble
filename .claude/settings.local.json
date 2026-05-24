@@ -84,7 +84,9 @@
       "Bash(grep -E '\\\\.env$|\\\\.env\\\\.')",
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
       "Bash(python -)",
-      "Bash(python -c \"from cryptography.fernet import Fernet; print\\(Fernet.generate_key\\(\\).decode\\(\\)\\)\")"
+      "Bash(python -c \"from cryptography.fernet import Fernet; print\\(Fernet.generate_key\\(\\).decode\\(\\)\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('services/extraction_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import json; d=json.load\\(open\\(r'c:\\\\Users\\\\lenovo\\\\Desktop\\\\Primble\\\\backend\\\\forms_database\\\\ACORD_ACORD_125_fieldmap.json'\\)\\); fm=d.get\\('fieldmap',d\\); print\\('total_keys:',len\\(fm\\)\\); null_ct=sum\\(1 for v in fm.values\\(\\) if v is None\\); nonnull=len\\(fm\\)-null_ct; print\\('null_values:',null_ct\\); print\\('non_null_values:',nonnull\\); print\\('ai_set_size:',len\\(d.get\\('ai_mapped',[]\\)\\)\\) if isinstance\\(d,dict\\) and 'ai_mapped' in d else None\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",

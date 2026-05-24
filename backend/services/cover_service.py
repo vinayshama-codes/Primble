@@ -64,7 +64,7 @@ Respond with ONLY a valid JSON object with exactly three keys:
 
 Return ONLY the JSON object."""
     try:
-        raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
+        raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}], max_tokens=4096)
         if raw.startswith("```"):
             raw = raw.replace("```json", "").replace("```", "").strip()
         s, e = raw.find("{"), raw.rfind("}")
@@ -153,7 +153,7 @@ Respond with ONLY a valid JSON object with exactly three keys:
 
 Return ONLY the JSON object."""
     try:
-        raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}])
+        raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}], max_tokens=4096)
         if raw.startswith("```"):
             raw = raw.replace("```json", "").replace("```", "").strip()
         s, e = raw.find("{"), raw.rfind("}")

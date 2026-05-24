@@ -568,7 +568,6 @@ export default function AcordModal({
   onOpenBillingPortal, billingPortalLoading,
   fullPage = false,
 }) {
-  const dropRef = useRef(null);
   const fileInputRef = useRef(null);
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
@@ -692,18 +691,13 @@ export default function AcordModal({
       .finally(() => { clearTimeout(timer); setLoading(false); setProcessingStage(""); });
   }, [resumeSessionId]); // eslint-disable-line
 
-  useEffect(() => {
-    const el = dropRef.current; if (!el) return;
-    const over = e => { e.preventDefault(); setDragging(true); };
-    const leave = () => setDragging(false);
-    const drop = e => {
-      e.preventDefault(); setDragging(false);
-      const uploaded = Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".zip") || f.type.startsWith("image/"));
-      setFiles(prev => [...prev, ...uploaded]);
-    };
-    el.addEventListener("dragover", over); el.addEventListener("dragleave", leave); el.addEventListener("drop", drop);
-    return () => { el.removeEventListener("dragover", over); el.removeEventListener("dragleave", leave); el.removeEventListener("drop", drop); };
-  }, []);
+  const handleDragOver = e => { e.preventDefault(); setDragging(true); };
+  const handleDragLeave = () => setDragging(false);
+  const handleDrop = e => {
+    e.preventDefault(); setDragging(false);
+    const uploaded = Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".zip") || f.type.startsWith("image/"));
+    setFiles(prev => [...prev, ...uploaded]);
+  };
 
   useEffect(() => {
     if ((step !== "editor" && step !== "lite") || !sessionId) return;
@@ -1668,7 +1662,9 @@ export default function AcordModal({
                 {/* Drop target */}
                 <input ref={fileInputRef} type="file" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,application/pdf,application/zip,image/*" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }} />
                 <label
-                  ref={dropRef}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
                   onClick={() => { if (!uploadBlocked) fileInputRef.current?.click(); }}
                   style={{
                     display: "block",
@@ -1838,7 +1834,7 @@ export default function AcordModal({
             )}
             {tier2Score !== null && (
               <div className="tier2-bar">
-                <div className="tier2-header"><span className="tier2-label">Underwriting Readiness</span><span className="tier2-score" style={{ color: barColor(tier2Score) }}>{tier2Score}%</span></div>
+                <div className="tier2-header"><span className="tier2-label">Submission Readiness</span><span className="tier2-score" style={{ color: barColor(tier2Score) }}>{tier2Score}%</span></div>
                 <div className="metric-bar"><div className="metric-fill" style={{ width: `${tier2Score}%`, background: barColor(tier2Score) }} /></div>
                 {tier2Missing.length > 0 && <div className="tier2-missing">Missing: {tier2Missing.join(" · ")}</div>}
               </div>
@@ -2078,7 +2074,7 @@ export default function AcordModal({
                           ))}
                         </div>
                         {packageSqs.tier && (
-                          <div style={{ marginTop: 8, padding: "3px 8px", borderRadius: 5, fontSize: 10, fontWeight: 700, textAlign: "center", background: { "Carrier-Ready": "#dcfce7", "Quote-Ready": "#fef9c3", "Review-Ready": "#ffedd5", "At-Risk": "#fee2e2", "Incomplete": "#f1f5f9" }[packageSqs.tier] || "#f1f5f9", color: { "Carrier-Ready": "#166534", "Quote-Ready": "#854d0e", "Review-Ready": "#9a3412", "At-Risk": "#991b1b", "Incomplete": "#64748b" }[packageSqs.tier] || "#374151" }}>
+                          <div style={{ marginTop: 8, padding: "3px 8px", borderRadius: 5, fontSize: 10, fontWeight: 700, textAlign: "center", background: { "Submission Ready": "#dcfce7", "Almost There": "#fef9c3", "Needs Work": "#ffedd5", "Major Gaps": "#fee2e2", "Not Ready": "#fee2e2", "Incomplete": "#f1f5f9" }[packageSqs.tier] || "#f1f5f9", color: { "Submission Ready": "#166534", "Almost There": "#854d0e", "Needs Work": "#9a3412", "Major Gaps": "#991b1b", "Not Ready": "#991b1b", "Incomplete": "#64748b" }[packageSqs.tier] || "#374151" }}>
                             {packageSqs.tier}
                           </div>
                         )}
@@ -2088,7 +2084,7 @@ export default function AcordModal({
                     {/* ── Risk drivers ── */}
                     {activeSqs.risk_drivers?.length > 0 && (
                       <div style={{ background: "#fdf2f8", borderRadius: 7, padding: "8px 10px", marginBottom: 8, border: "1px solid #f9a8d4", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Top Risk Drivers</div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>TOP DRIVERS</div>
                         {activeSqs.risk_drivers.map((d, i) => (
                           <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: i < activeSqs.risk_drivers.length - 1 ? "1px solid #f9a8d4" : "none" }}>
                             <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>#{i + 1}</span>
@@ -2278,13 +2274,6 @@ export default function AcordModal({
                   )}
                 </div>
 
-                {/* Dashboard — return to recent forms */}
-                <button onClick={goToDashboard}
-                  style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", letterSpacing: "0.02em", boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", transition: "all 0.2s" }}
-                  onMouseEnter={e => { e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)"; e.currentTarget.style.boxShadow = "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(0)"; }}>
-                  Dashboard
-                </button>
 
               </div>
             </div>
@@ -2332,12 +2321,6 @@ export default function AcordModal({
                 onMouseEnter={e => e.currentTarget.style.background = "#C0157A"}
                 onMouseLeave={e => e.currentTarget.style.background = "#E61B84"}>
                 ← Back to Form
-              </button>
-              <button onClick={goToDashboard}
-                style={{ minWidth: 260, padding: "11px 0", borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc", color: "#475569", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
-                onMouseEnter={e => e.currentTarget.style.background = "#f1f5f9"}
-                onMouseLeave={e => e.currentTarget.style.background = "#f8fafc"}>
-                ← Dashboard
               </button>
             </div>
           </div>

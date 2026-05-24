@@ -973,178 +973,35 @@ def fill_pdf(template_path: str, data: dict, confidence: Optional[dict] = None) 
             return f.read()
 
 
-# Increment when new fact keys are added to extraction schema — forces fieldmap regen.
-# Must match FIELDMAP_SCHEMA_VERSION in scripts/generate_fieldmaps.py.
-_FIELDMAP_SCHEMA_VERSION = "v5"
-
+# ── Fieldmap cache layer REMOVED ─────────────────────────────────────────────
+# The persisted {field → fact_key} JSON cache was removed because >92% of its
+# entries were null and the ambiguous null semantics caused dozens of fillable
+# fields to be re-queried against GPT on every run. All form filling now flows
+# through: (1) deterministic Pass 1 rules in this module and (2) the GPT call
+# with the form schema + complete extracted raw text. Archived fieldmap JSONs
+# live in backend/forms_database/deprecated/ for reference.
+#
+# The stubs below preserve the external API surface so callers in main.py and
+# routes/form_routes.py keep working without modification.
 
 def _load_fieldmap(form_id: str) -> tuple:
-    """Load persisted {field_name: fact_key} map and AI-mapped field set.
-
-    Returns (fieldmap, ai_mapped_set) where ai_mapped_set contains field names
-    that were originally resolved by LLM (not deterministic rules). These retain
-    "low_confidence" status across runs so the UI keeps showing pink highlights.
-    """
-    if not form_id:
-        return {}, set()
-    path = os.path.join(FORMS_DB_DIR, f"ACORD_{form_id}_fieldmap.json")
-    if not os.path.exists(path):
-        return {}, set()
-    try:
-        with open(path) as f:
-            data = json.load(f)
-        # Delete fieldmap if schema version changed or __ai_mapped__ is missing —
-        # forces fresh LLM run with new fact keys.
-        if data.get("__schema_version__") != _FIELDMAP_SCHEMA_VERSION or "__ai_mapped__" not in data:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
-            return {}, set()
-        data.pop("__schema_version__", None)
-        ai_set = set(data.pop("__ai_mapped__", []))
-        return data, ai_set
-    except Exception:
-        return {}, set()
+    """No-op stub. Cache layer removed — always returns empty fieldmap + ai set."""
+    return {}, set()
 
 
 def _save_fieldmap(form_id: str, fieldmap: dict, ai_set: set = None):
-    """Persist field→fact_key map and AI-mapped field names."""
-    if not form_id or not fieldmap:
-        return
-    path = os.path.join(FORMS_DB_DIR, f"ACORD_{form_id}_fieldmap.json")
-    try:
-        data = dict(fieldmap)
-        data["__schema_version__"] = _FIELDMAP_SCHEMA_VERSION
-        if ai_set:
-            data["__ai_mapped__"] = sorted(ai_set)
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as ex:
-        logger.warning(f"Could not save fieldmap for {form_id}: {ex}")
+    """No-op stub. Cache layer removed — fills are recomputed from schema + raw text."""
+    return
 
 
 def migrate_fieldmaps_to_v5() -> None:
-    """One-time startup migration: stamp all on-disk fieldmaps to schema version v5.
-
-    All 15 fieldmaps shipped at v4. The runtime rejects v4 files (deletes them and
-    rebuilds from zero), destroying the pre-generated non-null mappings. This function
-    reads each file, sets __schema_version__ = "v5", adds __ai_mapped__ if missing,
-    and writes it back — preserving every existing field→fact_key entry.
-
-    Idempotent: safe to call on every boot (already-v5 files are untouched).
-    """
-    import glob as _glob
-    pattern = os.path.join(FORMS_DB_DIR, "ACORD_ACORD_*_fieldmap.json")
-    files   = _glob.glob(pattern)
-    if not files:
-        logger.warning("migrate_fieldmaps_to_v5: no fieldmap files found in %s", FORMS_DB_DIR)
-        return
-
-    migrated = 0
-    for path in files:
-        try:
-            with open(path) as f:
-                data = json.load(f)
-            current_ver = data.get("__schema_version__")
-            needs_write = False
-            if current_ver != _FIELDMAP_SCHEMA_VERSION:
-                data["__schema_version__"] = _FIELDMAP_SCHEMA_VERSION
-                needs_write = True
-            if "__ai_mapped__" not in data:
-                data["__ai_mapped__"] = []
-                needs_write = True
-            if not needs_write:
-                continue
-            with open(path, "w") as f:
-                json.dump(data, f, indent=2)
-            migrated += 1
-            logger.info(
-                "migrate_fieldmaps_to_v5: %s %s → %s",
-                os.path.basename(path), current_ver or "missing", _FIELDMAP_SCHEMA_VERSION,
-            )
-        except Exception as ex:
-            logger.warning("migrate_fieldmaps_to_v5: skipped %s — %s", os.path.basename(path), ex)
-
-    logger.info("migrate_fieldmaps_to_v5: done — %d/%d files updated", migrated, len(files))
+    """No-op stub. Cache layer removed — nothing to migrate."""
+    return
 
 
 def purge_stale_null_fieldmap_entries() -> None:
-    """Remove null entries from all fieldmaps for fields that are actually fillable.
-
-    Null entries for fillable fields (indicator checkboxes, contact fields, prior
-    coverage rows, etc.) were written by older code that didn't have _INDICATOR_RULES
-    or full _ACORD_FIELD_RULES coverage. Keeping them as null permanently blocks GPT
-    from filling those fields. This function removes those nulls so the next form fill
-    run sends them through GPT, which can now tick the right boxes from the document.
-
-    Runs at startup; idempotent — only modifies files that have removable nulls.
-    """
-    import glob as _glob
-
-    # Fields whose null entry is VALID and must NOT be removed (carrier-computed, admin-only).
-    # Use precise substrings — avoid over-broad patterns that catch Indicator fields.
-    _PERMANENT_NULL_SUBSTRINGS = (
-        "Signature", "_Sig", "InsurerLetterCode",
-        "Hazard_", "Premium", "Rate_", "Revision",
-        "EditionIdentifier", "NeedAppearances",
-        "Underwriter", "CarrierCode", "PolicyNumber_Carrier",
-        # Truly un-extractable identifier fields
-        "ProducerIdentifier", "SubProducerIdentifier",
-        "ProductDescription", "ProductCode",
-        "WebsiteAddress",       # not extracted
-        "Initials_",            # handwritten initials widget
-        "GeneralLiabilityCode", # carrier-assigned
-        "OccupiedArea", "OpenToPublicArea",
-        "Sublocation", "TaxCode",
-    )
-
-    # Additional whole-name patterns (exact contains check on stripped field name)
-    _PERMANENT_NULL_EXACT = (
-        "Policy_Status_EffectiveTime_A",
-        "Policy_Status_EffectiveTimeAMIndicator_A",
-        "Policy_Status_EffectiveTimePMIndicator_A",
-        "LossHistory_TotalAmount_A",
-    )
-
-    def _is_permanent_null(field: str) -> bool:
-        if field in _PERMANENT_NULL_EXACT:
-            return True
-        return any(s in field for s in _PERMANENT_NULL_SUBSTRINGS)
-
-    pattern = os.path.join(FORMS_DB_DIR, "ACORD_ACORD_*_fieldmap.json")
-    files   = _glob.glob(pattern)
-    if not files:
-        return
-
-    total_purged = 0
-    for path in files:
-        try:
-            with open(path) as f:
-                data = json.load(f)
-            purged = []
-            for field, value in list(data.items()):
-                if field.startswith("__"):
-                    continue
-                if value is None and not _is_permanent_null(field):
-                    del data[field]
-                    purged.append(field)
-            if purged:
-                with open(path, "w") as f:
-                    json.dump(data, f, indent=2)
-                total_purged += len(purged)
-                logger.info(
-                    "purge_null_fieldmap: %s — removed %d stale nulls: %s",
-                    os.path.basename(path), len(purged),
-                    ", ".join(purged[:8]) + ("…" if len(purged) > 8 else ""),
-                )
-        except Exception as ex:
-            logger.warning("purge_null_fieldmap: skipped %s — %s", os.path.basename(path), ex)
-
-    if total_purged:
-        logger.info("purge_null_fieldmap: done — %d null entries removed across %d files", total_purged, len(files))
-    else:
-        logger.debug("purge_null_fieldmap: no stale nulls found")
+    """No-op stub. Cache layer removed — nothing to purge."""
+    return
 
 
 def _resolve_special(key: str, facts: dict, prefix: str) -> str:
@@ -1622,7 +1479,7 @@ def _fill_empty_from_raw_text(
     """
     empty_fields = [
         f for f in schema
-        if mapped.get(f) is None or str(mapped.get(f, "")).strip() in ("", "null", "None")
+        if _is_empty_llm_value(mapped.get(f))
     ]
     if not empty_fields:
         return
@@ -1678,32 +1535,50 @@ def _fill_empty_from_raw_text(
             "Rules:\n"
             "  1. Read the ENTIRE document — values appear anywhere across all pages.\n"
             "  2. Extract the EXACT value as written in the document. Do not paraphrase.\n"
-            "  3. Return null for any field whose value is genuinely absent from the document.\n"
+            "  3. Use JSON null (the unquoted literal null) for any field whose value is genuinely "
+            "absent. You MUST NOT return the strings \"null\", \"None\", \"N/A\", \"NA\", "
+            "\"Not Provided\", \"Not Specified\", \"Not Available\", \"Not Applicable\", \"Unknown\", "
+            "\"TBD\", \"Undefined\", or \"\" — these will be discarded. Omitting the field from the "
+            "JSON object is also acceptable and equivalent to null.\n"
             "  4. Return short scalar values only: names, dates, dollar amounts, addresses, codes.\n"
             "  5. Do NOT invent, estimate, or carry over values from other fields.\n"
             "  6. For date fields: use the format as found in the document (MM/DD/YYYY or similar).\n"
             "  7. For dollar amounts: include the $ sign and commas as found (e.g. $1,000,000).\n\n"
-            "Return ONLY a single JSON object: {\"FieldName\": \"extracted_value_or_null\"}\n\n"
+            "Return ONLY a single JSON object: {\"FieldName\": <string value> OR JSON null}\n\n"
             f"=== FORM FIELDS TO FILL ({form_id}) ===\n{fields_block}\n\n"
             f"=== COMPLETE INSURANCE DOCUMENT TEXT ===\n{doc_text}\n\n"
             "JSON Output:"
         )
         try:
-            _coro    = groq_chat(llm_model, [{"role": "user", "content": prompt}])
+            _coro    = groq_chat(llm_model, [{"role": "user", "content": prompt}], max_tokens=16000)
             raw_resp = _run_coro_sync(_coro)
             if raw_resp.startswith("```"):
                 raw_resp = raw_resp.replace("```json", "").replace("```", "").strip()
             s, e = raw_resp.find("{"), raw_resp.rfind("}")
             if s != -1 and e != -1:
                 result = json.loads(raw_resp[s : e + 1])
+                batch_filled    = 0
+                batch_rejected  = 0
+                batch_rej_sample: List[str] = []
                 for field, value in result.items():
-                    if value and str(value).strip() not in ("", "null", "None"):
-                        mapped[field] = str(value).strip()
-                        filled_set.add(field)
+                    if _is_empty_llm_value(value):
+                        batch_rejected += 1
+                        if len(batch_rej_sample) < 6:
+                            batch_rej_sample.append(f"{field}={value!r}")
+                        continue
+                    mapped[field] = str(value).strip()
+                    filled_set.add(field)
+                    batch_filled += 1
                 logger.info(
                     f"raw_text_fill form={form_id} batch_start={start} "
-                    f"fields_sent={len(batch)} fields_filled={len(filled_set)}"
+                    f"fields_sent={len(batch)} batch_filled={batch_filled} "
+                    f"batch_rejected={batch_rejected} total_filled={len(filled_set)}"
                 )
+                if batch_rej_sample:
+                    logger.info(
+                        f"raw_text_fill REJECT_SAMPLE form={form_id} batch_start={start}: "
+                        + "; ".join(batch_rej_sample)
+                    )
         except Exception as ex:
             logger.warning(f"Raw-text fill batch failed (form={form_id}, start={start}): {ex}")
 
@@ -1731,6 +1606,32 @@ _FORM_FILL_BATCH_RETRIES = int(os.getenv("FORM_FILL_BATCH_RETRIES", "3"))
 # Legacy constant — kept so existing env-var overrides still work but no longer
 # used as the primary chunk size (it's derived dynamically from the budget above).
 _FORM_FILL_RAW_CHUNK_CHARS = int(os.getenv("FORM_FILL_RAW_CHUNK_CHARS", str(40_000)))
+
+# Tokens the LLM commonly returns to signal "not found" — all should be treated
+# as empty/null regardless of casing. Kept here so the prompt and the post-filter
+# stay in sync; update both sides together if you add new sentinels.
+_LLM_EMPTY_SENTINELS = frozenset({
+    "", "null", "none", "nil", "n/a", "na", "n.a.",
+    "not provided", "not specified", "not available", "not applicable",
+    "unknown", "tbd", "to be determined", "undefined", "blank",
+})
+
+
+def _is_empty_llm_value(value) -> bool:
+    """Return True if `value` is a JSON null or any string the LLM uses to mean 'not found'.
+
+    This catches both true JSON nulls AND the literal strings ("null", "None", "N/A",
+    "Not Provided", etc.) that GPT-4o-mini frequently emits in JSON mode when the
+    instruction is "use null when not found". Comparison is case-insensitive and
+    trims surrounding whitespace.
+    """
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in _LLM_EMPTY_SENTINELS
+    if isinstance(value, (list, dict)):
+        return len(value) == 0
+    return False
 
 
 def _fill_unmatched_with_gpt(
@@ -1865,31 +1766,45 @@ def _fill_unmatched_with_gpt(
         "PRIMARY RULE: Extract values DIRECTLY from the raw document text. "
         "Do not invent or paraphrase — copy values verbatim as they appear in the document.\n\n"
         "Return exactly two keys:\n"
-        '  "values":          {FieldName: "exact_value_or_null"}\n'
+        '  "values":          {FieldName: <string value> OR JSON null}\n'
         '  "raw_text_sourced":[FieldName, ...]\n\n'
+        "ABSENCE PROTOCOL — read carefully:\n"
+        "  When a field's value is not present in the document text, you MUST use JSON null "
+        "(the unquoted literal null). You MUST NOT return any of the following strings as a "
+        "stand-in for null: \"null\", \"None\", \"N/A\", \"NA\", \"Not Provided\", \"Not Specified\", "
+        "\"Not Available\", \"Not Applicable\", \"Unknown\", \"TBD\", \"Undefined\", \"\". "
+        "These strings will be discarded as if you had returned no value at all — which makes "
+        "the response useless. If the value is missing, write null with no quotes. If the value "
+        "is present but extremely short (e.g., a single digit, a single letter, a single word), "
+        "return that exact string — short is fine, sentinel strings are not.\n\n"
+        "OMIT-WHEN-UNKNOWN PROTOCOL:\n"
+        "  You may also simply omit a field from the \"values\" object when you have no value. "
+        "An omitted field is treated identically to JSON null. Do NOT include a field in "
+        "\"raw_text_sourced\" unless you actually copied its value from the document text.\n\n"
         "Rules:\n"
         "  1. EXACT values only — copy verbatim from the document text. Do not paraphrase or invent.\n"
-        "  2. Return null when the value is genuinely absent from the document text.\n"
-        "  3. Checkbox/indicator fields (marked 'checkbox — Yes/No'): return 'Yes' or 'No' ONLY.\n"
+        "  2. Use JSON null (unquoted) when the value is genuinely absent. Never the string \"null\".\n"
+        "  3. Checkbox/indicator fields (marked 'checkbox — Yes/No'): return \"Yes\" or \"No\" ONLY.\n"
+        "     If the document does not say one way or the other, return null — do NOT default to \"No\".\n"
         "     Examples of how to fill checkboxes:\n"
-        "     - Policy_Status_BoundIndicator: 'Yes' if the document is a bound policy, else 'No'\n"
-        "     - Policy_Status_QuoteIndicator: 'Yes' if document is a quote/application, else 'No'\n"
-        "     - Policy_LineOfBusiness_CommercialGeneralLiability: 'Yes' if GL coverage is requested\n"
-        "     - NamedInsured_LegalEntity_CorporationIndicator: 'Yes' if entity type is Corporation\n"
-        "     - BusinessInformation_BusinessType_ContractorIndicator: 'Yes' if business is a contractor\n"
-        "     - LossHistory_NoPriorLossesIndicator: 'Yes' only if document explicitly states no losses\n"
+        "     - Policy_Status_BoundIndicator: \"Yes\" if the document is a bound policy, else \"No\"\n"
+        "     - Policy_Status_QuoteIndicator: \"Yes\" if document is a quote/application, else \"No\"\n"
+        "     - Policy_LineOfBusiness_CommercialGeneralLiability: \"Yes\" if GL coverage is requested\n"
+        "     - NamedInsured_LegalEntity_CorporationIndicator: \"Yes\" if entity type is Corporation\n"
+        "     - BusinessInformation_BusinessType_ContractorIndicator: \"Yes\" if business is a contractor\n"
+        "     - LossHistory_NoPriorLossesIndicator: \"Yes\" only if document explicitly states no losses\n"
         "  4. Dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
         "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n"
-        "  6. List ALL fields you fill in raw_text_sourced.\n"
+        "  6. List ALL fields you fill in raw_text_sourced. Do NOT list fields you returned null for.\n"
         "  7. REPEATING GROUP fields (shown as '── REPEATING GROUP … ──' blocks below):\n"
         "     These are sibling fields sharing the same base name but different _A/_B/_C suffixes.\n"
         "     They represent DISTINCT sequential entries — not repeated copies of one value.\n"
         "       a) Count how many DISTINCT values of that type appear in the document.\n"
         "       b) Assign them in order: 1st distinct value → _A, 2nd → _B, 3rd → _C, …\n"
         "       c) NEVER copy the same value into multiple slots — that is always wrong.\n"
-        "       d) If the document has fewer distinct values than slots, leave the extras null.\n"
+        "       d) If the document has fewer distinct values than slots, set the extras to JSON null.\n"
         "     Example: 3 slots for Insurer_FullName but only 2 insurer names found →\n"
-        "       _A = 'Acme Insurance', _B = 'Beta Insurance', _C = null.\n\n"
+        "       _A = \"Acme Insurance\", _B = \"Beta Insurance\", _C = null (unquoted).\n\n"
     )
     _SKELETON_CHARS = len(_PROMPT_SKELETON)
     # Fixed overhead per call: skeleton + fields header + footer
@@ -1986,22 +1901,38 @@ def _fill_unmatched_with_gpt(
         values      = result.get("values",          {}) or {}
         raw_sourced = set(result.get("raw_text_sourced", []) or [])
 
-        filled_count = 0
+        filled_count    = 0
+        rejected_count  = 0
+        rejected_sample: List[str] = []
         for field, value in values.items():
             if field not in sent:
                 continue
-            if value and str(value).strip() not in ("", "null", "None"):
-                vstr = str(value).strip()
-                candidate_counts[field][vstr] = candidate_counts[field].get(vstr, 0) + 1
-                if field in raw_sourced:
-                    all_raw_fields.add(field)
-                filled_count += 1
+            if _is_empty_llm_value(value):
+                rejected_count += 1
+                if len(rejected_sample) < 8:
+                    rejected_sample.append(f"{field}={value!r}")
+                logger.debug(
+                    "gpt_fill REJECT: form=%s chunk=%s field=%s value=%r",
+                    form_id, chunk_label, field, value,
+                )
+                continue
+            vstr = str(value).strip()
+            candidate_counts[field][vstr] = candidate_counts[field].get(vstr, 0) + 1
+            if field in raw_sourced:
+                all_raw_fields.add(field)
+            filled_count += 1
 
         logger.info(
-            "gpt_fill: chunk=%s form=%s sent=%d filled=%d raw_sourced=%d",
+            "gpt_fill: chunk=%s form=%s sent=%d filled=%d raw_sourced=%d rejected=%d",
             chunk_label,
-            form_id, len(sent), filled_count, len(raw_sourced),
+            form_id, len(sent), filled_count, len(raw_sourced), rejected_count,
         )
+        if rejected_sample:
+            logger.info(
+                "gpt_fill REJECT_SAMPLE: form=%s chunk=%s (%d shown of %d) %s",
+                form_id, chunk_label, len(rejected_sample), rejected_count,
+                "; ".join(rejected_sample),
+            )
 
     # ── Chunk sizing ──────────────────────────────────────────────────────────
     # Budget per call: model context minus reply headroom minus fixed overhead
@@ -2147,6 +2078,23 @@ def _is_nonfillable_field(field: str) -> bool:
 
 
 def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: str = "") -> Tuple[dict, dict]:
+    """Two-stage form fill — cache-free.
+
+    Pass 1 (deterministic, no LLM): schedule row routing, address decomposition,
+    indicator derivation from flags, and direct fact-key mappings via
+    `_ACORD_FIELD_RULES`. Non-fillable fields (signatures, premiums, carrier-
+    computed codes) are skipped entirely.
+
+    Pass 2 (LLM Call 2): every remaining field is sent to GPT together with the
+    complete extracted raw document text and the form schema (field name +
+    tooltip + type + required flag). Chunked automatically when the prompt
+    exceeds the per-call character budget.
+
+    Confidence labels feed the highlight layer:
+      - "filled"           → no highlight (deterministic OR GPT verbatim from raw text)
+      - "low_confidence"   → pink (GPT inferred — not copied verbatim from doc)
+      - "missing_required" → yellow (required + empty + fillable)
+    """
     if not schema:
         return {}, {}
 
@@ -2154,210 +2102,106 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
     unmatched  = {}
     confidence = {}
 
-    # Load persisted field→fact_key map and the set of fields that were originally
-    # AI-mapped. The ai_set persists across runs so those fields keep "low_confidence".
-    cached_fieldmap, cached_ai_set = _load_fieldmap(form_id)
-    new_fieldmap = dict(cached_fieldmap)
-    new_ai_set   = set(cached_ai_set)
+    # Fields filled by Pass 1 (deterministic rules) — always treated as "filled"
+    # in the highlight pass. Schedule rows that resolved to N/A are also marked
+    # here as authoritative blanks so they don't waste GPT prompt budget.
+    _deterministic_filled: set = set()
 
-    # Fields whose Pass 1 values are authoritative and should NOT be overridden by
-    # LLM Call 2: address decomposition (_addr_*/_loc_*), schedule rows, and
-    # indicator/checkbox fields (derived from flags, not raw text values).
-    _pass1_authoritative: set = set()
-
-    # Counters for detailed pipeline logging
-    cnt_schema          = len(schema)
-    cnt_cached_hit      = 0   # fields resolved from cached fact_key (non-null)
-    cnt_cached_null_skip = 0  # cached-null entries that are truly non-fillable → skipped
-    cnt_cached_null_retry = 0 # cached-null entries for fillable fields → retried via GPT
-    cnt_deterministic   = 0   # fields resolved by deterministic rules (not cached)
+    cnt_deterministic = 0
+    cnt_nonfillable   = 0
+    cnt_blank_sched   = 0
 
     for field in schema.keys():
-        if field in cached_fieldmap:
-            cached_key = cached_fieldmap[field]
+        # Non-fillable fields (signatures, premiums, rates, underwriter codes)
+        # are never sent to GPT. Leave them blank.
+        if _is_nonfillable_field(field):
+            mapped[field] = None
+            _deterministic_filled.add(field)
+            cnt_nonfillable += 1
+            continue
 
-            # Schedule fields cached with a list-fact-key must re-resolve by row index
-            # each call (different documents have different list lengths).
-            sched = _resolve_schedule_row(field, facts)
-            if sched is not _SCHED_SKIP:
-                if sched is not None:
-                    mapped[field] = sched
-                    cnt_cached_hit += 1
-                    _pass1_authoritative.add(field)
-                # sched==None means row out-of-range → leave mapped[field] unset (blank)
-            elif cached_key is None:
-                # Cached None means GPT previously found no mapping OR the field was
-                # explicitly classified non-fillable. We only accept the cached null when
-                # the field is truly non-fillable (carrier-computed / admin / signature).
-                # For all other fields we retry via GPT so a fresh raw-text pass can fill them.
-                if _is_nonfillable_field(field):
-                    mapped[field] = None          # accepted: truly non-fillable
-                    cnt_cached_null_skip += 1
-                    _pass1_authoritative.add(field)
-                else:
-                    # Fillable field whose GPT pass previously returned null — retry.
-                    # First try deterministic indicator derivation; if that returns a
-                    # value we accept it and DON'T need GPT. Indicators are authoritative.
-                    ind = _derive_indicator(field, facts)
-                    if ind is not None:
-                        mapped[field] = ind
-                        cnt_cached_hit += 1
-                        _pass1_authoritative.add(field)
-                    else:
-                        unmatched[field] = schema[field]
-                        cnt_cached_null_retry += 1
-            else:
-                val = _apply_fact_key(cached_key, facts)
-                mapped[field] = val
-                cnt_cached_hit += 1
-                # Authoritative if: address-decomposed key (_addr_*/_loc_*), indicator
-                # field, or nonfillable (Signature, Premium, Rate, etc.).
-                # All other cached fact-key fields go to LLM Call 2 for raw-text confirmation.
-                if (
-                    (isinstance(cached_key, str) and cached_key.startswith("_"))
-                    or "Indicator" in field
-                    or _is_nonfillable_field(field)
-                ):
-                    _pass1_authoritative.add(field)
-                else:
-                    unmatched[field] = schema[field]
-        else:
-            result = _deterministic_map(field, facts)
-            if result == "UNMATCHED":
-                unmatched[field] = schema[field]
-            else:
-                mapped[field] = result
+        # Schedule fields: row index → list[idx] lookup against facts.
+        # If the row is out of range, mark as authoritative blank (do NOT send
+        # to GPT — we know the row doesn't exist).
+        sched = _resolve_schedule_row(field, facts)
+        if sched is not _SCHED_SKIP:
+            if sched is not None and not _is_empty_llm_value(sched):
+                mapped[field] = sched
+                _deterministic_filled.add(field)
                 cnt_deterministic += 1
-                # Persist the matched fact_key so this field is free next run.
-                rule_fact_key = None   # fact_key from _ACORD_FIELD_RULES (None = no match or explicit null)
-                for pattern, fact_key in _ACORD_FIELD_RULES:
-                    if pattern in field:
-                        new_fieldmap[field] = fact_key
-                        rule_fact_key = fact_key     # may be None for explicit-null rules
-                        break
-                # Classify: authoritative (Pass 1 keeps) vs raw-text-eligible (LLM Call 2)
-                #
-                # Authoritative cases:
-                #   1. Address decomposition: fact_key starts with "_" (_addr_*, _loc_*)
-                #   2. Indicator/checkbox fields: value derived from flags, not raw text
-                #   3. Nonfillable fields: Signature, Premium, Rate, etc. — no LLM needed
-                #   4. rule_fact_key is None: either an explicit-null rule (field intentionally
-                #      unmapped) or no _ACORD_FIELD_RULES match (resolved by _derive_indicator)
-                is_addr_key    = isinstance(rule_fact_key, str) and rule_fact_key.startswith("_")
-                is_indicator   = "Indicator" in field
-                is_nonfillable = _is_nonfillable_field(field)
+            else:
+                _deterministic_filled.add(field)
+                cnt_blank_sched += 1
+            continue
 
-                if is_addr_key or is_indicator or is_nonfillable or rule_fact_key is None:
-                    _pass1_authoritative.add(field)
-                else:
-                    # Non-address, non-indicator, fillable, non-null fact_key mapping:
-                    # send to LLM Call 2 so raw document text can confirm/override.
-                    unmatched[field] = schema[field]
+        # General deterministic path: _ACORD_FIELD_RULES, address decomposition,
+        # indicator derivation.
+        result = _deterministic_map(field, facts)
+        if result == "UNMATCHED" or _is_empty_llm_value(result):
+            # No rule matched, or rule produced empty value — let GPT try the
+            # raw text. This keeps coverage on fields like _addr_line2 that
+            # decompose to empty when the source address is a single line.
+            unmatched[field] = schema[field]
+        else:
+            mapped[field] = result
+            _deterministic_filled.add(field)
+            cnt_deterministic += 1
 
     logger.info(
-        "map_facts PIPELINE form=%s | schema=%d cached_hit=%d det=%d "
-        "null_skip=%d null_retry=%d gpt_fields=%d pass1_auth=%d",
+        "map_facts PIPELINE form=%s | schema=%d det=%d nonfill=%d blank_sched=%d gpt_fields=%d",
         form_id or "unknown",
-        cnt_schema, cnt_cached_hit, cnt_deterministic,
-        cnt_cached_null_skip, cnt_cached_null_retry, len(unmatched),
-        len(_pass1_authoritative),
+        len(schema), cnt_deterministic, cnt_nonfillable, cnt_blank_sched, len(unmatched),
     )
+
+    gpt_raw_fields: set = set()
 
     if unmatched:
         logger.info(
             "map_facts GPT_ELIGIBLE form=%s | fields=%d raw_text_chars=%d",
             form_id or "unknown", len(unmatched), len(raw_text),
         )
-        gpt_result       = _fill_unmatched_with_gpt(unmatched, facts, form_id, raw_text=raw_text)
-        gpt_values       = gpt_result["filled_values"]
-        gpt_mappings     = gpt_result["new_mappings"]
-        gpt_raw_fields   = gpt_result.get("raw_text_fields", set())
-        gpt_filled_set   = set(gpt_values.keys())
+        gpt_result     = _fill_unmatched_with_gpt(unmatched, facts, form_id, raw_text=raw_text)
+        gpt_values     = gpt_result["filled_values"]
+        gpt_raw_fields = gpt_result.get("raw_text_fields", set())
+        gpt_filled_set = set(gpt_values.keys())
 
-        # Apply GPT values and update fieldmap cache.
-        # Raw-text-sourced fields get fact_key=None — document-specific, not reusable.
-        # For cached-null-retry fields: only persist a new None mapping if GPT
-        # also returned null AND the field is non-fillable; otherwise leave the
-        # existing cached None so we retry again on the next run.
-        # Pass 1 authoritative fields (address decomposition, schedule rows, indicators)
-        # keep their Pass 1 value — GPT raw-text fill does not override them.
         for field in unmatched:
-            fact_key = None if field in gpt_raw_fields else gpt_mappings.get(field)
-            gpt_returned_null = field not in gpt_values
-            was_cached_null   = field in cached_fieldmap and cached_fieldmap[field] is None
-
-            if was_cached_null and gpt_returned_null:
-                # GPT still can't fill it — keep the cached null so it retries next
-                # time (don't overwrite with another null that would look fresh).
-                pass
-            else:
-                new_fieldmap[field] = fact_key   # cache non-null key or confirmed null
-
-            if field in gpt_values and field not in _pass1_authoritative:
-                # LLM Call 2 found a value in raw text — use it as the primary result.
-                # If Pass 1 also had a value it is superseded (raw text is ground truth).
+            if field in gpt_values:
                 mapped[field] = gpt_values[field]
-            elif field in gpt_values and field in _pass1_authoritative:
-                # Pass 1 is authoritative for this field; keep Pass 1 value.
-                mapped.setdefault(field, gpt_values[field])
             else:
                 mapped.setdefault(field, None)
-            if fact_key is not None:
-                new_ai_set.add(field)
 
         logger.info(
-            "map_facts GPT_DONE form=%s | gpt_filled=%d/%d",
-            form_id or "unknown", len(gpt_filled_set), len(unmatched),
+            "map_facts GPT_DONE form=%s | gpt_filled=%d/%d raw_text_sourced=%d",
+            form_id or "unknown", len(gpt_filled_set), len(unmatched), len(gpt_raw_fields),
         )
-        _save_fieldmap(form_id, new_fieldmap, new_ai_set)
 
-    else:
-        gpt_filled_set = set()
-        if new_fieldmap != cached_fieldmap:
-            # Deterministic pass added new entries — persist even with no GPT batch.
-            _save_fieldmap(form_id, new_fieldmap, new_ai_set)
-
-    # On the very first run (no cached fieldmap) every filled field is unreviewed,
-    # so mark them all low_confidence so pink highlights appear immediately.
-    # On subsequent runs only truly AI-mapped fields stay pink; deterministic ones
-    # transition to "filled" once the fieldmap is established.
-    first_run = not cached_fieldmap
-
+    # ── Confidence / highlight assignment ────────────────────────────────────
+    # A filled value is "confident" (no highlight) when it was either filled by
+    # the deterministic Pass 1, OR copied verbatim from the raw document text by
+    # GPT (raw_text_sourced flag). GPT-inferred values that were NOT sourced
+    # from raw text are marked low_confidence → pink, so the broker reviews.
     for field, meta in schema.items():
         val       = mapped.get(field)
         has_value = val is not None and str(val).strip() not in ("", "null", "None")
         is_req    = meta.get("required", False) if isinstance(meta, dict) else False
-        was_ai    = first_run or (field in unmatched) or (field in cached_ai_set) or (field in gpt_filled_set)
+
         if has_value:
-            confidence[field] = "filled"
+            confident = (field in _deterministic_filled) or (field in gpt_raw_fields)
+            confidence[field] = "filled" if confident else "low_confidence"
         elif is_req and not _is_nonfillable_field(field):
-            # Only paint yellow for genuinely fillable required fields.
-            # Carrier-computed / admin / signature fields are never fillable so
-            # marking them missing_required creates phantom yellow highlights.
+            # Paint yellow only for genuinely fillable required fields.
             confidence[field] = "missing_required"
         else:
             confidence[field] = "low_confidence"
 
     confidence = apply_acord125_missing_field_highlights(form_id, facts, mapped, confidence)
 
-    # Fill-rate: exclude fields whose fieldmap entry is explicitly null (carrier_computed /
-    # not_fillable) — they are not theoretically fillable from a declaration page.
-    fillable_fields = [f for f, v in new_fieldmap.items() if not f.startswith("__")]
-    fillable_count  = len(fillable_fields) if fillable_fields else len(schema)
-    total_filled    = sum(1 for v in mapped.values() if v is not None and str(v).strip() not in ("", "null", "None"))
+    # Fill-rate denominator excludes non-fillable fields (signatures, premiums,
+    # rate codes) so the reported coverage is meaningful.
+    fillable_count = sum(1 for f in schema if not _is_nonfillable_field(f))
+    total_filled   = sum(1 for v in mapped.values() if v is not None and str(v).strip() not in ("", "null", "None"))
     logger.info(f"Mapped {total_filled}/{fillable_count} fields (form_id={form_id or 'unknown'})")
-
-    # Log every field that has a mapped fact_key but ended up empty — these are
-    # extraction gaps that need investigation.
-    for field, fact_key in new_fieldmap.items():
-        if field.startswith("__") or fact_key is None:
-            continue
-        val = mapped.get(field)
-        if val is None or str(val).strip() in ("", "null", "None"):
-            logger.warning(
-                f"FILL_MISS form={form_id or 'unknown'} field={field!r} "
-                f"fact_key={fact_key!r} — fact value was empty/missing"
-            )
 
     return mapped, confidence
 

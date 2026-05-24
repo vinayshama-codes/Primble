@@ -97,7 +97,7 @@ async def _bg_lite_generate(session_id: str) -> None:
             "cross_issues_last": cross_issues,
         })
         sqs_list = [r["sqs"] for r in results.values() if r.get("sqs")]
-        avg_score = int(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
+        avg_score = round(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
         logger.info("bg_lite: session=%s form=%s sqs=%d", session_id, form_ids[0], avg_score)
     except Exception as ex:
         logger.error("bg_lite: unexpected error session=%s: %s", session_id, ex)
@@ -537,7 +537,7 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
     })
 
     sqs_list  = [r["sqs"] for r in results.values() if r.get("sqs")]
-    avg_score = int(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
+    avg_score = round(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
     first_sqs = sqs_list[0] if sqs_list else {}
     return JSONResponse({
         "success": True,
@@ -908,12 +908,15 @@ async def session_stats(current_user: dict = Depends(get_current_user)):
                     WHERE ps2.user_id = $1
                 )                                                      AS total_forms,
                 (
-                    SELECT ROUND(AVG((sqs_obj->>'sqs_score')::numeric))::int
-                    FROM processing_sessions ps3,
-                         jsonb_each(COALESCE(ps3.data->'generated_forms', '{}'::jsonb)) gf,
-                         LATERAL (SELECT gf.value->'sqs' AS sqs_obj) sq
-                    WHERE ps3.user_id = $1
-                      AND (gf.value->'sqs'->>'sqs_score') IS NOT NULL
+                    SELECT ROUND(AVG(session_avg))::int
+                    FROM (
+                        SELECT AVG((gf.value->'sqs'->>'sqs_score')::numeric) AS session_avg
+                        FROM processing_sessions ps3,
+                             jsonb_each(COALESCE(ps3.data->'generated_forms', '{}'::jsonb)) gf
+                        WHERE ps3.user_id = $1
+                          AND (gf.value->'sqs'->>'sqs_score') IS NOT NULL
+                        GROUP BY ps3.id
+                    ) per_session
                 )                                                      AS avg_sqs_score
             FROM processing_sessions
             WHERE user_id = $1

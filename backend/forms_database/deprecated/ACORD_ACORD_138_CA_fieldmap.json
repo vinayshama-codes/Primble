@@ -1,0 +1,11 @@
+{
+  "Form_EditionIdentifier_A": null,
+  "Vehicle_CombinedSingleLimit_LimitIndicator_A": "auto_liability_structure",
+  "CommercialStructure_Location_ProducerIdentifier_A": null,
+  "CommercialStructure_Location_ProducerIdentifier_B": null,
+  "NamedInsured_Signature_A": null,
+  "NamedInsured_SignatureDate_A": null,
+  "Producer_AuthorizedRepresentative_Signature_A": "contact_name",
+  "__schema_version__": "v5",
+  "__ai_mapped__": []
+}

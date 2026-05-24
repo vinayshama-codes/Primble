@@ -289,6 +289,7 @@ function AppContent() {
         onHome={() => { setMarketingPage(null); setShowModal(false); }}
         onAccountSettings={() => setShowAccountSettings(true)}
         onContactPrimble={() => setShowContactModal(true)}
+        onDashboard={user ? () => setShowModal(true) : undefined}
       />
       {headerError && (
         <div className="header-error-bar">{headerError}<button onClick={() => setHeaderError("")}>✕</button></div>
