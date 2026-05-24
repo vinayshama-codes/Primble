@@ -969,10 +969,6 @@ export default function AcordModal({
   const _pushJobToast = (title, body, ok) => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setJobToasts(prev => [...prev, { id, title, body, ok }]);
-    // Auto-dismiss after 6s; user can also click to dismiss.
-    setTimeout(() => {
-      setJobToasts(prev => prev.filter(t => t.id !== id));
-    }, 6000);
   };
   const _notifyJobDone = async (kind, ok) => {
     const title = ok ? "Primble — Ready" : "Primble — Action needed";
@@ -1009,7 +1005,7 @@ export default function AcordModal({
         body,
         tag,
         silent: false,
-        requireInteraction: false,
+        requireInteraction: true,
       });
       console.info("[primble-notify] showNotification ok, tag=", tag);
     } catch (err) {
@@ -1019,7 +1015,7 @@ export default function AcordModal({
       try {
         const target = reg.active || reg.waiting || reg.installing;
         if (target && target.postMessage) {
-          target.postMessage({ type: "SHOW_NOTIFICATION", title, body, tag });
+          target.postMessage({ type: "SHOW_NOTIFICATION", title, body, tag, requireInteraction: true });
         }
       } catch (e2) {
         console.error("[primble-notify] postMessage fallback failed:", e2 && e2.message ? e2.message : e2);
