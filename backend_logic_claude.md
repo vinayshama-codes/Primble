@@ -3,7 +3,7 @@
 > **Purpose:** Retain context across chat sessions. Documents every issue identified, root cause, and fix applied so new sessions can pick up exactly where this left off.
 >
 > **Project:** Acordly — ACORD Form Processing Platform
-> **Last updated:** 2026-05-25
+> **Last updated:** 2026-05-25 (Session 2)
 
 ---
 
@@ -228,6 +228,98 @@ The dummy answers file was comprehensively rewritten to cover all 548 ACORD 125 
 
 ---
 
+## Session 2 Fixes (2026-05-25) — OpenAI SDK & Runaway Loop
+
+### Fix 4 — `backend/config/settings.py` — `max_completion_tokens` Parameter Routing
+
+**Problem:** `gpt-5.x` and `o1/o3/o4` model families reject `max_tokens` with HTTP 400:
+`"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."`
+
+This caused every extraction chunk to fail with HTTP 400 → 3 retries per chunk → 18 failed calls → majority-failed → 10 smaller chunks × 3 retries = 48 total wasted API calls. The entire extraction returned empty data.
+
+**Fix:** Added `_uses_max_completion_tokens(model)` helper and dynamic parameter selection in `_openai_chat`:
+
+```python
+def _uses_max_completion_tokens(model: str) -> bool:
+    m = model.lower()
+    return m.startswith("o1") or m.startswith("o3") or m.startswith("o4") or "gpt-5" in m
+
+# In _openai_chat:
+token_param = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
+r = await client.chat.completions.create(
+    model=model, messages=messages, temperature=temperature,
+    **{token_param: max_tokens},
+)
+```
+
+**Note:** `_openai_chat` only retries on 429/500/502/503 — NOT 400. The extraction service's chunk-retry loop was the one burning 3 retries per chunk on permanent 400s (see Fix 5).
+
+---
+
+### Fix 5 — `backend/services/extraction_service.py` — Fail-Fast on Permanent Errors
+
+**Problem:** The `_one()` function inside `_gather_chunks_async` (line ~1834) catches all exceptions and retries them 3 times. HTTP 400 and `TypeError` (SDK signature mismatch) are **permanent** errors — retrying will never succeed but burns API quota and creates runaway loops.
+
+**Root cause of the runaway loop** (user had to suspend Render service to stop it):
+1. Each page refresh/re-upload created a new job
+2. Each job: 6 chunks × 3 retries = 18 failed calls → majority-failed → 10 smaller chunks × 3 retries = 30 more = **48 wasted calls per document**
+3. Watchdog could re-queue failed jobs up to 5 times
+
+**Fix:** Added permanent-error guard before the retry sleep:
+
+```python
+except Exception as ex:
+    # HTTP 400 = permanent API error (bad parameter, unsupported model flag)
+    # TypeError = SDK signature mismatch (e.g. unknown kwarg in installed openai version)
+    # AttributeError = SDK shape mismatch
+    if (
+        getattr(ex, "status_code", None) == 400
+        or isinstance(ex, (TypeError, AttributeError))
+    ):
+        logger.error(f"chunk {idx}: permanent error — not retrying: {type(ex).__name__}: {ex}")
+        raise
+    # ... rest of retry logic
+```
+
+**Result:** Chunks now fail in 1 attempt instead of 3. No more 48-call storms.
+
+---
+
+### Fix 6 — `backend/requirements.txt` — OpenAI SDK Upgraded 1.10.0 → 1.54.4
+
+**Problem:** `openai==1.10.0` (Jan 2024) does not know about `max_completion_tokens` — it raises `TypeError: AsyncCompletions.create() got an unexpected keyword argument 'max_completion_tokens'` at the Python SDK level (before any HTTP call). This is a `TypeError`, not an HTTP 400, so the status_code guard alone was insufficient.
+
+**Fix:** Bumped to `openai==1.54.4` in `requirements.txt`. The Fix 5 `TypeError` guard provides defense-in-depth for any future SDK mismatches.
+
+**Local venv:** Run `pip install openai==1.54.4` in the backend venv (done — confirmed installed successfully).
+
+**Render:** Redeploy picks up the new version via `pip install -r requirements.txt`.
+
+---
+
+### Env Var Discrepancy — Two Separate LLM Model Variables
+
+**Important:** There are **two separate env vars** controlling which model is used:
+
+| Env Var | Used by | Default | Purpose |
+|---------|---------|---------|---------|
+| `LLM_MODEL` | `extraction_service.py` | `gpt-4.1-nano` | Extraction (OCR text → facts) |
+| `GPT_MODEL` | `pdf_service.py` line 23 | `gpt-4.1-nano` | Form fill Pass 2 (GPT filling unmatched fields) |
+
+Setting only `LLM_MODEL=gpt-5.4-mini` in Render will upgrade extraction but **not** form-fill. Both must be set.
+
+**Render dashboard — set on BOTH web and worker services:**
+```
+LLM_MODEL = gpt-5.4-mini
+GPT_MODEL  = gpt-5.4-mini
+```
+
+**Observed in logs (12:25 run):** Extraction used mini (14s per chunk), but form-fill showed `model=gpt-4.1-nano` because `GPT_MODEL` was not set.
+
+**Fill rate impact:** Setting `GPT_MODEL=gpt-5.4-mini` expected to increase ACORD 126 form fill from 4/187 (2%) to ~95/187 (51%) based on prior model comparison.
+
+---
+
 ## Outstanding Issues (Not Yet Fixed)
 
 ### 1. `CommercialPolicy_Question_*Code_A` — 16 Y/N Fields Not Filled
@@ -244,9 +336,17 @@ No Pass 1 rules, no extraction fact keys. These always go to GPT but GPT returns
 
 Diagnostic `logger.debug` / `logger.info` statements added during debugging are still present in the `_absorb` function. Not harmful but adds noise. Confirm with user before removing.
 
-### 3. SQS / ARQ Async Processing — Ongoing Blocker
+### 3. GPT_MODEL and LLM_MODEL Consolidation (Not Yet Done)
+
+Two separate env vars (`LLM_MODEL` for extraction, `GPT_MODEL` for form-fill) is a footgun — setting one and forgetting the other leaves half the system on the old model. Consider unifying to a single `LLM_MODEL` var read by both services.
+
+### 4. SQS / ARQ Async Processing — Ongoing Blocker
 
 Documented in CLAUDE.md. Not related to form filling but blocks background job processing for production workflows.
+
+### 5. Worker numInstances for 3 Concurrent Demo Users
+
+`render.yaml` has `numInstances: 2` for the worker. For 3 truly simultaneous demo users each submitting a document, the 3rd user will queue until a worker frees. Bump to `numInstances: 3` before investor demos if needed.
 
 ---
 
@@ -260,3 +360,24 @@ Documented in CLAUDE.md. Not related to form filling but blocks background job p
 | `backend/forms_schemas/ACORD_125_schema.json` | 548 ACORD 125 field definitions (ft, tu, required) |
 | `backend/forms_schemas/ACORD_125_dummy_answers.json` | Comprehensive test document with realistic values for all fields |
 | `backend/forms_database/deprecated/` | Old fieldmap JSONs (moved here, no longer used for scoring) |
+| `backend/requirements.txt` | Python dependencies — openai pinned to 1.54.4 (was 1.10.0) |
+
+---
+
+## Infrastructure Notes (Render Deployment)
+
+| Service | Setting | Value | Notes |
+|---------|---------|-------|-------|
+| Web | `WEB_CONCURRENCY` | `2` | 2 gunicorn+uvicorn workers |
+| Web | `ENABLE_ASYNC_PROCESSING` | `true` | Web tier enqueues only, worker processes |
+| Web | `LLM_MAX_CONCURRENT` | `15` | Redis-distributed cap across all processes |
+| Web | `OCR_PROVIDER` | `easyocr` | Must change to `textract` — easyocr 400MB × 2 workers = 800MB, OOMs on 512MB Starter |
+| Worker | `numInstances` | `2` | Handles 2 simultaneous jobs; 3rd queues |
+| Worker | `WORKER_MAX_JOB_RETRIES` | `5` | Dead-letters job after 5 watchdog resets |
+| Worker | `STUCK_JOB_THRESHOLD_MINUTES` | `30` | Jobs in `processing` >30min → reset to `pending` |
+| Both | `LLM_MODEL` | `gpt-5.4-mini` | Set in Render dashboard |
+| Both | `GPT_MODEL` | `gpt-5.4-mini` | **Must also set** — separate var for form-fill |
+
+**RAM requirement:** Render Standard (2GB) required minimum with easyocr. If switching to Textract, Starter (512MB) may work but Standard is safer.
+
+**OpenAI Tier:** Tier 1 (500 RPM) is sufficient for 2–3 demo users. Nano retry failures were model quality issues, not rate limits.

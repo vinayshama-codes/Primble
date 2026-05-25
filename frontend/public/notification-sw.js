@@ -1,7 +1,7 @@
 // Minimal notification service worker.
 // Versioned via the comment below — bump to force browsers to detect an update
 // (the SW file is byte-compared; any change triggers install of the new worker).
-// SW_VERSION: 2026-05-24-3
+// SW_VERSION: 2026-05-25-3
 
 self.addEventListener("install", () => {
   self.skipWaiting();

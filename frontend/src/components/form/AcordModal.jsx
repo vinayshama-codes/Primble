@@ -911,6 +911,16 @@ const AcordModal = forwardRef(function AcordModal({
   // so this helper only handles the Notification permission prompt.
   const _notifPermissionAsked = useRef(false);
   const _permissionWarnedThisSession = useRef(false);
+  // Tracks whether the tab was hidden at ANY point between the moment a job
+  // started and the moment it finished. Without this, _notifyJobDone would only
+  // fire an OS notification if `document.hidden` is true at the exact tick the
+  // job completes — but users often glance back at the tab to check progress
+  // (or switch back just as the job finishes), so the "hidden right now" check
+  // misses the common case. Reset to false on every job start.
+  const _wasHiddenDuringJob = useRef(false);
+  const _markJobStart = () => {
+    _wasHiddenDuringJob.current = (typeof document !== "undefined" && document.hidden) || false;
+  };
   const _requestNotificationPermission = async () => {
     if (_notifPermissionAsked.current) return;
     _notifPermissionAsked.current = true;
@@ -991,13 +1001,25 @@ const AcordModal = forwardRef(function AcordModal({
     const body = ok
       ? (kind === "generate" ? "Your ACORD forms are ready to review." : "Your documents have finished processing.")
       : "There was an issue with your submission. Please reopen to review.";
+    console.info("[primble-notify] _notifyJobDone fired", {
+      kind, ok,
+      hidden: typeof document !== "undefined" ? document.hidden : "n/a",
+      wasAwayDuringJob: _wasHiddenDuringJob.current,
+      permission: typeof Notification !== "undefined" ? Notification.permission : "n/a",
+    });
     // Always show in-page toast (every event, regardless of tab state).
     _pushJobToast(title, body, ok);
     // Title-badge runs even if the OS path fails, so a hidden tab still gets
     // a visible "(1) Primble — …" hint when the user returns.
     if (typeof document !== "undefined" && document.hidden) _setTitleBadge(true);
-    // OS-level browser notification only when the tab is hidden.
-    if (typeof document !== "undefined" && !document.hidden) return;
+    // Reset the "was away" flag for the next job. We no longer gate the OS
+    // notification on it: trying to predict whether the user "needs" an alert
+    // based on visibility timing kept missing edge cases (tabbing back briefly,
+    // job finishing during the glance, OS race conditions). Slack/Gmail/Discord
+    // all fire OS notifications unconditionally on job completion — the in-page
+    // toast is the foreground signal, the OS banner is the away signal, and
+    // showing both when the user is on the page is harmless redundancy.
+    _wasHiddenDuringJob.current = false;
     if (typeof Notification === "undefined") {
       console.info("[primble-notify] skip: Notification API unavailable");
       return;
@@ -1009,41 +1031,91 @@ const AcordModal = forwardRef(function AcordModal({
     const tag = `primble-${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const reg = await _resolveSwRegistration();
     if (!reg) {
-      // No SW available — Chrome/Edge will silently swallow new Notification()
-      // from a page context in a background tab, so we deliberately do NOT
-      // fall back to it. The in-page toast + title badge are the user-visible
-      // signal in this degraded case.
       console.error("[primble-notify] no SW registration available, OS notification skipped");
       return;
     }
+    // Stripped-down primary path: many browsers (Brave, Edge with enterprise
+    // policy, Chrome under strict privacy) silently drop notifications when the
+    // icon URL 404s or when certain optional flags are set. The spec only
+    // requires `title`; `body` and `tag` are safe extras. Everything else
+    // (icon/badge/requireInteraction/silent/actions) is optional and has been
+    // observed to cause silent suppression in the field. We rely on the SW
+    // registration path (NOT `new Notification()`) because Chromium silently
+    // no-ops the constructor path in backgrounded tabs.
     try {
-      await reg.showNotification(title, {
-        body,
-        tag,
-        silent: false,
-        requireInteraction: true,
-        icon: "/primble-favicon.png",
-        badge: "/primble-favicon.png",
-      });
+      await reg.showNotification(title, { body, tag });
       console.info("[primble-notify] showNotification ok, tag=", tag);
+      return;
     } catch (err) {
-      console.error("[primble-notify] showNotification rejected:", err && err.message ? err.message : err);
-      // Last-ditch: postMessage to the SW so it can show the notification from
-      // its own context. Useful if the page lost some capability mid-flight.
-      try {
-        const target = reg.active || reg.waiting || reg.installing;
-        if (target && target.postMessage) {
-          target.postMessage({ type: "SHOW_NOTIFICATION", title, body, tag, requireInteraction: true, icon: "/primble-favicon.png", badge: "/primble-favicon.png" });
-        }
-      } catch (e2) {
-        console.error("[primble-notify] postMessage fallback failed:", e2 && e2.message ? e2.message : e2);
+      console.warn("[primble-notify] showNotification rejected, trying SW postMessage:", err && err.message ? err.message : err);
+    }
+    // Fallback: ask the SW to display from its own context via postMessage.
+    // event.waitUntil() inside the SW keeps it alive long enough to show the
+    // notification even if the page-side call path hit a quirk.
+    try {
+      const target = reg.active || reg.waiting || reg.installing;
+      if (target && target.postMessage) {
+        target.postMessage({ type: "SHOW_NOTIFICATION", title, body, tag });
+        console.info("[primble-notify] postMessage to SW ok (fallback), tag=", tag);
+      } else {
+        console.error("[primble-notify] no SW worker target available for postMessage fallback");
       }
+    } catch (err) {
+      console.error("[primble-notify] postMessage to SW failed:", err && err.message ? err.message : err);
     }
   };
 
-  // Clear the title badge when the user returns to the tab.
+  // Diagnostic helper exposed on window so you can verify OS-level
+  // notification delivery independently of the upload/generate flow.
+  // Usage from DevTools console:
+  //     window.__primbleTestNotification(5)
+  // Fires a notification 5 seconds later — switch tabs/apps in that window
+  // and observe whether the OS banner appears. If this does NOT appear when
+  // the tab is hidden, the issue is OS-level (Focus/DND mode, Chrome quieter
+  // messaging, Brave shields) — NOT a bug in Primble's notification code.
   useEffect(() => {
-    const onVis = () => { if (!document.hidden) _setTitleBadge(false); };
+    window.__primbleTestNotification = async (delaySec = 3) => {
+      const ms = Math.max(0, Number(delaySec) * 1000);
+      console.info("[primble-notify] TEST scheduled in", ms, "ms — switch tabs now");
+      console.info("[primble-notify] TEST state at schedule:", {
+        hidden: typeof document !== "undefined" ? document.hidden : "n/a",
+        permission: typeof Notification !== "undefined" ? Notification.permission : "n/a",
+        hasSW: "serviceWorker" in navigator,
+      });
+      await new Promise(r => setTimeout(r, ms));
+      console.info("[primble-notify] TEST firing now — hidden=", document.hidden);
+      if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+        console.error("[primble-notify] TEST aborted: no permission");
+        return;
+      }
+      const reg = await _resolveSwRegistration();
+      if (!reg) {
+        console.error("[primble-notify] TEST aborted: no SW registration");
+        return;
+      }
+      const tag = `primble-test-${Date.now()}`;
+      try {
+        await reg.showNotification("Primble — Test", { body: "If you see this banner, OS-level notifications work. ✓", tag });
+        console.info("[primble-notify] TEST showNotification resolved. If no banner appeared, the OS/browser is suppressing it.");
+      } catch (err) {
+        console.error("[primble-notify] TEST showNotification rejected:", err && err.message ? err.message : err);
+      }
+    };
+    return () => { try { delete window.__primbleTestNotification; } catch {} };
+  }, []);
+
+  // Clear the title badge when the user returns to the tab, and track every
+  // hide event so _notifyJobDone knows whether the user tabbed away during the
+  // job (even if they happen to be on the Primble tab at the exact instant the
+  // job completes).
+  useEffect(() => {
+    const onVis = () => {
+      if (document.hidden) {
+        _wasHiddenDuringJob.current = true;
+      } else {
+        _setTitleBadge(false);
+      }
+    };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
@@ -1112,6 +1184,7 @@ const AcordModal = forwardRef(function AcordModal({
   const handleUpload = async () => {
     if (!files.length) { setError("Select at least one file"); return; }
     await _requestNotificationPermission();
+    _markJobStart();
     setLoading(true); setError(null); setShowUploadOverlay(true);
     const fd = new FormData(); files.forEach(f => fd.append("files", f));
     try {
@@ -1172,6 +1245,7 @@ const AcordModal = forwardRef(function AcordModal({
     const ids = Array.from(checkedFormIds);
     if (!ids.length) { setError("Select at least one form"); return; }
     await _requestNotificationPermission();
+    _markJobStart();
     setLoading(true); setError(null); setShowGenerateOverlay(true);
     try {
       const res = await fetch(`${API_BASE}/api/select-forms-bulk`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sessionId, form_ids: ids }) });
