@@ -13,7 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Tuple, Dict, Any
 
-from config.settings import groq_chat, LLM_MODEL
+from config.settings import groq_chat, LLM_MODEL, LLM_PROVIDER
 
 # ASYNC-SAFE: shared executor for CPU-bound blocking work (tiktoken, sync helpers)
 _EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
@@ -29,7 +29,7 @@ _MODEL_CHUNK_CHARS: Dict[str, int] = {
     "claude": 28_000,
     "openai": 100_000,
 }
-ACTIVE_MODEL = "openai"
+ACTIVE_MODEL = LLM_PROVIDER  # driven by LLM_PROVIDER env var ("openai" or "claude")
 
 _MAX_TOKENS_PER_DOC = int(os.getenv("ACORDLY_MAX_DOC_TOKENS", "500000"))
 _CHARS_PER_TOKEN    = 4

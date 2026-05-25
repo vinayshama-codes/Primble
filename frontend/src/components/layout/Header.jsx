@@ -278,7 +278,17 @@ function UserDropdown({
           {/* ── Actions ── */}
           <div className="udrop-section udrop-actions">
 
-            {/* 1. Account Settings */}
+            {/* 1. Dashboard */}
+            {onDashboard && (
+              <button
+                className="udrop-item"
+                onClick={() => { setOpen(false); onDashboard(); }}
+              >
+                <span className="udrop-item-label">Dashboard</span>
+              </button>
+            )}
+
+            {/* 2. Account Settings */}
             <button
               className="udrop-item"
               onClick={() => { setOpen(false); onAccountSettings(); }}
@@ -286,7 +296,7 @@ function UserDropdown({
               <span className="udrop-item-label">Account Settings</span>
             </button>
 
-            {/* 2. Manage Signature */}
+            {/* 3. Manage Signature */}
             <button
               className="udrop-item"
               onClick={() => { setOpen(false); onSignatureClick(); }}
@@ -294,13 +304,13 @@ function UserDropdown({
               <span className="udrop-item-label">{savedSignature ? "Manage Signature" : "Add Signature"}</span>
             </button>
 
-            {/* 3. Edit Subscription / Select */}
+            {/* 4. Edit Subscription / Select */}
             {user.subscription_tier === "free" ? (
               <button
                 className="udrop-item"
                 onClick={() => { setOpen(false); onUpgradeClick(); }}
               >
-                <span className="udrop-item-label">Select a plan</span>
+                <span className="udrop-item-label">Select a Plan</span>
               </button>
             ) : (
               <>
@@ -330,15 +340,6 @@ function UserDropdown({
               <span className="udrop-item-label">Contact Primble</span>
             </button>
 
-            {/* 5. Dashboard */}
-            {onDashboard && (
-              <button
-                className="udrop-item"
-                onClick={() => { setOpen(false); onDashboard(); }}
-              >
-                <span className="udrop-item-label">Dashboard</span>
-              </button>
-            )}
           </div>
 
           <div className="udrop-divider" />

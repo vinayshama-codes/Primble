@@ -621,10 +621,8 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              template_pending=True)
 
     _133_kw = {
-        "builder", "builders risk", "under construction", "renovation",
-        "project value", "completion date", "construction loan",
-        "project cost", "ground-up construction", "new construction",
-        "builder's risk", "construction project", "contract value",
+        "builders risk", "builder's risk", "course of construction",
+        "construction loan", "ground-up construction",
     }
     if flags.get("has_builders_risk") or any(kw in text for kw in _133_kw):
         _add("ACORD_133",

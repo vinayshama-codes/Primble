@@ -10,7 +10,7 @@ import httpx
 import openai
 
 from config.database import get_pool
-from config.settings import FRONTEND_URL
+from config.settings import FRONTEND_URL, LLM_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -376,12 +376,13 @@ Fields:
 {numbered_lines}"""
 
     try:
+        _timeout = float(os.getenv("LLM_REQUEST_TIMEOUT", "120"))
         client = openai.AsyncOpenAI(
             api_key=os.getenv("OPENAI_API_KEY", ""),
-            http_client=httpx.AsyncClient(timeout=30.0),
+            http_client=httpx.AsyncClient(timeout=_timeout),
         )
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
             max_tokens=1500,

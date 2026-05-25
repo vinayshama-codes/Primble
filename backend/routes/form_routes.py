@@ -49,6 +49,15 @@ from utils.virus_scanner import scan_file_bytes
 router = APIRouter(tags=["forms"])
 logger = logging.getLogger(__name__)
 
+# Dedicated pool for sync form-processing work (process_single_form, fill_pdf).
+# Explicit size prevents the default pool from growing unbounded under burst load.
+# 6 = 2 forms per user × 3 concurrent users; keep below WEB_CONCURRENCY × cpu_count.
+import concurrent.futures as _cf
+_FORM_EXECUTOR = _cf.ThreadPoolExecutor(
+    max_workers=int(os.getenv("FORM_EXECUTOR_WORKERS", "6")),
+    thread_name_prefix="form-gen",
+)
+
 
 async def _bg_lite_generate(session_id: str) -> None:
     """Background task: generate the top recommended form for essentials users and store SQS in session."""
@@ -381,7 +390,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             if not os.path.exists(tpl):
                 return form_id, None
             try:
-                result = await loop.run_in_executor(None, process_single_form, form_meta, session)
+                result = await loop.run_in_executor(_FORM_EXECUTOR, process_single_form, form_meta, session)
                 return form_id, result
             except Exception as ex:
                 logger.error(f"Error processing {form_id}: {ex}")

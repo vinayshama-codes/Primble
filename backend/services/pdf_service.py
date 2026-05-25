@@ -20,7 +20,7 @@ from services.fact_registry import FACT_REGISTRY
 logger = logging.getLogger(__name__)
 
 # ── GPT model config — env-driven so any OpenAI model is selectable with zero code changes ──
-GPT_MODEL       = os.getenv("GPT_MODEL",       "gpt-4o-mini")
+GPT_MODEL       = os.getenv("GPT_MODEL",       "gpt-4.1-nano")
 GPT_BATCH_SIZE  = int(os.getenv("GPT_BATCH_SIZE",  "80"))
 GPT_TEMPERATURE = float(os.getenv("GPT_TEMPERATURE", "0.0"))
 
@@ -1511,7 +1511,7 @@ def _fill_empty_from_raw_text(
     if ACTIVE_MODEL == "claude":
         llm_model = "claude-haiku-4-5-20251001"   # fast + large context
     else:
-        llm_model = "gpt-4o-mini"
+        llm_model = GPT_MODEL
 
     for start in range(0, len(text_fields), BATCH):
         batch = text_fields[start : start + BATCH]
@@ -1947,7 +1947,7 @@ def _fill_unmatched_with_gpt(
                 return json.loads(_run_coro_sync(_inner()))
             except Exception as ex:
                 if attempt < _FORM_FILL_BATCH_RETRIES - 1:
-                    wait = 2 ** attempt
+                    wait = min(2 ** attempt, 8)
                     logger.warning("gpt_fill: call failed attempt=%d/%d retrying in %ds — %s",
                                    attempt + 1, _FORM_FILL_BATCH_RETRIES, wait, ex)
                     _time.sleep(wait)

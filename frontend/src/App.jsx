@@ -173,7 +173,7 @@ function AppContent() {
           .then(r => r.ok ? r.json() : null).then(me => { if (me) setUser(me); });
         const applied = data.credited || data.already_applied;
         setOverageToast(applied
-          ? `✅ ${qty} extra package${qty !== "1" ? "s" : ""} added!`
+          ? `${qty} extra package${qty !== "1" ? "s" : ""} added!`
           : `Could not verify payment. Contact support if packages were not credited.`);
         setTimeout(() => setOverageToast(null), 8000);
         if (savedSid && applied) { setResumeSessionId(savedSid); setShowModal(true); }

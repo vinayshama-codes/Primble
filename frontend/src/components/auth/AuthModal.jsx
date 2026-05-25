@@ -202,7 +202,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
             <h2 className="step-title">Reset Your Password</h2>
             <p className="step-subtitle">Enter your email and we'll send a reset code</p>
             {error    && <div className="alert alert-error"><span>{error}</span></div>}
-            {resetMsg && <div className="alert alert-success"><span>✅ {resetMsg}</span></div>}
+            {resetMsg && <div className="alert alert-success"><span>{resetMsg}</span></div>}
             <form onSubmit={handleForgotRequest} className="auth-form">
               <div className="form-group">
                 <label>Email Address</label>
@@ -226,7 +226,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
             <h2 className="step-title">Set New Password</h2>
             <p className="step-subtitle">Enter the code sent to {email} and your new password</p>
             {error    && <div className="alert alert-error"><span>{error}</span></div>}
-            {resetMsg && <div className="alert alert-success"><span>✅ {resetMsg}</span></div>}
+            {resetMsg && <div className="alert alert-success"><span>{resetMsg}</span></div>}
             <form onSubmit={handleResetPassword} className="auth-form">
               <div className="form-group">
                 <label>Reset Code</label>
@@ -274,7 +274,7 @@ export default function AuthModal({ onClose, onSuccess, initialMode = "signin" }
             <p className="step-subtitle">{mode === "signin" ? "Sign in to access your packages" : "Get started with three free packages"}</p>
           </div>
           {error    && (<div className="alert alert-error"><span>{error}</span><button className="alert-close" onClick={() => setError("")}>✕</button></div>)}
-          {resetMsg && <div className="alert alert-success"><span>✅ {resetMsg}</span></div>}
+          {resetMsg && <div className="alert alert-success"><span>{resetMsg}</span></div>}
           <div className="auth-google">
             <div style={{ position: "relative", width: "100%" }}>
               <button className="google-btn-custom" type="button" style={{ pointerEvents: "none", position: "relative", zIndex: 2 }}>

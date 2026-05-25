@@ -1563,7 +1563,7 @@ const AcordModal = forwardRef(function AcordModal({
                   Essentials
                 </div>
                 <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: "0 0 6px", letterSpacing: "-0.3px" }}>Submission Analysis</h2>
-                <p style={{ fontSize: 13.5, color: "#64748b", margin: 0 }}>{liteGenerating ? "Analyzing your submission — generating SQS and ARQ. This takes about 30–60 seconds…" : "Your SQS score is ready. Use the tools below to complete your workflow."}</p>
+                <p style={{ fontSize: 13.5, color: "#64748b", margin: 0 }}>{liteGenerating ? "Carefully analyzing your submission to generate a submission quality score and identify critical gaps." : "Your SQS score is ready. Use the tools below to complete your workflow."}</p>
               </div>
 
               {/* ── SQS hero card ── */}
@@ -1572,7 +1572,7 @@ const AcordModal = forwardRef(function AcordModal({
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "24px 0", gap: 14 }}>
                     <span style={{ width: 40, height: 40, border: "3px solid #e2e8f0", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.8s linear infinite" }} />
                     <div style={{ fontSize: 14, color: "#64748b", fontWeight: 500 }}>Generating your full analysis…</div>
-                    <div style={{ fontSize: 12, color: "#94a3b8" }}>Building SQS score and ARQ questions — this takes about 30–60 seconds</div>
+                    <div style={{ fontSize: 12, color: "#94a3b8" }}>Calculating SQS and pre-building client questionnaire…</div>
                   </div>
                 ) : (
                   <div>
@@ -1657,12 +1657,12 @@ const AcordModal = forwardRef(function AcordModal({
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Send to Client</div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.55, flex: 1 }}>Client-in-the-Loop™ — send a targeted questionnaire to fill gaps and improve your score.</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.55, flex: 1 }}>Client-in-the-Loop™ - send a targeted questionnaire to fill gaps and improve your score.</div>
                   <button onClick={handleOpenARQ} disabled={!liteReady || arqLoadingQ}
                     style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: (!liteReady || arqLoadingQ) ? "#e2e8f0" : "#E61B84", color: (!liteReady || arqLoadingQ) ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: (!liteReady || arqLoadingQ) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: (!liteReady || arqLoadingQ) ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
                     onMouseEnter={e => { if (liteReady && !arqLoadingQ) { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
                     onMouseLeave={e => { if (liteReady && !arqLoadingQ) { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
-                    {liteGenerating ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Preparing…</> : arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client (ARQ)"}
+                    {liteGenerating ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Preparing…</> : arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client"}
                   </button>
                   <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
                 </div>
@@ -1672,13 +1672,13 @@ const AcordModal = forwardRef(function AcordModal({
                   <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(230,0,122,0.08)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 12 }}>
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                   </div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Cover Summary</div>
-                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.55, flex: 1 }}>AI-generated SQS narrative cover sheet — submittable with any platform, ready to download.</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>Submission Brief</div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, lineHeight: 1.55, flex: 1 }}>Complete submission quality narrative - easy to read for both human review and AI intake engines.</div>
                   <button onClick={handleLiteCoverSheet} disabled={!liteReady || liteCoverLoading}
                     style={{ width: "100%", padding: "11px 14px", borderRadius: 10, border: "none", background: (!liteReady || liteCoverLoading) ? "#e2e8f0" : "#E61B84", color: (!liteReady || liteCoverLoading) ? "#94a3b8" : "#fff", fontSize: 13, fontWeight: 700, cursor: (!liteReady || liteCoverLoading) ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, transition: "background 0.15s, box-shadow 0.15s", boxShadow: (!liteReady || liteCoverLoading) ? "none" : "0 4px 12px rgba(230,0,122,0.25)" }}
                     onMouseEnter={e => { if (liteReady && !liteCoverLoading) { e.currentTarget.style.background = "#C0157A"; e.currentTarget.style.boxShadow = "0 6px 18px rgba(230,0,122,0.35)"; } }}
                     onMouseLeave={e => { if (liteReady && !liteCoverLoading) { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
-                    {liteGenerating ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Preparing…</> : liteCoverLoading ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Generating…</> : "Cover Summary"}
+                    {liteGenerating ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Preparing…</> : liteCoverLoading ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Generating…</> : "Download Brief"}
                   </button>
                 </div>
               </div>

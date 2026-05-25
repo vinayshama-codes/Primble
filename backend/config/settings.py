@@ -95,7 +95,8 @@ ADMIN_EMAILS: set = {
 
 DEV_ROUTES_ENABLED: bool = os.getenv("DEV_ROUTES_ENABLED", "false").lower() == "true"
 
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()  # "openai" or "claude"
+LLM_MODEL    = os.getenv("LLM_MODEL",    "gpt-4.1-nano")
 
 _llm_secret_key = "OPENAI_API_KEY"
 _llm_secret_val = os.getenv(_llm_secret_key, "")
