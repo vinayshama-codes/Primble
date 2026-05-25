@@ -1466,20 +1466,20 @@ const AcordModal = forwardRef(function AcordModal({
     return (
       <>
         {showUploadOverlay && (
-          <>
-            <ProcessStageOverlay stages={["Reading your documents…", "Extracting facts…"]} advanceAfter={3500} />
-            <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", zIndex: 100001, background: "rgba(253,242,248,0.96)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", color: "#9d174d", padding: "14px 32px", borderRadius: 16, fontSize: 13.5, fontStyle: "italic", fontWeight: 500, textAlign: "center", maxWidth: 480, boxShadow: "0 8px 32px rgba(230,27,132,0.15), 0 2px 8px rgba(0,0,0,0.06)", border: "1px solid rgba(230,27,132,0.22)", pointerEvents: "none", letterSpacing: "0.01em", lineHeight: 1.55 }}>
-              Quality takes time. But not as much time if you were still doing this manually.
-            </div>
-          </>
+          <ProcessStageOverlay
+            stages={["Reading your documents…", "Extracting facts…"]}
+            advanceAfter={3500}
+            tagline="Quality takes time. But not as much time if you were still doing this manually."
+            note="You can leave this page during processing, but do not close it. Please enable your browser notifications, and we'll let you know as soon as it's ready."
+          />
         )}
         {showGenerateOverlay && (
-          <>
-            <ProcessStageOverlay stages={[`Selecting ${checkedFormIds.size} form${checkedFormIds.size !== 1 ? "s" : ""}…`, "Generating form…"]} advanceAfter={3000} />
-            <div style={{ position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", zIndex: 100001, background: "rgba(253,242,248,0.96)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)", color: "#9d174d", padding: "14px 32px", borderRadius: 16, fontSize: 13.5, fontStyle: "italic", fontWeight: 500, textAlign: "center", maxWidth: 480, boxShadow: "0 8px 32px rgba(230,27,132,0.15), 0 2px 8px rgba(0,0,0,0.06)", border: "1px solid rgba(230,27,132,0.22)", pointerEvents: "none", letterSpacing: "0.01em", lineHeight: 1.55 }}>
-              Quality takes time. But not as much time if you were still doing this manually.
-            </div>
-          </>
+          <ProcessStageOverlay
+            stages={[`Selecting ${checkedFormIds.size} form${checkedFormIds.size !== 1 ? "s" : ""}…`, "Generating form…"]}
+            advanceAfter={3000}
+            tagline="Quality takes time. But not as much time if you were still doing this manually."
+            note="You can leave this page during processing, but do not close it. Please enable your browser notifications, and we'll let you know as soon as it's ready."
+          />
         )}
         {showDownloadOverlay && <ProcessStageOverlay stages={["Preparing your form…", "Packaging for download…"]} advanceAfter={2000} />}
 

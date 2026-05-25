@@ -197,6 +197,16 @@ async def _claude_chat(
 
 
 # ASYNC-SAFE
+def _uses_max_completion_tokens(model: str) -> bool:
+    """Return True for models that require max_completion_tokens instead of max_tokens.
+
+    OpenAI o-series and gpt-5.x models reject max_tokens with HTTP 400.
+    All other models (gpt-4*, gpt-3.5*) accept max_tokens.
+    """
+    m = model.lower()
+    return m.startswith("o1") or m.startswith("o3") or m.startswith("o4") or "gpt-5" in m
+
+
 async def _openai_chat(
     model: str,
     messages: list,
@@ -214,6 +224,11 @@ async def _openai_chat(
     # Global concurrency cap smooths bursts under OpenAI Tier 1 RPM limits.
     # Slot is acquired per-attempt so it is released BEFORE the retry sleep,
     # letting other callers proceed instead of freezing all slots during backoff.
+    #
+    # Parameter name differs by model family:
+    #   gpt-4*, gpt-3.5* → max_tokens
+    #   o1/o3/o4, gpt-5* → max_completion_tokens  (max_tokens returns HTTP 400)
+    token_param = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
     last_ex = None
     for attempt in range(_retries + 1):
         try:
@@ -222,7 +237,7 @@ async def _openai_chat(
                     model=model,
                     messages=messages,
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    **{token_param: max_tokens},
                 )
             return (r.choices[0].message.content or "").strip()
         except Exception as ex:

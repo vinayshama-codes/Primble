@@ -1832,6 +1832,21 @@ async def _gather_chunks_async(
                     # Schema/JSON failure — not transient, do not retry.
                     raise
                 except Exception as ex:
+                    # Permanent errors — retrying will never succeed, fail fast to avoid
+                    # burning API quota and spamming the upstream provider:
+                    #   • HTTP 400  → bad parameter / unsupported model flag (API rejection)
+                    #   • TypeError → SDK signature mismatch (e.g. unknown kwarg in installed
+                    #                  openai version) — raised by the Python client, not the API
+                    #   • AttributeError → SDK shape mismatch (missing attr on response object)
+                    if (
+                        getattr(ex, "status_code", None) == 400
+                        or isinstance(ex, (TypeError, AttributeError))
+                    ):
+                        logger.error(
+                            f"chunk {idx} (chars {c_start}–{c_end}): permanent error — not retrying: "
+                            f"{type(ex).__name__}: {ex}"
+                        )
+                        raise
                     last_ex = ex
                     wait = 2 ** attempt + random.uniform(0, 0.5)
                     logger.warning(
