@@ -731,8 +731,8 @@ def loss_integrity_coefficient(
 def calculate_p4_loss_history(facts: dict, flags: dict) -> Tuple[int, List[str]]:
     """Loss History Integrity pillar with coefficient-based scoring."""
     λ = loss_integrity_coefficient(
-        loss_history_years = int(_fv(facts, "loss_history_years") or 0),
-        report_age_days    = int(_fv(facts, "loss_run_age_days") or 365)
+        loss_history_years = _to_int(_fv(facts, "loss_history_years")) or 0,
+        report_age_days    = _to_int(_fv(facts, "loss_run_age_days")) or 365
     )
     has_carrier = bool(_fv(facts, "prior_carrier"))
 
