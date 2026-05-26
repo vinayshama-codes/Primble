@@ -397,6 +397,7 @@ export default function Header({
 }) {
   const [hidden, setHidden] = useState(false);
   const [collapse, setCollapse] = useState(false);
+  const [headerH, setHeaderH] = useState(0);
   const headerRef = useRef(null);
 
   useEffect(() => {
@@ -438,10 +439,9 @@ export default function Header({
 
   useLayoutEffect(() => {
     document.body.classList.toggle("app-header-collapsed", collapse);
+    if (headerRef.current) setHeaderH(headerRef.current.offsetHeight);
     return () => document.body.classList.remove("app-header-collapsed");
   }, [collapse]);
-
-  const headerH = headerRef.current?.offsetHeight || 0;
 
   return (
     <header
