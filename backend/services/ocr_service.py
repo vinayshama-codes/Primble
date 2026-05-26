@@ -1,12 +1,16 @@
 import asyncio
+import base64
+import json
 import os
 import logging
+import tempfile
 import uuid
 import zipfile
 from typing import List, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
 import pdfplumber
+import httpx
 from circuitbreaker import CircuitBreaker
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from config.settings import UPLOAD_DIR, SUPPORTED_IMG, OCR_PROVIDER
@@ -18,17 +22,17 @@ logger = logging.getLogger(__name__)
 _OCR_MAX_WORKERS = (os.cpu_count() or 2) * 2
 _OCR_EXECUTOR = ThreadPoolExecutor(max_workers=_OCR_MAX_WORKERS)
 
-# Circuit breakers for external OCR providers
-_vision_cb   = CircuitBreaker(failure_threshold=3, recovery_timeout=60, name="google_vision")
+# Circuit breaker for the external OCR provider.
+_vision_cb = CircuitBreaker(failure_threshold=3, recovery_timeout=60, name="google_vision")
+_GOOGLE_PROVIDER_ALIASES = {"google", "google_vision", "vision"}
+_GOOGLE_VISION_API_URL = "https://vision.googleapis.com/v1/images:annotate"
+_google_vision_client = None
 
-_web_concurrency = int(os.getenv("WEB_CONCURRENCY", "1"))
-if OCR_PROVIDER == "easyocr" and _web_concurrency > 1:
+if OCR_PROVIDER not in _GOOGLE_PROVIDER_ALIASES:
     logger.warning(
-        "ocr_service: OCR_PROVIDER=easyocr with WEB_CONCURRENCY=%d — "
-        "EasyOCR loads ~400 MB of model weights per worker process. "
-        "This may cause OOM on Render Starter (512 MB) and tight memory on Standard (2 GB). "
-        "Consider setting OCR_PROVIDER=google in your environment.",
-        _web_concurrency,
+        "ocr_service: unsupported OCR_PROVIDER=%r; Google Vision is the only "
+        "packaged OCR provider and will be used.",
+        OCR_PROVIDER,
     )
 
 # ---------------------------------------------------------------------------
@@ -82,48 +86,95 @@ def _flag_for_manual_review(
 
 
 # ---------------------------------------------------------------------------
-# EasyOCR singleton — lazy-init, GPU disabled for server safety
-# ---------------------------------------------------------------------------
-_easyocr_reader = None
-
-
-def _get_easyocr():
-    global _easyocr_reader
-    if _easyocr_reader is None:
-        try:
-            import easyocr
-            _easyocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-            logger.info("EasyOCR reader initialised")
-        except Exception as ex:
-            logger.error(f"EasyOCR init failed: {ex}")
-    return _easyocr_reader
-
-
-# ---------------------------------------------------------------------------
 # Provider OCR implementations (sync — called via executor)
 # ---------------------------------------------------------------------------
 
-def _ocr_easyocr(img_path: str) -> Tuple[str, List[str], int]:
-    try:
-        reader = _get_easyocr()
-        if reader is None:
-            logger.error(f"EasyOCR not available — returning empty for {img_path}")
-            return "", [], 0
-        results   = reader.readtext(img_path, detail=1)
-        all_texts = [text for (_, text, _) in results]
-        full_text = "\n".join(all_texts).strip()
-        total     = len(results)
-        low_conf: List[str] = []
-        for (_, text, conf) in results:
-            penalty    = _numeric_correction_score(text)
-            adj_conf   = max(0.0, conf - penalty)
-            norm_token = _normalize_token(text)
-            if adj_conf < OCR_CONFIDENCE_THRESHOLD:
-                low_conf.append(norm_token)
-        return full_text, low_conf, total
-    except Exception as ex:
-        logger.error(f"EasyOCR error on {img_path}: {ex}")
-        return "", [], 0
+def _materialize_google_credentials_json() -> None:
+    """Allow deploying Google service-account JSON as a single secret env var."""
+    if os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
+        return
+    raw = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    if not raw:
+        return
+
+    path = os.path.join(tempfile.gettempdir(), "google-vision-credentials.json")
+    if not os.path.exists(path):
+        try:
+            data = json.dumps(json.loads(raw))
+        except json.JSONDecodeError:
+            data = raw
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(data)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
+
+
+def _get_google_vision_client():
+    global _google_vision_client
+    if _google_vision_client is None:
+        _materialize_google_credentials_json()
+        from google.cloud import vision as gvision
+        _google_vision_client = gvision.ImageAnnotatorClient()
+        logger.info("Google Vision OCR client initialised")
+    return _google_vision_client
+
+
+def _extract_low_conf_from_annotation(annotation: dict) -> Tuple[str, List[str], int]:
+    full_text = (annotation.get("text") or "").strip()
+    low_conf: List[str] = []
+    total = 0
+
+    for page in annotation.get("pages") or []:
+        for block in page.get("blocks") or []:
+            for para in block.get("paragraphs") or []:
+                for word in para.get("words") or []:
+                    total += 1
+                    word_text = "".join(
+                        symbol.get("text", "")
+                        for symbol in word.get("symbols") or []
+                    )
+                    confidence = float(word.get("confidence", 1.0) or 0.0)
+                    penalty = _numeric_correction_score(word_text)
+                    adj_conf = max(0.0, confidence - penalty)
+                    if adj_conf < OCR_CONFIDENCE_THRESHOLD:
+                        low_conf.append(_normalize_token(word_text))
+
+    return full_text, low_conf, total
+
+
+def _ocr_google_vision_rest(img_path: str, content: bytes) -> Tuple[str, List[str], int]:
+    api_key = os.getenv("GOOGLE_VISION_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("GOOGLE_VISION_API_KEY is not configured")
+
+    payload = {
+        "requests": [
+            {
+                "image": {
+                    "content": base64.b64encode(content).decode("ascii"),
+                },
+                "features": [
+                    {"type": "DOCUMENT_TEXT_DETECTION"},
+                ],
+            }
+        ]
+    }
+    timeout = float(os.getenv("GOOGLE_VISION_TIMEOUT_SECONDS", "60"))
+    with httpx.Client(timeout=timeout) as client:
+        response = client.post(
+            _GOOGLE_VISION_API_URL,
+            params={"key": api_key},
+            json=payload,
+        )
+    response.raise_for_status()
+    body = response.json()
+    item = (body.get("responses") or [{}])[0]
+    if item.get("error"):
+        message = item["error"].get("message", "unknown Google Vision error")
+        raise RuntimeError(f"Google Vision OCR error: {message}")
+
+    annotation = item.get("fullTextAnnotation") or {}
+    return _extract_low_conf_from_annotation(annotation)
 
 
 @retry(
@@ -134,17 +185,25 @@ def _ocr_easyocr(img_path: str) -> Tuple[str, List[str], int]:
 )
 def _ocr_google_vision_attempt(img_path: str) -> Tuple[str, List[str], int]:
     """Single attempt — called by _ocr_google_vision which owns the CB and error boundary."""
-    from google.cloud import vision as gvision
-    c = gvision.ImageAnnotatorClient()
     with open(img_path, "rb") as f:
         content = f.read()
+
+    if os.getenv("GOOGLE_VISION_API_KEY", "").strip():
+        return _ocr_google_vision_rest(img_path, content)
+
+    from google.cloud import vision as gvision
+    c = _get_google_vision_client()
     image    = gvision.Image(content=content)
     response = c.document_text_detection(image=image)
-    full_text = response.full_text_annotation.text.strip()
+    if response.error.message:
+        raise RuntimeError(f"Google Vision OCR error: {response.error.message}")
+
+    annotation = response.full_text_annotation
+    full_text = (annotation.text or "").strip() if annotation else ""
 
     low_conf: List[str] = []
     total = 0
-    for page in response.full_text_annotation.pages:
+    for page in getattr(annotation, "pages", []) or []:
         for block in page.blocks:
             for para in block.paragraphs:
                 for word in para.words:
@@ -171,10 +230,7 @@ def _ocr_google_vision(img_path: str) -> Tuple[str, List[str], int]:
 
 def _run_ocr_provider(img_path: str) -> Tuple[str, List[str], int]:
     """Dispatch to the configured OCR provider (sync, called via executor)."""
-    if OCR_PROVIDER == "google":
-        return _ocr_google_vision(img_path)
-    else:
-        return _ocr_easyocr(img_path)
+    return _ocr_google_vision(img_path)
 
 
 # ---------------------------------------------------------------------------

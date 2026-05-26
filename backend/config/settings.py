@@ -17,7 +17,7 @@ FRONTEND_URL          = os.getenv("FRONTEND_URL", "http://localhost:5173")
 REDIS_URL             = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_BILLING_PORTAL_URL = os.getenv("STRIPE_BILLING_PORTAL_URL", "https://billing.stripe.com/p/login/")
-OCR_PROVIDER              = os.getenv("OCR_PROVIDER", "easyocr").lower()
+OCR_PROVIDER              = os.getenv("OCR_PROVIDER", "google").lower()
 ENABLE_ASYNC_PROCESSING   = os.getenv("ENABLE_ASYNC_PROCESSING", "false").lower() == "true"
 SESSION_TTL_H             = int(os.getenv("SESSION_TTL_H", "8"))  # session lifetime in hours
 
@@ -128,6 +128,22 @@ def validate_production_config() -> None:
     if DEV_ROUTES_ENABLED and not ADMIN_EMAILS:
         raise RuntimeError(
             "Production misconfiguration: DEV_ROUTES_ENABLED requires ADMIN_EMAILS to be set."
+        )
+    supported_ocr = {"google", "google_vision", "vision"}
+    if OCR_PROVIDER not in supported_ocr:
+        raise RuntimeError(
+            "Unsupported OCR_PROVIDER for this deployment: "
+            f"{OCR_PROVIDER!r}. Supported values: google, google_vision, vision."
+        )
+    if not (
+        os.getenv("GOOGLE_VISION_API_KEY")
+        or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        or os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+    ):
+        raise RuntimeError(
+            "Google Vision OCR requires GOOGLE_VISION_API_KEY, "
+            "GOOGLE_APPLICATION_CREDENTIALS, or GOOGLE_APPLICATION_CREDENTIALS_JSON "
+            "in production."
         )
     if not ADMIN_EMAILS:
         raise RuntimeError(

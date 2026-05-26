@@ -58,8 +58,7 @@ cachetools==5.5.2
 # Error tracking
 sentry-sdk[fastapi]==1.40.0
 
-# OCR — default provider; install all three to support runtime switching via OCR_PROVIDER env var
-easyocr==1.7.2
+# OCR
 google-cloud-vision==3.4.0
 
 # Text cleaning
