@@ -1,5 +1,5 @@
 import { API_BASE } from "../../config/constants";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
 
 const ChevronDown = ({ rotated }) => (
   <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
@@ -24,6 +24,21 @@ const SignOutIcon = () => (
     <line x1="21" y1="12" x2="9" y2="12" />
   </svg>
 );
+
+function DownloadsPill({ count, onUpgradeClick }) {
+  const n = count ?? 0;
+  const variant = n === 0 ? "gone" : n <= 1 ? "warn" : "ok";
+  const label   = n === 0 ? "No downloads left" : n === 1 ? "1 download left" : `${n} downloads left`;
+  return (
+    <button
+      className={`dl-pill dl-pill--${variant}`}
+      onClick={onUpgradeClick}
+      title={n === 0 ? "Upgrade to get more downloads" : `${n} free downloads remaining`}
+    >
+      <span className="dl-pill__label">{label}</span>
+    </button>
+  );
+}
 
 const TIER_LABELS = {
   essentials: "Essentials",
@@ -380,8 +395,64 @@ export default function Header({
   setUpgradeFailed, setUpgradeChecking, setUser,
   onNavigate, onAccountSettings, onContactPrimble, onDashboard,
 }) {
+  const [hidden, setHidden] = useState(false);
+  const [collapse, setCollapse] = useState(false);
+  const headerRef = useRef(null);
+
+  useEffect(() => {
+    const scrollPositions = new WeakMap();
+    let hiddenLocal = false;
+    let lockUntil = 0;
+
+    const handleScroll = (e) => {
+      const t = e.target;
+      const isWindowScroll = t === document || t === document.documentElement || t === document.body;
+      const el = isWindowScroll ? (document.scrollingElement || document.documentElement) : t;
+      if (!el || typeof el.scrollTop !== "number") return;
+
+      const currentY = el.scrollTop;
+      const lastY = scrollPositions.get(el) ?? 0;
+      const delta = currentY - lastY;
+      if (Math.abs(delta) < 4) return;
+      scrollPositions.set(el, currentY);
+
+      // Asymmetric thresholds: easy to hide, deliberate to show.
+      // This filters out reflow-induced and trackpad-jitter reverse deltas.
+      let shouldHide = hiddenLocal;
+      if (!hiddenLocal && delta > 6 && currentY > 80) shouldHide = true;
+      else if (hiddenLocal && delta < -40) shouldHide = false;
+      if (shouldHide === hiddenLocal) return;
+
+      const now = performance.now();
+      if (now < lockUntil) return;
+      lockUntil = now + 400;
+
+      hiddenLocal = shouldHide;
+      setHidden(shouldHide);
+      setCollapse(shouldHide && !isWindowScroll);
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true, capture: true });
+    return () => window.removeEventListener("scroll", handleScroll, { capture: true });
+  }, []);
+
+  useLayoutEffect(() => {
+    document.body.classList.toggle("app-header-collapsed", collapse);
+    return () => document.body.classList.remove("app-header-collapsed");
+  }, [collapse]);
+
+  const headerH = headerRef.current?.offsetHeight || 0;
+
   return (
-    <header className="landing-header">
+    <header
+      ref={headerRef}
+      className="landing-header"
+      style={{
+        transform: hidden ? "translateY(-100%)" : "translateY(0)",
+        marginBottom: collapse ? `-${headerH}px` : 0,
+        transition: "transform 0.3s ease, margin-bottom 0.3s ease",
+      }}
+    >
       <div className="header-left">
         <div className="logo" onClick={() => onHome ? onHome() : (window.location.href = "/")} style={{ cursor: "pointer" }}>
           <img src="/primble-logo.webp" alt="Primble" style={{ height: "28px", width: "auto", display: "block" }} />
@@ -395,23 +466,28 @@ export default function Header({
       </div>
 
       {user ? (
-        <UserDropdown
-          user={user}
-          token={token}
-          savedSignature={savedSignature}
-          onSignatureClick={onSignatureClick}
-          onUpgradeClick={onUpgradeClick}
-          onLogout={onLogout}
-          openBillingPortal={openBillingPortal}
-          upgradeChecking={upgradeChecking}
-          upgradeFailed={upgradeFailed}
-          setUpgradeFailed={setUpgradeFailed}
-          setUpgradeChecking={setUpgradeChecking}
-          setUser={setUser}
-          onAccountSettings={onAccountSettings}
-          onContactPrimble={onContactPrimble}
-          onDashboard={onDashboard}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {user.subscription_tier === "free" && (
+            <DownloadsPill count={user.downloads_remaining} onUpgradeClick={onUpgradeClick} />
+          )}
+          <UserDropdown
+            user={user}
+            token={token}
+            savedSignature={savedSignature}
+            onSignatureClick={onSignatureClick}
+            onUpgradeClick={onUpgradeClick}
+            onLogout={onLogout}
+            openBillingPortal={openBillingPortal}
+            upgradeChecking={upgradeChecking}
+            upgradeFailed={upgradeFailed}
+            setUpgradeFailed={setUpgradeFailed}
+            setUpgradeChecking={setUpgradeChecking}
+            setUser={setUser}
+            onAccountSettings={onAccountSettings}
+            onContactPrimble={onContactPrimble}
+            onDashboard={onDashboard}
+          />
+        </div>
       ) : (
         <div className="user-menu" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button className="header-btn-login" onClick={onLogIn} style={{ background: "none", border: "1.5px solid #e0e0e0", cursor: "pointer", fontSize: 15, fontWeight: 600, color: "#0f172a", padding: "9px 22px", borderRadius: 999, transition: "all 0.2s" }} onMouseEnter={e => { e.currentTarget.style.borderColor = "#E61B84"; e.currentTarget.style.color = "#E61B84"; }} onMouseLeave={e => { e.currentTarget.style.borderColor = "#e0e0e0"; e.currentTarget.style.color = "#0f172a"; }}>Log in</button>

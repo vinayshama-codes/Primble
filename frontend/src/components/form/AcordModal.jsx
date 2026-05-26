@@ -1561,11 +1561,10 @@ const AcordModal = forwardRef(function AcordModal({
           <div className="loading-overlay"><div className="loading-spinner" /><p className="loading-text">{processingStage || "Processing..."}</p></div>
         )}
 
-        {user && user.subscription_tier === "free" && step !== "upload" && step !== "dashboard" && (
-          <div className={`freemium-banner ${user.downloads_remaining === 0 ? "freemium-depleted" : ""}`}>
-            {user.downloads_remaining > 0
-              ? <><span className="freemium-text">{user.downloads_remaining} free download{user.downloads_remaining > 1 ? "s" : ""} remaining</span></>
-              : <><span className="freemium-text">Free limit reached — upgrade to continue</span><button className="freemium-upgrade-btn" onClick={onShowUpgrade}>Upgrade Now</button></>}
+        {user && user.subscription_tier === "free" && user.downloads_remaining === 0 && step !== "upload" && step !== "dashboard" && (
+          <div className="freemium-banner freemium-depleted">
+            <span className="freemium-text">Free limit reached — upgrade to continue</span>
+            <button className="freemium-upgrade-btn" onClick={onShowUpgrade}>Upgrade Now</button>
           </div>
         )}
 

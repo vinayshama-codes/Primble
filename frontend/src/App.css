@@ -70,6 +70,35 @@ body {
   font-weight: 500;
 }
 
+/* ── Downloads Remaining Pill ── */
+.dl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  background: none;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+  text-decoration: none;
+  line-height: 1;
+}
+.dl-pill:hover { opacity: 0.78; }
+.dl-pill--ok   { color: var(--primary); background: rgba(230, 27, 132, 0.08); }
+.dl-pill--warn { color: #b45309; background: #fef3c7; }
+.dl-pill--gone { color: #dc2626; background: #fee2e2; }
+.dl-pill__dot  { display: none; }
+
+/* hide label text on very small screens, keep dot+count */
+@media (max-width: 480px) {
+  .dl-pill__label { display: none; }
+  .dl-pill { padding: 5px 9px; }
+}
+
 /* ── User Dropdown ── */
 .udrop-root { position: relative; }
 
@@ -2182,6 +2211,17 @@ body {
   width: 100%;
 }
 
+/* When the auto-hide header collapses, let the editor wrapper fill the
+   viewport so no gap appears at the bottom. Overrides the inline height
+   set in AcordModal.jsx via !important. */
+.acord-modal-editor-root {
+  transition: height 0.3s ease;
+}
+body.app-header-collapsed .acord-modal-editor-root {
+  height: 100dvh !important;
+  height: 100vh !important;
+}
+
 .editor-main {
   min-width: 0;
   overflow: hidden;
@@ -4272,6 +4312,11 @@ body {
   .acord-modal-editor-root {
     height: calc(100dvh - 81px) !important;
     height: calc(100vh - 81px) !important;
+  }
+
+  body.app-header-collapsed .acord-modal-editor-root {
+    height: 100dvh !important;
+    height: 100vh !important;
   }
 
   /* Upload / recommendations / other non-editor steps: tighter side padding */
