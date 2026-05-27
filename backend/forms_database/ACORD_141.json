@@ -8,5 +8,21 @@
   "matching_flags": ["has_property_coverage","has_multiple_locations"],
   "matching_keywords": ["property schedule","multiple locations","location schedule","building schedule","BPP schedule"],
   "coverage_types": ["property"],
-  "policy_types": ["commercial"]
+  "policy_types": ["commercial"],
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "effective_date",
+    "expiration_date",
+    "property_locations",
+    "locations",
+    "occupancy_type",
+    "construction_type",
+    "property_building_value",
+    "property_bpp_value",
+    "valuation_method",
+    "property_deductible_aop",
+    "coinsurance_percentage",
+    "business_income_limit",
+    "period_of_restoration"
+  ]
 }

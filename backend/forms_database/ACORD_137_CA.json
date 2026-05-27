@@ -56,5 +56,28 @@
   ],
   "state": "CA",
   "attach_to": ["ACORD_127", "ACORD_132"],
-  "pages": 3
+  "pages": 3,
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "producer_name",
+    "policy_number",
+    "effective_date",
+    "expiration_date",
+    "carrier_name",
+    "carrier_naic",
+    "auto_covered_symbols",
+    "auto_liability_limit",
+    "auto_liability_structure",
+    "auto_med_pay_limit",
+    "auto_um_uim_limit",
+    "auto_deductible_comp",
+    "auto_deductible_collision",
+    "auto_physical_damage_valuation",
+    "auto_hired_nonowned",
+    "hired_auto_indicator",
+    "non_owned_auto_indicator",
+    "auto_vin_schedule",
+    "auto_garaging_addresses",
+    "auto_drivers"
+  ]
 }

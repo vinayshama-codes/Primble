@@ -9,5 +9,11 @@
   "matching_keywords": ["floater", "inland marine", "contractor's equipment", "cargo", "motor truck", "transit"],
   "coverage_types": ["inland_marine"],
   "policy_types": ["commercial"],
-  "tier1_minimum_fields": []
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "effective_date",
+    "inland_marine_total_value",
+    "inland_marine_transit_limit",
+    "inland_marine_items"
+  ]
 }

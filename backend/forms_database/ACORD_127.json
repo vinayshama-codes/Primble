@@ -8,5 +8,22 @@
   "matching_flags": ["has_auto_coverage"],
   "matching_keywords": ["auto","vehicle","VIN","hired auto","non-owned","garage","driver","fleet","business auto","liability limit","physical damage","collision","comprehensive"],
   "coverage_types": ["auto"],
-  "policy_types": ["commercial"]
+  "policy_types": ["commercial"],
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "effective_date",
+    "expiration_date",
+    "auto_liability_limit",
+    "auto_liability_structure",
+    "auto_deductible_comp",
+    "auto_deductible_collision",
+    "auto_vin_schedule",
+    "auto_garaging_addresses",
+    "auto_radius_of_operation",
+    "auto_physical_damage_valuation",
+    "auto_covered_symbols",
+    "auto_um_uim_limit",
+    "auto_hired_nonowned",
+    "auto_drivers"
+  ]
 }

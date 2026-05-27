@@ -10,5 +10,18 @@
                         "evidence of insurance", "additional insured", "lender",
                         "this is to certify", "acord 25"],
   "coverage_types": ["general_liability", "auto", "workers_comp"],
-  "policy_types": ["commercial"]
+  "policy_types": ["commercial"],
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "producer_name",
+    "effective_date",
+    "expiration_date",
+    "certificate_holder",
+    "certificate_holder_address",
+    "gl_each_occurrence",
+    "gl_aggregate",
+    "auto_liability_limit",
+    "umbrella_limit",
+    "wc_el_each_accident"
+  ]
 }

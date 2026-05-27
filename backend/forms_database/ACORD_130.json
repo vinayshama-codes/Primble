@@ -8,5 +8,19 @@
   "matching_flags": ["has_workers_comp"],
   "matching_keywords": ["workers compensation","WC","payroll","class code","NCCI","experience mod","x-mod","employees","state fund","employer liability"],
   "coverage_types": ["workers_comp"],
-  "policy_types": ["commercial"]
+  "policy_types": ["commercial"],
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "effective_date",
+    "expiration_date",
+    "wc_payroll",
+    "wc_payroll_by_state",
+    "wc_class_codes",
+    "wc_xmod",
+    "wc_description_of_operations",
+    "num_employees",
+    "wc_el_each_accident",
+    "wc_el_disease_each_employee",
+    "wc_el_disease_policy_limit"
+  ]
 }

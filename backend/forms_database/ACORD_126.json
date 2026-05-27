@@ -8,5 +8,21 @@
   "matching_flags": ["has_general_liability"],
   "matching_keywords": ["general liability","GL","BI","PD","products completed","premises operations","personal advertising injury","class code","additional insured","subcontractor"],
   "coverage_types": ["general_liability"],
-  "policy_types": ["commercial"]
+  "policy_types": ["commercial"],
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "effective_date",
+    "expiration_date",
+    "gl_each_occurrence",
+    "gl_aggregate",
+    "gl_products_aggregate",
+    "gl_personal_advertising_injury",
+    "gl_medical_expense",
+    "gl_class_codes_by_location",
+    "gl_form_type",
+    "gl_deductible",
+    "operations_description",
+    "total_payroll",
+    "total_revenue"
+  ]
 }

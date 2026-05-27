@@ -9,5 +9,5 @@
   "matching_keywords": ["commercial","general liability","business","application","lines of coverage","certificate holder","mortgagee","revenue","payroll","operations"],
   "coverage_types": ["general_liability","property","auto","workers_comp","umbrella"],
   "policy_types": ["commercial"],
-  "tier1_minimum_fields": ["producer_name","applicant_name","mailing_address","contact_info","lines_of_business","effective_date"]
+  "tier1_minimum_fields": ["producer_name","applicant_name","mailing_address","contact_name","lines_of_business","effective_date"]
 }

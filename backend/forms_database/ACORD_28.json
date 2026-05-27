@@ -9,5 +9,14 @@
   "matching_keywords": ["mortgagee", "evidence of insurance", "loss payee", "lender", "lienholder"],
   "coverage_types": ["property"],
   "policy_types": ["commercial"],
-  "tier1_minimum_fields": []
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "effective_date",
+    "expiration_date",
+    "property_building_value",
+    "property_bpp_value",
+    "mortgagee_name",
+    "certificate_holder",
+    "loss_payee_name"
+  ]
 }

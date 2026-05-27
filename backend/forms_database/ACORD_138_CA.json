@@ -49,5 +49,23 @@
   ],
   "state": "CA",
   "attach_to": "ACORD_128",
-  "pages": 2
+  "pages": 2,
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "producer_name",
+    "policy_number",
+    "effective_date",
+    "expiration_date",
+    "carrier_name",
+    "carrier_naic",
+    "auto_covered_symbols",
+    "garage_liability_limit",
+    "garage_operations_type",
+    "garage_deductible",
+    "garagekeeper_liability_limit",
+    "garagekeeper_comp_deductible",
+    "garagekeeper_coll_deductible",
+    "auto_dealers_inventory_value",
+    "auto_um_uim_limit"
+  ]
 }

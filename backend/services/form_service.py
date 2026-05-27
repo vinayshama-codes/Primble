@@ -419,32 +419,32 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
 
     # ── Flag-based (trigger_weight 0.95) ──────────────────────────────────────
 
-    # Keyword fallback sets used when the LLM-derived flag is missing but the
-    # raw document text contains GL / Auto / Property signals.
+    # Keyword fallback sets — used ONLY when the LLM-derived flag is missing
+    # (not when the LLM explicitly evaluated it as False). Phrases here are
+    # narrow enough to imply coverage-being-requested, not incidental mentions
+    # (e.g. "bodily injury", "additional insured" appear on every COI and are
+    # therefore excluded — they would over-trigger).
     _126_kw = {
         "general liability", "premises-operations", "premises/operations",
         "products/completed", "products-completed", "personal & advertising injury",
-        "personal and advertising injury", "bodily injury", "property damage",
-        "additional insured", "subcontract", "class code", "acord 126",
+        "personal and advertising injury", "acord 126",
     }
     _127_kw = {
-        "business auto", "commercial auto", "hired auto", "non-owned",
-        "non owned", "garage operations", "vehicle schedule", "auto liability",
-        "fleet", "vin ", "year/make/model", "year make model", "acord 127",
+        "business auto", "commercial auto", "vehicle schedule",
+        "auto liability", "year/make/model", "year make model", "acord 127",
     }
     _140_kw = {
-        "building limit", "bpp", "business personal property",
-        "construction type", "sprinkler", "sprinklered", "roof year",
+        "building limit", "business personal property",
+        "construction type", "sprinklered", "roof year",
         "business income", "year built", "fire protection class",
-        "protection class", "acord 140",
+        "acord 140",
     }
 
-    if (flags.get("has_general_liability")
-            or flags.get("is_contractor")
-            or any(kw in search for kw in _126_kw)):
+    _has_gl = flags.get("has_general_liability")
+    if _has_gl is True or (_has_gl is None and any(kw in search for kw in _126_kw)):
         _gl_reason = (
-            "has_general_liability or is_contractor flag detected"
-            if (flags.get("has_general_liability") or flags.get("is_contractor"))
+            "has_general_liability flag detected"
+            if _has_gl is True
             else "general liability keywords detected in document text"
         )
         _add("ACORD_126",
@@ -459,11 +459,11 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              trigger_reason="has_workers_comp flag detected",
              template_pending=True)
 
-    if (flags.get("has_auto_coverage")
-            or any(kw in search for kw in _127_kw)):
+    _has_auto = flags.get("has_auto_coverage")
+    if _has_auto is True or (_has_auto is None and any(kw in search for kw in _127_kw)):
         _auto_reason = (
             "has_auto_coverage flag detected"
-            if flags.get("has_auto_coverage")
+            if _has_auto is True
             else "auto / vehicle keywords detected in document text"
         )
         _add("ACORD_127",
@@ -473,17 +473,27 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              template_pending=True)
 
     if flags.get("has_umbrella"):
-        _add("ACORD_131",
-             "ACORD 131 - Umbrella / Excess Liability",
-             trigger_weight=0.95,
-             trigger_reason="has_umbrella flag detected",
-             template_pending=True)
+        # Require at least one extracted umbrella fact OR the literal word "umbrella"
+        # in the raw text as a secondary confirmation. Prevents firing from broad
+        # flag definitions when "excess" or "SIR" appear without an umbrella section.
+        _umb_facts = any([
+            _fv(facts, "umbrella_limit"),
+            _fv(facts, "umbrella_attachment_point"),
+            _fv(facts, "umbrella_sir"),
+        ])
+        _umb_kw_in_text = any(kw in text for kw in ("umbrella", "excess liability"))
+        if _umb_facts or _umb_kw_in_text:
+            _add("ACORD_131",
+                 "ACORD 131 - Umbrella / Excess Liability",
+                 trigger_weight=0.95,
+                 trigger_reason="has_umbrella flag detected with supporting umbrella data",
+                 template_pending=True)
 
-    if (flags.get("has_property_coverage")
-            or any(kw in search for kw in _140_kw)):
+    _has_prop = flags.get("has_property_coverage")
+    if _has_prop is True or (_has_prop is None and any(kw in search for kw in _140_kw)):
         _prop_reason = (
             "has_property_coverage flag detected"
-            if flags.get("has_property_coverage")
+            if _has_prop is True
             else "property / COPE keywords detected in document text"
         )
         _add("ACORD_140",
@@ -498,85 +508,90 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              trigger_reason="has_certificate_request or is_certificate_doc flag detected")
 
     if flags.get("is_contractor"):
-        _add("ACORD_186",
-             "ACORD 186 - Contractors Supplemental Application",
-             trigger_weight=0.95,
-             trigger_reason="is_contractor flag detected")
+        # Require at least one contractor-specific fact or keyword in ops/text
+        # as secondary confirmation — prevents firing when the LLM sets
+        # is_contractor from incidental construction mentions.
+        _186_confirm_kw = {
+            "general contractor", "roofing", "excavation", "demolition",
+            "subcontractor", "plumbing", "electrical", "contractor",
+        }
+        _contractor_confirmed = (
+            _fv(facts, "contractor_type")
+            or _fv(facts, "percent_subcontracted")
+            or any(kw in ops for kw in _186_confirm_kw)
+            or any(kw in text for kw in {"general contractor", "roofing contractor",
+                                          "licensed contractor", "subcontractor"})
+        )
+        if _contractor_confirmed:
+            _add("ACORD_186",
+                 "ACORD 186 - Contractors Supplemental Application",
+                 trigger_weight=0.95,
+                 trigger_reason="is_contractor flag with contractor trade confirmed in document")
 
     # ── Keyword / rule-based (trigger_weight 0.85) ────────────────────────────
 
-    # ACORD 137 - Commercial Auto Coverages / Limits (state-variant aware)
-    _auto_137_kw = {
-        "commercial auto", "business auto", "truckers", "motor carrier",
-        "fleet", "vehicle schedule", "auto liability",
-        "hired auto", "hired autos", "non-owned", "non owned",
-        "trailer interchange", "uninsured motorist", "acord 137",
-    }
-    has_137_auto_signal = (
-        flags.get("has_auto_coverage")
-        or flags.get("has_commercial_auto")
-        or flags.get("has_auto_liability")
-        or flags.get("has_truckers_coverage")
-        or flags.get("has_motor_carrier_coverage")
-        or any(kw in search for kw in _auto_137_kw)
-    )
-    if has_137_auto_signal:
-        primary_state = _infer_primary_state(facts) or _infer_primary_state_from_flags(flags)
-        if primary_state in _SUPPORTED_137_138_STATES:
-            form_id = f"ACORD_137_{primary_state}"
-            _add(form_id,
-                 f"ACORD 137 {primary_state} - Commercial Auto Coverages / Limits Section",
+    # ACORD 137 (CA/CO) — Commercial Auto Coverages / Limits Section.
+    # These are state-specific section forms. They only apply when the
+    # insured's primary state of operations is California or Colorado.
+    # If the state cannot be confidently resolved (or is anything else), we
+    # do NOT recommend either variant — falling back to BOTH CA+CO produced
+    # spurious dual recommendations on every submission.
+    _primary_state_137_138 = _infer_primary_state(facts) or _infer_primary_state_from_flags(flags)
+    if _primary_state_137_138 in _SUPPORTED_137_138_STATES:
+        _auto_137_kw = {
+            "trailer interchange", "uninsured motorist",
+            "truckers", "motor carrier", "acord 137",
+        }
+        _has_auto_137_flag = (
+            flags.get("has_auto_coverage")
+            or flags.get("has_commercial_auto")
+            or flags.get("has_auto_liability")
+            or flags.get("has_truckers_coverage")
+            or flags.get("has_motor_carrier_coverage")
+        )
+        # Allow keyword fallback only when no auto flag was extracted at all.
+        _all_auto_flags_absent = all(
+            flags.get(k) is None for k in (
+                "has_auto_coverage", "has_commercial_auto", "has_auto_liability",
+                "has_truckers_coverage", "has_motor_carrier_coverage",
+            )
+        )
+        if _has_auto_137_flag or (_all_auto_flags_absent
+                                  and any(kw in search for kw in _auto_137_kw)):
+            _form_id_137 = f"ACORD_137_{_primary_state_137_138}"
+            _add(_form_id_137,
+                 f"ACORD 137 {_primary_state_137_138} - Commercial Auto Coverages / Limits Section",
                  trigger_weight=0.85,
-                 trigger_reason=f"commercial auto coverage signals detected (inferred state: {primary_state})")
-        elif primary_state is None:
-            _add("ACORD_137_CA",
-                 "ACORD 137 CA - Commercial Auto Coverages / Limits Section",
-                 trigger_weight=0.65,
-                 trigger_reason="commercial auto coverage signals detected (state not detected, offering California variant)",
-                 needs_state_confirmation=True)
-            _add("ACORD_137_CO",
-                 "ACORD 137 CO - Commercial Auto Coverages / Limits Section",
-                 trigger_weight=0.65,
-                 trigger_reason="commercial auto coverage signals detected (state not detected, offering Colorado variant)",
-                 needs_state_confirmation=True)
+                 trigger_reason=f"commercial auto coverage signals detected (state: {_primary_state_137_138})")
 
-    # ACORD 138 - Garage and Dealers Coverages / Limits (state-variant aware)
-    _garage_138_kw = {
-        "garage liability", "garage keepers", "garagekeepers",
-        "auto dealer", "auto dealership", "dealer plates", "dealers",
-        "repair shop", "service garage", "dealer operations",
-        "garage operations", "autos left for service", "safe keeping",
-        "transportation plates", "acord 138",
-    }
-    has_138_garage_signal = (
-        flags.get("has_garage_operations")
-        or flags.get("has_auto_dealer_exposure")
-        or flags.get("has_garagekeepers_coverage")
-        or flags.get("has_garage_coverage")
-        or flags.get("has_dealers_coverage")
-        or flags.get("has_garage_liability")
-        or flags.get("has_garage_keepers")
-        or any(kw in search for kw in _garage_138_kw)
-    )
-    if has_138_garage_signal:
-        primary_state = _infer_primary_state(facts) or _infer_primary_state_from_flags(flags)
-        if primary_state in _SUPPORTED_137_138_STATES:
-            form_id = f"ACORD_138_{primary_state}"
-            _add(form_id,
-                 f"ACORD 138 {primary_state} - Garage and Dealers Coverages / Limits Section",
+        _garage_138_kw = {
+            "garage liability", "garage keepers", "garagekeepers",
+            "auto dealership", "dealer plates", "dealer operations",
+            "autos left for service", "transportation plates", "acord 138",
+        }
+        _has_138_garage_flag = (
+            flags.get("has_garage_operations")
+            or flags.get("has_auto_dealer_exposure")
+            or flags.get("has_garagekeepers_coverage")
+            or flags.get("has_garage_coverage")
+            or flags.get("has_dealers_coverage")
+            or flags.get("has_garage_liability")
+            or flags.get("has_garage_keepers")
+        )
+        _all_garage_flags_absent = all(
+            flags.get(k) is None for k in (
+                "has_garage_operations", "has_auto_dealer_exposure",
+                "has_garagekeepers_coverage", "has_garage_coverage",
+                "has_dealers_coverage", "has_garage_liability", "has_garage_keepers",
+            )
+        )
+        if _has_138_garage_flag or (_all_garage_flags_absent
+                                    and any(kw in search for kw in _garage_138_kw)):
+            _form_id_138 = f"ACORD_138_{_primary_state_137_138}"
+            _add(_form_id_138,
+                 f"ACORD 138 {_primary_state_137_138} - Garage and Dealers Coverages / Limits Section",
                  trigger_weight=0.85,
-                 trigger_reason=f"garage/dealers coverage signals detected (inferred state: {primary_state})")
-        elif primary_state is None:
-            _add("ACORD_138_CA",
-                 "ACORD 138 CA - Garage and Dealers Coverages / Limits Section",
-                 trigger_weight=0.65,
-                 trigger_reason="garage/dealers coverage signals detected (state not detected, offering California variant)",
-                 needs_state_confirmation=True)
-            _add("ACORD_138_CO",
-                 "ACORD 138 CO - Garage and Dealers Coverages / Limits Section",
-                 trigger_weight=0.65,
-                 trigger_reason="garage/dealers coverage signals detected (state not detected, offering Colorado variant)",
-                 needs_state_confirmation=True)
+                 trigger_reason=f"garage/dealers coverage signals detected (state: {_primary_state_137_138})")
 
     # ACORD 101 — Additional Remarks (complex trigger logic unchanged)
     _101_reasons: List[str] = []
@@ -624,7 +639,17 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         "builders risk", "builder's risk", "course of construction",
         "construction loan", "ground-up construction",
     }
-    if flags.get("has_builders_risk") or any(kw in text for kw in _133_kw):
+    _has_br = flags.get("has_builders_risk")
+    _br_kw_in_text = any(kw in text for kw in _133_kw)
+    # When triggered by flag alone, require at least one extracted builders-risk
+    # fact as corroboration. This prevents the flag from firing on general
+    # contractor submissions that mention "construction" without an active project.
+    _br_facts = any([
+        _fv(facts, "builders_risk_project_address"),
+        _fv(facts, "builders_risk_project_cost"),
+        _fv(facts, "builders_risk_completion_date"),
+    ])
+    if _br_kw_in_text or (_has_br and (_br_facts or _br_kw_in_text)):
         _add("ACORD_133",
              "ACORD 133 - Builders Risk Application",
              trigger_weight=0.85,
@@ -632,13 +657,22 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              template_pending=True)
 
     _160_kw = {
-        "floater", "inland marine", "contractor's equipment", "cargo",
-        "motor truck", "transit", "equipment schedule", "motor truck cargo",
-        "installation floater", "accounts receivable", "serial number",
-        "scheduled equipment", "contractors equipment", "tool floater",
-        "installation risk", "equipment breakdown",
+        "inland marine", "contractor's equipment", "contractors equipment",
+        "motor truck cargo", "equipment schedule", "installation floater",
+        "scheduled equipment", "tool floater", "installation risk",
+        "equipment breakdown",
     }
-    if flags.get("has_inland_marine") or any(kw in text for kw in _160_kw):
+    _has_im = flags.get("has_inland_marine")
+    _im_kw_in_text = any(kw in text for kw in _160_kw)
+    _im_facts = any([
+        _fv(facts, "inland_marine_total_value"),
+        _fv(facts, "inland_marine_transit_limit"),
+        bool(_fv(facts, "inland_marine_items")),
+    ])
+    # Flag-alone is not sufficient — require keyword or extracted inland marine
+    # data as corroboration (prevents firing when the flag was set on a brief
+    # incidental mention in ops description without actual IM coverage).
+    if _im_kw_in_text or (_has_im is True and _im_facts) or (_has_im is None and _im_kw_in_text):
         _add("ACORD_160",
              "ACORD 160 - Inland Marine Application",
              trigger_weight=0.85,
@@ -649,29 +683,20 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
     # once the correct form template is added to forms_database. ACORD 137 is a commercial
     # AUTO form and must NOT be used for crime/fidelity coverage detection.
 
-    # ACORD 138 — Cyber / Network Security
-    _138_cyber_kw = {
-        "cyber", "data breach", "network security", "ransomware",
-        "cyber liability", "privacy liability", "pci", "phi",
-        "cyber insurance", "acord 138",
-    }
-    if (not _already_matched("ACORD_138_CA")
-            and (flags.get("has_cyber") or any(kw in search for kw in _138_cyber_kw))):
-        _add("ACORD_138_CA",
-             "ACORD 138 CA - Garage and Dealers Coverages / Limits Section",
-             trigger_weight=0.85,
-             trigger_reason="cyber/data breach coverage signals detected",
-             template_pending=True)
-        _add("ACORD_138_CO",
-             "ACORD 138 CO - Garage and Dealers Coverages / Limits Section",
-             trigger_weight=0.85,
-             trigger_reason="cyber/data breach coverage signals detected",
-             template_pending=True)
+    # ACORD 138 (national) — Cyber / Network Security: intentionally out of
+    # scope for now. The state-variant ACORD 138 CA/CO forms in the form DB
+    # cover Garage and Dealers (not Cyber), so cyber signals must NOT trigger
+    # them — that produced wrong-form recommendations. Crime (ACORD 137) is
+    # likewise out of scope. Both remain pending until proper national
+    # templates are added.
 
-    # ACORD 186 — flag-matched above; keyword fallback for GL-present submissions
+    # ACORD 186 — flag-matched above; keyword fallback for GL-present submissions.
+    # Keywords narrowed to construction-trade signals that are unlikely to appear
+    # incidentally on a non-contractor submission. "contractor"/"subcontract"
+    # alone are too broad (appear on most COIs as endorsement requests).
     _186_kw = {
-        "contractor", "subcontract", "roofing", "demolition", "scaffolding",
-        "blasting", "general contractor", "subcontractor", "licensed contractor",
+        "roofing", "demolition", "scaffolding",
+        "blasting", "general contractor", "licensed contractor",
         "excavation", "underground", "crane", "rigging", "pile driving",
         "residential construction", "commercial construction",
     }
@@ -699,9 +724,10 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              trigger_reason="property coverage with multiple locations or detailed valuation/coinsurance data detected",
              template_pending=True)
 
-    # ACORD 25 keyword path — only if not already flag-matched above
+    # ACORD 25 keyword path — only if not already flag-matched above.
+    # "coi" removed: appears in filenames, banners, and unrelated abbreviations.
     _25_kw = {
-        "certificate holder", "certificate of liability", "coi",
+        "certificate holder", "certificate of liability",
         "proof of insurance", "evidence of liability", "acord 25",
         "liability certificate", "additional insured certificate",
     }

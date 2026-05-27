@@ -9,5 +9,15 @@
   "matching_keywords": ["builder", "builders risk", "under construction", "renovation", "project value", "completion date"],
   "coverage_types": ["property"],
   "policy_types": ["commercial"],
-  "tier1_minimum_fields": []
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "effective_date",
+    "builders_risk_project_address",
+    "builders_risk_project_cost",
+    "builders_risk_completion_date",
+    "builders_risk_construction_type",
+    "builders_risk_owner_name",
+    "builders_risk_insured_interest",
+    "builders_risk_contractor_name"
+  ]
 }

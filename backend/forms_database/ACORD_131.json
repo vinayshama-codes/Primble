@@ -8,5 +8,15 @@
   "matching_flags": ["has_umbrella"],
   "matching_keywords": ["umbrella","excess","attachment point","self-insured retention","SIR","underlying policy","excess liability"],
   "coverage_types": ["umbrella"],
-  "policy_types": ["commercial"]
+  "policy_types": ["commercial"],
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "effective_date",
+    "expiration_date",
+    "umbrella_limit",
+    "umbrella_sir",
+    "umbrella_attachment_point",
+    "underlying_policies",
+    "employers_liability_limits"
+  ]
 }

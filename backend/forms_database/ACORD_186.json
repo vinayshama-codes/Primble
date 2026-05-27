@@ -9,5 +9,16 @@
   "matching_keywords": ["contractor", "subcontract", "roofing", "demolition", "scaffolding", "blasting", "general contractor"],
   "coverage_types": ["general_liability"],
   "policy_types": ["commercial"],
-  "tier1_minimum_fields": []
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "effective_date",
+    "contractor_type",
+    "percent_subcontracted",
+    "contractor_residential_pct",
+    "contractor_commercial_pct",
+    "contractor_high_hazard_ops",
+    "contractor_license_number",
+    "operations_description",
+    "total_payroll"
+  ]
 }

@@ -9,5 +9,10 @@
   "matching_keywords": ["additional remarks", "supplemental", "narrative"],
   "coverage_types": ["general_liability", "property", "auto", "workers_comp", "umbrella"],
   "policy_types": ["commercial"],
-  "tier1_minimum_fields": []
+  "tier1_minimum_fields": [
+    "applicant_name",
+    "policy_number",
+    "effective_date",
+    "additional_remarks_text"
+  ]
 }
