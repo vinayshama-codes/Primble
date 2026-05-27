@@ -91,7 +91,8 @@
       "Bash(grep -E \"\\\\.\\(py|yaml\\)$\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('services/form_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(ls *fieldmap*.json)",
-      "Bash(ls deprecated/)"
+      "Bash(ls deprecated/)",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in ['backend/services/sqs_service.py','backend/services/extraction_pipeline.py','backend/services/form_service.py','backend/routes/form_routes.py','backend/worker.py']]; print\\('OK'\\)\")"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",

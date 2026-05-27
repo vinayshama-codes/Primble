@@ -835,6 +835,8 @@ def process_single_form(form_meta: dict, session: dict) -> dict:
         form_id=form_meta["form_id"],
         schema_size=len(schema),
         fields_mapped=sum(1 for v in mapped.values() if v is not None and str(v).strip() not in ("", "null", "None")),
+        # Spec: producer-edits=1.00, AI-high=0.85, AI-low=0.50.
+        confidence_dict=confidence,
     )
     pdf_bytes = fill_pdf(tpl, mapped, confidence)
     return {

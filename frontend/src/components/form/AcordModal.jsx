@@ -20,6 +20,14 @@ const SQS_WEIGHTS = {
 };
 
 const PACKAGE_PILLAR_LABELS = {
+  // Spec-compliant pillar keys returned by calculate_package_sqs.
+  structural_completeness: "Structural Completeness",
+  exposure_consistency:    "Exposure Consistency",
+  property_integrity:      "Property Integrity",
+  loss_history_alignment:  "Loss History",
+  umbrella_limit_adequacy: "Umbrella Adequacy",
+  narrative_quality:       "Narrative Quality",
+  // Legacy keys (older session payloads) kept for backward-compat display.
   data_integrity: "Data Integrity",
   exposure_cope:  "Exposure & COPE",
   consistency:    "Cross-Form Consistency",

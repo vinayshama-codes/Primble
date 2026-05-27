@@ -293,12 +293,34 @@ async def _process_form_generation_job(job: dict, queue) -> None:
                 seen_msgs.add(msg)
                 cross_issues_deduped.append(issue)
 
-        await upd_processing_session(session_id, {
+        # Compute package SQS as the average of per-form SQS scores so async
+        # (worker) sessions get the same package-level scoring shown to sync
+        # users. Essential tier uses the single top recommended form which the
+        # average naturally reduces to.
+        _sqs_list = [r["sqs"] for r in results.values() if r.get("sqs")]
+        _scores   = [s.get("sqs_score") for s in _sqs_list if s.get("sqs_score") is not None]
+        _avg      = int(round(sum(_scores) / len(_scores))) if _scores else 0
+        _first    = _sqs_list[0] if _sqs_list else {}
+        package_sqs = {
+            "package_sqs_score": _avg,
+            "tier":              _first.get("tier"),
+            "pillars":           _first.get("breakdown", {}),
+            "weights_used":      _first.get("breakdown", {}),
+            "weights_version":   "spec_compliant_v2.1.0",
+            "form_ids":          list(results.keys()),
+            "model_version":     SQS_MODEL_VERSION,
+        } if _sqs_list else None
+
+        _update_payload = {
             "selected_form_ids": form_ids,
             "generated_forms":   results,
             "active_form_id":    form_ids[0] if form_ids else None,
             "cross_issues_last": cross_issues_deduped,
-        })
+        }
+        if package_sqs is not None:
+            _update_payload["package_sqs"] = package_sqs
+
+        await upd_processing_session(session_id, _update_payload)
 
         # Log audit recommendations
         for fid, r in results.items():

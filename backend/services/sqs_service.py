@@ -66,6 +66,10 @@ TIER2_FIELDS = {
     "naics_code":             "NAICS / industry code",
     "num_claims":             "Number of prior claims",
     "total_payroll":          "Annual payroll",
+    # Spec ACORD 130: X-mod, payroll period, owner/officer exclusions are required for WC.
+    "wc_xmod":                "WC experience modification factor (X-mod)",
+    "wc_payroll_period":      "WC payroll period",
+    "wc_officer_exclusions":  "WC owner/officer inclusion/exclusion",
 }
 
 
@@ -546,11 +550,14 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
 
     wc_pay  = _to_float(_fv(facts, "wc_payroll"))
     tot_pay = _to_float(_fv(facts, "total_payroll"))
-    if wc_pay and tot_pay and tot_pay > 0:
-        diff_pct = abs(wc_pay - tot_pay) / tot_pay
-        if diff_pct > 0.20:
-            # Spec: hard stop — WC payroll must reconcile with total payroll
-            issues.append({"type": "hard_stop", "message": f"WC payroll differs from total payroll by {diff_pct * 100:.0f}% — reconcile or add ACORD 101 explanation"})
+    # NOTE: WC payroll reconciliation is owned by cross_form_validator._check_wc_payroll_reconciliation
+    # (gates on ACORD_130 trigger + handles ACORD 186 subcontracting reconciliation).
+    # Commented out here to avoid duplicate hard_stops in the soft/hard stop streams.
+    # if wc_pay and tot_pay and tot_pay > 0:
+    #     diff_pct = abs(wc_pay - tot_pay) / tot_pay
+    #     if diff_pct > 0.20:
+    #         # Spec: hard stop — WC payroll must reconcile with total payroll
+    #         issues.append({"type": "hard_stop", "message": f"WC payroll differs from total payroll by {diff_pct * 100:.0f}% — reconcile or add ACORD 101 explanation"})
 
     rev = _to_float(_fv(facts, "total_revenue"))
     if rev and tot_pay and tot_pay > 0 and rev > 0:
@@ -574,31 +581,34 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
                 "message": "Hired/Non-Owned exposure detected but coverage symbols not defined.",
             })
 
-    locs_125 = _fv(facts, "locations") or []
-    locs_140 = (_fv(facts, "property_locations") or []) if flags.get("has_property_coverage") else []
-    if isinstance(locs_125, list) and isinstance(locs_140, list):
-        n, m = len(locs_125), len(locs_140)
-        if n > 0 and m > 0:
-            diff = abs(n - m)
-            if diff == 1:
-                issues.append({
-                    "type":      "warning",
-                    "field":     "location_count",
-                    "125_count": n,
-                    "140_count": m,
-                    "severity":  "warning",
-                    "message":   "Location count mismatch between application and property schedule (off by 1 — verify)",
-                })
-            elif diff > 1:
-                # Spec: hard stop for > 1 location mismatch
-                issues.append({
-                    "type":      "hard_stop",
-                    "field":     "location_count",
-                    "125_count": n,
-                    "140_count": m,
-                    "severity":  "hard_stop",
-                    "message":   "Location count mismatch between application and property schedule — must reconcile or add ACORD 101",
-                })
+    # NOTE: Location-count reconciliation is owned by cross_form_validator._check_location_address_reconciliation
+    # (gates on ACORD_140 trigger which matches the spec wording "ACORD 125 ↔ ACORD 140").
+    # Commented out here to avoid duplicate stops in the hard/soft stream.
+    # locs_125 = _fv(facts, "locations") or []
+    # locs_140 = (_fv(facts, "property_locations") or []) if flags.get("has_property_coverage") else []
+    # if isinstance(locs_125, list) and isinstance(locs_140, list):
+    #     n, m = len(locs_125), len(locs_140)
+    #     if n > 0 and m > 0:
+    #         diff = abs(n - m)
+    #         if diff == 1:
+    #             issues.append({
+    #                 "type":      "warning",
+    #                 "field":     "location_count",
+    #                 "125_count": n,
+    #                 "140_count": m,
+    #                 "severity":  "warning",
+    #                 "message":   "Location count mismatch between application and property schedule (off by 1 — verify)",
+    #             })
+    #         elif diff > 1:
+    #             # Spec: hard stop for > 1 location mismatch
+    #             issues.append({
+    #                 "type":      "hard_stop",
+    #                 "field":     "location_count",
+    #                 "125_count": n,
+    #                 "140_count": m,
+    #                 "severity":  "hard_stop",
+    #                 "message":   "Location count mismatch between application and property schedule — must reconcile or add ACORD 101",
+    #             })
 
     return issues
 
@@ -641,17 +651,24 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
             "FEIN mismatch across uploaded documents. Submission blocked."
         )
 
+    # Spec: misaligned dates → hard stop UNLESS explained (ACORD 101 narrative).
+    _dates_explained = any(
+        bool(_fv(d["facts"], "acord101_remarks") or _fv(d["facts"], "policy_period_explanation"))
+        for d in docs
+    )
+    _date_prefix = "[warning]" if _dates_explained else "[hard_stop]"
+
     eff_vals = {_fv(d["facts"], "effective_date") for d in docs if _fv(d["facts"], "effective_date")}
     if len(eff_vals) > 1:
         issues.append(
-            "[hard_stop] code=date_conflict "
+            f"{_date_prefix} code=date_conflict "
             "Policy date mismatch across documents. Submission blocked unless explained."
         )
 
     exp_vals = {_fv(d["facts"], "expiration_date") for d in docs if _fv(d["facts"], "expiration_date")}
     if len(exp_vals) > 1:
         issues.append(
-            "[hard_stop] code=expiration_conflict "
+            f"{_date_prefix} code=expiration_conflict "
             "Policy expiration date mismatch across documents. Submission blocked unless explained."
         )
 
@@ -690,26 +707,40 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
 # ── Confidence-weighted fill rate ────────────────────────────────────────────
 
 CONFIDENCE_SCORE = {
-    "deterministic": 1.00,
-    "filled":        1.00,
-    "ai_high":       0.85,
-    "ai_low":        0.50,
-    None:            0.00,
+    # Producer-verified / deterministic fills score 1.00.
+    "deterministic":    1.00,
+    "filled":           1.00,
+    "client_arq":       1.00,    # producer-/client-supplied via ARQ
+    # AI-mapped fills — high vs low confidence per spec (producer=1.00, AI-high=0.85, AI-low=0.50).
+    "ai_high":          0.85,
+    "ai_low":           0.50,
+    "low_confidence":   0.50,    # actual label emitted by pdf_service for GPT-inferred fields
+    # Empty / required-but-missing fields contribute nothing.
+    "missing_required": 0.00,
+    None:               0.00,
 }
 
 
 def confidence_fill_rate(mapped_data: dict, confidence_dict: dict) -> int:
-    """Calculate confidence-weighted fill rate."""
-    total = len(mapped_data)
-    if total == 0:
+    """Calculate confidence-weighted fill rate.
+
+    Spec: producer-edits=1.00, AI-high=0.85, AI-low=0.50. Denominator is the
+    count of *filled* fields so the score reflects the average confidence of
+    what was filled, not how big the template happens to be.
+    """
+    filled_items = [
+        field for field, val in mapped_data.items()
+        if val is not None and str(val).strip() not in ("", "null", "None")
+    ]
+    filled_count = len(filled_items)
+    if filled_count == 0:
         return 0
-    
+
     weighted = sum(
         CONFIDENCE_SCORE.get(confidence_dict.get(field), 0.0)
-        for field, val in mapped_data.items()
-        if val is not None and str(val).strip() not in ("", "null", "None")
+        for field in filled_items
     )
-    return int((weighted / total) * 100)
+    return int((weighted / filled_count) * 100)
 
 
 # ── Loss history integrity coefficient ───────────────────────────────────────
@@ -729,7 +760,13 @@ def loss_integrity_coefficient(
 
 
 def calculate_p4_loss_history(facts: dict, flags: dict) -> Tuple[int, List[str]]:
-    """Loss History Integrity pillar with coefficient-based scoring."""
+    """Loss History Integrity pillar with coefficient-based scoring.
+
+    Spec: "Lost History Alignment — 15% (claims vs exposures)". In addition to
+    the recency/years coefficient, compare claim activity to exposure size
+    (revenue/payroll) and penalise loss frequency that is high relative to
+    exposure.
+    """
     λ = loss_integrity_coefficient(
         loss_history_years = _to_int(_fv(facts, "loss_history_years")) or 0,
         report_age_days    = _to_int(_fv(facts, "loss_run_age_days")) or 365
@@ -737,17 +774,46 @@ def calculate_p4_loss_history(facts: dict, flags: dict) -> Tuple[int, List[str]]
     has_carrier = bool(_fv(facts, "prior_carrier"))
 
     if λ >= 0.85 and has_carrier:
-        return 100, []
+        base_score, recs = 100, []
     elif λ >= 0.85:
-        return 80, ["Prior carrier name missing"]
+        base_score, recs = 80, ["Prior carrier name missing"]
     elif λ >= 0.70:
-        return 65, ["Loss runs older than recommended — verify recency"]
+        base_score, recs = 65, ["Loss runs older than recommended — verify recency"]
     elif λ >= 0.50:
-        return 40, ["Loss history incomplete — fewer than 3 years provided"]
+        base_score, recs = 40, ["Loss history incomplete — fewer than 3 years provided"]
     elif λ > 0:
-        return 20, ["Loss history critically incomplete or stale"]
+        base_score, recs = 20, ["Loss history critically incomplete or stale"]
     else:
         return 10, ["No loss history provided — required for carrier submission"]
+
+    # Spec: claims vs exposures. Penalise when claim frequency is high
+    # relative to revenue/payroll exposure base.
+    num_claims = _to_int(_fv(facts, "num_claims"))
+    total_incurred = _to_float(_fv(facts, "total_incurred"))
+    exposure = _to_float(_fv(facts, "total_revenue")) or _to_float(_fv(facts, "total_payroll"))
+    if num_claims is not None and num_claims > 0 and exposure and exposure > 0:
+        # Claims per $1M exposure
+        claims_per_m = num_claims / (exposure / 1_000_000.0)
+        if claims_per_m > 2.0:
+            base_score = max(0, base_score - 25)
+            recs.append(
+                f"High loss frequency: {num_claims} claims on ${exposure:,.0f} exposure "
+                f"(~{claims_per_m:.1f}/$1M)"
+            )
+        elif claims_per_m > 1.0:
+            base_score = max(0, base_score - 10)
+            recs.append(
+                f"Elevated loss frequency relative to exposure ({claims_per_m:.1f} claims/$1M)"
+            )
+    if total_incurred and exposure and exposure > 0:
+        loss_ratio = total_incurred / exposure
+        if loss_ratio > 0.10:
+            base_score = max(0, base_score - 15)
+            recs.append(
+                f"Loss ratio {loss_ratio*100:.1f}% exceeds 10% of exposure — review with underwriter"
+            )
+
+    return base_score, recs
 
 
 # ── LOB inference ─────────────────────────────────────────────────────────────
@@ -890,35 +956,42 @@ def calculate_package_sqs(
     else:
         p5 = 100
 
-    # P6 — Narrative Quality
-    ops = _fv(facts, "operations_description") or ""
+    # P6 — Narrative Quality (spec: ACORD 101 clarity). Prefer ACORD 101 remarks
+    # when present; fall back to operations_description.
+    remarks = _fv(facts, "acord101_remarks") or ""
+    ops     = _fv(facts, "operations_description") or ""
+    text    = remarks if remarks else ops
     p6 = min(100, int(
-        (min(len(ops), 300) / 300) * 60 +
-        (20 if any(w in ops.lower() for w in ["safety", "certified", "osha", "protocol"]) else 0) +
-        (20 if len(ops) > 100 else 0)
+        (min(len(text), 300) / 300) * 60 +
+        (20 if any(w in text.lower() for w in ["safety", "certified", "osha", "protocol"]) else 0) +
+        (20 if len(text) > 100 else 0)
     ))
 
-    # Cross-form consistency penalty (applied to P2)
+    # Cross-form consistency penalty (applied to P2 for pillar display only)
     hard_cross = [i for i in cross_issues if i.get("type") == "hard_stop"]
     warn_cross = [i for i in cross_issues if i.get("type") == "warning"]
     p2 = max(0, p2 - len(hard_cross) * 25 - len(warn_cross) * 10)
 
-    # Weighted package score using spec-compliant weights
-    raw = int(
-        p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] +
-        p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"] +
-        p3 * SPEC_PILLAR_WEIGHTS["property_integrity"] +
-        p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"] +
-        p5 * SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"] +
-        p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
-    )
-
-    # Hard stop penalty
-    if hard_stops or any(hard_cross):
-        raw = min(raw, 60)
-    elif soft_stops:
-        raw = min(raw, 85)
-    raw = max(0, raw)
+    # Package SQS = average of per-form SQS scores (product directive).
+    # The 6 pillars above are still computed and surfaced for display, but the
+    # headline number the user sees must be the mean of the forms in the package.
+    _form_scores = [
+        r.get("sqs_score") for r in (form_results or [])
+        if isinstance(r, dict) and isinstance(r.get("sqs_score"), (int, float))
+    ]
+    if _form_scores:
+        raw = int(round(sum(_form_scores) / len(_form_scores)))
+    else:
+        # Fallback for pre-generation calls: use the weighted pillars.
+        raw = int(
+            p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] +
+            p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"] +
+            p3 * SPEC_PILLAR_WEIGHTS["property_integrity"] +
+            p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"] +
+            p5 * SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"] +
+            p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
+        )
+    raw = max(0, min(100, raw))
 
     # Tier determination — spec: 90 / 80 / 70 / 60 / <60
     tier = (
@@ -929,25 +1002,33 @@ def calculate_package_sqs(
         "Not Ready"
     )
 
-    # SQS history management
-    history = session_data.get("sqs_history", [])
+    # SQS history management — dedup adjacent entries with same (stage, score)
+    # so repeated calls don't pollute history; keep the earliest entry for delta.
+    history = list(session_data.get("sqs_history", []))
     stage = calculation_stage
     timestamp = datetime.utcnow().isoformat() + "Z"
 
-    history.append({
+    new_entry = {
         "at": timestamp,
         "score": raw,
         "stage": stage,
         "model_version": SQS_MODEL_VERSION,
         "weights_version": "spec_compliant_v2.1.0",
-    })
+    }
+    if not history or (history[-1].get("score") != raw or history[-1].get("stage") != stage):
+        history.append(new_entry)
 
-    # Delta calculation
-    delta = raw - history[0]["score"] if len(history) > 1 else 0
+    # Delta calculation — prefer the genuine "initial_extract" baseline.
+    _baseline = next(
+        (h for h in history if h.get("stage") == "initial_extract"),
+        history[0] if history else None,
+    )
+    delta = (raw - _baseline["score"]) if (_baseline and len(history) > 1) else 0
 
     # Top recommendations — spec: Top-3 ranked risk drivers with actionable steps.
-    # Rank: pick the 3 lowest-scoring pillars (<90) and surface the most relevant
-    # missing field per pillar.
+    # When hard stops are present, surface a synthetic "hard_stops_present" entry
+    # first so the recommendation engine focuses on the cap rather than the
+    # lowest-scoring pillar (which may be unrelated to the actual blocker).
     _pillar_scores = {
         "structural_completeness": p1,
         "exposure_consistency":    p2,
@@ -965,7 +1046,17 @@ def calculate_package_sqs(
         "loss_history_alignment":  list(p4_recs),
     }
     top_recs: List[dict] = []
+    if hard_stops or any(hard_cross):
+        _hs_list = list(hard_stops) + [i.get("message", "") for i in hard_cross if i.get("message")]
+        top_recs.append({
+            "pillar":  "hard_stops_present",
+            "score":   0,
+            "action":  _hs_list[0] if _hs_list else "Resolve hard stops to lift the SQS cap",
+            "missing": _hs_list[:3],
+        })
     for pillar, score in _ranked_pillars:
+        if len(top_recs) >= 3:
+            break
         miss_list = _miss_by_pillar.get(pillar, [])
         action = miss_list[0] if miss_list else f"Improve {pillar.replace('_', ' ')}"
         top_recs.append({
@@ -1060,12 +1151,14 @@ def calculate_package_sqs_spec_compliant(
     else:
         p5 = 100
 
-    # P6: Narrative Quality
-    ops = _fv(facts, "operations_description") or ""
+    # P6: Narrative Quality (spec: ACORD 101 clarity). Prefer ACORD 101 remarks.
+    remarks = _fv(facts, "acord101_remarks") or ""
+    ops     = _fv(facts, "operations_description") or ""
+    text    = remarks if remarks else ops
     p6 = min(100, int(
-        (min(len(ops), 300) / 300) * 60 +
-        (20 if any(w in ops.lower() for w in ["safety", "certified", "osha", "protocol"]) else 0) +
-        (20 if len(ops) > 100 else 0)
+        (min(len(text), 300) / 300) * 60 +
+        (20 if any(w in text.lower() for w in ["safety", "certified", "osha", "protocol"]) else 0) +
+        (20 if len(text) > 100 else 0)
     ))
 
     # Calculate weighted score using SPEC-COMPLIANT weights
@@ -1513,6 +1606,101 @@ def calculate_sqs(
                     "priority": 2,
                 })
 
+    elif fid == "ACORD_127":
+        # Business Auto: vehicle schedule + liability limit + garaging + drivers + symbols.
+        chks = [
+            bool(_fv(facts, "auto_vin_schedule") or _fv(facts, "vehicle_schedule")),
+            bool(_fv(facts, "auto_liability_limit")),
+            bool(_fv(facts, "auto_garaging_address") or _fv(facts, "locations")),
+            bool(_fv(facts, "auto_drivers")),
+            bool(_fv(facts, "auto_covered_symbols")),
+            bool(_fv(facts, "auto_radius_of_operation")),
+        ]
+        struct = int(sum(chks) / len(chks) * 100)
+        if not _fv(facts, "auto_vin_schedule") and not _fv(facts, "vehicle_schedule"):
+            recommendations.append({
+                "rec_id":      "rec_auto_vin_schedule",
+                "field":       "auto_vin_schedule",
+                "component":   "structural_completeness",
+                "message":     "Provide a vehicle schedule (VIN, year, make/model)",
+                "type":        "missing_field",
+                "score_impact": 15,
+                "priority":    1,
+            })
+
+    elif fid == "ACORD_130":
+        # Workers Comp: payroll, class codes, X-mod, carrier, officer inclusions.
+        chks = [
+            bool(_fv(facts, "wc_payroll") or _fv(facts, "total_payroll")),
+            bool(_fv(facts, "wc_class_codes")),
+            bool(_fv(facts, "wc_xmod")),
+            bool(_fv(facts, "prior_carrier")),
+            bool(_fv(facts, "wc_officer_exclusions")),
+            bool(_fv(facts, "num_employees")),
+        ]
+        struct = int(sum(chks) / len(chks) * 100)
+        for fk, lbl in [
+            ("wc_payroll",            "WC payroll by class/state"),
+            ("wc_class_codes",        "WC class codes"),
+            ("wc_xmod",               "experience modification factor (X-mod)"),
+            ("wc_officer_exclusions", "owner/officer inclusion/exclusion"),
+        ]:
+            if not _fv(facts, fk):
+                recommendations.append({
+                    "rec_id":      f"rec_{fk}",
+                    "field":       fk,
+                    "component":   "structural_completeness",
+                    "message":     f"ACORD 130 requires {lbl}",
+                    "type":        "missing_field",
+                    "score_impact": 12,
+                    "priority":    1,
+                })
+
+    elif fid == "ACORD_131":
+        # Umbrella / Excess Liability: limit, SIR, underlying limits, EL.
+        chks = [
+            bool(_fv(facts, "umbrella_limit")),
+            bool(_fv(facts, "umbrella_sir") or _fv(facts, "umbrella_attachment_point")),
+            bool(_fv(facts, "gl_limits") or _fv(facts, "gl_each_occurrence")),
+            bool(_fv(facts, "auto_liability_limit")),
+            bool(_fv(facts, "employers_liability_limits")),
+        ]
+        struct = int(sum(chks) / len(chks) * 100)
+        if not _fv(facts, "umbrella_limit"):
+            recommendations.append({
+                "rec_id":      "rec_umbrella_limit",
+                "field":       "umbrella_limit",
+                "component":   "structural_completeness",
+                "message":     "Provide umbrella/excess limit",
+                "type":        "missing_field",
+                "score_impact": 20,
+                "priority":    1,
+            })
+
+    elif fid == "ACORD_28":
+        # Evidence of Property: policy number + dates + values + mortgagee.
+        chks = [
+            bool(_fv(facts, "applicant_name")),
+            bool(_fv(facts, "effective_date") and _fv(facts, "expiration_date")),
+            bool(_fv(facts, "policy_number")),
+            bool(_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")),
+            bool(_fv(facts, "mortgagee_name") or _fv(facts, "certificate_holder")),
+        ]
+        struct = int(sum(chks) / len(chks) * 100)
+
+    elif fid == "ACORD_101":
+        # Additional Remarks: free-text narrative is the primary value.
+        remarks_text = str(_fv(facts, "acord101_remarks") or _fv(facts, "remarks_text") or "")
+        chks = [
+            bool(_fv(facts, "applicant_name")),
+            bool(_fv(facts, "effective_date")),
+            bool(_fv(facts, "form_reference")),
+            len(remarks_text) >= 50,
+        ]
+        struct = int(sum(chks) / len(chks) * 100)
+        if len(remarks_text) >= 200:
+            struct = min(100, struct + 10)
+
     else:
         struct = conf_rate
 
@@ -1578,6 +1766,53 @@ def calculate_sqs(
                 "score_impact": 10,
                 "priority": 1,
             })
+
+    elif fid == "ACORD_127":
+        chks = [
+            bool(_fv(facts, "auto_liability_limit")),
+            bool(_fv(facts, "auto_liability_structure")),
+            bool(_fv(facts, "auto_covered_symbols")),
+            bool(_fv(facts, "auto_radius_of_operation")),
+            bool(_fv(facts, "auto_vin_schedule") or _fv(facts, "vehicle_schedule")),
+        ]
+        exp_score = int(sum(chks) / len(chks) * 100)
+
+    elif fid == "ACORD_130":
+        chks = [
+            bool(_fv(facts, "wc_payroll") or _fv(facts, "total_payroll")),
+            bool(_fv(facts, "wc_class_codes")),
+            bool(_fv(facts, "operations_description")),
+            bool(_fv(facts, "num_employees")),
+            bool(_fv(facts, "wc_xmod")),
+        ]
+        exp_score = int(sum(chks) / len(chks) * 100)
+
+    elif fid == "ACORD_131":
+        chks = [
+            bool(_fv(facts, "umbrella_limit")),
+            bool(_fv(facts, "gl_limits") or _fv(facts, "gl_each_occurrence")),
+            bool(_fv(facts, "auto_liability_limit")),
+            bool(_fv(facts, "umbrella_sir") or _fv(facts, "umbrella_attachment_point")),
+        ]
+        exp_score = int(sum(chks) / len(chks) * 100)
+
+    elif fid == "ACORD_28":
+        chks = [
+            bool(_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")),
+            bool(_fv(facts, "policy_number")),
+            bool(_fv(facts, "mortgagee_name") or _fv(facts, "certificate_holder")),
+            bool(_fv(facts, "effective_date") and _fv(facts, "expiration_date")),
+        ]
+        exp_score = int(sum(chks) / len(chks) * 100)
+
+    elif fid == "ACORD_101":
+        remarks_text = str(_fv(facts, "acord101_remarks") or _fv(facts, "remarks_text") or "")
+        chks = [
+            bool(_fv(facts, "form_reference")),
+            bool(_fv(facts, "explanation_of_yes_answers") or remarks_text),
+            len(remarks_text) >= 100,
+        ]
+        exp_score = int(sum(chks) / len(chks) * 100)
 
     else:
         chks = [
@@ -1743,11 +1978,14 @@ def calculate_sqs(
         umbrella_score = 100
     breakdown["umbrella_limit_adequacy"] = umbrella_score
 
-    # ── Narrative quality ─────────────────────────────────────────────────────
+    # ── Narrative quality (spec: ACORD 101 clarity) ───────────────────────────
+    # Prefer ACORD 101 remarks when present; fall back to operations description.
     narrative_score = min(tier2_score, 100)
-    ops_desc = str(_fv(facts, "operations_description") or "")
-    if len(ops_desc) > 50:
-        diversity = _token_diversity(ops_desc)
+    remarks_text    = str(_fv(facts, "acord101_remarks") or "")
+    ops_desc        = str(_fv(facts, "operations_description") or "")
+    narrative_text  = remarks_text if remarks_text else ops_desc
+    if len(narrative_text) > 50:
+        diversity = _token_diversity(narrative_text)
         bonus = 15 if diversity > 0.6 else 10
         narrative_score = min(100, narrative_score + bonus)
     breakdown["narrative_quality"] = narrative_score

@@ -744,12 +744,28 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                     updated_facts[fact_key] = val_str if val_str not in ("", "null", "None") else None
                     break
 
+        # Re-evaluate stops against the LATEST facts so SQS can actually improve
+        # when the producer fixes a field. Without this, stale hard_stops from
+        # extraction would keep capping the score regardless of user edits.
+        from services.cross_form_validator import (
+            run_cross_form_validation, split_cross_form_issues,
+        )
+        _re_hard, _re_soft = evaluate_stops(updated_facts, session.get("flags", {}))
+        _triggered_ids = set(session.get("selected_form_ids") or []) | {form_id}
+        _cf_issues = run_cross_form_validation(updated_facts, session.get("flags", {}), _triggered_ids)
+        _cf_hard, _cf_soft, _cf_advisories = split_cross_form_issues(_cf_issues)
+        fresh_hard_stops = list(_re_hard) + list(_cf_hard)
+        fresh_soft_stops = list(_re_soft) + list(_cf_soft)
+
+        # Pass confidence_dict so structural completeness reflects producer edits
+        # (1.00) vs AI-high (0.85) vs AI-low (0.50) per spec.
         sqs = calculate_sqs(
             facts=updated_facts, flags=session["flags"],
             mapped_data=current_state, form_schema=r.get("schema", {}),
             selected_form_ids=session.get("selected_form_ids", []),
-            hard_stops=session.get("hard_stops", []), soft_stops=session.get("soft_stops", []),
+            hard_stops=fresh_hard_stops, soft_stops=fresh_soft_stops,
             tier2_score=session.get("tier2_score", 50),
+            confidence_dict=confidence,
         )
 
         was_signed      = bool(r.get("signature_applied")) and len(cleared_sig_fields) == 0
@@ -831,7 +847,12 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             "field_state": current_state, "confidence": confidence, "sqs": sqs,
             "_pdf_cache_hash": cache_hash, "pdf_bytes": new_pdf_bytes, "signature_applied": new_sig_applied,
         })
-        await upd_processing_session(req.session_id, {"generated_forms": generated, "facts": updated_facts})
+        await upd_processing_session(req.session_id, {
+            "generated_forms": generated,
+            "facts": updated_facts,
+            "hard_stops": fresh_hard_stops,
+            "soft_stops": fresh_soft_stops,
+        })
         return JSONResponse({"success": True, "sqs": sqs, "confidence": confidence})
     except HTTPException:
         raise

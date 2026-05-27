@@ -204,8 +204,13 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
                 code      = code_part.split("=", 1)[1] if "=" in code_part else "conflict"
                 doc_conflicts.append({"code": code, "message": msg, "hard_stop": True})
                 hard_stops = list(hard_stops) + [msg]
+            elif issue.startswith("[warning]"):
+                # Spec: DBAs/address/LOB/revenue mismatches are warnings, not blockers.
+                rest = issue[len("[warning]"):].strip()
+                soft_stops = list(soft_stops) + [rest]
             else:
-                hard_stops = list(hard_stops) + [issue]
+                # Unknown prefix — treat as warning so it does not silently cap SQS at 60.
+                soft_stops = list(soft_stops) + [issue]
 
     # ── Cross-document source conflicts ─────────────────────────────────────
     # Surface field-level discrepancies between uploaded documents so the
