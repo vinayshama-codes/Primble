@@ -204,6 +204,12 @@ async def upload_declaration(
             elif ext == ".pdf" or ext in SUPPORTED_IMG:
                 all_paths.append(path)
 
+        # Release the in-memory upload buffer now that every file is on disk.
+        # The extraction pipeline reads from `all_paths`; the raw bytes are no
+        # longer needed and holding them costs up to ~500 MB of heap on a
+        # 10-file × 50 MB upload while the pipeline runs.
+        contents = None
+
         if not all_paths:
             raise HTTPException(400, "No supported files found")
 

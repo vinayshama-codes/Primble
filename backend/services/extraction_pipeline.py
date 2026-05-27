@@ -23,6 +23,7 @@ extra_forms_scored  : list[dict]
 unique_low_conf     : list
 available_forms     : list[dict]
 """
+import asyncio
 import json
 import logging
 import os
@@ -144,7 +145,12 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
         # PDFs; non-fatal if pdfplumber/camelot is unavailable.
         if path.lower().endswith(".pdf"):
             try:
-                tables = extract_tables_from_pdf(path)
+                # Run the sync pdfplumber/camelot table extraction in a thread so it
+                # does not freeze the asyncio event loop (would otherwise block
+                # health checks and other in-flight requests for the duration of
+                # table parsing on large PDFs).
+                _loop = asyncio.get_running_loop()
+                tables = await _loop.run_in_executor(None, extract_tables_from_pdf, path)
                 if tables:
                     text = text + _format_tables_as_text(tables)
                     logger.info(
