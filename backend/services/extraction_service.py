@@ -2292,4 +2292,20 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
         elif not _is_empty(v):
             mg[k] = v
 
+    # Deterministic re-derivation of WC monopolistic / multi-state flags
+    # (Decision_Tree.txt §137-150). The LLM may omit these, so we always
+    # cross-check from wc_payroll_by_state keys to avoid silent fail-open.
+    _MONOPOLISTIC_STATES = {"ND", "OH", "WA", "WY"}
+    wc_by_state = mf.get("wc_payroll_by_state")
+    if isinstance(wc_by_state, dict) and wc_by_state:
+        state_codes = set()
+        for raw_state in wc_by_state.keys():
+            code = str(raw_state or "").strip().upper()[:2]
+            if code:
+                state_codes.add(code)
+        if len(state_codes) > 1:
+            mg["wc_multi_state"] = True
+        if state_codes & _MONOPOLISTIC_STATES:
+            mg["wc_has_monopolistic_state"] = True
+
     return mf, mg

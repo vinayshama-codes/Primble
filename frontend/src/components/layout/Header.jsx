@@ -28,10 +28,10 @@ const SignOutIcon = () => (
 function DownloadsPill({ count, onUpgradeClick }) {
   const n = count ?? 0;
   const variant = n === 0 ? "gone" : n <= 1 ? "warn" : "ok";
-  const label   = n === 0 ? "No downloads left" : n === 1 ? "1 download left" : `${n} downloads left`;
+  const label   = n === 0 ? "No free downloads left" : n === 1 ? "1 free download left" : `${n} free downloads left`;
   return (
     <button
-      className={`dl-pill dl-pill--${variant}`}
+      className={`dl-pill dl-pill--${variant}`} 
       onClick={onUpgradeClick}
       title={n === 0 ? "Upgrade to get more downloads" : `${n} free downloads remaining`}
     >

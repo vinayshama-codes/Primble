@@ -74,7 +74,7 @@ Identity & Dates Integrity Checks: Underwriters expect absolute consistency in t
 SQS effect: ACORD 125 completeness = structural completeness portion (25%) of SQS. Missing 125 → hard stop, SQS = 0 (or cap). 
 Decision rule (pseudo):
 * IF commercial_submission_detected THEN require ACORD_125
-* IF ACORD_125 not provided THEN block submission (Implementation note:** OCR confidence threshold for key fields (business name, location) = 90%. If <90% for critical fields, surface to user for manual confirmation.
+* IF ACORD_125 not provided THEN show warnings but let the process go on (Implementation note:** OCR confidence threshold for key fields (business name, location) = 90%. If <90% for critical fields, surface to user for manual confirmation.
 
 
 ________________
@@ -518,10 +518,15 @@ Decision rule (pseudo):*
 Submission Quality Score (SQS™) — Implementation
 Purpose: Predict quote speed, bind probability, and underwriter confidence prior to carrier submission. Use it to prioritize remediation work and to gate quality. 
 Score range & tiers:
-            * 90–100 Carrier-Ready (green)
-            * 75–89 Review-Ready (yellow/green)
-            * 60–74 At-Risk (yellow)
-            * <60 Decline-Prone (red)
+          
+A: 90-100 "Submission Ready" (Green)
+B: 80-89 "Almost There" (Yellow)
+C: 70-79 "Needs Work" (Orange)
+I see that you had two "C" tiers divided by color. Perhaps we can combine them into one letter grade for now. 
+D: 60-69 "Major Gaps" (Red)
+F: <60 "Not Ready" (Red)
+
+
 Hard-stop failures cap the score at 60. 
 Weighted components (suggested implementation):**
                * Structural Completeness — 25% (ACORD 125 + required line forms present)

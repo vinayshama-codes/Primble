@@ -397,9 +397,12 @@ function DashboardStep({ token, onResume, onNewPackage }) {
     const scores = Object.values(sqsMap || {}).map(s => s?.sqs_score).filter(n => n != null);
     return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
   };
-  const sqsColor  = v => v >= 75 ? "#10b981" : v >= 50 ? "#f59e0b" : "#ef4444";
-  const sqsBg     = v => v >= 75 ? "rgba(16,185,129,0.1)" : v >= 50 ? "rgba(245,158,11,0.1)" : "rgba(239,68,68,0.1)";
-  const sqsGrade  = v => v >= 90 ? "A" : v >= 75 ? "B" : v >= 60 ? "C" : v >= 50 ? "D" : "F";
+  // Decision_Tree.txt §522-527: A≥90 (green), B≥80 (yellow), C≥70 (orange),
+  // D≥60 (red), F<60 (red). Per client confirmation, C/D are visually combined
+  // into a single "needs attention" band but use distinct grade letters.
+  const sqsColor  = v => v >= 80 ? "#10b981" : v >= 70 ? "#f59e0b" : "#ef4444";
+  const sqsBg     = v => v >= 80 ? "rgba(16,185,129,0.1)" : v >= 70 ? "rgba(245,158,11,0.1)" : "rgba(239,68,68,0.1)";
+  const sqsGrade  = v => v >= 90 ? "A" : v >= 80 ? "B" : v >= 70 ? "C" : v >= 60 ? "D" : "F";
 
   const totalForms = stats.total_forms;
   const globalAvg  = stats.avg_sqs_score;
@@ -690,6 +693,7 @@ const AcordModal = forwardRef(function AcordModal({
           setSessionId(resumeSessionId); setStep("lite");
         } else if (!isEssentials && data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
           setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
+          if (data.package_sqs) setPackageSqs(data.package_sqs);
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
           setPdfLoading(readyMap); setStep("editor");
@@ -782,6 +786,7 @@ const AcordModal = forwardRef(function AcordModal({
         const isEssentials = user?.subscription_tier === "essentials";
         if (!isEssentials && data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
           setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
+          if (data.package_sqs) setPackageSqs(data.package_sqs);
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
           setPdfLoading(readyMap); setStep("editor");
@@ -1273,7 +1278,7 @@ const AcordModal = forwardRef(function AcordModal({
         const sessRes = await fetch(`${API_BASE}/api/session/${sessionId}`, { credentials: "include" });
         if (!sessRes.ok) { setError("Form generation failed. Please try again."); return; }
         const sessData = await sessRes.json();
-        data = { success: true, generated: sessData.generated_forms, form_ids: Object.keys(sessData.generated_forms || {}), cross_issues: sessData.cross_issues, package_sqs: null };
+        data = { success: true, generated: sessData.generated_forms, form_ids: Object.keys(sessData.generated_forms || {}), cross_issues: sessData.cross_issues, package_sqs: sessData.package_sqs || null };
       } else {
         data = await res.json();
       }
@@ -1624,14 +1629,27 @@ const AcordModal = forwardRef(function AcordModal({
         {step === "lite" && (() => {
           const sqs = liteSqsData?.sqs;
           const liteReady = !liteGenerating && !!sqs;
-          const liteGradeColor = g => ({ A: "#10b981", B: "#22c55e", C: "#f59e0b", D: "#f97316", F: "#ef4444" }[g] || "#94a3b8");
-          const liteGradeBg = g => ({ A: "rgba(16,185,129,0.08)", B: "rgba(34,197,94,0.08)", C: "rgba(245,158,11,0.08)", D: "rgba(249,115,22,0.08)", F: "rgba(239,68,68,0.08)" }[g] || "rgba(148,163,184,0.08)");
-          const routingLabel = { auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Package Review", hold: "Hold — Remediation Required" };
+          const liteGradeColor = g => ({ A: "#10b981", B: "#eab308", C: "#f59e0b", D: "#ef4444", F: "#ef4444" }[g] || "#94a3b8");
+          const liteGradeBg = g => ({ A: "rgba(16,185,129,0.08)", B: "rgba(234,179,8,0.08)", C: "rgba(245,158,11,0.08)", D: "rgba(239,68,68,0.08)", F: "rgba(239,68,68,0.08)" }[g] || "rgba(148,163,184,0.08)");
+          // Two routing label sets coexist in the backend:
+          //   • per-form  (calculate_sqs):           auto_quote | review | full_review | hold
+          //   • package   (calculate_package_sqs):   auto_quote | priority_review | standard_review | hold
+          // Map both so package-level scores don't render as raw enum strings.
+          const routingLabel = {
+            auto_quote:       "Auto-Route to Quoting",
+            review:           "Light Review",
+            priority_review:  "Priority Review",
+            standard_review:  "Standard Review",
+            full_review:      "Full Package Review",
+            hold:             "Hold — Remediation Required",
+          };
           const routingStyle = {
-            auto_quote: { bg: "#dcfce7", color: "#166534", border: "#86efac" },
-            review:     { bg: "#fef9c3", color: "#854d0e", border: "#fde047" },
-            full_review:{ bg: "#fef2f2", color: "#991b1b", border: "#fecaca" },
-            hold:       { bg: "#fee2e2", color: "#991b1b", border: "#fca5a5" },
+            auto_quote:      { bg: "#dcfce7", color: "#166534", border: "#86efac" },
+            review:          { bg: "#fef9c3", color: "#854d0e", border: "#fde047" },
+            priority_review: { bg: "#fef9c3", color: "#854d0e", border: "#fde047" },
+            standard_review: { bg: "#fef3c7", color: "#92400e", border: "#fcd34d" },
+            full_review:     { bg: "#fef2f2", color: "#991b1b", border: "#fecaca" },
+            hold:            { bg: "#fee2e2", color: "#991b1b", border: "#fca5a5" },
           };
           const rd = sqs?.routing_decision;
           const rs = routingStyle[rd] || { bg: "#f1f5f9", color: "#475569", border: "#e2e8f0" };
@@ -1704,7 +1722,7 @@ const AcordModal = forwardRef(function AcordModal({
                         <div className="lite-stops-grid">
                           {liteSqsData?.hard_stops?.length > 0 && (
                             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px" }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Hard Stops — Must Resolve Before Submission</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Hard Stops — Caps Your Score at 60</div>
                               {liteSqsData.hard_stops.map((s, i) => (
                                 <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0", display: "flex", gap: 6 }}>
                                   <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
@@ -1713,10 +1731,10 @@ const AcordModal = forwardRef(function AcordModal({
                             </div>
                           )}
                           {liteSqsData?.soft_stops?.length > 0 && (
-                            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px" }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Warnings — Will Cap Your Score</div>
+                            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px" }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 7 }}>Warnings — Will Cap Your Score at 85</div>
                               {liteSqsData.soft_stops.map((s, i) => (
-                                <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0", display: "flex", gap: 6 }}>
+                                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0", display: "flex", gap: 6 }}>
                                   <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
                                 </div>
                               ))}
@@ -1978,13 +1996,13 @@ const AcordModal = forwardRef(function AcordModal({
               <div className="stops-row">
                 {hardStops.length > 0 && (
                   <div className="stops-banner stops-hard">
-                    <div className="stops-title">Hard Stops - Must Fix Before Submission</div>
+                    <div className="stops-title">Hard Stops - Caps Your SQS at 60</div>
                     {hardStops.map((s, i) => <div key={i} className="stop-item stop-item-hard">- {s}</div>)}
                   </div>
                 )}
                 {softStops.length > 0 && (
                   <div className="stops-banner stops-soft">
-                    <div className="stops-title">Warnings - Will Cap Your SQS Score</div>
+                    <div className="stops-title">Warnings - Caps Your SQS at 85</div>
                     {softStops.map((s, i) => <div key={i} className="stop-item stop-item-soft">- {s}</div>)}
                   </div>
                 )}
@@ -2169,24 +2187,37 @@ const AcordModal = forwardRef(function AcordModal({
                     )}
 
                     {/* ── Session delta ── */}
-                    {packageSqs && packageSqs.sqs_history?.length > 1 && (
-                      <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "6px 10px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                        <span style={{ fontSize: 14 }}></span>
-                        <div>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: packageSqs.delta_this_session >= 0 ? "#059669" : "#dc2626" }}>
-                            {packageSqs.delta_this_session >= 0 ? "+" : ""}{packageSqs.delta_this_session} pts this session
-                          </span>
-                          <div style={{ fontSize: 10, color: "#94a3b8" }}>
-                            Started at {packageSqs.sqs_history[0].score} → now {packageSqs.package_sqs_score}
+                    {packageSqs && packageSqs.sqs_history?.length > 1 && (() => {
+                      // Prefer the genuine initial_extract baseline (matches
+                      // backend delta computation); fall back to first entry.
+                      const baseline = packageSqs.sqs_history.find(h => h?.stage === "initial_extract")
+                        || packageSqs.sqs_history[0];
+                      return (
+                        <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "6px 10px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
+                          <span style={{ fontSize: 14 }}></span>
+                          <div>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: packageSqs.delta_this_session >= 0 ? "#059669" : "#dc2626" }}>
+                              {packageSqs.delta_this_session >= 0 ? "+" : ""}{packageSqs.delta_this_session} pts this session
+                            </span>
+                            <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                              Started at {baseline?.score ?? "—"} → now {packageSqs.package_sqs_score}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* ── Routing decision ── */}
                     {activeSqs.routing_decision && (
                       <div style={{ padding: "5px 9px", fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, color: "#000" }}>
-                        {{ auto_quote: "Auto-Route to Quoting", review: "Light Review", full_review: "Full Package Review", hold: "Hold — Remediation Required" }[activeSqs.routing_decision]}
+                        {{
+                          auto_quote: "Auto-Route to Quoting",
+                          review: "Light Review",
+                          priority_review: "Priority Review",
+                          standard_review: "Standard Review",
+                          full_review: "Full Package Review",
+                          hold: "Hold — Remediation Required",
+                        }[activeSqs.routing_decision] || activeSqs.routing_decision}
                       </div>
                     )}
 
@@ -2252,8 +2283,45 @@ const AcordModal = forwardRef(function AcordModal({
                       </div>
                     )}
 
-                    {/* ── Risk drivers ── */}
-                    {activeSqs.risk_drivers?.length > 0 && (
+                    {/* ── Top package recommendations with actionable steps ──
+                        Spec L538: SQS outputs must include "top 3 risk drivers
+                        AND actionable steps". Backend supplies these on the
+                        package-level result as `top_recommendations`. */}
+                    {packageSqs?.top_recommendations?.length > 0 && (
+                      <div style={{ background: "#fdf2f8", borderRadius: 7, padding: "8px 10px", marginBottom: 8, border: "1px solid #f9a8d4", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>TOP RECOMMENDATIONS</div>
+                        {packageSqs.top_recommendations.map((r, i) => {
+                          if (!r) return null;
+                          // Backend may return either dict (package) or string (legacy).
+                          if (typeof r === "string") {
+                            return (
+                              <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "3px 0" }}>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>#{i + 1}</span>
+                                <span style={{ flex: 1, fontSize: 11, color: "#000" }}>{r}</span>
+                              </div>
+                            );
+                          }
+                          const pillarLabel = PACKAGE_PILLAR_LABELS[r.pillar] || r.pillar || "";
+                          return (
+                            <div key={i} style={{ padding: "4px 0", borderBottom: i < packageSqs.top_recommendations.length - 1 ? "1px solid #f9a8d4" : "none" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>#{i + 1}</span>
+                                <span style={{ flex: 1, fontSize: 11, fontWeight: 700, color: "#000" }}>{pillarLabel}</span>
+                                {typeof r.score === "number" && (
+                                  <span style={{ fontSize: 11, fontWeight: 700, color: barColor(r.score) }}>{r.score}%</span>
+                                )}
+                              </div>
+                              {r.action && (
+                                <div style={{ fontSize: 11, color: "#334155", marginLeft: 22, marginTop: 2 }}>{r.action}</div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* ── Risk drivers (per-form fallback view) ── */}
+                    {activeSqs.risk_drivers?.length > 0 && !packageSqs?.top_recommendations?.length && (
                       <div style={{ background: "#fdf2f8", borderRadius: 7, padding: "8px 10px", marginBottom: 8, border: "1px solid #f9a8d4", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>TOP DRIVERS</div>
                         {activeSqs.risk_drivers.map((d, i) => (
@@ -2467,10 +2535,14 @@ const AcordModal = forwardRef(function AcordModal({
                 onOpenSignatureModal={onOpenSignatureModal}
                 clientFilledFields={clientFilledFields}
                 onRefreshFields={refreshArqData}
-                onSqsUpdate={(fid, newSqs) => setGeneratedForms(prev => ({
-                  ...prev,
-                  [fid]: { ...prev[fid], sqs: newSqs }
-                }))}
+                onSqsUpdate={(fid, newSqs, extras) => {
+                  setGeneratedForms(prev => ({
+                    ...prev,
+                    [fid]: { ...prev[fid], sqs: newSqs }
+                  }));
+                  if (extras?.packageSqs) setPackageSqs(extras.packageSqs);
+                  if (Array.isArray(extras?.crossIssues)) setCrossIssues(extras.crossIssues);
+                }}
               />
             </div>
           </div>

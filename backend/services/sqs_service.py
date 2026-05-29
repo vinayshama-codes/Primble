@@ -249,14 +249,24 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     # ── ACORD 127: Auto coverage integrity ────────────────────────────────────
     if flags.get("has_auto_coverage"):
         auto_limit_structure = _fv(facts, "auto_liability_structure")
-        if flags.get("auto_split_limits") or auto_limit_structure == "split":
-            bi_pp = _fv(facts, "bi_per_person")
-            bi_pa = _fv(facts, "bi_per_accident")
-            pd_pa = _fv(facts, "pd_per_accident")
+        bi_pp = _fv(facts, "bi_per_person")
+        bi_pa = _fv(facts, "bi_per_accident")
+        pd_pa = _fv(facts, "pd_per_accident")
+        # Spec L185: "Incomplete liability structure → hard stop". Detect a
+        # split-limit attempt even when auto_liability_structure / auto_split_limits
+        # weren't extracted: if ANY of the three components is present, treat
+        # this as split and require all three.
+        _split_indicated = (
+            flags.get("auto_split_limits")
+            or auto_limit_structure == "split"
+            or any([bi_pp, bi_pa, pd_pa])
+        )
+        if _split_indicated:
             if not all([bi_pp, bi_pa, pd_pa]):
                 hard.append(
                     "auto_split_limits_incomplete: "
-                    "Split liability limits incomplete — all three components required."
+                    "Split liability limits incomplete — all three components required "
+                    "(BI per person, BI per accident, PD per accident)."
                 )
 
         if flags.get("auto_has_physical_damage"):
@@ -318,9 +328,19 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
 # ── Hard-stop classification for non-property submissions ─────────────────────
 
 # Hard stops that MUST remain hard regardless of coverage type.
+# Per Decision_Tree.txt §46 (Identity & Dates Integrity), §137-142 (Monopolistic WC),
+# §185 (Auto split limits), §218 (Umbrella attachment), §381 (Peril deductibles),
+# §415 (Builders Risk required fields), and §527 (Named insured missing).
 _ALWAYS_HARD_PATTERNS: Tuple[str, ...] = (
     "fein_conflict",
     "FEIN mismatch",
+    "name_conflict",
+    "Named insured missing",
+    "Inconsistent applicant_name",
+    "date_conflict",
+    "expiration_conflict",
+    "Policy date mismatch",
+    "Policy expiration date mismatch",
     "Umbrella detected but no underlying",
     "auto_umbrella_attachment_failure",
     "auto_split_limits_incomplete",
@@ -328,6 +348,10 @@ _ALWAYS_HARD_PATTERNS: Tuple[str, ...] = (
     "WC payroll differs from total payroll",
     "Location count mismatch",
     "Monopolistic WC state detected but wc_monopolistic_payroll",
+    "Monopolistic WC state (ND/OH/WA/WY) requires the state fund",
+    "Peril-specific deductibles referenced but not defined",
+    "Peril-specific",
+    "Builders Risk missing required field",
 )
 
 
@@ -651,11 +675,23 @@ def check_doc_consistency(docs: List[dict]) -> List[str]:
             "FEIN mismatch across uploaded documents. Submission blocked."
         )
 
-    # Spec: misaligned dates → hard stop UNLESS explained (ACORD 101 narrative).
-    _dates_explained = any(
-        bool(_fv(d["facts"], "acord101_remarks") or _fv(d["facts"], "policy_period_explanation"))
-        for d in docs
-    )
+    # Spec (L67): misaligned dates → hard stop UNLESS explained.
+    # The explanation must specifically address the policy period — a generic
+    # ACORD 101 remark about unrelated topics (e.g. loss history, ops) must
+    # NOT cancel the date-conflict hard stop. Require a dedicated explanation
+    # field, or a remark that explicitly mentions the policy term.
+    def _has_date_explanation(d):
+        if _fv(d["facts"], "policy_period_explanation"):
+            return True
+        remarks_lower = str(_fv(d["facts"], "acord101_remarks") or "").lower()
+        if not remarks_lower:
+            return False
+        return any(kw in remarks_lower for kw in (
+            "policy period", "policy term", "effective date", "expiration date",
+            "renewal date", "extension", "endorsement period",
+        ))
+
+    _dates_explained = any(_has_date_explanation(d) for d in docs)
     _date_prefix = "[warning]" if _dates_explained else "[hard_stop]"
 
     eff_vals = {_fv(d["facts"], "effective_date") for d in docs if _fv(d["facts"], "effective_date")}
@@ -852,10 +888,13 @@ def infer_lob(facts: dict, flags: dict) -> str:
 
 LOB_RULES = {
     "contractor": {
-        "required": ["percent_subcontracted", "years_in_business", "operations_description"],
+        # Use fields that extraction reliably produces for GL-contractor submissions.
+        # percent_subcontracted and years_in_business (ACORD 186 specialty fields)
+        # are almost never in extraction → they always dragged P2 to 33%.
+        "required": ["operations_description", "total_payroll", "gl_class_codes_by_location"],
     },
     "restaurant": {
-        "required": ["occupancy_type", "fire_protection_class", "years_in_business"],
+        "required": ["occupancy_type", "operations_description", "total_revenue"],
     },
     "technology": {
         "required": ["operations_description", "total_revenue", "num_employees"],
@@ -869,27 +908,186 @@ LOB_RULES = {
 }
 
 
+def _calculate_exposure_consistency(
+    facts: dict,
+    flags: dict,
+    hard_cross: list,
+    warn_cross: list,
+) -> int:
+    """P2 — Exposure Consistency (25%), spec-compliant field-level scoring.
+
+    Per Decision_Tree.txt L533, L90-95, L121-122, L143-150, L458, L539:
+    deterministic negative/positive deltas per check rather than a single
+    pooled penalty. Each underwriting-relevant alignment is evaluated
+    independently so the user can see *which* gap drives the score down.
+    """
+    score = 100
+
+    # ── GL: class codes vs operations (L90, L92) ─────────────────────────────
+    if flags.get("has_general_liability"):
+        gl_codes = _fv(facts, "gl_class_codes_by_location")
+        codes_present = bool(gl_codes) and not (isinstance(gl_codes, list) and not gl_codes)
+        if not codes_present:
+            score -= 20
+        elif not _fv(facts, "operations_description"):
+            score -= 10
+        if not _fv(facts, "gl_limits") and not _fv(facts, "gl_each_occurrence"):
+            score -= 8
+
+    # ── Payroll / revenue exposure base (L41, L121) ──────────────────────────
+    has_payroll = bool(_fv(facts, "total_payroll") or _fv(facts, "wc_payroll"))
+    has_revenue = bool(_fv(facts, "total_revenue"))
+    if not (has_payroll or has_revenue):
+        score -= 15
+
+    # ── WC: payroll + class codes + multi-state (L121, L143-150) ─────────────
+    if flags.get("has_workers_comp"):
+        if not _fv(facts, "wc_payroll") and not _fv(facts, "total_payroll"):
+            score -= 12
+        if not _fv(facts, "wc_class_codes"):
+            score -= 10
+        if flags.get("wc_multi_state") and not _fv(facts, "wc_payroll_by_state"):
+            score -= 8
+
+    # ── Contractor: subcontracting % reconciliation (L91, L458) ──────────────
+    if flags.get("is_contractor") or flags.get("has_subcontractors"):
+        if not _fv(facts, "percent_subcontracted"):
+            score -= 8
+
+    # ── Auto: liability structure + symbols (L184-191) ───────────────────────
+    if flags.get("has_auto_coverage"):
+        if not _fv(facts, "auto_liability_limit"):
+            score -= 10
+        if not _fv(facts, "auto_covered_symbols"):
+            score -= 5
+
+    # ── Residual cross-form penalty (smaller now that checks are explicit) ──
+    cross_penalty = min(len(hard_cross) * 15 + len(warn_cross) * 5, 20)
+    score -= cross_penalty
+
+    return max(0, min(100, score))
+
+
+def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> int:
+    """Calculate P5 — Umbrella & Limit Adequacy (10% of SQS).
+
+    Per Decision_Tree.txt §218, §242: underlying GL/Auto limits must meet
+    umbrella attachment minimums. If umbrella attaches over WC, Employers
+    Liability limits must be present at minimum threshold (§237-238).
+
+    Scoring:
+      • No umbrella requested → 100 (pillar N/A, full credit)
+      • Umbrella with NO underlying limits        → 0  (hard-stop scenario)
+      • Umbrella with underlying < $1M attachment → 40 (attachment failure)
+      • Underlying present but EL missing/low     → 75 (coverage integrity gap)
+      • Fully adequate underlying stack           → 100
+    """
+    if not flags.get("has_umbrella"):
+        return 100
+
+    gl_val   = _to_int(_fv(facts, "gl_limits") or _fv(facts, "gl_each_occurrence"))
+    auto_val = _to_int(_fv(facts, "auto_liability_limit"))
+    has_underlying = bool(gl_val or auto_val)
+
+    if not has_underlying:
+        return 0  # hard-stop scenario per evaluate_stops()
+
+    # Standard umbrella attachment minimum is $1M for primary GL/Auto.
+    _MIN_ATTACHMENT = 1_000_000
+    attachment_ok = (
+        (gl_val is None or gl_val >= _MIN_ATTACHMENT) and
+        (auto_val is None or auto_val >= _MIN_ATTACHMENT)
+    )
+    if not attachment_ok:
+        return 40
+
+    # EL check when umbrella attaches over WC.
+    if flags.get("has_workers_comp"):
+        el_val = _to_int(_fv(facts, "employers_liability_limits"))
+        if el_val is None or el_val < 100_000:
+            return 75
+
+    return 100
+
+
+def _calculate_narrative_quality(facts: dict) -> int:
+    """Calculate P6 — Narrative Quality (10% of SQS).
+
+    Per Decision_Tree.txt L537: "Narrative Quality — 10% (ACORD 101 clarity)".
+    The score is driven by the ACORD 101 remarks themselves, NOT by the
+    Tier-2 business profile. Operations description is a fallback when no
+    ACORD 101 narrative exists.
+
+    Scoring components:
+      • Length (max 60 pts): scaled up to 300 chars of substantive text
+      • Token diversity (max 25 pts): type-token ratio rewards specific,
+        non-repetitive writing
+      • Bonus for substantive narrative (15 pts): >100 chars
+    """
+    remarks = str(_fv(facts, "acord101_remarks") or "").strip()
+    ops     = str(_fv(facts, "operations_description") or "").strip()
+
+    # Prefer dedicated ACORD 101 narrative; ops_description is a weaker fallback.
+    if remarks:
+        text = remarks
+        source_factor = 1.0
+    elif ops:
+        text = ops
+        # Penalize using ops as narrative — spec wants ACORD 101 specifically.
+        source_factor = 0.75
+    else:
+        return 0
+
+    length_score    = min(len(text), 300) / 300 * 60
+    diversity       = _token_diversity(text)
+    diversity_score = min(diversity, 1.0) * 25
+    bonus           = 15 if len(text) > 100 else 0
+
+    return min(100, int((length_score + diversity_score + bonus) * source_factor))
+
+
 def _calculate_cope_score(facts: dict, flags: dict) -> int:
-    """Calculate COPE score for Exposure & COPE pillar."""
+    """Calculate COPE score for Property Integrity pillar.
+
+    Per Decision_Tree.txt §313-321 / §394-399:
+      • Missing Minimum Viable COPE → 0% (hard stop)
+      • Minimum Viable Only          → ~60-70% (cap until Carrier-Grade complete)
+      • Carrier-Grade COPE           → 100%
+
+    Carrier-Grade fields per spec §295-303: year built, roof year, sprinklered,
+    fire protection details, distance to fire hydrant, fire department type,
+    protection class, valuation method (RCV/ACV), BI limit, period of restoration.
+    """
     if not flags.get("has_property_coverage"):
         return 100
-    
+
     min_ok = all([
         bool(_fv(facts, "locations")),
         bool(_fv(facts, "occupancy_type")),
         bool(_fv(facts, "construction_type")),
         bool(_fv(facts, "property_building_value") or _fv(facts, "property_bpp_value")),
     ])
-    
+
     if not min_ok:
         return 0
-    
-    carrier_cope = [bool(_fv(facts, k)) for k in [
+
+    # Carrier-Grade fields (spec §295-303).
+    carrier_cope_fields = [
         "year_built", "roof_year", "sprinkler_system",
-        "fire_protection_class", "valuation_method", "coinsurance_percentage",
-    ]]
-    
-    return int(60 + (sum(carrier_cope) / len(carrier_cope)) * 40)
+        "fire_protection_class", "valuation_method",
+        "distance_to_hydrant", "fire_department_type",
+        "protection_class", "business_income_limit", "period_of_restoration",
+    ]
+    carrier_filled = [bool(_fv(facts, k)) for k in carrier_cope_fields]
+    all_carrier_grade = all(carrier_filled)
+
+    if all_carrier_grade:
+        return 100
+
+    # Minimum Viable only — cap at 70 per spec ("~60-70%"). Within this band,
+    # scale by partial carrier-grade fills so users see incremental progress.
+    progress = sum(carrier_filled) / len(carrier_filled)
+    return int(60 + progress * 10)
 
 
 # ── Package-level SQS ─────────────────────────────────────────────────────────
@@ -925,23 +1123,43 @@ def calculate_package_sqs(
              property_integrity (15%) + loss_history_alignment (15%) +
              umbrella_limit_adequacy (10%) + narrative_quality (10%)
     """
+    # Normalize mutable args — callers occasionally pass None when the session
+    # field exists but is stored as null in the DB.
+    hard_stops  = hard_stops  or []
+    soft_stops  = soft_stops  or []
+    cross_issues = cross_issues or []
+
     lob = infer_lob(facts, flags)
 
     # P1 — Structural Completeness (ACORD 125 + required line forms)
     tier1_ok, tier1_missing = check_tier1(facts, flags)
     tier2_score, tier2_missing = check_tier2(facts)
-    conf_rate = confidence_fill_rate(mapped_data or {}, confidence_dict or {})
-    p1 = int((
-        (100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)) * 0.4 +
-        tier2_score * 0.35 +
-        conf_rate * 0.25
-    ))
+    tier1_score = 100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)
 
-    # P2 — Exposure Consistency (class codes, payroll alignment)
-    lob_rules   = LOB_RULES.get(lob, LOB_RULES["generic"])
-    req_present = sum(1 for f in lob_rules["required"] if _fv(facts, f))
-    req_total   = len(lob_rules["required"])
-    p2 = int((req_present / req_total) * 100) if req_total else 100
+    # Ground P1 using per-form structural_completeness averages when form_results
+    # are available. This prevents conf_rate=0 (mapped_data is never passed at the
+    # package level) from artificially crushing P1, and aligns the package score
+    # with the actual form fill quality the user already sees.
+    _form_structs = [
+        r.get("breakdown", {}).get("structural_completeness")
+        for r in (form_results or [])
+        if isinstance(r, dict) and isinstance(r.get("breakdown", {}).get("structural_completeness"), (int, float))
+    ]
+    if _form_structs:
+        _form_struct_avg = int(sum(_form_structs) / len(_form_structs))
+        p1 = int(tier1_score * 0.35 + tier2_score * 0.30 + _form_struct_avg * 0.35)
+    elif mapped_data:
+        conf_rate = confidence_fill_rate(mapped_data, confidence_dict or {})
+        p1 = int(tier1_score * 0.40 + tier2_score * 0.35 + conf_rate * 0.25)
+    else:
+        p1 = int(tier1_score * 0.55 + tier2_score * 0.45)
+
+    # P2 — Exposure Consistency: spec-compliant field-level scoring
+    # (Decision_Tree.txt L533, L90-95, L121-122, L143-150, L458, L539).
+    _cross = cross_issues or []
+    hard_cross = [i for i in _cross if isinstance(i, dict) and i.get("type") == "hard_stop"]
+    warn_cross = [i for i in _cross if isinstance(i, dict) and i.get("type") == "warning"]
+    p2 = _calculate_exposure_consistency(facts, flags, hard_cross, warn_cross)
 
     # P3 — Property Integrity (COPE completeness)
     p3 = _calculate_cope_score(facts, flags)
@@ -949,40 +1167,24 @@ def calculate_package_sqs(
     # P4 — Loss History Alignment
     p4, p4_recs = calculate_p4_loss_history(facts, flags)
 
-    # P5 — Umbrella & Limit Adequacy
-    if flags.get("has_umbrella"):
-        has_underlying = bool(_fv(facts, "gl_limits") or _fv(facts, "auto_liability_limit"))
-        p5 = 100 if has_underlying else 0
-    else:
-        p5 = 100
+    # P5 — Umbrella & Limit Adequacy (spec §239: underlying limits vs umbrella).
+    p5 = _calculate_umbrella_adequacy(facts, flags)
 
-    # P6 — Narrative Quality (spec: ACORD 101 clarity). Prefer ACORD 101 remarks
-    # when present; fall back to operations_description.
-    remarks = _fv(facts, "acord101_remarks") or ""
-    ops     = _fv(facts, "operations_description") or ""
-    text    = remarks if remarks else ops
-    p6 = min(100, int(
-        (min(len(text), 300) / 300) * 60 +
-        (20 if any(w in text.lower() for w in ["safety", "certified", "osha", "protocol"]) else 0) +
-        (20 if len(text) > 100 else 0)
-    ))
+    # P6 — Narrative Quality (spec L537: ACORD 101 clarity).
+    p6 = _calculate_narrative_quality(facts)
 
-    # Cross-form consistency penalty (applied to P2 for pillar display only)
-    hard_cross = [i for i in cross_issues if i.get("type") == "hard_stop"]
-    warn_cross = [i for i in cross_issues if i.get("type") == "warning"]
-    p2 = max(0, p2 - len(hard_cross) * 25 - len(warn_cross) * 10)
-
-    # Package SQS = average of per-form SQS scores (product directive).
-    # The 6 pillars above are still computed and surfaced for display, but the
-    # headline number the user sees must be the mean of the forms in the package.
-    _form_scores = [
+    # Package SQS headline = simple average of per-form SQS scores when forms
+    # exist (each per-form score already applies its own pillar weighting and
+    # hard/soft caps, so averaging is the cleanest expression of overall
+    # submission quality). Falls back to the pillar-weighted formula at the
+    # initial-extract stage when no forms have been generated yet.
+    _per_form_scores = [
         r.get("sqs_score") for r in (form_results or [])
         if isinstance(r, dict) and isinstance(r.get("sqs_score"), (int, float))
     ]
-    if _form_scores:
-        raw = int(round(sum(_form_scores) / len(_form_scores)))
+    if _per_form_scores:
+        raw = int(round(sum(_per_form_scores) / len(_per_form_scores)))
     else:
-        # Fallback for pre-generation calls: use the weighted pillars.
         raw = int(
             p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] +
             p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"] +
@@ -991,6 +1193,12 @@ def calculate_package_sqs(
             p5 * SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"] +
             p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
         )
+        # Caps only apply to the pillar-formula fallback; per-form scores
+        # already have hard/soft caps baked in before averaging.
+        if hard_stops or hard_cross:
+            raw = min(raw, 60)
+        elif soft_stops:
+            raw = min(raw, 85)
     raw = max(0, min(100, raw))
 
     # Tier determination — spec: 90 / 80 / 70 / 60 / <60
@@ -1144,22 +1352,11 @@ def calculate_package_sqs_spec_compliant(
     # P4: Loss History Alignment
     p4, _ = calculate_p4_loss_history(facts, flags)
 
-    # P5: Umbrella & Limit Adequacy
-    if flags.get("has_umbrella"):
-        has_underlying = bool(_fv(facts, "gl_limits") or _fv(facts, "auto_liability_limit"))
-        p5 = 100 if has_underlying else 0
-    else:
-        p5 = 100
+    # P5: Umbrella & Limit Adequacy (spec §239).
+    p5 = _calculate_umbrella_adequacy(facts, flags)
 
-    # P6: Narrative Quality (spec: ACORD 101 clarity). Prefer ACORD 101 remarks.
-    remarks = _fv(facts, "acord101_remarks") or ""
-    ops     = _fv(facts, "operations_description") or ""
-    text    = remarks if remarks else ops
-    p6 = min(100, int(
-        (min(len(text), 300) / 300) * 60 +
-        (20 if any(w in text.lower() for w in ["safety", "certified", "osha", "protocol"]) else 0) +
-        (20 if len(text) > 100 else 0)
-    ))
+    # P6: Narrative Quality (spec L537: ACORD 101 clarity).
+    p6 = _calculate_narrative_quality(facts)
 
     # Calculate weighted score using SPEC-COMPLIANT weights
     raw = int(
@@ -1188,18 +1385,28 @@ def calculate_package_sqs_spec_compliant(
         "Not Ready"
     )
 
-    # SQS history
-    history = session_data.get("sqs_history", [])
+    # SQS history — copy the list so we don't mutate the caller's session_data
+    # by reference (concurrent callers would otherwise share the same list).
+    history = list(session_data.get("sqs_history", []))
     timestamp = datetime.utcnow().isoformat() + "Z"
-    history.append({
+    new_entry = {
         "at": timestamp,
         "score": raw,
         "stage": calculation_stage,
         "model_version": SQS_MODEL_VERSION,
         "weights_version": "spec_compliant_v2.1.0"
-    })
+    }
+    # Dedup: skip if the last entry has the same stage AND same score (prevents
+    # idempotent re-calls from polluting history).
+    if not history or (history[-1].get("score") != raw or history[-1].get("stage") != calculation_stage):
+        history.append(new_entry)
 
-    delta = raw - history[0]["score"] if len(history) > 1 else 0
+    # Delta — prefer the genuine initial_extract baseline.
+    _baseline = next(
+        (h for h in history if h.get("stage") == "initial_extract"),
+        history[0] if history else None,
+    )
+    delta = (raw - _baseline["score"]) if (_baseline and len(history) > 1) else 0
     all_recs = list(tier1_missing) + list(tier2_missing)[:3]
 
     return {
@@ -1959,35 +2166,23 @@ def calculate_sqs(
         })
     breakdown["loss_history_alignment"] = loss_score
 
-    # ── Umbrella / limit adequacy ─────────────────────────────────────────────
-    if flags.get("has_umbrella"):
-        has_underlying = bool(_fv(facts, "gl_limits") or _fv(facts, "auto_liability_limit"))
-        umbrella_score = 100 if has_underlying else 0
-        if not has_underlying:
-            issues.append("Umbrella detected but no underlying GL/Auto limits")
-            recommendations.append({
-                "rec_id": "rec_underlying_limits",
-                "field": "gl_limits",
-                "component": "umbrella_limit_adequacy",
-                "message": "Provide underlying limits",
-                "type": "hard_stop",
-                "score_impact": 0,
-                "priority": 1,
-            })
-    else:
-        umbrella_score = 100
+    # ── Umbrella / limit adequacy (spec §218, §239) ──────────────────────────
+    umbrella_score = _calculate_umbrella_adequacy(facts, flags)
+    if flags.get("has_umbrella") and umbrella_score == 0:
+        issues.append("Umbrella detected but no underlying GL/Auto limits")
+        recommendations.append({
+            "rec_id": "rec_underlying_limits",
+            "field": "gl_limits",
+            "component": "umbrella_limit_adequacy",
+            "message": "Provide underlying limits",
+            "type": "hard_stop",
+            "score_impact": 0,
+            "priority": 1,
+        })
     breakdown["umbrella_limit_adequacy"] = umbrella_score
 
-    # ── Narrative quality (spec: ACORD 101 clarity) ───────────────────────────
-    # Prefer ACORD 101 remarks when present; fall back to operations description.
-    narrative_score = min(tier2_score, 100)
-    remarks_text    = str(_fv(facts, "acord101_remarks") or "")
-    ops_desc        = str(_fv(facts, "operations_description") or "")
-    narrative_text  = remarks_text if remarks_text else ops_desc
-    if len(narrative_text) > 50:
-        diversity = _token_diversity(narrative_text)
-        bonus = 15 if diversity > 0.6 else 10
-        narrative_score = min(100, narrative_score + bonus)
+    # ── Narrative quality (spec L537: ACORD 101 clarity) ─────────────────────
+    narrative_score = _calculate_narrative_quality(facts)
     breakdown["narrative_quality"] = narrative_score
 
     # ── Weighted score ────────────────────────────────────────────────────────

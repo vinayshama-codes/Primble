@@ -255,7 +255,7 @@ export default function PDFJsViewer({
       const conf = confLabels[name];
       if (clientFilled.includes(name) || conf === "client_arq") { green++; return; }
       if (YELLOW_REQUIRED.has(name) && (!val || val === "null" || val === "None")) { yellow++; return; }
-      if (conf === "missing_required" && (!val || val === "null" || val === "None")) { yellow++; return; }
+      if ((conf === "missing_required" || conf === "extraction_error") && (!val || val === "null" || val === "None")) { yellow++; return; }
       if (conf === "low_confidence" && val && val !== "null" && val !== "None") pink++;
     });
     setHighlightCounts({ pink, yellow, green });
@@ -292,7 +292,7 @@ export default function PDFJsViewer({
       return null;
     }
     if (conf === "low_confidence" && v && v !== "null" && v !== "None") return "pink";
-    if (conf === "missing_required" && (!v || v === "null" || v === "None")) return "yellow";
+    if ((conf === "missing_required" || conf === "extraction_error") && (!v || v === "null" || v === "None")) return "yellow";
     return null;
   };
 
@@ -474,7 +474,7 @@ export default function PDFJsViewer({
             setFieldValues({ ...allValues }); originalFieldValuesRef.current = { ...allValues }; clearedSigFieldsRef.current = new Set();
             const allSigF = fieldsRef.current.filter(f => _isSigField(f.name)).map(f => f.name);
             if (allSigF.length > 0 && allSigF.every(n => clearedSigFields.includes(n))) setIsSignedLocal(false);
-            if (data?.sqs && onSqsUpdate) onSqsUpdate(formId, data.sqs);
+            if (data?.sqs && onSqsUpdate) onSqsUpdate(formId, data.sqs, { packageSqs: data.package_sqs, crossIssues: data.cross_issues });
             // Sync confidence labels from backend so overlay reflects the post-save state
             // (e.g. user-edited fields become "filled", not "low_confidence").
             if (data?.confidence) {
@@ -552,9 +552,9 @@ export default function PDFJsViewer({
           <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>{formName}</span>
           {fieldsLoaded && (
             <>
-              {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.yellow} required</span>}
-              {highlightCounts.pink   > 0 && <span style={{ background: "rgba(254,226,226,0.9)", color: "#991b1b", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.pink} review</span>}
-              {highlightCounts.green  > 0 && <span style={{ background: "rgba(187,247,208,0.9)", color: "#166534", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.green} client</span>}
+              {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.yellow} Required</span>}
+              {highlightCounts.pink   > 0 && <span style={{ background: "rgba(254,226,226,0.9)", color: "#991b1b", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.pink} Review</span>}
+              {highlightCounts.green  > 0 && <span style={{ background: "rgba(187,247,208,0.9)", color: "#166534", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.green} Client</span>}
             </>
           )}
         </div>

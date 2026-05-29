@@ -1,0 +1,52 @@
+The full pipeline, every step, nothing omitted
+Here's exactly how a file goes from upload to filled PDF on your system:
+
+Stage 0 — Upload & OCR
+User uploads a PDF (max 50MB, max 10 files). The file hits form_routes.py → ocr_service.py → Google Cloud Vision. Vision returns raw text, position data, and confidence scores for every word on every page. table_extractor.py pulls tabular data (skips docs >40 pages). Result: raw text string of ~327k chars for your 130-page doc.
+
+Stage 1 — Chunked Extraction (LLM Call #1 — runs ONCE per document)
+extraction_service.py slices the raw text into 11 chunks of ~66k chars each. Each chunk goes to gpt-5.4-mini with a structured extraction prompt. The model returns ~65 facts per chunk in JSON. extraction_service.py merges all 11 responses by majority vote and value reconciliation. Output: one facts dict like:
+
+
+{
+  "insured_name": "Acme Corp",
+  "policy_effective_date": "07/15/2025",
+  "gl_each_occurrence": "$1,000,000",
+  "producer_name": "..."
+  // ~65 keys total
+}
+Stage 1b — Flag Derivation (no LLM call)
+extraction_pipeline.py runs boolean logic over the facts. "Does this doc mention auto schedules?" → has_auto_coverage: true. "Is SIC code in contractor range?" → is_contractor: true. These 20-ish boolean flags are the only input to form recommendation.
+
+Stage 2 — Form Recommendation
+The flags go through your decision tree / scoring logic. has_auto_coverage=true → recommend ACORD 127. is_contractor=true + state=CO → recommend ACORD 137_CO. User sees a ranked list of forms and confirms. Three forms selected this run: ACORD 125, 127, 137_CO.
+
+Stage 3 — Pass 1: Deterministic Rules (no LLM call)
+For each selected form, pdf_service.py → map_facts_to_form() applies _ACORD_FIELD_RULES. This is substring matching: "insured_name" → Producer_FullName_A. Pure dictionary lookup, no AI. For ACORD 125 this fills 113 of 548 schema fields in microseconds.
+
+Stage 3b — Pass 1.5: Alias Stamping (no LLM call, if ENABLE_ALIAS_STAMPING=true)
+alias_stamper.py loads the pre-generated alias maps from forms_aliases/. These map ACORD field names to canonical snake_case names via the 24-entry bridge dict. Fills additional fields without touching OpenAI. For ACORD 125 in this run: negligible additional fills (most were already handled by Pass 1).
+
+Stage 4 — Gap Computation (no LLM call)
+compute_form_gaps() runs Pass 1 + 1.5 only and returns what's still empty for each form. ACORD 127: 574 unfilled. ACORD 137_CO: 371 unfilled. ACORD 125: 343 unfilled. Total: 1,288 unmatched fields across 3 forms.
+
+Stage 5 — Combined Gap Fill (LLM Calls #2–#15)
+combined_gap_fill() deduplicates the 1,288 fields to a union set (many fields appear in multiple forms). Result: ~1,346 unique field names (confirmed by 7 batches × 200 = 1,400 max, last batch had 46). These are batched 200 at a time → 7 sequential calls to _fill_unmatched_with_gpt(). Each call:
+
+Builds fields block (~120k chars)
+Computes raw text budget: 380k - 30k - 120k - overhead = ~218k per chunk
+Document 327k > 218k → splits into 2 sequential chunks (chunk 1: chars 0→218k, chunk 2: chars 218k→327k)
+LLM fills what it can, absorbs results between chunks (progressive narrowing)
+2-second pause before next batch
+After all 7 batches: filled values distributed back to each form. ACORD 127 gets pre_filled=90/574. ACORD 137_CO gets pre_filled=163/371. ACORD 125 gets pre_filled=82/343.
+
+Stage 6 — Per-Form Final Merge (no LLM call)
+map_facts_to_form() for each form takes the pre_filled_gpt dict from Stage 5 and merges it with Pass 1/1.5 deterministic fills. For ACORD 127: 17 deterministic + 90 LLM = 107 total filled out of 623 schema fields. ACORD 137_CO: 185/393. ACORD 125: 195/480.
+
+Stage 7 — PDF Stamping
+fill_pdf() opens the ACORD PDF template with pikepdf, writes each filled value into the matching AcroForm field, draws highlight boxes on unfilled required fields. Outputs 3 filled PDFs. fill_pdf: wrote 185 field values for ACORD 137_CO in 370ms.
+
+Stage 8 — SQS Scoring & Audit
+package_sqs scores the submission: score=28, tier=Not Ready. audit_service logs 3 recommendation records. Session is closed out.
+
+What's still on the table to fix (in order of impact)

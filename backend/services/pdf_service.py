@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import pikepdf
@@ -1605,10 +1605,18 @@ def _fill_empty_from_raw_text(
 # We budget: total_prompt_chars ≤ _GPT_CALL_BUDGET_CHARS per call.
 # Raw-text chunks are sized so that (fixed_overhead + fields_block + chunk) ≤ budget.
 
-_GPT_CALL_BUDGET_CHARS   = int(os.getenv("GPT_CALL_BUDGET_CHARS",  str(280_000)))  # ~70k tokens
+_GPT_CALL_BUDGET_CHARS   = int(os.getenv("GPT_CALL_BUDGET_CHARS",  str(380_000)))  # ~95k tokens; bumped from 360k so combined batches keep doc coverage in fewer chunks
 _GPT_REPLY_RESERVE_CHARS = int(os.getenv("GPT_REPLY_RESERVE_CHARS", str(30_000)))   # output headroom
 # Max retries per individual LLM call
 _FORM_FILL_BATCH_RETRIES = int(os.getenv("FORM_FILL_BATCH_RETRIES", "3"))
+# Cap output tokens so one call can't burn the full 200k TPM budget
+_FORM_FILL_MAX_TOKENS    = int(os.getenv("FORM_FILL_MAX_TOKENS",    "16000"))
+# combined_gap_fill: max fields per LLM batch — 200 cuts batch count ~50% vs 100,
+# halving how many times the raw document is re-shipped to OpenAI per session.
+_COMBINED_FIELD_BATCH    = int(os.getenv("COMBINED_FIELD_BATCH",    "200"))
+# combined_gap_fill: seconds to sleep between batches so the OpenAI TPM bucket
+# refills — eliminates the 429-storm we observed in production logs.
+_COMBINED_BATCH_PAUSE_S  = float(os.getenv("COMBINED_BATCH_PAUSE_S", "2.0"))
 
 # Legacy constant — kept so existing env-var overrides still work but no longer
 # used as the primary chunk size (it's derived dynamically from the budget above).
@@ -1791,10 +1799,14 @@ def _fill_unmatched_with_gpt(
         "the response useless. If the value is missing, write null with no quotes. If the value "
         "is present but extremely short (e.g., a single digit, a single letter, a single word), "
         "return that exact string — short is fine, sentinel strings are not.\n\n"
-        "OMIT-WHEN-UNKNOWN PROTOCOL:\n"
-        "  You may also simply omit a field from the \"values\" object when you have no value. "
-        "An omitted field is treated identically to JSON null. Do NOT include a field in "
-        "\"raw_text_sourced\" unless you actually copied its value from the document text.\n\n"
+        "OMIT-WHEN-UNKNOWN PROTOCOL (REQUIRED — affects response size):\n"
+        "  When you have no value for a field you MUST omit it from the \"values\" object. "
+        "Do NOT emit explicit JSON nulls for absent fields — omission is the required form. "
+        "An omitted field is treated identically to null by the caller. "
+        "This rule is mandatory: a response that lists every field with null will exceed the "
+        "output-token cap and lose answers at the end. Only include fields you actually filled. "
+        "Do NOT include a field in \"raw_text_sourced\" unless you actually copied its value "
+        "from the document text.\n\n"
         "Rules:\n"
         "  1. EXACT values only — copy verbatim from the document text. Do not paraphrase or invent.\n"
         "  2. Use JSON null (unquoted) when the value is genuinely absent. Never the string \"null\".\n"
@@ -1929,16 +1941,63 @@ def _fill_unmatched_with_gpt(
 
         async def _inner(_s=system_msg, _u=user_msg):
             from utils.llm_limiter import get_llm_semaphore
+            # JSON-schema response format: typing `values` as a map of string→string
+            # (no null permitted) forces the model to OMIT absent fields rather
+            # than emit explicit nulls. This cuts output tokens ~10× on null-heavy
+            # batches and eliminates the truncation we saw under the 16k cap.
+            # Falls back to plain json_object if the model rejects the schema —
+            # the response shape is identical either way ({"values": {…}, …}).
+            _schema_response_format = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "form_fill_response",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "values": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"},
+                            },
+                            "raw_text_sourced": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["values"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
             async with get_llm_semaphore():
-                resp = await _client.chat.completions.create(
-                    model=llm_model,
-                    messages=[
-                        {"role": "system", "content": _s},
-                        {"role": "user",   "content": _u},
-                    ],
-                    temperature=GPT_TEMPERATURE,
-                    response_format={"type": "json_object"},
-                )
+                try:
+                    resp = await _client.chat.completions.create(
+                        model=llm_model,
+                        messages=[
+                            {"role": "system", "content": _s},
+                            {"role": "user",   "content": _u},
+                        ],
+                        temperature=GPT_TEMPERATURE,
+                        response_format=_schema_response_format,
+                        max_completion_tokens=_FORM_FILL_MAX_TOKENS,
+                    )
+                except Exception as _schema_err:
+                    # Some models/SDKs don't accept the json_schema response_format —
+                    # transparently fall back to json_object so the pipeline never
+                    # breaks. We accept the larger response in that case.
+                    logger.warning(
+                        "gpt_fill: json_schema response_format rejected (%s) — "
+                        "falling back to json_object for this call", _schema_err,
+                    )
+                    resp = await _client.chat.completions.create(
+                        model=llm_model,
+                        messages=[
+                            {"role": "system", "content": _s},
+                            {"role": "user",   "content": _u},
+                        ],
+                        temperature=GPT_TEMPERATURE,
+                        response_format={"type": "json_object"},
+                        max_completion_tokens=_FORM_FILL_MAX_TOKENS,
+                    )
             return resp.choices[0].message.content or ""
 
         import time as _time
@@ -2051,36 +2110,72 @@ def _fill_unmatched_with_gpt(
     # _absorb (already handles multi-chunk results correctly).
     #
     # For a single chunk this degenerates to a plain sequential call — no overhead.
-    _chunk_pool_size = min(len(raw_chunks), 4)
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=_chunk_pool_size, thread_name_prefix="gpt-fill-chunk"
-    ) as _chunk_pool:
-        def _dispatch_chunk(args):
-            chunk_idx, raw_chunk = args
+    #
+    # Sequential override applies in two cases:
+    #   (a) field_list > 200 — the prompt is too large to fire 4× in parallel
+    #       without saturating the TPM bucket and breaking progressive narrowing.
+    #   (b) combined_gap_fill batches (form_id "COMBINED_B<n>of<N>") — these
+    #       already arrive as sequential batches of ≤100 fields. Firing the
+    #       4 chunks of each batch in parallel lands ~240k tokens on the
+    #       OpenAI TPM limit (200k/min) in milliseconds, draining the budget
+    #       for the NEXT batch and triggering a 429 storm. Sequential dispatch
+    #       lets progressive narrowing trim later chunks and lets the adaptive
+    #       semaphore in llm_limiter pace the calls. Full document coverage
+    #       is preserved — every chunk is still processed, just one at a time.
+    _is_combined_batch = isinstance(form_id, str) and form_id.startswith("COMBINED_B")
+    _chunk_pool_size   = (
+        1 if (len(field_list) > 200 or _is_combined_batch)
+        else min(len(raw_chunks), 4)
+    )
+
+    if _chunk_pool_size == 1:
+        # Sequential path with REAL progressive narrowing: absorb each chunk's
+        # result before dispatching the next, so chunk N+1's active_fields drops
+        # everything chunk N already filled. Cuts chunk-2 prompt size 30-50% on
+        # combined batches without changing what gets returned. The full
+        # document is still scanned — each chunk holds a different slice of raw
+        # text and every chunk runs unless every field is already filled.
+        for chunk_idx, raw_chunk in enumerate(raw_chunks):
             active_fields = [f for f in field_list if not candidate_counts[f]]
             if not active_fields:
-                return chunk_idx, {}, active_fields
+                break
             prompt = _build_prompt(active_fields, raw_chunk, chunk_idx, len(raw_chunks))
             logger.info(
                 "gpt_fill: chunk %d/%d form=%s active_fields=%d prompt_chars=%d",
                 chunk_idx + 1, len(raw_chunks), form_id, len(active_fields), len(prompt),
             )
             result = _call_llm_sync(prompt)
-            return chunk_idx, result, active_fields
-
-        futures = {
-            _chunk_pool.submit(_dispatch_chunk, (i, chunk)): i
-            for i, chunk in enumerate(raw_chunks)
-        }
-        # Collect in submission order so _absorb sees results deterministically
-        ordered = sorted(
-            (f.result() for f in concurrent.futures.as_completed(futures)),
-            key=lambda x: x[0],
-        )
-
-    for chunk_idx, result, active_fields in ordered:
-        if active_fields:
             _absorb(result, active_fields, chunk_label=f"{chunk_idx + 1}/{len(raw_chunks)}")
+    else:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=_chunk_pool_size, thread_name_prefix="gpt-fill-chunk"
+        ) as _chunk_pool:
+            def _dispatch_chunk(args):
+                chunk_idx, raw_chunk = args
+                active_fields = [f for f in field_list if not candidate_counts[f]]
+                if not active_fields:
+                    return chunk_idx, {}, active_fields
+                prompt = _build_prompt(active_fields, raw_chunk, chunk_idx, len(raw_chunks))
+                logger.info(
+                    "gpt_fill: chunk %d/%d form=%s active_fields=%d prompt_chars=%d",
+                    chunk_idx + 1, len(raw_chunks), form_id, len(active_fields), len(prompt),
+                )
+                result = _call_llm_sync(prompt)
+                return chunk_idx, result, active_fields
+
+            futures = {
+                _chunk_pool.submit(_dispatch_chunk, (i, chunk)): i
+                for i, chunk in enumerate(raw_chunks)
+            }
+            # Collect in submission order so _absorb sees results deterministically
+            ordered = sorted(
+                (f.result() for f in concurrent.futures.as_completed(futures)),
+                key=lambda x: x[0],
+            )
+
+        for chunk_idx, result, active_fields in ordered:
+            if active_fields:
+                _absorb(result, active_fields, chunk_label=f"{chunk_idx + 1}/{len(raw_chunks)}")
 
     # ── Conflict resolution ───────────────────────────────────────────────────
     # Among candidates from multiple chunks, the most-frequent value wins (majority vote).
@@ -2150,7 +2245,217 @@ def _is_nonfillable_field(field: str) -> bool:
     return any(s in field for s in _NONFILLABLE_SUBSTRINGS)
 
 
-def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: str = "") -> Tuple[dict, dict]:
+def compute_form_gaps(form_id: str, schema: dict, facts: dict) -> Tuple[dict, dict, set]:
+    """
+    Run Pass 1 (deterministic rules) and Pass 1.5 (alias stamping) ONLY.
+    NO LLM call. Pure dictionary lookup.
+
+    Used by the combined cross-form gap-fill orchestrator (Stage 4) to determine
+    each form's gap list before running a single shared Pass 2 across all forms.
+
+    Returns
+    -------
+    mapped : dict
+        {field_name: value} for fields filled by Pass 1 + Pass 1.5
+        (plus authoritative blanks for non-fillable and out-of-range schedule rows).
+    unmatched : dict
+        {field_name: schema_meta} for fields that need GPT in Pass 2.
+    deterministic_filled : set
+        Field names treated as authoritative (no highlight) — superset of `mapped`
+        keys that includes deterministic blanks.
+
+    Mirrors the Pass 1 + Pass 1.5 logic at the top of `map_facts_to_form`
+    exactly. Kept as a standalone function so the orchestrator can preview gaps
+    cheaply without paying for Pass 2.
+    """
+    if not schema:
+        return {}, {}, set()
+
+    mapped: dict = {}
+    unmatched: dict = {}
+    deterministic_filled: set = set()
+
+    for field in schema.keys():
+        # Non-fillable fields (signatures, premiums, rates, underwriter codes)
+        # are never sent to GPT.
+        if _is_nonfillable_field(field):
+            mapped[field] = None
+            deterministic_filled.add(field)
+            continue
+
+        # Schedule rows resolved against facts["..."] lists.
+        sched = _resolve_schedule_row(field, facts)
+        if sched is not _SCHED_SKIP:
+            if sched is not None and not _is_empty_llm_value(sched):
+                mapped[field] = sched
+                deterministic_filled.add(field)
+            else:
+                deterministic_filled.add(field)
+            continue
+
+        # Pass 1: _ACORD_FIELD_RULES + address decomposition + indicator derivation.
+        result = _deterministic_map(field, facts)
+        if result == "UNMATCHED" or _is_empty_llm_value(result):
+            unmatched[field] = schema[field]
+        else:
+            mapped[field] = result
+            deterministic_filled.add(field)
+
+    # Pass 1.5: alias-based deterministic stamping (opt-in via flag).
+    if unmatched and form_id:
+        try:
+            from config.settings import ENABLE_ALIAS_STAMPING
+            if ENABLE_ALIAS_STAMPING:
+                from services.alias_stamper import stamp_form_fields
+                alias_filled = stamp_form_fields(form_id, facts, list(unmatched.keys()))
+                for field, value in alias_filled.items():
+                    if value is not None and not _is_empty_llm_value(value):
+                        mapped[field] = value
+                        deterministic_filled.add(field)
+                        unmatched.pop(field, None)
+        except Exception as exc:                # noqa: BLE001 — never block the pipeline
+            logger.warning("compute_form_gaps ALIAS form=%s | error: %s", form_id, exc)
+
+    return mapped, unmatched, deterministic_filled
+
+
+def combined_gap_fill(
+    forms_to_unmatched: Dict[str, dict],
+    facts: dict,
+    raw_text: str,
+    model: str = None,
+) -> Dict[str, dict]:
+    """
+    Run ONE shared GPT pass to fill the deduplicated union of gap fields across
+    all selected forms (Stage 5 of the extraction architecture).
+
+    Parameters
+    ----------
+    forms_to_unmatched : Dict[form_id, Dict[field_name, schema_meta]]
+        Per-form gap lists (typically produced by `compute_form_gaps`).
+    facts : dict
+        The shared extraction facts (same dict passed to per-form maps).
+    raw_text : str
+        Full extracted document text. Chunked internally by `_fill_unmatched_with_gpt`.
+    model : str, optional
+        Override model id. Default: GPT_MODEL.
+
+    Returns
+    -------
+    Dict[form_id, {"filled_values": dict, "raw_text_fields": set, "model_used": str}]
+        Per-form fill results, distributed from the shared LLM output. Each form
+        only receives values for fields *it* asked for.
+
+    Design notes
+    ------------
+    Fields are deduplicated by exact ACORD name (e.g. `Producer_FullName_A`).
+    Across our 17 schemas, ~858 of 4571 unique field names appear in 2+ forms;
+    those de-dupe automatically. Form-unique fields are passed through unchanged.
+
+    Same chunking, retries, prompt skeleton, and majority-vote conflict
+    resolution as the existing per-form Pass 2 — implemented by delegating to
+    `_fill_unmatched_with_gpt` with the unioned input.
+    """
+    # Default empty results per form so callers can iterate safely.
+    empty_result_for = lambda: {                      # noqa: E731
+        "filled_values": {},
+        "raw_text_fields": set(),
+        "model_used": model or GPT_MODEL,
+    }
+    per_form: Dict[str, dict] = {fid: empty_result_for() for fid in forms_to_unmatched}
+
+    if not forms_to_unmatched:
+        return per_form
+
+    # Build union (dedup by ACORD field name) + form-ownership index.
+    union_unmatched: dict = {}
+    field_to_forms: Dict[str, list] = {}
+    for form_id, fields_meta in forms_to_unmatched.items():
+        if not fields_meta:
+            continue
+        for field_name, meta in fields_meta.items():
+            if field_name not in union_unmatched:
+                union_unmatched[field_name] = meta
+            field_to_forms.setdefault(field_name, []).append(form_id)
+
+    if not union_unmatched:
+        return per_form
+
+    total_asks   = sum(len(v or {}) for v in forms_to_unmatched.values())
+    dedup_count  = len(union_unmatched)
+    saved_pct    = 0 if total_asks == 0 else round(100 * (1 - dedup_count / total_asks))
+    logger.info(
+        "combined_gap_fill: forms=%d union_fields=%d total_asks=%d savings=%d%%",
+        len(forms_to_unmatched), dedup_count, total_asks, saved_pct,
+    )
+
+    # GPT pass: batch fields into groups of _COMBINED_FIELD_BATCH (default 100).
+    # With 1531 fields the fields block alone is ~612k chars, leaving almost no
+    # budget for raw text inside _fill_unmatched_with_gpt. Batching keeps each
+    # fields block ~40k chars so _fill_unmatched_with_gpt gets ~309k chars of
+    # raw text budget per chunk (3 chunks for a 671k doc) — the full document
+    # is still scanned; we do NOT truncate the document here.
+    field_items = list(union_unmatched.items())
+    batches = [
+        dict(field_items[i : i + _COMBINED_FIELD_BATCH])
+        for i in range(0, len(field_items), _COMBINED_FIELD_BATCH)
+    ]
+    logger.info(
+        "combined_gap_fill: field_batches=%d batch_size=%d total_fields=%d",
+        len(batches), _COMBINED_FIELD_BATCH, len(field_items),
+    )
+
+    all_filled_values: dict = {}
+    all_raw_text_fields: set = set()
+    used_model = model or GPT_MODEL
+
+    import time as _time
+    for batch_idx, batch_fields in enumerate(batches):
+        batch_id = f"COMBINED_B{batch_idx + 1}of{len(batches)}"
+        # Pause between batches so the OpenAI TPM bucket refills. Without this
+        # back-to-back batches each consumed ~60k input tokens and the first
+        # chunk of every batch hit 429 → ~10s automatic backoff (see prod logs).
+        # The 2s pause costs ~12s total but saves ~120s of cumulative 429 waits.
+        if batch_idx > 0 and _COMBINED_BATCH_PAUSE_S > 0:
+            _time.sleep(_COMBINED_BATCH_PAUSE_S)
+        try:
+            gpt_result = _fill_unmatched_with_gpt(
+                batch_fields, facts, batch_id, model=model, raw_text=raw_text,
+            )
+        except Exception as exc:                      # noqa: BLE001
+            logger.warning("combined_gap_fill: batch %s failed — %s", batch_id, exc)
+            continue
+        all_filled_values.update(gpt_result.get("filled_values", {}) or {})
+        all_raw_text_fields.update(gpt_result.get("raw_text_fields", set()) or set())
+        used_model = gpt_result.get("model_used", used_model)
+
+    filled_values   = all_filled_values
+    raw_text_fields = all_raw_text_fields
+
+    # Distribute results back to each requesting form. A value flows to every
+    # form that asked for that field name; it does NOT bleed into forms that
+    # did not request it.
+    for field_name, value in filled_values.items():
+        for form_id in field_to_forms.get(field_name, []):
+            per_form[form_id]["filled_values"][field_name] = value
+
+    for field_name in raw_text_fields:
+        for form_id in field_to_forms.get(field_name, []):
+            per_form[form_id]["raw_text_fields"].add(field_name)
+
+    for form_id in per_form:
+        per_form[form_id]["model_used"] = used_model
+
+    return per_form
+
+
+def map_facts_to_form(
+    facts: dict,
+    schema: dict,
+    form_id: str = "",
+    raw_text: str = "",
+    pre_filled_gpt: Optional[Dict[str, Any]] = None,
+) -> Tuple[dict, dict]:
     """Two-stage form fill — cache-free.
 
     Pass 1 (deterministic, no LLM): schedule row routing, address decomposition,
@@ -2226,9 +2531,54 @@ def map_facts_to_form(facts: dict, schema: dict, form_id: str = "", raw_text: st
         len(schema), cnt_deterministic, cnt_nonfillable, cnt_blank_sched, len(unmatched),
     )
 
+    # ── Pass 1.5: alias-based deterministic stamping (opt-in) ───────────────
+    # Fills fields Pass 1 missed by looking up each field's canonical name in
+    # forms_aliases/<form_id>_alias.json and resolving it via the extraction-
+    # key bridge in alias_stamper. Pure dictionary lookup — no LLM. When the
+    # ENABLE_ALIAS_STAMPING flag is off, this block is a no-op and behavior
+    # is identical to the prior pipeline.
+    cnt_alias_filled = 0
+    if unmatched and form_id:
+        try:
+            from config.settings import ENABLE_ALIAS_STAMPING
+            if ENABLE_ALIAS_STAMPING:
+                from services.alias_stamper import stamp_form_fields
+                alias_filled = stamp_form_fields(form_id, facts, list(unmatched.keys()))
+                for field, value in alias_filled.items():
+                    if value is not None and not _is_empty_llm_value(value):
+                        mapped[field] = value
+                        _deterministic_filled.add(field)
+                        unmatched.pop(field, None)
+                        cnt_alias_filled += 1
+                if cnt_alias_filled:
+                    logger.info(
+                        "map_facts ALIAS form=%s | alias_filled=%d remaining_gpt=%d",
+                        form_id, cnt_alias_filled, len(unmatched),
+                    )
+        except Exception as exc:                # noqa: BLE001 — never block the pipeline
+            logger.warning("map_facts ALIAS form=%s | error: %s", form_id, exc)
+
     gpt_raw_fields: set = set()
 
-    if unmatched:
+    if unmatched and pre_filled_gpt is not None:
+        # Combined gap-fill path: consume pre-computed values from the cross-form
+        # GPT pass instead of issuing a per-form call. The shared pass already
+        # ran over the union of unmatched fields across all selected forms.
+        gpt_values     = pre_filled_gpt.get("filled_values", {}) or {}
+        gpt_raw_fields = pre_filled_gpt.get("raw_text_fields", set()) or set()
+        gpt_filled_set = {f for f in unmatched if f in gpt_values}
+
+        for field in unmatched:
+            if field in gpt_values:
+                mapped[field] = gpt_values[field]
+            else:
+                mapped.setdefault(field, None)
+
+        logger.info(
+            "map_facts COMBINED form=%s | pre_filled=%d/%d raw_text_sourced=%d",
+            form_id or "unknown", len(gpt_filled_set), len(unmatched), len(gpt_raw_fields),
+        )
+    elif unmatched:
         logger.info(
             "map_facts GPT_ELIGIBLE form=%s | fields=%d raw_text_chars=%d",
             form_id or "unknown", len(unmatched), len(raw_text),

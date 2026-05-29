@@ -81,11 +81,24 @@ TEMPLATE_DIR      = os.path.join(BASE_DIR, "templates")
 FORMS_DB_DIR      = os.path.join(BASE_DIR, "forms_database")
 FORMS_INDEX       = os.path.join(FORMS_DB_DIR, "forms_index.json")
 FORMS_SCHEMAS_DIR = os.path.join(BASE_DIR, "forms_schemas")
+FORMS_ALIASES_DIR = os.path.join(BASE_DIR, "forms_aliases")
 
 SUPPORTED_IMG = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(FORMS_SCHEMAS_DIR, exist_ok=True)
+
+# Alias-based deterministic stamping (Pass 1.5 in map_facts_to_form).
+# When true, fields left empty by _ACORD_FIELD_RULES are looked up via the
+# per-form alias maps in forms_aliases/ before being sent to GPT, reducing
+# LLM calls. Default off → behavior identical to the prior pipeline.
+ENABLE_ALIAS_STAMPING: bool = os.getenv("ENABLE_ALIAS_STAMPING", "false").lower() == "true"
+
+# Combined cross-form gap fill (Stages 4-6 of the extraction architecture).
+# When true, /api/select-forms-bulk runs ONE shared LLM gap-fill across the
+# union of unmatched fields from ALL selected forms, instead of one GPT call
+# per form. Default off → behavior identical to the prior pipeline.
+ENABLE_COMBINED_GAP_FILL: bool = os.getenv("ENABLE_COMBINED_GAP_FILL", "false").lower() == "true"
 
 ADMIN_EMAILS: set = {
     e.strip().lower()

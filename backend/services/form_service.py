@@ -453,10 +453,19 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
              trigger_reason=_gl_reason)
 
     if flags.get("has_workers_comp"):
+        _wc_reason = "has_workers_comp flag detected"
+        # Spec §137-142: monopolistic WC states (ND/OH/WA/WY) require state
+        # fund — surface the constraint in the recommendation reason so users
+        # see it at recommendation time, not just at SQS time.
+        if flags.get("wc_has_monopolistic_state"):
+            _wc_reason += (
+                " (monopolistic state detected — ND/OH/WA/WY require state fund; "
+                "private-carrier WC will be hard-stopped unless state-fund acknowledgement is provided)"
+            )
         _add("ACORD_130",
              "ACORD 130 - Workers Compensation Application",
              trigger_weight=0.95,
-             trigger_reason="has_workers_comp flag detected",
+             trigger_reason=_wc_reason,
              template_pending=True)
 
     _has_auto = flags.get("has_auto_coverage")
@@ -690,10 +699,11 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
     # likewise out of scope. Both remain pending until proper national
     # templates are added.
 
-    # ACORD 186 — flag-matched above; keyword fallback for GL-present submissions.
-    # Keywords narrowed to construction-trade signals that are unlikely to appear
-    # incidentally on a non-contractor submission. "contractor"/"subcontract"
-    # alone are too broad (appear on most COIs as endorsement requests).
+    # ACORD 186 — flag-matched above; keyword fallback for any submission with
+    # contractor-type operations. Per Decision_Tree.txt L461:
+    #   "IF 125.operations.contains(contracting) THEN add ACORD_186"
+    # The spec triggers on operations alone, independent of the GL flag — so
+    # WC-only or pure-operations contractor submissions also get 186.
     _186_kw = {
         "roofing", "demolition", "scaffolding",
         "blasting", "general contractor", "licensed contractor",
@@ -701,12 +711,11 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         "residential construction", "commercial construction",
     }
     if (not _already_matched("ACORD_186")
-            and flags.get("has_general_liability")
             and any(kw in ops for kw in _186_kw)):
         _add("ACORD_186",
              "ACORD 186 - Contractors Supplemental Application",
              trigger_weight=0.85,
-             trigger_reason="GL coverage with contractor-type operations keywords detected")
+             trigger_reason="contractor-type operations keywords detected in 125 operations description")
 
     # ACORD 141 — property + valuation/coinsurance detail or multiple locations
     _141_kw = {
@@ -748,13 +757,25 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "") -> List[
         w in _cert_holder_val or w in _mortgagee_val
         for w in ["bank", "lender", "mortgage", "financial", "credit union", "trust"]
     )
-    if (not _already_matched("ACORD_28")
-            and flags.get("has_property_coverage")
-            and (_28_entity_signal or any(kw in text for kw in _28_kw))):
+    # Spec L496-499: ACORD 28 trigger is "If a lender, landlord or other party
+    # requests evidence of the property policy" — a standalone lender/mortgagee
+    # request must trigger 28 even without a property coverage flag on the
+    # uploaded document (e.g. a lender request letter without dec page).
+    _28_strong_lender_signal = (
+        _28_entity_signal
+        or flags.get("has_mortgagee_requirement")
+        or flags.get("has_loss_payee_requirement")
+        or any(kw in text for kw in ("mortgagee", "evidence of property", "lender evidence",
+                                      "lender requirement", "mortgage lender", "acord 28"))
+    )
+    if not _already_matched("ACORD_28") and (
+        (flags.get("has_property_coverage") and (_28_entity_signal or any(kw in text for kw in _28_kw)))
+        or _28_strong_lender_signal
+    ):
         _add("ACORD_28",
              "ACORD 28 - Evidence of Commercial Property Insurance",
              trigger_weight=0.85,
-             trigger_reason="property coverage with mortgagee/lender/loss payee signals detected",
+             trigger_reason="mortgagee/lender/loss payee evidence request detected",
              template_pending=True)
 
     # ── Sort: blended confidence descending (ACORD_125 naturally stays first) ──
@@ -798,7 +819,7 @@ def match_forms(facts: dict, flags: dict, all_forms: List[dict], text: str = "")
     return match_forms_deterministic(facts, flags, text=text)
 
 
-def process_single_form(form_meta: dict, session: dict) -> dict:
+def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = None) -> dict:
     tpl              = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
     schema           = extract_form_schema(tpl, form_id=form_meta["form_id"])
     raw_text         = " ".join(d.get("text", "") for d in session.get("docs", []))
@@ -809,6 +830,7 @@ def process_single_form(form_meta: dict, session: dict) -> dict:
         facts_with_flags, schema,
         form_id=form_meta["form_id"],
         raw_text=raw_text,
+        pre_filled_gpt=pre_filled_gpt,
     )
 
     hard_stops, soft_stops = run_field_validations(mapped)

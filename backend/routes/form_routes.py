@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, Response
 from typing import List
 
 from config.database import get_pool
-from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING
+from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING, ENABLE_COMBINED_GAP_FILL
 from utils.crypto import decrypt_field
 from utils.json_logging import get_trace_id
 from utils.helpers import safe_join, check_payment_access
@@ -31,6 +31,7 @@ from services.pdf_service import (
     extract_form_fields_with_positions, get_page_dims_pikepdf, regenerate_pdf_for_form,
     fill_pdf, _is_signature_field, _load_fieldmap,
     apply_acord125_missing_field_highlights,
+    extract_form_schema, compute_form_gaps, combined_gap_fill,
 )
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
@@ -384,6 +385,65 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     try:
         loop = asyncio.get_event_loop()
 
+        # ── Stages 4-6: Combined cross-form gap fill (opt-in via flag) ───────
+        # Phase A — compute Pass 1 + 1.5 gaps per form in parallel (no LLM).
+        # Phase B — run ONE shared GPT pass across the union of gap fields.
+        # Phase C — generate each form, feeding it its slice of the shared
+        #            GPT result so Pass 2 is replaced by a dict lookup.
+        # When the flag is off, this whole block is skipped and the historic
+        # per-form path runs unchanged.
+        per_form_pre_filled: dict = {}
+        if ENABLE_COMBINED_GAP_FILL:
+            try:
+                async def _compute_gaps_one(form_id: str):
+                    form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
+                    if not form_meta:
+                        return form_id, None, None
+                    try:
+                        tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
+                    except ValueError:
+                        return form_id, None, None
+                    if not os.path.exists(tpl):
+                        return form_id, None, None
+                    schema = await loop.run_in_executor(
+                        _FORM_EXECUTOR, extract_form_schema, tpl, form_id,
+                    )
+                    facts_with_flags = {**session["facts"], **session.get("flags", {})}
+                    _mapped, unmatched, _det = await loop.run_in_executor(
+                        _FORM_EXECUTOR, compute_form_gaps, form_id, schema, facts_with_flags,
+                    )
+                    return form_id, schema, unmatched
+
+                gap_previews = await asyncio.gather(
+                    *[_compute_gaps_one(fid) for fid in req.form_ids],
+                    return_exceptions=True,
+                )
+
+                forms_to_unmatched: dict = {}
+                for item in gap_previews:
+                    if isinstance(item, Exception):
+                        logger.warning("combined_gap_fill: gap preview exception: %s", item)
+                        continue
+                    fid, _schema, unmatched = item
+                    if unmatched:
+                        forms_to_unmatched[fid] = unmatched
+
+                if forms_to_unmatched:
+                    raw_text = " ".join(d.get("text", "") for d in session.get("docs", []))
+                    facts_with_flags = {**session["facts"], **session.get("flags", {})}
+                    per_form_pre_filled = await loop.run_in_executor(
+                        _FORM_EXECUTOR,
+                        combined_gap_fill,
+                        forms_to_unmatched, facts_with_flags, raw_text,
+                    )
+                else:
+                    logger.info("combined_gap_fill: no gaps after Pass 1 + 1.5 — skipping shared GPT pass")
+            except Exception as ex:
+                # Any failure in the combined path falls back to the historic
+                # per-form GPT path (process_single_form with pre_filled_gpt=None).
+                logger.error("combined_gap_fill: fatal error, falling back per-form: %s", ex)
+                per_form_pre_filled = {}
+
         async def _generate_one(form_id: str):
             form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
             if not form_meta:
@@ -396,7 +456,10 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             if not os.path.exists(tpl):
                 return form_id, None
             try:
-                result = await loop.run_in_executor(_FORM_EXECUTOR, process_single_form, form_meta, session)
+                pre_filled = per_form_pre_filled.get(form_id) if per_form_pre_filled else None
+                result = await loop.run_in_executor(
+                    _FORM_EXECUTOR, process_single_form, form_meta, session, pre_filled,
+                )
                 return form_id, result
             except Exception as ex:
                 logger.error(f"Error processing {form_id}: {ex}")
@@ -457,6 +520,12 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         except Exception as _pkg_ex:
             logger.error(f"calculate_package_sqs failed: {_pkg_ex}", exc_info=True)
             package_sqs = None
+
+        # Persist so the async (202) refetch path and page reloads can recover it.
+        try:
+            await upd_processing_session(req.session_id, {"package_sqs": package_sqs})
+        except Exception as _persist_ex:
+            logger.warning(f"persist package_sqs failed: {_persist_ex}")
 
         for fid, r in results.items():
             sqs_data = r.get("sqs")
@@ -750,9 +819,45 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         from services.cross_form_validator import (
             run_cross_form_validation, split_cross_form_issues,
         )
-        _re_hard, _re_soft = evaluate_stops(updated_facts, session.get("flags", {}))
+
+        # Recompute coverage flags from the latest facts (downgrade-only).
+        # When the user clears the last fact backing a coverage flag, the
+        # flag must drop so its dependent hard stops (e.g. property COPE)
+        # don't keep the score capped. We never RAISE a flag here — raising
+        # requires a fresh extraction pass.
+        fresh_flags = dict(session.get("flags") or {})
+
+        def _fact(k):
+            return updated_facts.get(k) if updated_facts.get(k) not in ("", "null", "None") else None
+
+        if fresh_flags.get("has_property_coverage") and not (
+            _fact("property_building_value")
+            or _fact("property_bpp_value")
+            or _fact("locations")
+        ):
+            fresh_flags["has_property_coverage"] = False
+        if fresh_flags.get("has_umbrella") and not (
+            _fact("umbrella_limit")
+            or _fact("umbrella_attachment_point")
+            or _fact("umbrella_sir")
+        ):
+            fresh_flags["has_umbrella"] = False
+        if fresh_flags.get("has_auto_coverage") and not (
+            _fact("auto_liability_limit")
+            or _fact("auto_vin_schedule")
+            or _fact("vehicle_schedule")
+        ):
+            fresh_flags["has_auto_coverage"] = False
+        if fresh_flags.get("has_workers_comp") and not (
+            _fact("wc_payroll")
+            or _fact("wc_class_codes")
+            or _fact("total_payroll")
+        ):
+            fresh_flags["has_workers_comp"] = False
+
+        _re_hard, _re_soft = evaluate_stops(updated_facts, fresh_flags)
         _triggered_ids = set(session.get("selected_form_ids") or []) | {form_id}
-        _cf_issues = run_cross_form_validation(updated_facts, session.get("flags", {}), _triggered_ids)
+        _cf_issues = run_cross_form_validation(updated_facts, fresh_flags, _triggered_ids)
         _cf_hard, _cf_soft, _cf_advisories = split_cross_form_issues(_cf_issues)
         fresh_hard_stops = list(_re_hard) + list(_cf_hard)
         fresh_soft_stops = list(_re_soft) + list(_cf_soft)
@@ -760,7 +865,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         # Pass confidence_dict so structural completeness reflects producer edits
         # (1.00) vs AI-high (0.85) vs AI-low (0.50) per spec.
         sqs = calculate_sqs(
-            facts=updated_facts, flags=session["flags"],
+            facts=updated_facts, flags=fresh_flags,
             mapped_data=current_state, form_schema=r.get("schema", {}),
             selected_form_ids=session.get("selected_form_ids", []),
             hard_stops=fresh_hard_stops, soft_stops=fresh_soft_stops,
@@ -847,13 +952,46 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             "field_state": current_state, "confidence": confidence, "sqs": sqs,
             "_pdf_cache_hash": cache_hash, "pdf_bytes": new_pdf_bytes, "signature_applied": new_sig_applied,
         })
+
+        # Recompute package SQS from the now-updated per-form SQS results so
+        # the package score, pillars, top recommendations, and cross-form
+        # validation update live as the producer edits fields.
+        _sqs_results_live = [r2.get("sqs") for r2 in generated.values() if r2.get("sqs")]
+        # Dedup cross_issues by message to match select_forms_bulk behavior.
+        _seen_cf_msgs, _cf_deduped = set(), []
+        for _iss in (_cf_issues or []):
+            _m = _iss.get("message", "") if isinstance(_iss, dict) else ""
+            if _m and _m not in _seen_cf_msgs:
+                _seen_cf_msgs.add(_m)
+                _cf_deduped.append(_iss)
+        try:
+            pkg_sqs = calculate_package_sqs(
+                facts=updated_facts,
+                flags=fresh_flags,
+                form_results=_sqs_results_live,
+                cross_issues=_cf_deduped,
+                hard_stops=fresh_hard_stops,
+                soft_stops=fresh_soft_stops,
+                session_data=session,
+                session_id=req.session_id,
+                user_id=str(current_user["id"]),
+                calculation_stage="form_edited",
+            )
+        except Exception as _pkg_ex:
+            logger.error(f"package_sqs recompute (edit) failed: {_pkg_ex}", exc_info=True)
+            pkg_sqs = None
+
         await upd_processing_session(req.session_id, {
             "generated_forms": generated,
             "facts": updated_facts,
+            "flags": fresh_flags,
             "hard_stops": fresh_hard_stops,
             "soft_stops": fresh_soft_stops,
+            "package_sqs": pkg_sqs,
+            "cross_issues_last": _cf_deduped,
         })
-        return JSONResponse({"success": True, "sqs": sqs, "confidence": confidence})
+        return JSONResponse({"success": True, "sqs": sqs, "confidence": confidence,
+                             "package_sqs": pkg_sqs, "cross_issues": _cf_deduped})
     except HTTPException:
         raise
     except Exception as ex:
@@ -876,7 +1014,8 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
     summary   = {fid: {"form_id": r.get("form_id", fid), "form_name": r.get("form_name", fid),
                         "sqs": r.get("sqs", {})} for fid, r in generated.items()}
     return JSONResponse({"session_id": session_id, "generated_forms": summary,
-                         "cross_issues": proc_session.get("cross_issues_last", [])})
+                         "cross_issues": proc_session.get("cross_issues_last", []),
+                         "package_sqs": proc_session.get("package_sqs")})
 
 
 @router.get("/api/session/{session_id}/extraction-result")

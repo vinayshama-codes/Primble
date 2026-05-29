@@ -75,8 +75,8 @@ _style.textContent = `
     justify-content: center; z-index: 99999; gap: 24px;
   }
   .upgrade-stage-spinner {
-    width: 56px; height: 56px; border: 4px solid #e2e8f0;
-    border-top-color: #2563eb; border-radius: 50%;
+    width: 56px; height: 56px; border: 4px solid #fce7f3;
+    border-top-color: #e61b84; border-radius: 50%;
     animation: spin 0.9s linear infinite;
   }
   .upgrade-stage-steps { display: flex; flex-direction: column; gap: 10px; align-items: center; }
@@ -87,7 +87,7 @@ _style.textContent = `
   .upgrade-stage-step.active { color: #1e293b; font-weight: 700; font-size: 16px; }
   .upgrade-stage-step.done { color: #10b981; }
   .upgrade-stage-dot { width: 8px; height: 8px; border-radius: 50%; background: #e2e8f0; flex-shrink: 0; }
-  .upgrade-stage-step.active .upgrade-stage-dot { background: #2563eb; }
+  .upgrade-stage-step.active .upgrade-stage-dot { background: #e61b84; }
   .upgrade-stage-step.done .upgrade-stage-dot { background: #10b981; }
   .overage-inline-notice {
     background: #fefce8; border: 1px solid #fde047; border-radius: 8px;

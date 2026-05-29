@@ -1,0 +1,19 @@
+{
+  "Form_EditionIdentifier_A": "form_edition_identifier",
+  "Producer_CustomerIdentifier_A": "producer_customer_identifier",
+  "Location_ProducerIdentifier_A": "location_producer_identifier",
+  "Form_CurrentPageNumber_A": "form_current_page_number",
+  "Form_TotalPageNumber_A": "form_total_page_number",
+  "Producer_FullName_A": "producer_full_name",
+  "Policy_PolicyNumberIdentifier_A": "policy_number_identifier",
+  "Insurer_FullName_A": "insurer_full_name",
+  "Insurer_NAICCode_A": "insurer_naic_code",
+  "NamedInsured_FullName_A": "named_insured_full_name",
+  "NamedInsured_FullName_B": "named_insured_full_name_b",
+  "NamedInsured_FullName_C": "named_insured_full_name_c",
+  "NamedInsured_FullName_D": "named_insured_full_name_d",
+  "Policy_EffectiveDate_A": "policy_effective_date",
+  "AdditionalRemark_FormIdentifier_A": "additional_remark_form_identifier",
+  "AdditionalRemark_FormName_A": "additional_remark_form_name",
+  "AdditionalRemark_RemarkText_A": "additional_remark_remark_text"
+}

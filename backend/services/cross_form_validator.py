@@ -85,6 +85,7 @@ def _check_wc_payroll_reconciliation(
 
     wc_pay  = _to_float(_fv(facts, "wc_payroll"))
     tot_pay = _to_float(_fv(facts, "total_payroll"))
+    tot_rev = _to_float(_fv(facts, "total_revenue"))
 
     if wc_pay and tot_pay and tot_pay > 0:
         diff_pct = abs(wc_pay - tot_pay) / tot_pay
@@ -96,6 +97,23 @@ def _check_wc_payroll_reconciliation(
                     f"WC payroll (${wc_pay:,.0f}) differs from total payroll "
                     f"(${tot_pay:,.0f}) by {diff_pct * 100:.0f}% — exceeds 20% "
                     "tolerance. Reconcile or add ACORD 101 explanation."
+                ),
+                ["ACORD_125", "ACORD_130"],
+            ))
+
+    # Spec §121: "WC payroll must reconcile with ACORD 125 revenue/operations".
+    # If total_payroll is missing/zero, fall back to revenue-based sanity check:
+    # WC payroll >85% of revenue is operationally implausible for most businesses.
+    if wc_pay and tot_rev and tot_rev > 0:
+        wc_to_rev_ratio = wc_pay / tot_rev
+        if wc_to_rev_ratio > 0.85:
+            issues.append(_issue(
+                "soft_warning",
+                "wc_payroll_vs_revenue",
+                (
+                    f"WC payroll (${wc_pay:,.0f}) is {wc_to_rev_ratio * 100:.0f}% of "
+                    f"total revenue (${tot_rev:,.0f}) — unusually high. "
+                    "Reconcile with operations or add ACORD 101 explanation."
                 ),
                 ["ACORD_125", "ACORD_130"],
             ))
@@ -218,6 +236,44 @@ def _check_location_address_reconciliation(
             ),
             ["ACORD_125", "ACORD_140"],
         ))
+
+    # Spec §56-61: Address Mapping — physical locations must align between
+    # ACORD 125 and 140 by ADDRESS, not just count. Normalise each location
+    # to a tokenised string and verify the sets overlap.
+    def _normalise_location(loc) -> str:
+        if isinstance(loc, dict):
+            raw = " ".join(str(v) for v in loc.values() if v)
+        else:
+            raw = str(loc or "")
+        # Collapse whitespace, lowercase, strip punctuation for comparison.
+        import re as _re
+        return _re.sub(r"[^a-z0-9 ]+", "", raw.lower()).strip()
+
+    addrs_125 = {_normalise_location(loc) for loc in locs_125 if loc}
+    addrs_140 = {_normalise_location(loc) for loc in locs_140 if loc}
+    addrs_125.discard("")
+    addrs_140.discard("")
+
+    if addrs_125 and addrs_140:
+        # Locations in 125 not represented in 140 (substring-match either way
+        # to tolerate minor differences like apartment numbers or zip suffixes).
+        def _addr_present(addr, addr_set):
+            return any(addr in other or other in addr for other in addr_set)
+
+        unmatched_125 = [a for a in addrs_125 if not _addr_present(a, addrs_140)]
+        unmatched_140 = [a for a in addrs_140 if not _addr_present(a, addrs_125)]
+
+        if unmatched_125 or unmatched_140:
+            issues.append(_issue(
+                "soft_warning",
+                "location_address_mismatch",
+                (
+                    "Location addresses do not align between ACORD 125 and ACORD 140. "
+                    "Verify each insured location is represented on both forms or add "
+                    "ACORD 101 explanation."
+                ),
+                ["ACORD_125", "ACORD_140"],
+            ))
 
     return issues
 

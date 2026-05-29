@@ -187,8 +187,48 @@ async def upd_processing_session(sid: str, updates: dict) -> None:
                                 existing_gen[fid].update(form_data)
                         current["generated_forms"] = existing_gen
 
+                    # Spec / concurrency: append-only merge for sqs_history so
+                    # concurrent writers don't wipe each other's entries; dict
+                    # merge for facts so ARQ apply / extraction / edit don't
+                    # overwrite each other's keys.  (Other keys keep the
+                    # legacy wholesale-replace behaviour.)
                     for k, v in updates.items():
-                        if k != "generated_forms":
+                        if k == "generated_forms":
+                            continue
+                        if k == "sqs_history" and isinstance(v, list):
+                            existing_hist = current.get("sqs_history") or []
+                            if not isinstance(existing_hist, list):
+                                existing_hist = []
+                            merged = list(existing_hist)
+                            # Dedup by (stage, at, score) to avoid duplicates.
+                            seen = {
+                                (h.get("stage"), h.get("at"), h.get("score"))
+                                for h in merged if isinstance(h, dict)
+                            }
+                            for entry in v:
+                                if not isinstance(entry, dict):
+                                    continue
+                                key = (entry.get("stage"), entry.get("at"), entry.get("score"))
+                                if key not in seen:
+                                    merged.append(entry)
+                                    seen.add(key)
+                            current["sqs_history"] = merged
+                        elif k == "facts" and isinstance(v, dict) and isinstance(current.get("facts"), dict):
+                            merged_facts = dict(current.get("facts") or {})
+                            for fk, fv in v.items():
+                                # Last-write-wins per key, but only when the new
+                                # value is non-empty — never let an in-flight
+                                # caller's blank value erase a previously-set
+                                # value (the common ARQ-vs-extraction race).
+                                if fv is None:
+                                    continue
+                                if isinstance(fv, str) and not fv.strip():
+                                    continue
+                                if isinstance(fv, (list, dict)) and not fv:
+                                    continue
+                                merged_facts[fk] = fv
+                            current["facts"] = merged_facts
+                        else:
                             current[k] = v
 
                     clean = _session_to_db(_encrypt_facts(current))
