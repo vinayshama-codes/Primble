@@ -72,7 +72,7 @@ _style.textContent = `
   .upgrade-stage-overlay {
     position: fixed; inset: 0; background: rgba(255,255,255,0.97);
     display: flex; flex-direction: column; align-items: center;
-    justify-content: center; z-index: 99999; gap: 24px;
+    justify-content: center; z-index: 99999; gap: 14px;
   }
   .upgrade-stage-spinner {
     width: 56px; height: 56px; border: 4px solid #fce7f3;

@@ -15,13 +15,13 @@ export default function ProcessStageOverlay({ stages, advanceAfter = 3000, tagli
   return (
     <div className="upgrade-stage-overlay">
       {tagline && (
-        <p style={{ margin: "0 0 16px", fontSize: 20, fontWeight: 700, color: "#0f172a", letterSpacing: "-0.2px", textAlign: "center", lineHeight: 1.4, padding: "0 20px", maxWidth: 420 }}>
+        <p style={{ margin: "0 0 0", fontSize: "clamp(12px, 3.7vw, 22px)", fontWeight: 700, color: "#0f172a", letterSpacing: "-0.2px", textAlign: "center", lineHeight: 1.4, whiteSpace: "nowrap", padding: "0 10px", maxWidth: 580 }}>
           {tagline}
         </p>
       )}
       {note && (
-        <div style={{ margin: "0 0 24px", padding: "12px 28px", background: "rgba(253,242,248,0.96)", border: "1px solid rgba(230,27,132,0.18)", borderRadius: 12, maxWidth: 540, width: "calc(100% - 32px)", textAlign: "center" }}>
-          <p style={{ margin: 0, fontSize: 13, color: "#9d174d", lineHeight: 1.65, fontWeight: 450 }}>
+        <div style={{ margin: 0, padding: "0 8px", maxWidth: 600, width: "100%", textAlign: "center" }}>
+          <p style={{ margin: 0, fontSize: "clamp(6px, 2.2vw, 13px)", color: "#9d174d", lineHeight: 1.6, fontWeight: 450, whiteSpace: "nowrap" }}>
             {note}
           </p>
         </div>

@@ -1556,16 +1556,16 @@ const AcordModal = forwardRef(function AcordModal({
           <ProcessStageOverlay
             stages={["Reading your documents…", "Extracting facts…"]}
             advanceAfter={3500}
-            tagline="Quality takes time. But not as much time if you were still doing this manually."
-            note="You can leave this page during processing, but do not close it. Please enable your browser notifications, and we'll let you know as soon as it's ready."
+            tagline={<><span style={{ color: "#e61b84" }}>Quality takes a little time.</span><br />Doing this manually would take a lot more.</>}
+            note={<>You can leave this page during processing, but do <strong>not</strong> close it. Enable<br />your browser notifications, and we'll let you know as soon as it's ready.</>}
           />
         )}
         {showGenerateOverlay && (
           <ProcessStageOverlay
             stages={[`Selecting ${checkedFormIds.size} form${checkedFormIds.size !== 1 ? "s" : ""}…`, "Generating form…"]}
             advanceAfter={3000}
-            tagline="Quality takes time. But not as much time if you were still doing this manually."
-            note="You can leave this page during processing, but do not close it. Please enable your browser notifications, and we'll let you know as soon as it's ready."
+            tagline={<><span style={{ color: "#e61b84" }}>Quality takes a little time.</span><br />Doing this manually would take a lot more.</>}
+            note={<>You can leave this page during processing, but do <strong>not</strong> close it. Enable<br />your browser notifications, and we'll let you know as soon as it's ready.</>}
           />
         )}
         {showDownloadOverlay && <ProcessStageOverlay stages={["Preparing your form…", "Packaging for download…"]} advanceAfter={2000} />}
