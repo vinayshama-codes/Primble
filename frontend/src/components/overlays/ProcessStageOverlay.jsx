@@ -21,7 +21,7 @@ export default function ProcessStageOverlay({ stages, advanceAfter = 3000, tagli
       )}
       {note && (
         <div style={{ margin: 0, padding: "0 8px", maxWidth: 600, width: "100%", textAlign: "center" }}>
-          <p style={{ margin: 0, fontSize: "clamp(6px, 2.2vw, 13px)", color: "#9d174d", lineHeight: 1.6, fontWeight: 450, whiteSpace: "nowrap" }}>
+          <p style={{ margin: 0, fontSize: "clamp(5px, 1.8vw, 11px)", color: "#6b7280", lineHeight: 1.6, fontWeight: 450, whiteSpace: "nowrap" }}>
             {note}
           </p>
         </div>
