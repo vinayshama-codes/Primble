@@ -1,0 +1,427 @@
+Workstream 3 - SQS, Evidence Handling & Score Recalculation- DOUBTS AND SOLUTIONS BY CLIENT 
+ 
+Question 1. What underlying limits does an umbrella actually need to attach?
+The spec says underlying GL/Auto must "meet umbrella minimums" but never gives the number, so we've been running with $1M GL and $1M Auto. Please suggest the correct numbers. 
+
+Use the following as the baseline:
+• General Liability = $1,000,000 Each Occurrence / $2,000,000 Aggregate
+• Commercial Auto = $1,000,000 CSL (Combined Single Limit)
+Do not fail the submission if limits are lower. Instead:
+• Reduce the Umbrella Adequacy score
+• Generate a warning: "Underlying limits may not meet umbrella requirements."
+Carrier requirements vary, so this should be a warning, not a hard stop.
+
+
+Question 2. Minimum Employers Liability for an umbrella over Workers' Comp?
+Our code currently flags anything under $100K. What should we enforce?
+
+I would move the minimum from $100,000 to $500,000.
+Scoring recommendation:
+• $1,000,000 EL = Full Credit
+• $500,000 EL = Acceptable Credit
+• Below $500,000 = Warning and Score Reduction
+Many umbrella markets want to see at least $500,000 EL and often prefer $1M.
+
+ 
+Question 3. Loss runs
+How many years of loss runs do you consider complete - 3 or 5? And do they need to be currently valued (within roughly 90 days) to count?
+Before we credit a loss run toward the submission score, we need a way to confirm it belongs to the insured in the package. Is matching on the business name enough, or do you want the FEIN or policy number to agree too before we count it?
+
+
+
+For submission scoring:
+• 5 years currently valued = Full Credit
+• 3 years currently valued = Partial Credit
+• Less than 3 years = Incomplete
+Loss runs should ideally be valued within the last 90 days.
+If older than 90 days:
+• Still count them
+• Reduce score
+• Generate warning: "Updated loss runs may be required."
+
+For ownership validation:
+Business name alone is not enough.
+Preferred matching:
+• Business Name + Policy Number = Strong Match
+• Business Name + FEIN = Strong Match
+• Business Name Only = Possible Match
+If only Business Name matches:
+Show warning: "Loss run ownership could not be fully verified."
+
+
+ 
+Question 4. Umbrella follow-form
+When the submission doesn't include the full umbrella policy form , we can't always tell from what we're given whether the umbrella follows form over the underlying coverages or whether there are gaps. Please confirm which one we should go with two options:
+(a) Have the AI infer follow-form from whatever policy language is present in the documents - possible, but a coverage-critical call where a wrong inference has real consequences.
+(b) Only confirm follow-form when a document explicitly shows it, and flag everything else as "Unable to determine - recommend underwriter review."
+
+
+Use Option B. Do not have AI infer follow-form status. Only confirm follow-form if documentation explicitly states it.
+Otherwise display: "Unable to determine whether umbrella follows form. Recommend underwriter review."
+This is a coverage issue and should never be guessed.
+The category breakdown - here's how we're planning to build it, want your opinion.
+Doc asked for the scores to be broken out by category. Instead of replacing the six scores everyone is already familiar with, we’re going to keep those six as the headline scores and compute the more detailed category scores underneath them, either as expandable sub-rows. Alternatively, we can keep only the existing six scores visible without expandable sub-rows and handle the detailed calculations entirely in the backend. 
+
+Here's how the detailed categories roll up:
+
+Structural Completeness - Applicant Info, Entity Info, Effective Date Consistency, Policy Term Consistency, Supporting Documentation
+Exposure Consistency - Operations, Coverage Info, Payroll/Employee, Revenue/Sales, Cross-Document Consistency
+Property Integrity - COPE Info, Location Info
+Loss History - Loss History
+Umbrella Adequacy - Umbrella limits
+Narrative Quality - Narrative Quality, Prior Carrier context
+ 
+ 
+ 
+I like the proposed grouping structure. My recommendation:
+• Keep the six primary scores visible
+• Allow users to expand each score to see the details underneath
+This provides transparency without overwhelming the user. 
+
+
+
+
+
+More questions and answers : 
+
+
+
+
+
+1) How the Overall SQS Score Is Calculated
+
+The SQS headline score (0-100) is a weighted average of six individual pillar scores. Each pillar carries a specific weight:
+
+Structural Completeness - 25%
+Exposure Consistency - 25%
+Property Integrity - 15%
+Loss History - 15%
+Umbrella Adequacy -10%
+Narrative Quality -10%
+
+Each pillar is calculated independently using its own logic. Here is exactly how each one works.
+
+1. Structural Completeness (25%)
+
+This pillar measures whether the core application information is present and the forms are filled in properly. It is made up of three weighted components:
+
+Core Application Fields (35% of this pillar) - Is the applicant name, mailing address, effective date, contact information, producer name, and lines of business present?
+Underwriting Profile Fields (30% of this pillar) - Are the deeper business facts present? This includes FEIN, entity type, operations description, annual revenue, payroll, number of employees, years in business, prior carrier, NAICS code, number of prior claims, and workers comp modifier.
+Form Fill Quality (35% of this pillar) - Across the ACORD forms that were generated, how completely were the fields filled in and how confident are we in those values? Producer-entered values score at 100%, AI-high-confidence values at 85%, and AI-low-confidence values at 50%.
+I generally agree with the current logic for V1.
+My only concern is that we are combining three different concepts into one score:
+• Information Presence
+• Information Quality
+• AI Confidence
+This can create confusion because a user may see that all required information is present but still receive a lower score due to AI confidence levels.
+For V1:
+Keep the current calculation if it is already built.
+For a future release:
+Separate Extraction Confidence from SQS.
+Example:
+SQS = 88
+Extraction Confidence = 92%
+This will make the score easier for users to understand and trust.
+Recommended Structure
+Applicant Information (30%)
+• Named Insured
+• Address
+• Contact Information
+• Effective Date
+• Entity Type
+Underwriting Information (40%)
+• Revenue
+• Payroll
+• Employees
+• Years in Business
+• Operations Description
+• FEIN
+• NAICS
+Supporting Documents (30%)
+• Loss Runs
+• Dec Pages
+• Schedule of Values (SOV)
+• Prior Policies
+• Supplemental Applications
+Long-Term Recommendation
+Structural Completeness should answer one question: "Did we collect the information needed to evaluate the risk?"
+Extraction Confidence should answer a separate question: "How confident are we that the extracted information is correct?"
+Keeping those as separate metrics will prevent confusion and make the scoring easier to explain.
+
+2. Exposure Consistency (25%)
+
+This pillar measures whether the business exposure data is complete and internally consistent. It starts at 100 and applies deductions for each gap found:
+
+No GL class codes detected: - 20 points
+Class codes present but no operations description: - 10 points
+No GL limits found: -8 points
+No payroll or revenue in the submission: -15 points
+Workers Comp detected but no WC payroll: -12 points
+Workers Comp detected but no class codes: -10 points
+Multi-state WC with no state-by-state breakdown: -8 points
+Contractor submission with no subcontracting percentage: -8 points
+Auto coverage but no auto liability limit: -10 points
+Auto coverage but no covered symbols defined: -5 points
+Cross-form conflicts found: up to -20 points
+This is one of the most important pillars and should remain heavily weighted. I agree with the current deductions for:
+• Missing GL class codes
+• Missing payroll or revenue
+• Missing WC payroll
+• Missing WC class codes
+• Missing Auto limits
+• Missing covered auto symbols
+• Cross-form conflicts
+I would add the following validations:
+Operations Description Missing
+• -10 points
+If we cannot determine what the business does, the submission quality is reduced.
+GL Class Code Does Not Match Operations
+• -15 points
+Example:
+Operations Description = Roofing Contractor
+GL Class Code = Office Exposure
+This is a significant underwriting concern.
+WC Class Code Does Not Match Operations
+• -15 points
+This is another common underwriting issue and should be flagged.
+Revenue-to-Payroll Outlier
+• Warning and potential deduction
+Examples:
+• $10M revenue with $25,000 payroll
+• $500K revenue with $4M payroll
+These should be flagged for review because they may indicate incorrect data.
+Exposure Present but No Corresponding Coverage
+• Warning
+Examples:
+• Vehicles mentioned, but no Auto coverage detected
+• Employees mentioned, but no Workers Compensation coverage detected
+These are valuable underwriting signals and should impact the score or generate a warning.
+The goal of this pillar is not just to confirm data exists, but to verify that the exposure information is logical, complete, and internally consistent.
+
+3. Property Integrity (15%)
+
+This pillar is entirely driven by COPE (Construction, Occupancy, Protection, Exposure) data from the uploaded documents. No form fill quality component is involved.
+
+If no property coverage is detected - 100 (not applicable)
+Minimum Viable COPE - All four of the following must be present: location address, occupancy type, construction type, and either building value or BPP value. If any of these are missing → 0 (hard stop)
+If Minimum Viable COPE passes, we then check 10 Carrier-Grade fields: year built, roof year, sprinkler system, fire protection class, valuation method, distance to hydrant, fire department type, protection class, business income limit, and period of restoration
+All 10 present - 100
+Some missing - score between 60 and 70 (never higher until all carrier-grade fields are complete)
+
+I agree with the Minimum Viable COPE concept.
+Required (Hard Stop)
+The following must be present:
+• Address
+• Occupancy
+• Construction
+• Building Value or BPP Value
+If any of these are missing, the property submission should not be considered ready.
+Carrier Grade COPE
+Not all COPE fields should be weighted equally.
+Tier 1 – Required
+• Year Built
+• Roof Age
+• Sprinkler Information
+• Protection Class
+Tier 2 – Preferred
+• Distance to Hydrant
+• Fire Department Information
+• Business Income Limit
+• Period of Restoration
+A submission should not receive a perfect score without all COPE fields, but it should not be heavily penalized because a preferred field is missing.
+Additional Validation
+ACV vs. RCV Validation
+• -10 points
+If ACV appears on the source documents and RCV appears on the generated ACORD forms (or vice versa), flag as a conflict for review.
+Building Value Duplication
+• Hard Warning
+If building values appear duplicated, inflated, or inconsistent across documents, generate a warning and require review before forms are generated.
+4. Loss History (15%)
+
+This pillar is driven by the loss run documents uploaded and the loss data extracted from them. It uses a tiered scoring model:
+
+5 or more years of current loss runs + prior carrier name - 100
+5 or more years, no prior carrier - 80
+3 to 4 years of loss runs - 75
+1 to 2 years - 40
+Loss run document uploaded but years not yet confirmed:
+Name + FEIN or policy number match the insured - 50 (strong match)
+Name matches only - 35 (possible match, ownership warning issued)
+Name does not match - 15 (no match)
+User or narrative attests no prior losses, no loss runs → 60
+No loss information at all - 10
+
+Additional adjustments applied after the base score:
+Loss runs older than 90 days - up to -25 points, with a warning
+High claim frequency relative to revenue/payroll exposure -> -10 to -25 points
+Loss ratio above 10% of exposure -> -15 points
+
+This is an important pillar, but loss runs should not be a hard requirement for a submission to be considered Quote Ready.
+In the real world:
+• New ventures may have no loss history
+• Loss runs are often pending from incumbent carriers
+• Brokers frequently submit while waiting for updated loss runs
+• Insureds may attest to no known losses
+Because of this, missing loss runs should impact the score, but should not automatically prevent a submission from being marketed or quoted.
+Recommended Scoring
+• 5 years current loss runs + prior carrier identified = 100
+• 3-4 years current loss runs = 80
+• 1-2 years current loss runs = 40
+• Loss runs requested / pending = 70
+• Insured attests no prior losses = 60
+• No loss information provided = 25
+Ownership Validation
+Do not rely on business name alone.
+Use the following match hierarchy:
+Strong Match
+• Name + FEIN
+• Name + Policy Number
+Moderate Match
+• Name + Address
+Weak Match
+• Name Only
+Apply confidence scoring based on the strength of the match.
+Additional Validation
+Prior Carrier Present
+• +10 points
+Prior Carrier Missing
+• -10 points
+Prior carrier information is important underwriting information and is commonly found on loss runs and prior policy documents.
+Loss Runs Older Than 90 Days
+• Warning and score reduction
+High Claim Frequency
+• Warning and score reduction
+Focus on claim frequency, not just claim dollars. Multiple small claims can be a greater underwriting concern than a single large claim.
+The goal of this pillar is to reward complete and current loss information while recognizing that some accounts can still be marketed and quoted before final loss runs are received.
+
+5. Umbrella/Excess Adequacy (10%)
+
+This pillar checks whether the underlying coverage limits are sufficient to support the umbrella policy.
+
+No umbrella in the submission - Not Applicable (this pillar is excluded from the score entirely and the remaining weights are adjusted accordingly - this is why you may see "N/A" here rather than 100%)
+Umbrella present but no underlying GL or Auto limits found → 0
+Umbrella present with underlying limits, starting at 100 with deductions:
+GL each-occurrence limit below $1M → -20 points
+GL expected but entirely absent → -20 points
+Auto CSL below $1M → −20 points
+Auto expected but entirely absent → -20 points
+Employers Liability $1M or above → no deduction (full credit)
+Employers Liability $500K–$999K → -10 points
+Employers Liability below $500K → -25 points
+Employers Liability missing when WC is present → -25 points
+
+I agree with the current direction.
+Minimum Underlying Requirements
+• General Liability = $1M Each Occurrence
+• Commercial Auto = $1M CSL
+• Employers Liability = $1M Preferred
+Apply the same scoring logic to both:
+• Umbrella Liability
+• Excess Liability
+Follow Form Validation
+Use Option B.
+Only confirm follow-form status when it is explicitly documented.
+If follow-form language cannot be verified, display:
+"Unable to determine. Underwriter review recommended."
+Coverage decisions should never be inferred or guessed.
+Additional Scoring Adjustments
+No Schedule of Underlying Insurance Provided
+• -15 points
+No Evidence of Follow Form
+• -10 points
+These deductions should generate warnings and reduce the Umbrella / Excess Adequacy score.
+6. Narrative Quality (10%)
+
+This pillar scores the quality and completeness of the underwriting narrative - specifically the ACORD 101 remarks field, or the operations description as a fallback.
+
+Scoring is a blend of two elements:
+
+Component Coverage (60% of this pillar) - How many of the 12 narrative components are present? The system scans the narrative text for: Account Overview, Operations Description, Years in Business, Management Experience, Risk Controls, Loss History Discussion, Coverage Discussion, Prior Carrier Context, Location Details, Employee/Payroll Context, WC Payroll/Class Context, and EMOD/XMOD information.
+Text Quality (40% of this pillar) - Is the narrative substantive and specific? This is measured by text length (up to 300 characters scored) and vocabulary diversity (unique words vs. total words).
+Additional notes:
+
+If the narrative comes from the operations description field rather than a dedicated ACORD 101 narrative, the score is reduced by 25% - we treat a full narrative as higher quality than an operations description alone.
+If a narrative document is uploaded and classified, the score is floored at 40 regardless of text content - we credit the fact that a narrative was provided even if the specific text did not extract fully.
+If no narrative is present at all -> 0
+
+Narrative Quality (10%)
+For V1, keep the current model. I generally agree with the current structure, but I would shift the focus away from word count and toward underwriting usefulness. This is one of the most valuable parts of a submission because it provides underwriting context that cannot be captured through forms alone.
+For future releases, consider scoring narratives based on the presence of key underwriting concepts rather than character count or vocabulary diversity.
+The goal is to reward underwriting usefulness, not writing length. The key principle is that a narrative should be rewarded for the quality of information provided, not the number of words used.
+- Narrative Component Coverage (60%)
+I agree with keeping the 12 narrative components and scoring based on how many are present.
+The current components are:
+• Account Overview
+• Operations Description
+• Years in Business
+• Management Experience
+• Risk Controls
+• Loss History Discussion
+• Coverage Discussion
+• Prior Carrier Context
+• Location Details
+• Employee / Payroll Context
+• WC Payroll / Class Code Context
+• EMOD / XMOD Information
+This gives the system an objective way to measure completeness.
+- Narrative Quality (40%)
+Rather than primarily rewarding longer narratives, I would score whether the narrative provides meaningful underwriting context.
+Examples of valuable information:
+• What the company does
+• Management experience
+• Risk controls and safety programs
+• Loss history explanation
+• Prior carrier information
+• Reason for seeking coverage
+• Unique exposures
+• Coverage requests
+Example:
+Weak Narrative
+“Apartment complex. Looking for quote.”
+The narrative is short and provides little underwriting value.
+Strong Narrative
+“Family-owned apartment operator with 14 years of experience. No reported losses. Professionally managed properties with annual inspections and preventative maintenance programs. Seeking competitive renewal terms.”
+The narrative is still brief but provides meaningful underwriting information.
+Additional Recommendations:
+If a dedicated narrative document or ACORD 101 is provided:
+• Minimum score = 40
+If only an operations description exists:
+• Apply the existing reduction
+If no narrative exists:
+• Score = 0
+
+1.1) THE CURRENT DISCONNECT
+
+When a producer clicks to expand any of the six pillars, they see a set of sub-rows. For example, under Structural Completeness they might see:
+
+Applicant Information - 100%
+Entity Information - 100%
+Effective Date Consistency - 100%
+Policy Term Consistency - 100%
+Supporting Documentation - 66%
+The problem is that these sub-rows are a separate display layer. They show whether individual pieces of information are present or missing, but they are not the inputs that produced the headline score. They were built as an explanation tool to help producers understand what's in the submission, not as a rollup of the number above them.
+
+The result is a disconnect that can be confusing: all five sub-rows can show 100% while the pillar score still shows 65, because the pillar score is also being driven by underwriting profile fields and form fill quality - neither of which appears in the sub-rows.
+
+Option to Resolve This: 
+
+Keep the current calculation, add a tooltip to explain it.
+
+The scoring math stays exactly as it is today. We add a small label or tooltip under each pillar headline explaining that the score is driven by the full weighted formula, and that the expandable sub-rows are a field-by-field presence guide rather than a direct rollup.
+I do NOT think a tooltip alone solves the problem. If users see:
+Applicant Information = 100%
+Entity Information = 100%
+Effective Date Consistency = 100%
+Policy Term Consistency = 100%
+But the pillar score shows 65, they will assume the platform is wrong.
+My recommendation:
+Either:
+Option A (Preferred)
+Make the subcategories reflect the actual scoring inputs.
+or
+Option B
+Rename them:
+"Field Presence Indicators"
+Instead of displaying them as if they are scoring components.
+
+

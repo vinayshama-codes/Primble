@@ -231,12 +231,12 @@ function UserDropdown({
     );
     if (user.payment_status === "archived") return (
       <div className="udrop-status udrop-status--muted">
-        🗄️ Account archived — <a href="mailto:support@primble.ai" className="udrop-link">Contact support</a>
+        🗄️ Account archived - <a href="mailto:support@primble.ai" className="udrop-link">Contact support</a>
       </div>
     );
     if (user.payment_status === "suspended") return (
       <div className="udrop-status udrop-status--error">
-        Account suspended —{" "}
+        Account suspended -{" "}
         <button onClick={openBillingPortal} disabled={billingPortalLoading} className="udrop-link">
           {billingPortalLoading && <BillingSpinner />}Restore billing
         </button>
@@ -244,7 +244,7 @@ function UserDropdown({
     );
     if (user.payment_status === "soft_locked") return (
       <div className="udrop-status udrop-status--warning">
-        Account disabled — please{" "}
+        Account disabled - please{" "}
         <button onClick={openBillingPortal} disabled={billingPortalLoading} className="udrop-link">
           {billingPortalLoading && <BillingSpinner />}update billing
         </button>
@@ -256,7 +256,7 @@ function UserDropdown({
         : 0;
       return (
         <div className={`udrop-status ${daysOverdue >= 7 ? "udrop-status--error" : "udrop-status--warning"}`}>
-          {daysOverdue >= 7 ? "Payment still overdue — account will be restricted soon." : "Payment overdue —"}{" "}
+          {daysOverdue >= 7 ? "Payment still overdue - account will be restricted soon." : "Payment overdue -"}{" "}
           <button onClick={openBillingPortal} disabled={billingPortalLoading} className="udrop-link">
             {billingPortalLoading && <BillingSpinner />}{daysOverdue >= 7 ? "Update billing now" : "Update billing"}
           </button>

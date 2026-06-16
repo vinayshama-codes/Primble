@@ -18,7 +18,7 @@ Hard stops are propagated into the pipeline's hard_stops list.
 Soft warnings are propagated into soft_stops.
 Advisories are surfaced to the UI but do not affect SQS gating.
 
-All rules here are additive — they never remove or modify existing
+All rules here are additive - they never remove or modify existing
 stops returned by evaluate_stops() or check_doc_consistency().
 """
 
@@ -51,12 +51,27 @@ def _to_float(v) -> Optional[float]:
 
 
 def _to_int(v) -> Optional[int]:
-    if v is None:
-        return None
-    try:
-        return int(float(str(v).replace(",", "").replace("$", "").strip()))
-    except Exception:
-        return None
+    # Single canonical implementation lives in sqs_service; import it lazily to
+    # avoid a circular import at module load (cross_form_validator is imported by
+    # sqs_service indirectly through extraction_pipeline).
+    from services.sqs_service import _to_int as _sqs_to_int
+    return _sqs_to_int(v)
+
+
+def _dates_differ(a: Any, b: Any) -> bool:
+    """True only when two date strings resolve to DIFFERENT calendar dates.
+
+    Beta Report §5.2: equivalent dates in different formats (e.g. 07/15/2025 vs
+    7/15/2025) must NOT generate a hard stop. Both sides are normalized to ISO
+    via the shared normalization layer before comparison; when either value is
+    not a parseable date we fall back to a trimmed raw-string compare so two
+    genuinely different non-date values still differ.
+    """
+    from services.normalization import normalize_date
+    na, nb = normalize_date(a), normalize_date(b)
+    if na is not None and nb is not None:
+        return na != nb
+    return str(a).strip() != str(b).strip()
 
 
 def _issue(issue_type: str, code: str, message: str, forms: List[str]) -> dict:
@@ -95,7 +110,7 @@ def _check_wc_payroll_reconciliation(
                 "wc_payroll_mismatch",
                 (
                     f"WC payroll (${wc_pay:,.0f}) differs from total payroll "
-                    f"(${tot_pay:,.0f}) by {diff_pct * 100:.0f}% — exceeds 20% "
+                    f"(${tot_pay:,.0f}) by {diff_pct * 100:.0f}% - exceeds 20% "
                     "tolerance. Reconcile or add ACORD 101 explanation."
                 ),
                 ["ACORD_125", "ACORD_130"],
@@ -112,7 +127,7 @@ def _check_wc_payroll_reconciliation(
                 "wc_payroll_vs_revenue",
                 (
                     f"WC payroll (${wc_pay:,.0f}) is {wc_to_rev_ratio * 100:.0f}% of "
-                    f"total revenue (${tot_rev:,.0f}) — unusually high. "
+                    f"total revenue (${tot_rev:,.0f}) - unusually high. "
                     "Reconcile with operations or add ACORD 101 explanation."
                 ),
                 ["ACORD_125", "ACORD_130"],
@@ -237,17 +252,17 @@ def _check_location_address_reconciliation(
             ["ACORD_125", "ACORD_140"],
         ))
 
-    # Spec §56-61: Address Mapping — physical locations must align between
-    # ACORD 125 and 140 by ADDRESS, not just count. Normalise each location
-    # to a tokenised string and verify the sets overlap.
+    # Spec §56-61: Address Mapping - physical locations must align between
+    # ACORD 125 and 140 by ADDRESS, not just count. Use the shared normalize_address
+    # so street-suffix abbreviations (Street/St, Avenue/Ave, etc.) and unit markers
+    # (#D13 vs D13) don't manufacture false location mismatches (Beta Report §5.2).
     def _normalise_location(loc) -> str:
+        from services.normalization import normalize_address
         if isinstance(loc, dict):
             raw = " ".join(str(v) for v in loc.values() if v)
         else:
             raw = str(loc or "")
-        # Collapse whitespace, lowercase, strip punctuation for comparison.
-        import re as _re
-        return _re.sub(r"[^a-z0-9 ]+", "", raw.lower()).strip()
+        return normalize_address(raw)
 
     addrs_125 = {_normalise_location(loc) for loc in locs_125 if loc}
     addrs_140 = {_normalise_location(loc) for loc in locs_140 if loc}
@@ -297,7 +312,7 @@ def _check_umbrella_attachment_stack(
     if not flags.get("has_umbrella"):
         return issues
 
-    # 1. SIR vs GL deductible — hard stop (was soft warning)
+    # 1. SIR vs GL deductible - hard stop (was soft warning)
     sir    = _to_int(_fv(facts, "umbrella_sir"))
     gl_ded = _to_int(_fv(facts, "gl_deductible"))
     if sir is not None and gl_ded is not None and sir < gl_ded:
@@ -327,18 +342,20 @@ def _check_umbrella_attachment_stack(
             ))
         else:
             el_val = _to_int(el_limit)
-            if el_val and el_val < 100_000:
+            # Client Q2: minimum preferred EL for umbrella attachment is $500K
+            # (was $100K). Below $500K is a warning + score reduction, not a block.
+            if el_val and el_val < 500_000:
                 issues.append(_issue(
                     "soft_warning",
                     "umbrella_el_below_minimum",
                     (
                         f"Employers Liability limit (${el_val:,}) is below the "
-                        "standard minimum of $100,000 required for umbrella attachment."
+                        "$500,000 minimum preferred by umbrella markets."
                     ),
                     ["ACORD_130", "ACORD_131"],
                 ))
 
-    # 3. Policy period alignment — underlying must match umbrella
+    # 3. Policy period alignment - underlying must match umbrella
     umb_eff = _fv(facts, "umbrella_effective_date")
     umb_exp = _fv(facts, "umbrella_expiration_date")
     gl_eff  = _fv(facts, "effective_date")
@@ -349,7 +366,7 @@ def _check_umbrella_attachment_stack(
     _dates_explained = bool(_fv(facts, "acord101_remarks") or _fv(facts, "policy_period_explanation"))
     _date_sev = "soft_warning" if _dates_explained else "hard_stop"
 
-    if umb_eff and gl_eff and umb_eff != gl_eff:
+    if umb_eff and gl_eff and _dates_differ(umb_eff, gl_eff):
         issues.append(_issue(
             _date_sev,
             "umbrella_gl_period_misaligned",
@@ -361,7 +378,7 @@ def _check_umbrella_attachment_stack(
             ["ACORD_125", "ACORD_131"],
         ))
 
-    if umb_exp and gl_exp and umb_exp != gl_exp:
+    if umb_exp and gl_exp and _dates_differ(umb_exp, gl_exp):
         issues.append(_issue(
             _date_sev,
             "umbrella_gl_expiration_misaligned",
@@ -381,7 +398,7 @@ def _check_builders_risk_vs_property_deduplication(
 ) -> List[dict]:
     """
     ACORD 133 (Builders Risk) and ACORD 140 (Completed Property) must not
-    cover the same insured values for the same location — duplication risk.
+    cover the same insured values for the same location - duplication risk.
 
     Spec: "If both 133 and 140 exist for same location, ensure period
     covered is disjoint."
@@ -543,7 +560,7 @@ def _check_wc_multi_state_payroll_breakdown(
                     "wc_state_payroll_total_mismatch",
                     (
                         f"WC payroll by state totals ${state_total:,.0f} but ACORD 125 "
-                        f"reports total payroll of ${tot_pay:,.0f} — "
+                        f"reports total payroll of ${tot_pay:,.0f} - "
                         f"{diff_pct * 100:.0f}% variance. Reconcile payroll totals."
                     ),
                     ["ACORD_125", "ACORD_130"],
@@ -556,7 +573,7 @@ def _check_acord125_always_present(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
     """
-    ACORD 125 is the anchor form — it must always be triggered for any
+    ACORD 125 is the anchor form - it must always be triggered for any
     commercial submission.
 
     Spec: "ACORD 125 is mandatory for every commercial submission."
@@ -573,7 +590,7 @@ def _check_acord125_always_present(
             "acord125_missing",
             (
                 "ACORD 125 (Commercial Insurance Application) was not detected. "
-                "It is normally required for every commercial submission — please "
+                "It is normally required for every commercial submission - please "
                 "review the missing baseline data before generating forms."
             ),
             ["ACORD_125"],
@@ -815,7 +832,7 @@ def _check_property_valuation_consistency(
             "soft_warning",
             "property_valuation_method_missing",
             (
-                "Property valuation method is missing — select Replacement Cost "
+                "Property valuation method is missing - select Replacement Cost "
                 "Value (RCV) or Actual Cash Value (ACV) for each property limit."
             ),
             ["ACORD_140"],
@@ -949,7 +966,7 @@ def _check_wc_gl_class_code_alignment(
             (
                 "GL class codes suggest clerical/office operations but WC class codes "
                 "indicate heavy manual labor. This exposure mismatch requires an "
-                "explanation — attach ACORD 101 to clarify."
+                "explanation - attach ACORD 101 to clarify."
             ),
             ["ACORD_126", "ACORD_130"],
         ))
@@ -994,7 +1011,7 @@ def _check_claims_made_prior_acts(
             "claims_made_missing_prior_acts",
             (
                 "GL policy is claims-made but prior acts confirmation is not "
-                "provided. Confirm whether prior acts / nose coverage applies — "
+                "provided. Confirm whether prior acts / nose coverage applies - "
                 "required for umbrella attachment integrity."
             ),
             ["ACORD_126", "ACORD_131"] if "ACORD_131" in triggered_ids else ["ACORD_126"],
@@ -1035,7 +1052,7 @@ def _check_umbrella_period_vs_auto_wc(
         auto_eff = _fv(facts, "auto_effective_date")
         auto_exp = _fv(facts, "auto_expiration_date")
 
-        if umb_eff and auto_eff and umb_eff != auto_eff:
+        if umb_eff and auto_eff and _dates_differ(umb_eff, auto_eff):
             issues.append(_issue(
                 _date_sev,
                 "umbrella_auto_period_misaligned",
@@ -1047,7 +1064,7 @@ def _check_umbrella_period_vs_auto_wc(
                 ["ACORD_127", "ACORD_131"],
             ))
 
-        if umb_exp and auto_exp and umb_exp != auto_exp:
+        if umb_exp and auto_exp and _dates_differ(umb_exp, auto_exp):
             issues.append(_issue(
                 _date_sev,
                 "umbrella_auto_expiration_misaligned",
@@ -1064,7 +1081,7 @@ def _check_umbrella_period_vs_auto_wc(
         wc_eff = _fv(facts, "wc_effective_date")
         wc_exp = _fv(facts, "wc_expiration_date")
 
-        if umb_eff and wc_eff and umb_eff != wc_eff:
+        if umb_eff and wc_eff and _dates_differ(umb_eff, wc_eff):
             issues.append(_issue(
                 _date_sev,
                 "umbrella_wc_period_misaligned",
@@ -1083,7 +1100,7 @@ def _check_umbrella_gl_minimum_limits(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
     """
-    GL underlying limits must meet umbrella attachment requirements — not just
+    GL underlying limits must meet umbrella attachment requirements - not just
     Auto.  If GL limits are present but below the umbrella limit, this is an
     attachment failure risk.
 
@@ -1137,7 +1154,7 @@ def _check_umbrella_sir_vs_auto_deductible(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
     """
-    Umbrella SIR must also be consistent with Auto deductible — not just GL.
+    Umbrella SIR must also be consistent with Auto deductible - not just GL.
 
     Spec: "Validate deductibles and SIRs are consistent across ACORD 126/127,
     ACORD 131, and dec page representations. Flag unexplained discrepancies."
@@ -1177,7 +1194,7 @@ def _check_auto_optional_coverages(
     surface an advisory (no auto-add, no hard stop).
 
     Spec: "Medical Payments / PIP (state-dependent), Uninsured / Underinsured
-    Motorist, Hired & Non-Owned Auto Liability, Drive Other Car — If optional
+    Motorist, Hired & Non-Owned Auto Liability, Drive Other Car - If optional
     coverages are listed, extract limits. If exposure exists but coverage is
     omitted, surface an advisory warning only (no auto-add)."
     """
@@ -1197,20 +1214,20 @@ def _check_auto_optional_coverages(
             if state_val:
                 state_list.append(state_val)
 
-    # UM/UIM — required in many states; advisory if not found
+    # UM/UIM - required in many states; advisory if not found
     if not _fv(facts, "auto_um_limit") and not _fv(facts, "auto_uim_limit"):
         issues.append(_issue(
             "advisory",
             "auto_um_uim_not_specified",
             (
                 "Uninsured/Underinsured Motorist (UM/UIM) coverage is not specified "
-                "on the auto application. UM/UIM is required in many states — "
+                "on the auto application. UM/UIM is required in many states - "
                 "confirm with the insured whether coverage is desired or waived."
             ),
             ["ACORD_127"],
         ))
 
-    # Med Pay / PIP — state-dependent
+    # Med Pay / PIP - state-dependent
     pip_states = {"FL", "MI", "NY", "NJ", "PA", "HI", "KY", "MA", "MN", "ND", "UT"}
     has_pip_state = bool(set(state_list) & pip_states)
     if has_pip_state and not _fv(facts, "auto_med_pay_limit") and not _fv(facts, "auto_pip_limit"):
@@ -1225,7 +1242,7 @@ def _check_auto_optional_coverages(
             ["ACORD_127"],
         ))
 
-    # Drive Other Car — relevant when named insureds / officers drive non-fleet vehicles
+    # Drive Other Car - relevant when named insureds / officers drive non-fleet vehicles
     num_officers = _to_int(_fv(facts, "num_owners")) or 0
     if num_officers > 0 and not _fv(facts, "auto_drive_other_car"):
         issues.append(_issue(
@@ -1255,7 +1272,7 @@ def _check_acord101_triggers(
 
     This rule runs LAST so it can read the issues accumulated by all prior rules
     via the shared facts/flags.  It adds a single advisory noting ACORD 101 is
-    needed — the actual conflicts will already be in the issues list.
+    needed - the actual conflicts will already be in the issues list.
 
     Note: The pipeline calls run_cross_form_validation() which includes this rule.
     The callers decide whether to auto-add ACORD_101 to recommendations based on
@@ -1279,7 +1296,7 @@ def _check_acord101_triggers(
     pay = _to_float(_fv(facts, "total_payroll"))
     if rev and pay and rev > 0 and pay / rev > 0.85:
         needs_101 = True
-        reason_parts.append(f"payroll is {pay/rev*100:.0f}% of revenue — unusually high")
+        reason_parts.append(f"payroll is {pay/rev*100:.0f}% of revenue - unusually high")
 
     # WC / GL class code mismatch flag from flags
     if flags.get("wc_gl_class_mismatch"):
@@ -1292,7 +1309,7 @@ def _check_acord101_triggers(
     if pct_sub and pct_sub > 50 and wc_pay:
         needs_101 = True
         reason_parts.append(
-            f"{pct_sub:.0f}% subcontracted work with WC payroll present — "
+            f"{pct_sub:.0f}% subcontracted work with WC payroll present - "
             "clarify employee vs subcontractor split"
         )
 
@@ -1300,7 +1317,7 @@ def _check_acord101_triggers(
     num_claims = _to_int(_fv(facts, "num_claims"))
     if num_claims and num_claims > 2:
         needs_101 = True
-        reason_parts.append(f"{num_claims} prior claims — narrative explanation required")
+        reason_parts.append(f"{num_claims} prior claims - narrative explanation required")
 
     if needs_101:
         issues.append(_issue(
@@ -1523,7 +1540,7 @@ def _check_identity_address_distinction(
             ["ACORD_125"],
         ))
 
-    # Sanity: legal name and DBA captured identically — likely an extraction error
+    # Sanity: legal name and DBA captured identically - likely an extraction error
     legal = (_fv(facts, "applicant_name") or "").strip().lower()
     dba   = (_fv(facts, "dba_name") or "").strip().lower()
     if legal and dba and legal == dba:
@@ -1531,7 +1548,7 @@ def _check_identity_address_distinction(
             "advisory",
             "legal_name_equals_dba",
             (
-                "Legal named insured and DBA are identical — verify whether a "
+                "Legal named insured and DBA are identical - verify whether a "
                 "separate DBA exists or remove the duplicate value."
             ),
             ["ACORD_125"],
@@ -1629,7 +1646,7 @@ def _check_carrier_grade_cope_quality(
     if "ACORD_140" not in triggered_ids:
         return issues
 
-    # Only emit when Minimum Viable COPE is satisfied — avoid noise on incomplete subs
+    # Only emit when Minimum Viable COPE is satisfied - avoid noise on incomplete subs
     if not (_fv(facts, "occupancy_type") and _fv(facts, "construction_type")):
         return issues
 
@@ -1648,7 +1665,7 @@ def _check_carrier_grade_cope_quality(
             "soft_warning",
             "carrier_grade_cope_incomplete",
             (
-                "Carrier-Grade COPE detail incomplete — missing: "
+                "Carrier-Grade COPE detail incomplete - missing: "
                 + ", ".join(missing_quality)
                 + ". Submission can proceed but SQS will be capped."
             ),
@@ -1800,7 +1817,7 @@ def run_cross_form_validation(
 
     Returns
     -------
-    List of issue dicts — each has keys: type, code, message, forms.
+    List of issue dicts - each has keys: type, code, message, forms.
     """
     all_issues: List[dict] = []
 
@@ -1811,7 +1828,7 @@ def run_cross_form_validation(
                 all_issues.extend(result)
         except Exception as exc:
             logger.warning(
-                "cross_form_validator: rule %s raised %s — skipping",
+                "cross_form_validator: rule %s raised %s - skipping",
                 rule_fn.__name__,
                 exc,
             )

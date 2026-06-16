@@ -35,6 +35,71 @@ const PACKAGE_PILLAR_LABELS = {
   narrative:      "Narrative Quality",
 };
 
+// ── §6 SQS transparency: category breakdown, evidence, umbrella states ──────
+const CAT_STATUS_COLOR = {
+  ok: "#10b981", consistent: "#10b981", partial: "#f59e0b",
+  review_recommended: "#f59e0b", needs_review: "#f59e0b",
+  missing: "#ef4444", not_found: "#94a3b8", conflict_found: "#ef4444",
+  insufficient: "#ef4444", not_applicable: "#94a3b8", computed_separately: "#94a3b8",
+};
+const EVIDENCE_LABEL_DISPLAY = {
+  extracted_from_source: "Extracted from document",
+  confirmed_by_user: "Confirmed by user",
+  stated_in_narrative: "Stated in narrative",
+  inferred: "Inferred from business class",
+  not_found: "Not found",
+  conflicting: "Conflicting",
+  not_applicable: "Not applicable",
+  requires_supporting_doc: "Requires supporting doc",
+};
+// Only the "notable" (non-default) evidence labels get a chip - Extracted/Not found
+// are already implied by the score bars, so surfacing them would just add noise.
+const EVIDENCE_LABEL_COLOR = {
+  confirmed_by_user:       { bg: "#ecfdf5", fg: "#047857" },
+  stated_in_narrative:     { bg: "#eff6ff", fg: "#1d4ed8" },
+  conflicting:             { bg: "#fef2f2", fg: "#dc2626" },
+  requires_supporting_doc: { bg: "#fffbeb", fg: "#b45309" },
+  inferred:                { bg: "#f5f3ff", fg: "#6d28d9" },
+};
+const UMBRELLA_STATE_LABEL = {
+  not_applicable:                 "Not applicable - no umbrella in submission",
+  unknown:                        "Unknown - underlying limits not found",
+  insufficient_information:       "Insufficient information",
+  umbrella_information_provided:  "Umbrella information provided",
+  umbrella_coverage_present:      "Umbrella coverage present",
+  umbrella_coverage_needs_review: "Umbrella coverage needs review",
+  adequately_supported:           "Adequately supported",
+};
+// §6.4: loss-history evidence states (mirror backend LOSS_HISTORY_STATE_LABELS).
+const LOSS_HISTORY_STATE_LABEL = {
+  no_information:                  "No loss information provided",
+  user_states_no_losses:          "User states no prior losses",
+  narrative_states_no_losses:     "Narrative states no losses",
+  loss_runs_pending:              "Loss runs requested / pending",
+  loss_runs_uploaded:             "Loss runs uploaded - years not yet confirmed",
+  loss_runs_parsed:               "Loss runs parsed - claim years extracted",
+  loss_runs_match_insured:        "Loss runs match insured",
+  loss_runs_do_not_match:         "Loss runs do not match insured",
+  loss_data_reconciled:           "Loss data reconciled",
+  loss_history_conflicting:       "Conflicting - attested no losses but loss runs show claims",
+  loss_history_pending_validation: "Loss history pending validation",
+};
+// §6.3: narrative component labels (must mirror backend NARRATIVE_COMPONENT_LABELS).
+const NARRATIVE_COMPONENT_LABELS = {
+  account_overview:    "Account Overview",
+  operations:          "Operations Description",
+  years_in_business:   "Years in Business",
+  management:          "Management Experience",
+  risk_controls:       "Risk Controls",
+  loss_history:        "Loss History Discussion",
+  coverage_discussion: "Coverage Discussion",
+  carrier_market:      "Prior Carrier Context",
+  location_exposure:   "Location Details",
+  employee_practices:  "Employee / Payroll Context",
+  wc_payroll:          "Payroll / WC Class Context",
+  experience_mod:      "EMOD / XMOD Information",
+};
+
 const REC_TYPE_STYLE = {
   hard_stop:    { bg: "#fdf2f8", border: "#f9a8d4", color: "#000" },
   soft_warning: { bg: "#fdf2f8", border: "#f9a8d4", color: "#000" },
@@ -43,6 +108,95 @@ const REC_TYPE_STYLE = {
 };
 
 const FALLBACK_CHAT_REPLY = "I'm not sure about that. Please contact your agent or broker for assistance.";
+
+// ── Form recommendation tiers (Beta Report §7) ──────────────────────────────
+// Groups the recommendation list by underwriting priority. Tier is set by the
+// backend (form_service); match % / confidence is unchanged and still shown.
+const TIER_ORDER = ["required", "recommended", "optional", "needs_confirmation"];
+const TIER_META = {
+  required:           { label: "Required",           color: "#dc2626", bg: "rgba(220,38,38,0.08)", hint: "Core forms for this submission" },
+  recommended:        { label: "Recommended",        color: "#2563eb", bg: "rgba(37,99,235,0.08)", hint: "Supporting forms based on detected exposures" },
+  optional:           { label: "Optional",           color: "#0891b2", bg: "rgba(8,145,178,0.08)", hint: "Include if the exposure applies" },
+  needs_confirmation: { label: "Needs Confirmation", color: "#b45309", bg: "rgba(217,119,6,0.10)", hint: "Confirm relevance before generating" },
+};
+
+// ── "Why are you marketing this account?" options (DOUBTS-Workstream4 / Brent) ─
+// Producer-answerable reason captured on the recommendation screen. Must match
+// the backend _CARRIER_MARKETING_OPTIONS list; the adverse reasons there drive
+// ACORD 101 to its correct tier when selected.
+const MARKETING_REASON_OPTIONS = [
+  "Shopping for better pricing",
+  "Seeking broader coverage",
+  "Voluntary carrier change",
+  "Broker change",
+  "Carrier nonrenewal",
+  "Carrier cancellation",
+  "Carrier declined renewal",
+  "Carrier exited market",
+  "Coverage restrictions imposed by carrier",
+  "Coverage concerns",
+  "New venture",
+  "Other",
+];
+
+// Reasons that indicate a meaningful underwriting concern - selecting one of
+// these adds ACORD 101 to the recommended list. Mirrors the backend
+// _ADVERSE_CARRIER_REASONS set so the UI note matches what actually happens.
+const MARKETING_ADVERSE_REASONS = new Set([
+  "Carrier nonrenewal",
+  "Carrier cancellation",
+  "Carrier declined renewal",
+  "Carrier exited market",
+  "Coverage restrictions imposed by carrier",
+  "Coverage concerns",
+]);
+
+// ── Workstream 6 §9.1 - package status → corner-notification {title, body} ────
+// Maps the live package state (integrity review / hard stops / warnings / clean)
+// to a precise status so a notification never announces a bare "Ready" while
+// blocking issues remain. Counts come from the same arrays the on-screen banners
+// use, so the toast and the screen always agree.
+function packageStatusNotice({ integrityReviewRequired, hardStopCount, warningCount }) {
+  if (integrityReviewRequired) {
+    return { title: "Primble - Documents Processed", body: "Submission Integrity Review Needed" };
+  }
+  // Both present → "Review Required - X hard stops and Y warnings" (client's example).
+  if (hardStopCount > 0 && warningCount > 0) {
+    return {
+      title: "Primble - Review Required",
+      body: `${hardStopCount} hard stop${hardStopCount !== 1 ? "s" : ""} and ${warningCount} warning${warningCount !== 1 ? "s" : ""} require review`,
+    };
+  }
+  // Hard stops only → "Hard Stops Present - N items require review".
+  if (hardStopCount > 0) {
+    return { title: "Primble - Hard Stops Present", body: `${hardStopCount} item${hardStopCount !== 1 ? "s" : ""} require review` };
+  }
+  // Warnings only → "Review Required - N warnings found".
+  if (warningCount > 0) {
+    return { title: "Primble - Review Required", body: `${warningCount} warning${warningCount !== 1 ? "s" : ""} found` };
+  }
+  // Clean → "Ready for Generation - No blocking hard stops found".
+  return { title: "Primble - Ready for Generation", body: "No blocking hard stops found" };
+}
+
+// ── Workstream 6 §9.1 - small "what to do next" banner shown per screen ───────
+// Deliberately tiny and self-contained so it drops into existing layouts without
+// touching spacing/responsiveness. tone: "ready" (green) | "caution" (amber).
+function NextStepBanner({ text }) {
+  // Same light-magenta surface as the DOCUMENTS PROCESSED / hard-stops / warnings
+  // sections so every status block on a screen reads as one consistent family.
+  return (
+    <div style={{
+      background: "rgba(230, 27, 132, 0.07)",
+      border: "1.5px solid rgba(230, 27, 132, 0.25)",
+      borderRadius: 10,
+      padding: "10px 14px",
+      fontSize: 13, fontWeight: 600, color: "#1e293b",
+    }}>
+      {text}
+    </div>
+  );
+}
 
 // ── Delete Confirm Modal ───────────────────────────────────────────────────
 function DeleteConfirmModal({ onConfirm, onCancel }) {
@@ -61,6 +215,62 @@ function DeleteConfirmModal({ onConfirm, onCancel }) {
   );
 }
 
+// ── ARQ curation taxonomy - exact client spec language (Beta Report §8) ─────
+const ARQ_TOPIC_ORDER = [
+  "applicant_information", "operations", "locations", "property",
+  "general_liability", "auto", "workers_compensation", "umbrella",
+  "loss_history", "producer_review", "other",
+];
+const ARQ_TOPIC_LABELS = {
+  applicant_information: "Applicant Information", operations: "Operations",
+  locations: "Locations", property: "Property", general_liability: "General Liability",
+  auto: "Auto", workers_compensation: "Workers Compensation", umbrella: "Umbrella",
+  loss_history: "Loss History", producer_review: "Producer Review", other: "Other",
+};
+
+// Priority labels - exact names from §8.2 item 2
+const ARQ_PRIORITY_RANK = { critical: 0, important: 1, optional: 2, internal: 3, suppressed: 4 };
+const ARQ_PRIORITY_META = {
+  critical:  { label: "Critical",       bg: "#fef2f2", fg: "#dc2626", bd: "#fecaca" },
+  important: { label: "Important",      bg: "#fffbeb", fg: "#b45309", bd: "#fde68a" },
+  optional:  { label: "Optional",       bg: "#f1f5f9", fg: "#475569", bd: "#e2e8f0" },
+  internal:  { label: "Internal only",  bg: "#f8fafc", fg: "#64748b", bd: "#e2e8f0" },
+  suppressed:{ label: "Suppressed",     bg: "#f8fafc", fg: "#94a3b8", bd: "#e2e8f0" },
+};
+
+// Audience labels - exact names from §8.2 item 1
+const ARQ_AUDIENCE_META = {
+  client:      { label: "Client-facing",             bg: "#ecfdf5", fg: "#047857", bd: "#a7f3d0" },
+  producer:    { label: "Producer-facing",            bg: "#fefce8", fg: "#854d0e", bd: "#fef08a" },
+  internal:    { label: "Internal",                   bg: "#f1f5f9", fg: "#475569", bd: "#cbd5e1" },
+  carrier:     { label: "Carrier/underwriter review", bg: "#f0f9ff", fg: "#0369a1", bd: "#bae6fd" },
+  do_not_send: { label: "Do not send",                bg: "#fef2f2", fg: "#991b1b", bd: "#fecaca" },
+};
+
+// A question is client-facing when addressed to client audience and not suppressed.
+const isClientFacing = (q) => (q.audience ? q.audience === "client" : true) && !q.suppressed;
+// Sub-panel 1: Producer-facing + Internal/system + Carrier/underwriter review
+const isNonClientInternal = (q) => !isClientFacing(q) && q.audience !== "do_not_send";
+// Sub-panel 2: Do not send
+const isDoNotSend = (q) => q.audience === "do_not_send";
+
+function ScoreImpactBadges({ q }) {
+  const si = q.score_impact || {};
+  const badges = [];
+  if (si.hard_stop_resolution) badges.push({ t: "Resolves hard stop", bg: "#fef2f2", fg: "#dc2626" });
+  if (si.sqs) badges.push({ t: "SQS ↑", bg: "#ecfdf5", fg: "#047857" });
+  if (si.submission_readiness) badges.push({ t: "Submission ↑", bg: "#eff6ff", fg: "#1d4ed8" });
+  if (!badges.length && si.form_completion) badges.push({ t: "Form completion", bg: "#f1f5f9", fg: "#475569" });
+  if (!badges.length) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
+      {badges.map((b, i) => (
+        <span key={i} style={{ fontSize: 9.5, fontWeight: 700, color: b.fg, background: b.bg, padding: "1px 6px", borderRadius: 10 }}>{b.t}</span>
+      ))}
+    </div>
+  );
+}
+
 // ── ARQ Modal ─────────────────────────────────────────────────────────────
 function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
   const [clientEmail, setClientEmail] = useState("");
@@ -68,25 +278,53 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
   const [selectedQuestions, setSelectedQuestions] = useState({});
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
-  const [selectAll, setSelectAll] = useState(true);
   const [emailTouched, setEmailTouched] = useState(false);
+  const [showInternal, setShowInternal] = useState(false);
+  const [showDoNotSend, setShowDoNotSend] = useState(false);
+
+  // Legacy payloads have no taxonomy - fall back to the old "select all".
+  const hasTaxonomy = questions.some(q => q.audience);
 
   useEffect(() => {
     const init = {};
-    questions.forEach(q => { init[q.field_name] = true; });
+    questions.forEach(q => {
+      init[q.field_name] = hasTaxonomy ? !!q.default_selected : true;
+    });
     setSelectedQuestions(init);
-  }, [questions]);
+  }, [questions, hasTaxonomy]);
+
+  // Split by audience - exact §8.2 item 1 categories.
+  const clientQuestions   = questions.filter(isClientFacing);
+  const internalQuestions = questions.filter(isNonClientInternal);  // Producer-facing + Internal/system + Carrier
+  const doNotSendQuestions = questions.filter(isDoNotSend);          // Do not send
+
+  const groupedClient = ARQ_TOPIC_ORDER
+    .map(topic => ({
+      topic,
+      label: ARQ_TOPIC_LABELS[topic] || "Other",
+      items: clientQuestions
+        .filter(q => (q.topic_group || "other") === topic)
+        .sort((a, b) => (ARQ_PRIORITY_RANK[a.priority] ?? 2) - (ARQ_PRIORITY_RANK[b.priority] ?? 2)),
+    }))
+    .filter(g => g.items.length);
 
   const handleToggle = fn => setSelectedQuestions(prev => ({ ...prev, [fn]: !prev[fn] }));
-  const handleSelectAll = () => {
-    const next = !selectAll; setSelectAll(next);
-    const updated = {}; questions.forEach(q => { updated[q.field_name] = next; });
+
+  const applySelection = (predicate) => {
+    const updated = { ...selectedQuestions };
+    questions.forEach(q => { updated[q.field_name] = predicate(q); });
     setSelectedQuestions(updated);
   };
+  const selectCriticalOnly = () => applySelection(q => isClientFacing(q) && q.priority === "critical");
+  const selectRecommended  = () => applySelection(q => isClientFacing(q) && (q.priority === "critical" || q.priority === "important"));
+  const selectAllClient    = () => applySelection(q => isClientFacing(q));
+  const deselectAll        = () => applySelection(() => false);
 
   const sanitizeEmail = val => val.trim().toLowerCase().slice(0, 254);
-
   const selectedCount = Object.values(selectedQuestions).filter(Boolean).length;
+  // Track how many non-client items are included so we can warn the producer.
+  const nonClientSelected = [...internalQuestions, ...doNotSendQuestions]
+    .filter(q => selectedQuestions[q.field_name]).length;
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail);
   const canSend = isEmailValid && selectedCount > 0;
 
@@ -114,22 +352,51 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
     finally { setSending(false); }
   };
 
+  // showAudienceBadge = true when row is inside a non-client sub-panel (producer/internal/do-not-send)
+  const renderRow = (q, idx, dimmed, showAudienceBadge = false) => {
+    const sel = !!selectedQuestions[q.field_name];
+    const pm  = ARQ_PRIORITY_META[q.priority] || ARQ_PRIORITY_META.optional;
+    const am  = showAudienceBadge ? (ARQ_AUDIENCE_META[q.audience] || null) : null;
+    return (
+      <div key={`${q.field_name}-${idx}`} onClick={() => handleToggle(q.field_name)}
+        style={{ border: `1.5px solid ${sel ? "#E61B84" : "#e2e8f0"}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", background: sel ? "rgba(230,0,122,0.03)" : "#fafafa", display: "flex", alignItems: "flex-start", gap: 10, opacity: sel ? 1 : (dimmed ? 0.55 : 0.7), transition: "all 0.15s" }}>
+        <input type="checkbox" checked={sel} onChange={() => handleToggle(q.field_name)} onClick={e => e.stopPropagation()} style={{ marginTop: 3, width: 15, height: 15, cursor: "pointer", accentColor: "#E61B84", flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 4 }}>
+            {q.forms && <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", background: "#fdf2f8", padding: "1px 7px", borderRadius: 20 }}>ACORD {q.forms}</span>}
+            {/* Audience badge - shown in non-client sub-panels using exact §8.2 item 1 labels */}
+            {am && <span style={{ fontSize: 9.5, fontWeight: 700, color: am.fg, background: am.bg, border: `1px solid ${am.bd}`, padding: "1px 6px", borderRadius: 10 }}>{am.label}</span>}
+            {/* Priority chip - exact §8.2 item 2 labels */}
+            {hasTaxonomy && q.priority && ARQ_PRIORITY_META[q.priority] && !showAudienceBadge && (
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: pm.fg, background: pm.bg, border: `1px solid ${pm.bd}`, padding: "1px 6px", borderRadius: 10 }}>{pm.label}</span>
+            )}
+            {/* "Suggested" nudge - for Important questions that are shown but not pre-selected */}
+            {q.suggested && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#b45309", background: "#fffbeb", padding: "1px 6px", borderRadius: 10 }}>Suggested</span>}
+          </div>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#0f172a", lineHeight: 1.45 }}>{q.question}</p>
+          {q.current_value && <p style={{ margin: "3px 0 0", fontSize: 11, color: "#94a3b8" }}>Current: {q.current_value}</p>}
+          <ScoreImpactBadges q={q} />
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(8px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 620, maxHeight: "92vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 32px 80px rgba(0,0,0,0.2)" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 640, maxHeight: "92vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 32px 80px rgba(0,0,0,0.2)" }}>
         <div style={{ padding: "24px 28px 0", flexShrink: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#E61B84", marginBottom: 4, letterSpacing: "0.05em", textTransform: "uppercase" }}>Client Questionnaire</div>
               <h2 style={{ fontSize: 22, fontWeight: 700, color: "#0f172a", margin: 0 }}>Send to Client</h2>
-              <p style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Client answers will auto-populate your ACORD forms.</p>
+              <p style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>Only critical client questions are pre-selected. Answers auto-populate your ACORD forms.</p>
             </div>
             <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid #E61B84", background: "rgba(230,0,122,0.08)", color: "#E61B84", fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, transition: "all 0.2s" }}
               onMouseEnter={e => { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.color = "#fff"; }}
               onMouseLeave={e => { e.currentTarget.style.background = "rgba(230,0,122,0.08)"; e.currentTarget.style.color = "#E61B84"; }}>✕</button>
           </div>
           {error && <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 16, color: "#dc2626", fontSize: 13 }}>{error}</div>}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
             <div>
               <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>Client Email <span style={{ color: "#E61B84" }}>*</span></label>
               <input type="email" value={clientEmail}
@@ -149,40 +416,131 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
                 onFocus={e => e.target.style.borderColor = "#E61B84"} onBlur={e => e.target.style.borderColor = "#e2e8f0"} />
             </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid #f1f5f9" }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>Questions <span style={{ color: "#64748b", fontWeight: 400 }}>({selectedCount}/{questions.length} selected)</span></span>
-            <button onClick={handleSelectAll} style={{ fontSize: 12, fontWeight: 600, color: "#4f7cff", background: "rgba(79,124,255,0.06)", border: "1px solid rgba(79,124,255,0.2)", borderRadius: 6, padding: "3px 10px", cursor: "pointer" }}>
-              {selectAll ? "Deselect All" : "Select All"}
-            </button>
+          {/*
+            Quick-select controls - these four buttons implement the
+            "Default to a curated question set" requirement (§8.2 item 3):
+
+              • "Critical only"        → "Critical client-answerable questions selected"
+              • "Critical + Important" → applies both: Critical selected + Important suggested
+              • "All client-facing"    → selects all Client-facing audience questions
+              • "Clear all"            → "Producer/internal items deselected" starting state
+
+            The audience split (Client-facing / Producer-facing / Internal /
+            Carrier/underwriter review / Do not send) comes from §8.2 item 1.
+            The priority split (Critical / Important / Optional / Internal only /
+            Suppressed) comes from §8.2 item 2.
+          */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid #f1f5f9" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#1e293b", marginRight: "auto" }}>
+              {selectedCount} selected <span style={{ color: "#94a3b8", fontWeight: 400 }}>· {clientQuestions.length} client-facing</span>
+            </span>
+            {hasTaxonomy && <button onClick={selectCriticalOnly} style={qsBtn}>Critical only</button>}
+            {hasTaxonomy && <button onClick={selectRecommended}  style={qsBtn}>Recommended</button>}
+            <button onClick={selectAllClient} style={qsBtn}>All client-facing</button>
+            <button onClick={deselectAll}     style={qsBtn}>Clear all</button>
           </div>
         </div>
+
         <div style={{ flex: 1, overflowY: "auto", padding: "0 28px 4px" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {questions.map((q, idx) => (
-              <div key={idx} onClick={() => handleToggle(q.field_name)}
-                style={{ border: `1.5px solid ${selectedQuestions[q.field_name] ? "#E61B84" : "#e2e8f0"}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer", background: selectedQuestions[q.field_name] ? "rgba(230,0,122,0.03)" : "#fafafa", display: "flex", alignItems: "flex-start", gap: 10, opacity: selectedQuestions[q.field_name] ? 1 : 0.5, transition: "all 0.15s" }}>
-                <input type="checkbox" checked={!!selectedQuestions[q.field_name]} onChange={() => handleToggle(q.field_name)} onClick={e => e.stopPropagation()} style={{ marginTop: 3, width: 15, height: 15, cursor: "pointer", accentColor: "#E61B84", flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", background: "#fdf2f8", padding: "1px 7px", borderRadius: 20, display: "inline-block", marginBottom: 4 }}>ACORD {q.forms}</span>
-                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#0f172a", lineHeight: 1.45 }}>{q.question}</p>
-                  {q.current_value && <p style={{ margin: "3px 0 0", fontSize: 11, color: "#94a3b8" }}>Current: {q.current_value}</p>}
-                </div>
+          {/* Contextual hint when nothing is pre-selected */}
+          {hasTaxonomy && selectedCount === 0 && clientQuestions.length > 0 && (() => {
+            const hasCritical = clientQuestions.some(q => q.priority === "critical");
+            return (
+              <div style={{ background: hasCritical ? "#fffbeb" : "rgba(230,27,132,0.07)", border: `1px solid ${hasCritical ? "#fde68a" : "rgba(230,27,132,0.25)"}`, borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: hasCritical ? "#92400e" : "#9d174d" }}>
+                {hasCritical
+                  ? "Critical questions are available - click \"Critical only\" to pre-select them, or choose individual questions below."
+                  : "All critical fields were already answered from your uploaded documents. Select any additional questions to confirm or clarify with the client."}
               </div>
-            ))}
-          </div>
+            );
+          })()}
+          {/* Client-facing questions, grouped by topic */}
+          {groupedClient.map(group => (
+            <div key={group.topic} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.04em", margin: "4px 0 8px" }}>
+                {group.label} <span style={{ color: "#cbd5e1" }}>· {group.items.length}</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {group.items.map((q, idx) => renderRow(q, idx, false))}
+              </div>
+            </div>
+          ))}
+
+          {clientQuestions.length === 0 && (
+            <p style={{ fontSize: 13, color: "#64748b", textAlign: "center", padding: "16px 0" }}>
+              No client-answerable questions found - everything was either resolved or is internal.
+            </p>
+          )}
+
+          {/* ── Sub-panel 1: Producer-facing · Internal/system · Carrier/underwriter review ── */}
+          {internalQuestions.length > 0 && (
+            <div style={{ marginTop: 10, border: "1px dashed #cbd5e1", borderRadius: 10, background: "#f8fafc" }}>
+              <button onClick={() => setShowInternal(s => !s)}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>
+                  Producer-facing · Internal · Carrier/underwriter review
+                  <span style={{ color: "#94a3b8", fontWeight: 400 }}> ({internalQuestions.length})</span>
+                </span>
+                <span style={{ fontSize: 12, color: "#64748b", flexShrink: 0 }}>{showInternal ? "Hide ▲" : "Show ▼"}</span>
+              </button>
+              {showInternal && (
+                <div style={{ padding: "0 14px 12px" }}>
+                  <p style={{ fontSize: 11, color: "#94a3b8", margin: "0 0 10px" }}>
+                    These items are <strong>Producer-facing</strong> (e.g. agency info), <strong>Internal</strong> (e.g. coverage codes, NAIC), or for <strong>Carrier/underwriter review</strong> only. They are deselected by default and should not be sent to the client unless there is a specific reason.
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {internalQuestions.map((q, idx) => renderRow(q, idx, true, true))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Sub-panel 2: Do not send ── */}
+          {doNotSendQuestions.length > 0 && (
+            <div style={{ marginTop: 8, border: "1px dashed #fca5a5", borderRadius: 10, background: "#fff5f5" }}>
+              <button onClick={() => setShowDoNotSend(s => !s)}
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#991b1b" }}>
+                    Do not send
+                    <span style={{ color: "#fca5a5", fontWeight: 400 }}> ({doNotSendQuestions.length})</span>
+                  </span>
+                  <span style={{ fontSize: 10, color: "#fca5a5" }}>Fields never appropriate for a client questionnaire (§8.2 items 1 &amp; 4)</span>
+                </div>
+                <span style={{ fontSize: 12, color: "#dc2626", flexShrink: 0 }}>{showDoNotSend ? "Hide ▲" : "Show ▼"}</span>
+              </button>
+              {showDoNotSend && (
+                <div style={{ padding: "0 14px 12px" }}>
+                  <p style={{ fontSize: 11, color: "#fca5a5", margin: "0 0 10px" }}>
+                    These items are flagged <strong>"Do not send"</strong> - examples: producer fax numbers, national identifiers, internal system codes. They are visible here for completeness but should never be included in a client questionnaire.
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {doNotSendQuestions.map((q, idx) => renderRow(q, idx, true, true))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
+
         <div style={{ padding: "16px 28px 24px", flexShrink: 0, borderTop: "1px solid #f1f5f9", marginTop: 8 }}>
           <button onClick={handleSend} disabled={!canSend || sending}
             style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", background: canSend && !sending ? "#E61B84" : "#e2e8f0", color: canSend && !sending ? "#fff" : "#94a3b8", fontSize: 14, fontWeight: 700, cursor: canSend && !sending ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 46 }}>
             {sending ? <><span style={{ width: 14, height: 14, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Sending…</> : `Send ${selectedCount} Question${selectedCount !== 1 ? "s" : ""} to Client`}
           </button>
-          {emailTouched && clientEmail && !isEmailValid && <p style={{ fontSize: 11, color: "#ef4444", textAlign: "center", marginTop: 8 }}>Please enter a valid email address.</p>}
+          {nonClientSelected > 0 && (
+            <p style={{ fontSize: 11, color: "#b45309", textAlign: "center", marginTop: 8 }}>
+              {nonClientSelected} non-client item{nonClientSelected !== 1 ? "s" : ""} selected (Producer-facing / Internal / Do not send) - confirm these are appropriate before sending.
+            </p>
+          )}
           <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", marginTop: 10 }}>Client receives a secure link valid for 72 hours.</p>
         </div>
       </div>
     </div>
   );
 }
+
+const qsBtn = { fontSize: 11, fontWeight: 600, color: "#4f7cff", background: "rgba(79,124,255,0.06)", border: "1px solid rgba(79,124,255,0.2)", borderRadius: 6, padding: "3px 10px", cursor: "pointer" };
 
 // ── ARQ Status Panel ───────────────────────────────────────────────────────
 function ARQStatusPanel({ arqSessions, token, onRefresh }) {
@@ -192,7 +550,7 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
     try { await fetch(`${API_BASE}/api/arq/remind/${arq_id}`, { method: "POST", credentials: "include" }); onRefresh(); } catch (_) {}
     setReminding(null);
   };
-  const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
   if (!arqSessions || arqSessions.length === 0) return null;
   return (
     <div style={{ marginTop: 8 }}>
@@ -201,7 +559,7 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
         {arqSessions.map(arq => {
           const isExpired = new Date() > new Date(arq.expires_at) && arq.status !== "submitted";
           const status = isExpired ? "expired" : arq.status;
-          const sc = { submitted: { bg: "#dcfce7", color: "#166534", border: "#86efac", label: "✓ Done" }, expired: { bg: "#f1f5f9", color: "#64748b", border: "#cbd5e1", label: "Expired" }, pending: { bg: "#fef9c3", color: "#854d0e", border: "#fde047", label: "Pending" } }[status] || {};
+          const sc = { submitted: { bg: "#dcfce7", color: "#166534", border: "#86efac", label: "Done" }, expired: { bg: "#f1f5f9", color: "#64748b", border: "#cbd5e1", label: "Expired" }, pending: { bg: "#fef9c3", color: "#854d0e", border: "#fde047", label: "Pending" } }[status] || {};
           return (
             <div key={arq.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -225,7 +583,7 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
   );
 }
 
-// ── Side panel recommendation row — own local state avoids shared-state race ──
+// ── Side panel recommendation row - own local state avoids shared-state race ──
 function SidePanelRec({ rec, index, sqsScore, onDismiss }) {
   const [reason, setReason] = useState("");
   const isObj  = typeof rec === "object" && rec !== null;
@@ -283,7 +641,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
         <div style={{ flexShrink: 0 }}>
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>SQS Review</div>
-            <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length > 0 ? `${openRecs.length} item${openRecs.length !== 1 ? "s" : ""} flagged — review before downloading` : "All clear — review the SQS summary below"}</div>
+            <div style={{ fontSize: 12, color: "#64748b" }}>{openRecs.length > 0 ? `${openRecs.length} item${openRecs.length !== 1 ? "s" : ""} flagged - review before downloading` : "All clear - review the SQS summary below"}</div>
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
@@ -384,7 +742,7 @@ function DashboardStep({ token, onResume, onNewPackage }) {
   };
 
   const fmtDate = iso => {
-    if (!iso) return "—";
+    if (!iso) return "-";
     const d = new Date(iso);
     const diffDays = Math.floor((Date.now() - d) / 86400000);
     if (diffDays === 0) return "Today";
@@ -517,7 +875,7 @@ function DashboardStep({ token, onResume, onNewPackage }) {
                               <span style={{ fontSize: 9, fontWeight: 700, color: "#E61B84", opacity: 0.8, marginTop: 1 }}>{grade}</span>
                             </>
                           ) : (
-                            <span style={{ fontSize: 9, color: "#b5b5b5", fontWeight: 600, textAlign: "center", lineHeight: 1.3 }}>{"SQS\n—"}</span>
+                            <span style={{ fontSize: 9, color: "#b5b5b5", fontWeight: 600, textAlign: "center", lineHeight: 1.3 }}>{"SQS\n-"}</span>
                           )}
                         </div>
 
@@ -543,9 +901,9 @@ function DashboardStep({ token, onResume, onNewPackage }) {
             <div className="db-sidebar-card-title">Overview</div>
             <div style={{ display: "flex", flexDirection: "column" }}>
               {[
-                { label: "Total Packages", value: loading ? "—" : stats.total_packages, border: true },
-                { label: "Forms Generated", value: loading ? "—" : totalForms, border: true },
-                { label: "Avg SQS Score",   value: loading ? "—" : (globalAvg != null ? `${globalAvg} / 100` : "—"), border: false },
+                { label: "Total Packages", value: loading ? "-" : stats.total_packages, border: true },
+                { label: "Forms Generated", value: loading ? "-" : totalForms, border: true },
+                { label: "Avg SQS Score",   value: loading ? "-" : (globalAvg != null ? `${globalAvg} / 100` : "-"), border: false },
               ].map((item, i) => (
                 <div key={i} className="db-metric-row" style={{ borderBottom: item.border ? "1px solid #f0f0f0" : "none" }}>
                   <span className="db-metric-label">{item.label}</span>
@@ -616,7 +974,29 @@ const AcordModal = forwardRef(function AcordModal({
   const [tier2Score, setTier2Score] = useState(null);
   const [tier2Missing, setTier2Missing] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
+  const [accountProfile, setAccountProfile] = useState(null);
   const [allAvailableForms, setAllAvailableForms] = useState([]);
+  // "Why are you marketing this account?" (DOUBTS-Workstream4 / Brent) - answering
+  // re-runs recommendations so ACORD 101 escalates to its correct tier.
+  const [marketingReason, setMarketingReason] = useState("");
+  const [marketingOther, setMarketingOther] = useState("");
+  const [marketingBusy, setMarketingBusy] = useState(false);
+  // Submission Integrity Validation (Beta Report §4.1)
+  const [integrity, setIntegrity] = useState(null);
+  const [integrityBusy, setIntegrityBusy] = useState(false);
+  const [removeDocIds, setRemoveDocIds] = useState(new Set());
+  // Document classification correction (Beta Report §4.2)
+  const [availableDocTypes, setAvailableDocTypes] = useState([]);
+  const [reclassDocId, setReclassDocId] = useState(null); // doc_id currently being reclassified
+  const [reclassBusyBtn, setReclassBusyBtn] = useState(null); // which button triggered it: "toggle" | "supporting" | "type"
+  const [reviewData, setReviewData] = useState(null);     // "Review extracted data" payload (Beta Report §4.2)
+  const [reviewLoadingId, setReviewLoadingId] = useState(null); // doc_id whose extracted data is loading
+  // Normalization notices: values that differed in format but were treated as equivalent (§5.1)
+  const [normalizedDiffs, setNormalizedDiffs] = useState([]);
+  // Core Underwriting Data Consistency - Gross Sales reconciliation (Beta Report §4.3)
+  const [underwriting, setUnderwriting] = useState(null);
+  const [underwritingBusy, setUnderwritingBusy] = useState(null); // fact_key currently confirming
+  const [underwritingPicks, setUnderwritingPicks] = useState({});  // {fact_key: chosen/typed value}
   const [checkedFormIds, setCheckedFormIds] = useState(new Set());
   const [showAddForms, setShowAddForms] = useState(false);
   const [generatedForms, setGeneratedForms] = useState({});
@@ -654,6 +1034,8 @@ const AcordModal = forwardRef(function AcordModal({
 
   // ── SQS enhancement state ──────────────────────────────────────────────────
   const [packageSqs, setPackageSqs] = useState(null);
+  // §6.1: which package pillars are expanded to show their 15-category detail.
+  const [expandedPillars, setExpandedPillars] = useState(() => new Set());
   const [dismissedRecs, setDismissedRecs] = useState(new Set());
   const [showDownloadPreflight, setShowDownloadPreflight] = useState(false);
   const [preflightRecs, setPreflightRecs] = useState([]);
@@ -680,6 +1062,41 @@ const AcordModal = forwardRef(function AcordModal({
       .finally(() => setLiteGenerating(false));
   }, [step, sessionId]); // eslint-disable-line
 
+  // Restore a session that has NOT generated forms yet — i.e. one paused at the
+  // Submission Integrity review or sitting on the recommendations / SQS step.
+  // Lets users reopen in-progress submissions (including the extra ones created
+  // by "Create separate submissions") instead of being bounced to the dashboard
+  // (Beta Report §4.1). Returns true on success. Works for all non-essentials
+  // tiers; essentials always lands on the "lite" SQS step separately.
+  const _restoreFromExtraction = async (sid, signal) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/session/${sid}/extraction-result`, { credentials: "include", signal });
+      const data = res.ok ? await res.json() : null;
+      if (!data?.success) return false;
+      setSessionId(sid);
+      setDocSummary(data.doc_summary || []); setFlags(data.flags || {});
+      setAvailableDocTypes(data.available_doc_types || []);
+      setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
+      setCanProceedWithWarning(!!data.can_proceed_with_warning);
+      setWarningStops(data.warning_stops || []);
+      setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
+      setRecommendations(data.recommendations || []); setAllAvailableForms(data.all_available_forms || []);
+      setAccountProfile(data.account_profile || null);
+      setCheckedFormIds(new Set());
+      setUnderwriting(data.underwriting_consistency || null); setUnderwritingPicks({});
+      setIntegrity(data.integrity || null);
+      if (data.integrity_review_required) {
+        setRemoveDocIds(new Set());
+        setStep("integrity_review");
+      } else {
+        setStep("recommendations");
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   useEffect(() => {
     if (!resumeSessionId) return;
     setLoading(true); setProcessingStage("Restoring your session...");
@@ -687,7 +1104,7 @@ const AcordModal = forwardRef(function AcordModal({
     const timer = setTimeout(() => ctrl.abort(), 20000);
     fetch(`${API_BASE}/api/session/${resumeSessionId}`, { credentials: "include", signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
-      .then(data => {
+      .then(async data => {
         const isEssentials = user?.subscription_tier === "essentials";
         if (isEssentials && data?.session_id) {
           setSessionId(resumeSessionId); setStep("lite");
@@ -697,6 +1114,11 @@ const AcordModal = forwardRef(function AcordModal({
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
           setPdfLoading(readyMap); setStep("editor");
+        } else if (!isEssentials && data) {
+          // In-progress submission (no forms yet) → land on the integrity review
+          // or the recommendations/SQS step rather than dropping to the dashboard.
+          const ok = await _restoreFromExtraction(resumeSessionId, ctrl.signal);
+          if (!ok) { setStep("dashboard"); setSessionId(null); }
         } else { setStep("dashboard"); setSessionId(null); }
       })
       .catch(() => { setError("Could not restore session. Please try again."); setStep("dashboard"); setSessionId(null); })
@@ -753,7 +1175,7 @@ const AcordModal = forwardRef(function AcordModal({
     setFiles([]); setSessionId(null); setStep("upload"); setError(null);
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]);
     setCanProceedWithWarning(false); setWarningStops([]);
-    setTier2Score(null); setTier2Missing([]); setRecommendations([]);
+    setTier2Score(null); setTier2Missing([]); setRecommendations([]); setAccountProfile(null);
     setAllAvailableForms([]); setCheckedFormIds(new Set());
     setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]);
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
@@ -765,7 +1187,7 @@ const AcordModal = forwardRef(function AcordModal({
   const goToDashboard = () => {
     setFiles([]); setSessionId(null); setStep("dashboard"); setError(null);
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]);
-    setTier2Score(null); setTier2Missing([]); setRecommendations([]);
+    setTier2Score(null); setTier2Missing([]); setRecommendations([]); setAccountProfile(null);
     setAllAvailableForms([]); setCheckedFormIds(new Set());
     setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]);
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
@@ -782,7 +1204,7 @@ const AcordModal = forwardRef(function AcordModal({
     const timer = setTimeout(() => ctrl.abort(), 20000);
     fetch(`${API_BASE}/api/session/${sid}`, { credentials: "include", signal: ctrl.signal })
       .then(r => r.ok ? r.json() : null)
-      .then(data => {
+      .then(async data => {
         const isEssentials = user?.subscription_tier === "essentials";
         if (!isEssentials && data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
           setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
@@ -792,6 +1214,11 @@ const AcordModal = forwardRef(function AcordModal({
           setPdfLoading(readyMap); setStep("editor");
         } else if (isEssentials && data?.session_id) {
           setSessionId(sid); setStep("lite");
+        } else if (!isEssentials && data) {
+          // In-progress submission (no forms yet) → land on the integrity review
+          // or the recommendations/SQS step rather than dropping to upload.
+          const ok = await _restoreFromExtraction(sid, ctrl.signal);
+          if (!ok) { setStep("upload"); setSessionId(null); }
         } else { setStep("upload"); setSessionId(null); }
       })
       .catch(() => { setError("Could not load session. Please try again."); setStep("upload"); setSessionId(null); })
@@ -927,7 +1354,7 @@ const AcordModal = forwardRef(function AcordModal({
   // Tracks whether the tab was hidden at ANY point between the moment a job
   // started and the moment it finished. Without this, _notifyJobDone would only
   // fire an OS notification if `document.hidden` is true at the exact tick the
-  // job completes — but users often glance back at the tab to check progress
+  // job completes - but users often glance back at the tab to check progress
   // (or switch back just as the job finishes), so the "hidden right now" check
   // misses the common case. Reset to false on every job start.
   const _wasHiddenDuringJob = useRef(false);
@@ -1009,11 +1436,25 @@ const AcordModal = forwardRef(function AcordModal({
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setJobToasts(prev => [...prev, { id, title, body, ok }]);
   };
-  const _notifyJobDone = async (kind, ok) => {
-    const title = ok ? "Primble — Ready" : "Primble — Action needed";
-    const body = ok
-      ? (kind === "generate" ? "Your ACORD forms are ready to review." : "Your documents have finished processing.")
-      : "There was an issue with your submission. Please reopen to review.";
+  const _notifyJobDone = async (kind, ok, statusOverride = null) => {
+    // Workstream 6 §9.1 - never announce a bare "Ready". When the caller knows the
+    // live package state it passes a precise {title, body} via statusOverride;
+    // otherwise fall back to a neutral, state-appropriate default (the background
+    // job-restore poll has no issue counts to work with).
+    let title, body;
+    if (!ok) {
+      title = "Primble - Action needed";
+      body = "There was an issue with your submission. Please reopen to review.";
+    } else if (statusOverride && statusOverride.title) {
+      title = statusOverride.title;
+      body = statusOverride.body || "";
+    } else if (kind === "generate") {
+      title = "Primble - Forms Generated";
+      body = "Your ACORD forms are ready to review.";
+    } else {
+      title = "Primble - Documents Processed";
+      body = "Processing complete.";
+    }
     console.info("[primble-notify] _notifyJobDone fired", {
       kind, ok,
       hidden: typeof document !== "undefined" ? document.hidden : "n/a",
@@ -1023,13 +1464,13 @@ const AcordModal = forwardRef(function AcordModal({
     // Always show in-page toast (every event, regardless of tab state).
     _pushJobToast(title, body, ok);
     // Title-badge runs even if the OS path fails, so a hidden tab still gets
-    // a visible "(1) Primble — …" hint when the user returns.
+    // a visible "(1) Primble - …" hint when the user returns.
     if (typeof document !== "undefined" && document.hidden) _setTitleBadge(true);
     // Reset the "was away" flag for the next job. We no longer gate the OS
     // notification on it: trying to predict whether the user "needs" an alert
     // based on visibility timing kept missing edge cases (tabbing back briefly,
     // job finishing during the glance, OS race conditions). Slack/Gmail/Discord
-    // all fire OS notifications unconditionally on job completion — the in-page
+    // all fire OS notifications unconditionally on job completion - the in-page
     // toast is the foreground signal, the OS banner is the away signal, and
     // showing both when the user is on the page is harmless redundancy.
     _wasHiddenDuringJob.current = false;
@@ -1082,21 +1523,21 @@ const AcordModal = forwardRef(function AcordModal({
   // notification delivery independently of the upload/generate flow.
   // Usage from DevTools console:
   //     window.__primbleTestNotification(5)
-  // Fires a notification 5 seconds later — switch tabs/apps in that window
+  // Fires a notification 5 seconds later - switch tabs/apps in that window
   // and observe whether the OS banner appears. If this does NOT appear when
   // the tab is hidden, the issue is OS-level (Focus/DND mode, Chrome quieter
-  // messaging, Brave shields) — NOT a bug in Primble's notification code.
+  // messaging, Brave shields) - NOT a bug in Primble's notification code.
   useEffect(() => {
     window.__primbleTestNotification = async (delaySec = 3) => {
       const ms = Math.max(0, Number(delaySec) * 1000);
-      console.info("[primble-notify] TEST scheduled in", ms, "ms — switch tabs now");
+      console.info("[primble-notify] TEST scheduled in", ms, "ms - switch tabs now");
       console.info("[primble-notify] TEST state at schedule:", {
         hidden: typeof document !== "undefined" ? document.hidden : "n/a",
         permission: typeof Notification !== "undefined" ? Notification.permission : "n/a",
         hasSW: "serviceWorker" in navigator,
       });
       await new Promise(r => setTimeout(r, ms));
-      console.info("[primble-notify] TEST firing now — hidden=", document.hidden);
+      console.info("[primble-notify] TEST firing now - hidden=", document.hidden);
       if (typeof Notification === "undefined" || Notification.permission !== "granted") {
         console.error("[primble-notify] TEST aborted: no permission");
         return;
@@ -1108,7 +1549,7 @@ const AcordModal = forwardRef(function AcordModal({
       }
       const tag = `primble-test-${Date.now()}`;
       try {
-        await reg.showNotification("Primble — Test", { body: "If you see this banner, OS-level notifications work. ✓", tag });
+        await reg.showNotification("Primble - Test", { body: "If you see this banner, OS-level notifications work.", tag });
         console.info("[primble-notify] TEST showNotification resolved. If no banner appeared, the OS/browser is suppressing it.");
       } catch (err) {
         console.error("[primble-notify] TEST showNotification rejected:", err && err.message ? err.message : err);
@@ -1136,7 +1577,7 @@ const AcordModal = forwardRef(function AcordModal({
   // Poll /api/jobs/{jobId}/status until completed or failed. Throws on failure or timeout.
   // iOS Safari aggressively drops fetch when the tab backgrounds or the
   // cellular link blips. Treat transient network/5xx errors as "skip this
-  // tick" rather than aborting the whole flow — the backend job is still
+  // tick" rather than aborting the whole flow - the backend job is still
   // running. Only definitive errors (401/403/404, job=failed) terminate.
   const _pollJobStatus = async (jobId, maxAttempts = 100, interval = 3000) => {
     let consecutiveErrors = 0;
@@ -1167,7 +1608,7 @@ const AcordModal = forwardRef(function AcordModal({
   };
 
   // Resume polling for an active job left in localStorage after a page reload.
-  // Silent: doesn't show overlays — when the job finishes we notify via browser
+  // Silent: doesn't show overlays - when the job finishes we notify via browser
   // notification + tab-title badge so the user knows to come back.
   useEffect(() => {
     let cancelled = false;
@@ -1176,7 +1617,7 @@ const AcordModal = forwardRef(function AcordModal({
       if (!raw) return;
       const { jobId, kind, ts } = JSON.parse(raw) || {};
       if (!jobId) { _clearActiveJob(); return; }
-      // Drop stale entries (>30 min old) — covers crashed/timed-out jobs
+      // Drop stale entries (>30 min old) - covers crashed/timed-out jobs
       if (ts && (Date.now() - ts) > 30 * 60 * 1000) { _clearActiveJob(); return; }
       (async () => {
         try {
@@ -1203,8 +1644,8 @@ const AcordModal = forwardRef(function AcordModal({
     try {
       const res = await fetch(`${API_BASE}/api/upload-declaration`, { method: "POST", credentials: "include", body: fd });
       if (res.status === 401) { setError("Session expired. Please sign in again."); setTimeout(() => { try { localStorage.removeItem("acordly_tk"); sessionStorage.removeItem("acordly_tk"); } catch {} window.location.reload(); }, 2000); return; }
-      if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.upgrade_required) { onShowUpgrade(); return; } const msg = d.detail || d.message || "Access blocked."; if (msg.includes("suspended")) setError("Your account is suspended."); else if (msg.includes("archived")) setError("Account archived. Contact support."); else if (msg.includes("soft_locked") || msg.includes("locked")) setError("Account Disabled — please update billing."); else setError(msg); return; }
-      if (res.status === 429) { setError("Server busy — too many concurrent uploads. Please wait 30 seconds and try again."); return; }
+      if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.upgrade_required) { onShowUpgrade(); return; } const msg = d.detail || d.message || "Access blocked."; if (msg.includes("suspended")) setError("Your account is suspended."); else if (msg.includes("archived")) setError("Account archived. Contact support."); else if (msg.includes("soft_locked") || msg.includes("locked")) setError("Account Disabled - please update billing."); else setError(msg); return; }
+      if (res.status === 429) { setError("Server busy - too many concurrent uploads. Please wait 30 seconds and try again."); return; }
       if (res.status >= 500) { setError("Server error during upload. Please try again. If this persists, the file may be too large or complex."); return; }
       let data;
       if (res.status === 202) {
@@ -1222,7 +1663,7 @@ const AcordModal = forwardRef(function AcordModal({
         data = await res.json();
       }
       if (!data.success) {
-        // tier1_fail is no longer returned — backend now surfaces missing
+        // tier1_fail is no longer returned - backend now surfaces missing
         // ACORD 125 fields as soft warnings on the recommendations / lite SQS
         // screens. Keep a tolerant fallback in case an old backend responds.
         if (data.gate === "tier1_fail") {
@@ -1235,14 +1676,29 @@ const AcordModal = forwardRef(function AcordModal({
         setError(data.message || "Upload failed");
         return;
       }
-      _notifyJobDone("upload", true);
+      _notifyJobDone("upload", true, packageStatusNotice({
+        integrityReviewRequired: !!data.integrity_review_required,
+        hardStopCount: (data.hard_stops || []).length,
+        warningCount: (data.soft_stops || []).length,
+      }));
       setSessionId(data.session_id); setDocSummary(data.doc_summary || []); setFlags(data.flags || {});
-      setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []);
+      setAvailableDocTypes(data.available_doc_types || []);
+      setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
       setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
       setRecommendations(data.recommendations || []); setAllAvailableForms(data.all_available_forms || []);
+      setAccountProfile(data.account_profile || null);
       setCheckedFormIds(new Set());
+      setUnderwriting(data.underwriting_consistency || null); setUnderwritingPicks({});
+      // Submission Integrity Validation (Beta Report §4.1): pause for review
+      // BEFORE form selection/generation when the package may hold multiple insureds.
+      setIntegrity(data.integrity || null);
+      if (data.integrity_review_required) {
+        setRemoveDocIds(new Set());
+        setStep("integrity_review");
+        return;
+      }
       setStep(user?.subscription_tier === "essentials" ? "lite" : "recommendations");
     } catch (e) {
       if (e.message === "Failed to fetch" || e.name === "TypeError") {
@@ -1252,6 +1708,248 @@ const AcordModal = forwardRef(function AcordModal({
       }
     }
     finally { setLoading(false); setShowUploadOverlay(false); }
+  };
+
+  // Submission Integrity Validation (Beta Report §4.1) - resolve a pending review.
+  // action: "remove_documents" (drop selected docs, re-assess) | "continue_anyway".
+  const handleResolveIntegrity = async (action) => {
+    if (!sessionId) return;
+    if (action === "remove_documents" && removeDocIds.size === 0) {
+      setError("Select at least one document to remove."); return;
+    }
+    setIntegrityBusy(true); setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/submission-integrity/resolve`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          action,
+          remove_doc_ids: action === "remove_documents" ? Array.from(removeDocIds) : [],
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setError(data.detail || data.message || "Could not resolve the submission integrity review.");
+        return;
+      }
+      setIntegrity(data.integrity || null);
+      setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
+      setCanProceedWithWarning(!!data.can_proceed_with_warning);
+      setDocSummary(data.doc_summary || docSummary);
+      if (data.available_doc_types) setAvailableDocTypes(data.available_doc_types);
+      // Still flagged after removing documents → stay on the review step.
+      if (data.integrity_review_required) {
+        setRemoveDocIds(new Set());
+        return;
+      }
+      setRecommendations(data.recommendations || []);
+      setAllAvailableForms(data.all_available_forms || []);
+      setAccountProfile(data.account_profile || null);
+      setCheckedFormIds(new Set());
+      setUnderwriting(data.underwriting_consistency || null);
+      // Workstream 6 §9.1 - integrity resolved → announce the now-current status
+      // (hard stops / warnings / ready) as the user lands on the recommendations
+      // screen, so they immediately know what to do next. When the package was
+      // split (§4.1 "Create separate submissions") tell the user how many
+      // submissions were created and which one they're continuing with.
+      const _created = data.created_submissions || [];
+      const _resolveNotice =
+        action === "create_separate_submissions" && _created.length > 1
+          ? {
+              title: "Primble - Submissions Split",
+              body: `Created ${_created.length} separate submissions. Continuing with "${_created[0]?.label || "the first"}"; the others are saved to your submissions.`,
+            }
+          : packageStatusNotice({
+              integrityReviewRequired: false,
+              hardStopCount: (data.hard_stops || []).length,
+              warningCount: (data.soft_stops || []).length,
+            });
+      _notifyJobDone("upload", true, _resolveNotice);
+      setStep(user?.subscription_tier === "essentials" ? "lite" : "recommendations");
+    } catch (e) {
+      setError("Could not resolve the submission integrity review: " + (e?.message || "network error"));
+    } finally {
+      setIntegrityBusy(false);
+    }
+  };
+
+  // Document classification correction (Beta Report §4.2). action:
+  // "set_type" (with newType) | "exclude" | "include". Re-runs scoring server-side.
+  const handleReclassify = async (docId, action, newType = null, busyBtn = null) => {
+    if (!sessionId || !docId) return;
+    setReclassDocId(docId); setReclassBusyBtn(busyBtn); setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/document/reclassify`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, doc_id: docId, action, new_doc_type: newType }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setError(data.detail || data.message || "Could not update the document type.");
+        return;
+      }
+      // Corrected classification re-runs downstream scoring + recommendations.
+      setDocSummary(data.doc_summary || docSummary);
+      if (data.available_doc_types) setAvailableDocTypes(data.available_doc_types);
+      setRecommendations(data.recommendations || []);
+      if (data.account_profile) setAccountProfile(data.account_profile);
+      setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
+      setCanProceedWithWarning(!!data.can_proceed_with_warning);
+      setWarningStops(data.warning_stops || []);
+      setFlags(data.flags || flags);
+      // Refresh the live Submission Readiness score + missing items so the
+      // corrected classification visibly updates downstream scoring (§4.2).
+      if (data.tier2_score !== undefined) setTier2Score(data.tier2_score);
+      if (data.tier2_missing) setTier2Missing(data.tier2_missing);
+      if (data.integrity) setIntegrity(data.integrity);
+      if (data.underwriting_consistency) setUnderwriting(data.underwriting_consistency);
+    } catch (e) {
+      setError("Could not update the document type: " + (e?.message || "network error"));
+    } finally {
+      setReclassDocId(null); setReclassBusyBtn(null);
+    }
+  };
+
+  // "Why are you marketing this account?" answer (DOUBTS-Workstream4 / Brent).
+  // Re-runs form recommendations live so ACORD 101 moves to its correct tier; the
+  // answer also persists into the session so it flows into later SQS scoring.
+  const handleMarketingReason = async (reason) => {
+    if (!sessionId || !reason) return;
+    setMarketingBusy(true); setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/session/${sessionId}/marketing-reason`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setError(data.detail || data.message || "Could not update recommendations.");
+        return;
+      }
+      setRecommendations(data.recommendations || recommendations);
+      if (data.account_profile) setAccountProfile(data.account_profile);
+      if (data.all_available_forms) setAllAvailableForms(data.all_available_forms);
+      if (data.flags) setFlags(data.flags);
+    } catch (e) {
+      setError("Could not update recommendations: " + (e?.message || "network error"));
+    } finally {
+      setMarketingBusy(false);
+    }
+  };
+
+  // "Review extracted data" (Beta Report §4.2 item #6): fetch what Primble pulled
+  // from a single document and show it in a read-only panel.
+  const handleReviewData = async (docId) => {
+    if (!sessionId || !docId) return;
+    setReviewLoadingId(docId); setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/session/${sessionId}/document/${docId}/extracted-data`, { credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setError(data.detail || data.message || "Could not load the extracted data for this document.");
+        return;
+      }
+      setReviewData(data);
+    } catch (e) {
+      setError("Could not load the extracted data: " + (e?.message || "network error"));
+    } finally {
+      setReviewLoadingId(null);
+    }
+  };
+
+  // Submission Integrity status banner (Beta Report §4.1). Pink to match the
+  // other sections. HIGH / MEDIUM are surfaced here on the recommendations/SQS
+  // screen (they never pause); LOW pauses and is shown on the dedicated
+  // "Submission Integrity Review Needed" screen instead. Informational only.
+  const renderIntegrityStatus = () => {
+    const st = integrity?.status;
+    if (!st) return null;
+    const reasons = integrity?.reasons || [];
+    const entities = integrity?.detected_entities || [];
+    const title = { high: "Documents verified", medium: "Review recommended", low: "Possible multiple submissions" }[st];
+    if (!title) return null;
+    const desc = st === "high"
+      ? "The uploaded documents appear to belong to the same submission."
+      : st === "low"
+        ? "These documents may belong to different insureds. You can continue, or separate them into individual submissions."
+        : "Some submission details differ across the uploaded documents. You can continue, but a quick review is recommended.";
+    return (
+      <div style={{ marginBottom: 14, background: "rgba(230,27,132,0.07)", border: "1.5px solid rgba(230,27,132,0.25)", borderRadius: 12, padding: "14px 18px" }}>
+        <div style={{ fontWeight: 700, color: "#9d0f5a", fontSize: 13.5 }}>
+          Submission integrity: {st.toUpperCase()} - {title}
+        </div>
+        <div style={{ fontSize: 12.5, color: "#b01868", lineHeight: 1.5, marginTop: 4 }}>{desc}</div>
+        {entities.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+            {entities.map((e, i) => (
+              <span key={i} style={{ background: "rgba(230,27,132,0.08)", color: "#9d0f5a", border: "1px solid rgba(230,27,132,0.22)", borderRadius: 999, padding: "3px 12px", fontSize: 12.5, fontWeight: 600 }}>{e}</span>
+            ))}
+          </div>
+        )}
+        {reasons.length > 0 && (
+          <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+            {reasons.map((r, i) => (
+              <li key={i} style={{ fontSize: 12.5, color: "#b01868", padding: "1px 0" }}>{r}</li>
+            ))}
+          </ul>
+        )}
+        {normalizedDiffs.length > 0 && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(230,27,132,0.2)" }}>
+            <div style={{ fontWeight: 700, fontSize: 12, color: "#1e293b", marginBottom: 4 }}>
+              Formatting Differences - Automatically Resolved
+            </div>
+            <div style={{ fontSize: 12, color: "#1e293b", marginBottom: 5 }}>
+              These values appeared in different formats across your documents but refer to the same thing. No action needed.
+            </div>
+            {normalizedDiffs.map((s, i) => (
+              <div key={i} style={{ fontSize: 12, color: "#1e293b", padding: "2px 0" }}>
+                <span style={{ fontWeight: 600 }}>{s.split(":")[0]}:</span>
+                <span>{s.includes(":") ? s.slice(s.indexOf(":") + 1) : ""}</span>
+                <span style={{ fontStyle: "italic" }}> - treated as equivalent</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // Core Underwriting Data Consistency (Beta Report §4.3): confirm the correct
+  // Gross Sales (or similar) value when documents disagree. The server applies
+  // it across every relevant form and re-runs scoring.
+  const handleConfirmUnderwriting = async (factKey, value) => {
+    if (!sessionId || !factKey) return;
+    const v = (value ?? "").toString().trim();
+    if (!v) { setError("Enter or select a value to confirm."); return; }
+    setUnderwritingBusy(factKey); setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/underwriting/confirm-value`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, fact_key: factKey, value: v }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setError(data.detail || data.message || "Could not confirm the value.");
+        return;
+      }
+      setUnderwriting(data.underwriting_consistency || null);
+      setRecommendations(data.recommendations || recommendations);
+      if (data.account_profile) setAccountProfile(data.account_profile);
+      setAllAvailableForms(data.all_available_forms || allAvailableForms);
+      setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
+      setCanProceedWithWarning(!!data.can_proceed_with_warning);
+      setWarningStops(data.warning_stops || []);
+      setTier2Score(data.tier2_score ?? tier2Score); setTier2Missing(data.tier2_missing || tier2Missing);
+      setFlags(data.flags || flags);
+    } catch (e) {
+      setError("Could not confirm the value: " + (e?.message || "network error"));
+    } finally {
+      setUnderwritingBusy(null);
+    }
   };
 
   const handleGenerateAll = async () => {
@@ -1267,6 +1965,31 @@ const AcordModal = forwardRef(function AcordModal({
         const msg = d.detail || d.message || "";
         if (msg.toLowerCase().includes("lite")) { setStep("lite"); return; }
         setError(msg || "Access blocked. Please update your billing."); return;
+      }
+      // Submission Integrity gate (Beta Report §4.1): the server refuses to
+      // generate forms while a multi-insured review is pending. Route the user
+      // back to the review step rather than failing silently.
+      if (res.status === 409) {
+        const d = await res.json().catch(() => ({}));
+        const detail = d.detail || {};
+        if (detail.error === "submission_integrity_review_required" || detail.integrity) {
+          setIntegrity(detail.integrity || null);
+          setRemoveDocIds(new Set());
+          setStep("integrity_review");
+          return;
+        }
+        // Building-value review gate (client Property Integrity): the server
+        // refuses to generate forms while building values conflict across
+        // documents. Route back to the recommendations step where the Data
+        // Consistency picker lets the broker confirm the correct value.
+        if (detail.error === "building_value_review_required") {
+          if (detail.underwriting_consistency) setUnderwriting(detail.underwriting_consistency);
+          setUnderwritingPicks({});
+          setStep("recommendations");
+          setError(detail.message || "Building values differ across the submitted documents. Confirm the correct value before generating forms.");
+          return;
+        }
+        setError(detail.message || "Submission cannot proceed. Please review your documents."); return;
       }
       let data;
       if (res.status === 202) {
@@ -1290,9 +2013,9 @@ const AcordModal = forwardRef(function AcordModal({
       const readyMap = {}; (data.form_ids || []).forEach(fid => { readyMap[fid] = false; }); setPdfLoading(readyMap);
     } catch (e) {
       if (e.message === "Failed to fetch" || e.name === "TypeError") {
-        setError("Generation failed: could not reach the server. Your documents are still loaded — click Generate again to retry.");
+        setError("Generation failed: could not reach the server. Your documents are still loaded - click Generate again to retry.");
       } else {
-        setError("Generation failed: " + e.message + " — click Generate again to retry.");
+        setError("Generation failed: " + e.message + " - click Generate again to retry.");
       }
     }
     finally { setLoading(false); setShowGenerateOverlay(false); }
@@ -1306,6 +2029,13 @@ const AcordModal = forwardRef(function AcordModal({
 
   const recommendedIds = new Set(recommendations.map(r => r.form_id));
   const extraForms = allAvailableForms.filter(f => !recommendedIds.has(f.form_id));
+  // Group recommendations by tier for display (Beta Report §7). Order within a
+  // tier is preserved from the backend (confidence-sorted). Any recommendation
+  // without a known tier falls back to "recommended" so nothing is dropped.
+  const tierOf = (r) => (TIER_ORDER.includes(r.tier) ? r.tier : "recommended");
+  const groupedRecs = TIER_ORDER
+    .map(t => ({ tier: t, items: recommendations.filter(r => tierOf(r) === t) }))
+    .filter(g => g.items.length > 0);
   const activeSqs = activeFormId && generatedForms[activeFormId]?.sqs;
   const pkgsUsed = user?.packages_used || 0;
   const pkgsLimit = user?.packages_limit || 0;
@@ -1390,7 +2120,7 @@ const AcordModal = forwardRef(function AcordModal({
 
   const handlePreflightProceed = () => {
     setShowDownloadPreflight(false);
-    // Fire audit log in background — don't block the download
+    // Fire audit log in background - don't block the download
     fetch(`${API_BASE}/api/audit/download-anyway`, {
       method: "POST",
       credentials: "include",
@@ -1446,6 +2176,47 @@ const AcordModal = forwardRef(function AcordModal({
       )}
       {showAcordModal && renderAcordLicenseModal()}
       {showARQModal && <ARQModal sessionId={sessionId} token={token} questions={arqQuestions} onClose={() => setShowARQModal(false)} onSuccess={() => { setShowARQModal(false); refreshArqData(); }} />}
+      {/* "Review extracted data" panel (Beta Report §4.2 item #6) */}
+      {reviewData && (
+        <div
+          onClick={() => setReviewData(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(15,23,42,0.55)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 14, width: "100%", maxWidth: 560, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)", overflow: "hidden" }}
+          >
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b" }}>Extracted data</div>
+                <div style={{ fontSize: 12.5, color: "#64748b", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {reviewData.doc_type_label} · {reviewData.filename}
+                </div>
+              </div>
+              <button type="button" onClick={() => setReviewData(null)} aria-label="Close" style={{ background: "none", border: "none", fontSize: 20, lineHeight: 1, color: "#64748b", cursor: "pointer", flexShrink: 0 }}>✕</button>
+            </div>
+            <div style={{ padding: "12px 20px", overflowY: "auto" }}>
+              {(reviewData.fields || []).length === 0 ? (
+                <div style={{ fontSize: 13, color: "#64748b", padding: "12px 0" }}>
+                  No structured data was extracted from this document.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {reviewData.fields.map((f) => (
+                    <div key={f.key} style={{ display: "flex", flexDirection: "column", gap: 2, paddingBottom: 8, borderBottom: "1px solid #f1f5f9" }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.03em" }}>{f.label}</span>
+                      <span style={{ fontSize: 13.5, color: "#1e293b", wordBreak: "break-word" }}>{f.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ padding: "12px 20px", borderTop: "1px solid #e2e8f0", textAlign: "right" }}>
+              <button type="button" onClick={() => setReviewData(null)} className="btn btn-modal-secondary" style={{ fontSize: 13 }}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
       {downloadPreflightLoading && <ProcessStageOverlay stages={["Checking recommendations", "Loading SQS summary"]} advanceAfter={1800} />}
       {showDownloadPreflight && (
         <DownloadPreflightModal
@@ -1560,14 +2331,35 @@ const AcordModal = forwardRef(function AcordModal({
             note={<>You can leave this page during processing, but do <strong>not</strong> close it. Enable<br />your browser notifications, and we'll let you know as soon as it's ready.</>}
           />
         )}
-        {showGenerateOverlay && (
-          <ProcessStageOverlay
-            stages={[`Selecting ${checkedFormIds.size} form${checkedFormIds.size !== 1 ? "s" : ""}…`, "Generating form…"]}
-            advanceAfter={3000}
-            tagline={<><span style={{ color: "#e61b84" }}>Quality takes a little time.</span><br />Doing this manually would take a lot more.</>}
-            note={<>You can leave this page during processing, but do <strong>not</strong> close it. Enable<br />your browser notifications, and we'll let you know as soon as it's ready.</>}
-          />
-        )}
+        {showGenerateOverlay && (() => {
+          // Workstream 6 §9.3 - generalized, client-approved progress stages plus a
+          // rough ETA. Forms aren't generated strictly one-by-one (shared LLM pass),
+          // so these describe the real phases instead of faking "form 1 of N". The
+          // overlay holds on the last stage until the response lands.
+          const _stages = [
+            "Preparing Form Package",
+            "Gathering Submission Data",
+            "Mapping ACORD Fields",
+            "Validating Data",
+            "Generating Forms",
+            "Performing Quality Checks",
+            "Preparing Download Package",
+          ];
+          // ETA = ~avg seconds/form x forms selected (dynamic per submission, not a
+          // fixed value); the countdown + deceleration absorb real-world variance.
+          const _eta = Math.max(30, Math.max(1, checkedFormIds.size) * 20);
+          const _adv = Math.min(9000, Math.max(2800, Math.round((_eta * 1000) / _stages.length)));
+          return (
+            <ProcessStageOverlay
+              stages={_stages}
+              advanceAfter={_adv}
+              etaSeconds={_eta}
+              windowSize={2}
+              tagline={<><span style={{ color: "#e61b84" }}>Quality takes a little time.</span><br />Doing this manually would take a lot more.</>}
+              note={<>You can leave this page during processing, but do <strong>not</strong> close it. Enable<br />your browser notifications, and we'll let you know as soon as it's ready.</>}
+            />
+          );
+        })()}
         {showDownloadOverlay && <ProcessStageOverlay stages={["Preparing your form…", "Packaging for download…"]} advanceAfter={2000} />}
 
         {loading && !showUploadOverlay && !showGenerateOverlay && !showDownloadOverlay && step !== "editor" && (
@@ -1576,26 +2368,26 @@ const AcordModal = forwardRef(function AcordModal({
 
         {user && user.subscription_tier === "free" && user.downloads_remaining === 0 && step !== "upload" && step !== "dashboard" && (
           <div className="freemium-banner freemium-depleted">
-            <span className="freemium-text">Free limit reached — upgrade to continue</span>
+            <span className="freemium-text">Free limit reached - upgrade to continue</span>
             <button className="freemium-upgrade-btn" onClick={onShowUpgrade}>Upgrade Now</button>
           </div>
         )}
 
         {inOverage && (
           <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "9px 14px", fontSize: 12, color: "#92400e", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
-            <span>You're in overage territory — each additional download will be billed on your next invoice.</span>
+            <span>You're in overage territory - each additional download will be billed on your next invoice.</span>
           </div>
         )}
 
         {user && user.subscription_tier !== "free" && (() => {
           const ps = user.payment_status;
-          if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived — <a href="mailto:support@primble.ai">Contact support</a> to restore.</div>;
+          if (ps === "archived") return <div className="payment-status-banner payment-status-archived">🗄️ Account archived - <a href="mailto:support@primble.ai">Contact support</a> to restore.</div>;
           if (ps === "suspended") return <div className="payment-status-banner payment-status-suspended">Account suspended.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Restore billing</button></div>;
-          if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">Account Disabled — Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
+          if (ps === "soft_locked") return <div className="payment-status-banner payment-status-locked">Account Disabled - Please{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update your billing</button>{" "}to restore access.</div>;
           if (ps === "failed") {
             const daysFailed = user.payment_failed_at ? Math.floor((Date.now() - new Date(user.payment_failed_at).getTime()) / 86400000) : 0;
-            if (daysFailed >= 7) return <div className="payment-status-banner payment-status-failed" style={{ background: "#fef2f2", borderColor: "#fca5a5", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap" }}>Payment still overdue — account will be restricted soon.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Update billing now</button></div>;
-            return <div className="payment-status-banner payment-status-failed">Payment overdue —{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
+            if (daysFailed >= 7) return <div className="payment-status-banner payment-status-failed" style={{ background: "#fef2f2", borderColor: "#fca5a5", fontWeight: 700, display: "flex", alignItems: "center", gap: 8, flexWrap: "nowrap" }}>Payment still overdue - account will be restricted soon.{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}Update billing now</button></div>;
+            return <div className="payment-status-banner payment-status-failed">Payment overdue -{" "}<button onClick={onOpenBillingPortal} disabled={billingPortalLoading} style={{ color: "inherit", fontWeight: 700, textDecoration: "underline", background: "none", border: "none", cursor: billingPortalLoading ? "wait" : "pointer", padding: 0, display: "inline-flex", alignItems: "center", gap: 4 }}>{billingPortalLoading && <BillingBtnSpinner />}update billing</button></div>;
           }
           return null;
         })()}
@@ -1641,7 +2433,7 @@ const AcordModal = forwardRef(function AcordModal({
             priority_review:  "Priority Review",
             standard_review:  "Standard Review",
             full_review:      "Full Package Review",
-            hold:             "Hold — Remediation Required",
+            hold:             "Hold - Remediation Required",
           };
           const routingStyle = {
             auto_quote:      { bg: "#dcfce7", color: "#166534", border: "#86efac" },
@@ -1655,6 +2447,10 @@ const AcordModal = forwardRef(function AcordModal({
           const rs = routingStyle[rd] || { bg: "#f1f5f9", color: "#475569", border: "#e2e8f0" };
           return (
             <div style={{ maxWidth: 960, margin: "0 auto", padding: "0 16px" }}>
+
+              {/* Submission Integrity status (Beta Report §4.1): advisory banner,
+                  all statuses, mirrored from the recommendations step. */}
+              {renderIntegrityStatus()}
 
               {/* ── Page header ── */}
               <div style={{ marginBottom: 28 }}>
@@ -1681,7 +2477,7 @@ const AcordModal = forwardRef(function AcordModal({
                       {/* Score circle */}
                       <div style={{ position: "relative", flexShrink: 0 }}>
                         <div style={{ width: 120, height: 120, borderRadius: "50%", background: liteGradeBg(sqs.grade), border: `3px solid ${liteGradeColor(sqs.grade)}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                          <span style={{ fontSize: 42, fontWeight: 900, color: liteGradeColor(sqs.grade), lineHeight: 1 }}>{sqs.sqs_score ?? "—"}</span>
+                          <span style={{ fontSize: 42, fontWeight: 900, color: liteGradeColor(sqs.grade), lineHeight: 1 }}>{sqs.sqs_score ?? "-"}</span>
                           <span style={{ fontSize: 12, fontWeight: 700, color: liteGradeColor(sqs.grade), opacity: 0.75, marginTop: 2 }}>/100</span>
                         </div>
                         <div style={{ position: "absolute", bottom: -4, right: -4, width: 32, height: 32, borderRadius: "50%", background: liteGradeColor(sqs.grade), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: "#fff", boxShadow: "0 2px 6px rgba(0,0,0,0.2)" }}>
@@ -1716,13 +2512,13 @@ const AcordModal = forwardRef(function AcordModal({
                       </div>
                     </div>
 
-                    {/* Stops — side by side on desktop, stacked on mobile */}
+                    {/* Stops - side by side on desktop, stacked on mobile */}
                     {(liteSqsData?.hard_stops?.length > 0 || liteSqsData?.soft_stops?.length > 0) && (
                       <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 16 }}>
                         <div className="lite-stops-grid">
                           {liteSqsData?.hard_stops?.length > 0 && (
                             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px" }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Hard Stops — Caps Your Score at 60</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Hard Stops - Caps Your Score at 60</div>
                               {liteSqsData.hard_stops.map((s, i) => (
                                 <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0", display: "flex", gap: 6 }}>
                                   <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
@@ -1732,7 +2528,7 @@ const AcordModal = forwardRef(function AcordModal({
                           )}
                           {liteSqsData?.soft_stops?.length > 0 && (
                             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "12px 16px" }}>
-                              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 7 }}>Warnings — Will Cap Your Score at 85</div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 7 }}>Warnings - Will Cap Your Score at 85</div>
                               {liteSqsData.soft_stops.map((s, i) => (
                                 <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0", display: "flex", gap: 6 }}>
                                   <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
@@ -1824,7 +2620,7 @@ const AcordModal = forwardRef(function AcordModal({
           }
           const ps = user?.payment_status;
           const uploadBlocked = ps === "soft_locked" || ps === "suspended" || ps === "archived";
-          const blockMsg = ps === "archived" ? "Account archived — contact support to restore." : ps === "suspended" ? "Account suspended — restore billing to continue." : ps === "soft_locked" ? "Account Disabled — please update your billing." : null;
+          const blockMsg = ps === "archived" ? "Account archived - contact support to restore." : ps === "suspended" ? "Account suspended - restore billing to continue." : ps === "soft_locked" ? "Account Disabled - please update your billing." : null;
           const activeBtn = files.length && !loading && !uploadBlocked;
           return (
             <div style={{ maxWidth: 640, margin: "0 auto", padding: "0 4px" }}>
@@ -1832,7 +2628,7 @@ const AcordModal = forwardRef(function AcordModal({
               <div style={{ textAlign: "center", marginBottom: 28 }}>
                 <div style={{ display: "inline-block", fontSize: 10, fontWeight: 700, color: "#991b1b", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 10, padding: "3px 10px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 20 }}>New Submission</div>
                 <h2 style={{ fontSize: 26, fontWeight: 700, color: "#0f172a", margin: "0 0 6px", letterSpacing: "-0.3px" }}>Upload Documents</h2>
-                <p style={{ fontSize: 13.5, color: "#64748b", margin: 0, lineHeight: 1.5 }}>Dec pages, loss runs, schedules, quotes — PDFs, images, or ZIP archives</p>
+                <p style={{ fontSize: 13.5, color: "#64748b", margin: 0, lineHeight: 1.5 }}>Dec pages, loss runs, schedules, quotes - PDFs, images, or ZIP archives</p>
               </div>
 
               {/* Blocked banner */}
@@ -1867,7 +2663,7 @@ const AcordModal = forwardRef(function AcordModal({
                     textAlign: "center",
                   }}
                 >
-                  {/* Upload icon — SVG, no emoji */}
+                  {/* Upload icon - SVG, no emoji */}
                   <div style={{ marginBottom: 16, display: "flex", justifyContent: "center" }}>
                     <svg width="44" height="44" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ opacity: dragging ? 1 : 0.55, transition: "opacity 0.18s" }}>
                       <rect width="44" height="44" rx="12" fill={dragging ? "rgba(230,0,122,0.1)" : "#f1f5f9"} />
@@ -1966,12 +2762,151 @@ const AcordModal = forwardRef(function AcordModal({
           <div className="modal-step">
             <div className="stop-banner stop-hard">
               <div className="stop-icon"></div>
-              <h2 className="stop-title">Submission Blocked — Minimum Fields Missing</h2>
+              <h2 className="stop-title">Submission Blocked - Minimum Fields Missing</h2>
               <p className="stop-subtitle">ACORD 125 cannot be generated. Missing:</p>
             </div>
             <div className="stop-fields">{hardStops.map((f, i) => <div key={i} className="stop-field-item"><span className="stop-field-icon"></span><span>{f}</span></div>)}</div>
             <p className="stop-advice">Upload documents that include these fields, then try again.</p>
             <button className="btn btn-modal-primary" onClick={resetToUpload}>← Upload New Documents</button>
+          </div>
+        )}
+
+        {integrityBusy && (
+          <ProcessStageOverlay
+            stages={["Reviewing your documents...", "Re-assessing submission package..."]}
+            advanceAfter={2000}
+            tagline="Checking which documents belong together."
+          />
+        )}
+
+        {step === "integrity_review" && integrity && !integrityBusy && (
+          <div className="modal-step modal-step-wide">
+            {/* Workstream 6 9.1 - next-step guidance for the integrity review screen. */}
+            <div style={{ marginBottom: 14 }}>
+              <NextStepBanner text="Ready to Review Documents" />
+            </div>
+            {/* ── Banner - light magenta to match the homepage hero ── */}
+            <div style={{
+              background: "rgba(230,27,132,0.07)",
+              border: "1.5px solid rgba(230,27,132,0.25)",
+              borderRadius: 12,
+              padding: "18px 22px",
+              marginBottom: 20,
+            }}>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#9d0f5a" }}>
+                Submission Integrity Review Needed
+              </h2>
+              <div style={{ margin: "8px 0 0", fontWeight: 700, fontSize: 13.5, color: "#9d0f5a" }}>
+                Submission integrity: {(integrity.status || "low").toUpperCase()} - Possible multiple submissions
+              </div>
+              <p style={{ margin: "6px 0 0", fontSize: 13.5, color: "#b01868", lineHeight: 1.55 }}>
+                These documents may belong to different insureds. You can continue, or separate them into individual submissions.
+              </p>
+            </div>
+
+            {integrity.detected_entities?.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontWeight: 600, color: "#1e293b", marginBottom: 6, fontSize: 13 }}>Detected entities</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {integrity.detected_entities.map((e, i) => (
+                    <span key={i} style={{ background: "rgba(230,27,132,0.08)", color: "#9d0f5a", border: "1px solid rgba(230,27,132,0.22)", borderRadius: 999, padding: "4px 14px", fontSize: 13, fontWeight: 600 }}>{e}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {integrity.reasons?.length > 0 && (
+              <div style={{ marginBottom: 16, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "12px 16px" }}>
+                <div style={{ fontWeight: 600, color: "#334155", marginBottom: 6, fontSize: 13 }}>Why this was flagged</div>
+                {integrity.reasons.map((r, i) => (
+                  <div key={i} style={{ color: "#475569", fontSize: 13, padding: "2px 0" }}>• {r}</div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontWeight: 600, color: "#1e293b", marginBottom: 10, fontSize: 13 }}>
+                Uploaded documents - check any that don't belong, then remove them
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {(integrity.documents || []).map((d) => {
+                  const checked = removeDocIds.has(d.doc_id);
+                  return (
+                    <label key={d.doc_id} style={{
+                      display: "flex", alignItems: "center", gap: 12,
+                      background: checked ? "rgba(230,27,132,0.07)" : "#fff",
+                      border: `1.5px solid ${checked ? "rgba(230,27,132,0.35)" : "#e2e8f0"}`,
+                      borderRadius: 9, padding: "10px 14px", cursor: "pointer",
+                      transition: "background 0.15s, border-color 0.15s",
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={integrityBusy}
+                        onChange={() => {
+                          setRemoveDocIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(d.doc_id)) next.delete(d.doc_id); else next.add(d.doc_id);
+                            return next;
+                          });
+                        }}
+                      />
+                      <span style={{ background: "#eef2ff", color: "#4338ca", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 600, textTransform: "uppercase", flexShrink: 0 }}>
+                        {String(d.doc_type || "unknown").replace(/_/g, " ")}
+                      </span>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: "block", fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.filename}</span>
+                        <span style={{ display: "block", fontSize: 12, color: "#64748b" }}>Insured: {d.applicant}{d.fein ? ` · FEIN ••${d.fein}` : ""}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── Actions ── all buttons equal width, single row (no wrap) ── */}
+            <div style={{ display: "flex", flexWrap: "nowrap", gap: 10, marginTop: 24, alignItems: "stretch" }}>
+              <button
+                className={`btn ${removeDocIds.size > 0 ? "btn-modal-primary" : "btn-modal-secondary"}`}
+                disabled={integrityBusy || removeDocIds.size === 0}
+                onClick={() => handleResolveIntegrity("remove_documents")}
+                style={{ flex: "1 1 0", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+              >
+                {`Remove selected${removeDocIds.size ? ` (${removeDocIds.size})` : ""}`}
+              </button>
+              <button
+                className="btn btn-modal-primary"
+                disabled={integrityBusy}
+                onClick={() => handleResolveIntegrity("continue_anyway")}
+                style={{ flex: "1 1 0", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+              >
+                Continue anyway
+              </button>
+              {(integrity?.detected_entities?.length || 0) > 1 && (
+                <button
+                  className="btn btn-modal-primary"
+                  disabled={integrityBusy}
+                  onClick={() => handleResolveIntegrity("create_separate_submissions")}
+                  title="Split these documents into one submission per insured"
+                  style={{ flex: "1 1 0", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                >
+                  Create separate submissions
+                </button>
+              )}
+              <button
+                className="btn btn-modal-primary"
+                disabled={integrityBusy}
+                onClick={resetToUpload}
+                style={{ flex: "1 1 0", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+              >
+                Upload new documents
+              </button>
+            </div>
+
+            <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 14, lineHeight: 1.5 }}>
+              "Continue anyway" records your acknowledgment and proceeds with all documents as a single submission.
+              {(integrity?.detected_entities?.length || 0) > 1 && " “Create separate submissions” splits the documents into one submission per insured and continues with the first."}
+            </p>
           </div>
         )}
 
@@ -1981,17 +2916,197 @@ const AcordModal = forwardRef(function AcordModal({
               <h2 className="step-title" style={{ color: "#1e293b" }}>Select Forms to Generate</h2>
               <p className="step-subtitle">Select the forms you need, then generate all at once.</p>
             </div>
+            {/* Workstream 6 §9.1 - "what to do next" guidance. Never says "Ready"
+                while hard stops remain (acceptance criteria). */}
+            <div style={{ marginBottom: 14 }}>
+              {(() => {
+                // Reflects the live hard-stop + warning counts (they update as the
+                // user reclassifies/excludes docs). Only "Ready" once both are zero.
+                const h = hardStops.length, w = softStops.length;
+                let text;
+                if (h > 0 && w > 0) text = `Review ${h} hard stop${h !== 1 ? "s" : ""} and ${w} warning${w !== 1 ? "s" : ""} below before generating forms`;
+                else if (h > 0)     text = `Review ${h} hard stop${h !== 1 ? "s" : ""} below before generating forms`;
+                else if (w > 0)     text = `Review ${w} warning${w !== 1 ? "s" : ""} below before generating forms`;
+                else                text = "Ready to Generate Forms";
+                return <NextStepBanner text={text} />;
+              })()}
+            </div>
+            {/* Submission Integrity status (Beta Report §4.1): advisory banner for
+                all statuses (HIGH / MEDIUM / LOW). LOW/MEDIUM expose an on-demand
+                "Review / separate documents" action; nothing is force-paused. */}
+            {renderIntegrityStatus()}
             <div className="doc-summary">
               <div className="doc-summary-title">DOCUMENTS PROCESSED</div>
-              <div className="doc-chips">
-                {docSummary.map((d, i) => (
-                  <div key={i} className="doc-chip">
-                    <span className="doc-type-badge">{d.doc_type.replace(/_/g, " ")}</span>
-                    <span className="doc-filename">{d.filename}</span>
-                  </div>
-                ))}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {docSummary.map((d, i) => {
+                  const docType = d.doc_type || "unknown";
+                  const label = d.doc_type_label || docType.replace(/_/g, " ");
+                  const conf = d.doc_type_confidence || "";
+                  const isUnknown = docType === "unknown";
+                  const needsReview = isUnknown || conf === "low" || d.doc_type_source === "filename";
+                  const excluded = !!d.excluded;
+                  const supportingOnly = !!d.supporting_only;
+                  const busy = reclassDocId && reclassDocId === d.doc_id;
+                  const reviewBusy = reviewLoadingId === d.doc_id;
+                  const confColor = conf === "high" ? "#16a34a" : conf === "medium" ? "#d97706" : "#dc2626";
+                  return (
+                    <div key={d.doc_id || i} style={{
+                      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                      padding: "8px 12px", borderRadius: 8,
+                      border: `1px solid ${needsReview ? "rgba(230,27,132,0.35)" : "rgba(230,27,132,0.15)"}`,
+                      background: excluded ? "#f8fafc" : (needsReview ? "rgba(230,27,132,0.05)" : "#fff"),
+                      opacity: excluded ? 0.6 : 1,
+                    }}>
+                      <span className="doc-type-badge" style={{ textTransform: "capitalize" }}>{label}</span>
+                      {d.doc_type_overridden
+                        ? <span title="You set this type" style={{ fontSize: 10, color: "#2563eb", fontWeight: 600 }}>you set this</span>
+                        : conf && <span title={`Classification confidence: ${conf}`} style={{ fontSize: 10, color: confColor, fontWeight: 600, textTransform: "uppercase" }}>{conf}</span>}
+                      <span className="doc-filename" style={{ flex: 1, minWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.filename}</span>
+                      {excluded && <span style={{ fontSize: 10, color: "#64748b", fontStyle: "italic" }}>excluded from scoring</span>}
+                      {supportingOnly && !excluded && <span title="Facts contribute, but this document is never treated as the primary source" style={{ fontSize: 10, color: "#64748b", fontStyle: "italic" }}>supporting only</span>}
+
+                      {/* Manual correction (Beta Report §4.2): change type, exclude/include */}
+                      {availableDocTypes.length > 0 && !excluded && (
+                        <select
+                          value={docType}
+                          disabled={busy}
+                          onChange={(e) => { if (e.target.value && e.target.value !== docType) handleReclassify(d.doc_id, "set_type", e.target.value, "type"); }}
+                          title="Correct the document type"
+                          style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", cursor: busy ? "wait" : "pointer" }}
+                        >
+                          {availableDocTypes.map((t) => (
+                            <option key={t.value} value={t.value}>{t.label}</option>
+                          ))}
+                        </select>
+                      )}
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => handleReclassify(d.doc_id, excluded ? "include" : "exclude", null, "toggle")}
+                        title={excluded ? "Include this document in scoring" : "Exclude this document from scoring"}
+                        style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#475569", cursor: busy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, minWidth: 58, justifyContent: "center" }}
+                      >
+                        {busy && reclassBusyBtn === "toggle"
+                          ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />{excluded ? "Include" : "Exclude"}</>
+                          : (excluded ? "Include" : "Exclude")}
+                      </button>
+                      {/* "Include as supporting document only" (Beta Report §4.2 item #6) */}
+                      {!excluded && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => handleReclassify(d.doc_id, supportingOnly ? "include" : "supporting_only", null, "supporting")}
+                          title={supportingOnly ? "Use this document as a normal source again" : "Include facts but never treat as the primary source"}
+                          style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: `1px solid ${supportingOnly ? "#E61B84" : "#cbd5e1"}`, background: supportingOnly ? "rgba(230,27,132,0.06)" : "#fff", color: supportingOnly ? "#9d0f5a" : "#475569", cursor: busy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "center" }}
+                        >
+                          {busy && reclassBusyBtn === "supporting"
+                            ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />{supportingOnly ? "Supporting only ✓" : "Supporting only"}</>
+                            : (supportingOnly ? "Supporting only ✓" : "Supporting only")}
+                        </button>
+                      )}
+                      {/* "Review extracted data" (Beta Report §4.2 item #6) */}
+                      <button
+                        type="button"
+                        disabled={reviewBusy}
+                        onClick={() => handleReviewData(d.doc_id)}
+                        title="See the data Primble extracted from this document"
+                        style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#475569", cursor: reviewBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "center" }}
+                      >
+                        {reviewBusy
+                          ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Review data</>
+                          : "Review data"}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
+              {docSummary.some(d => (d.doc_type || "unknown") === "unknown" || d.doc_type_confidence === "low") && (
+                <div style={{ fontSize: 11, color: "#92400e", marginTop: 6 }}>
+                  Some documents need review. Set the correct type so scoring and form recommendations use them - or exclude documents that don't belong.
+                </div>
+              )}
             </div>
+
+            {/* Cross-document value reconciliation picker (Beta Report §4.3 + §5).
+                Surfaces every materially-different value between documents — Gross
+                Sales plus identity/policy fields (name, FEIN, dates, entity type,
+                address, carrier) — with each document's value as a choice plus a
+                custom-value option. Consistent fields are silent (no action). */}
+            {underwriting?.fields?.some(f => f.status === "conflict" || f.status === "confirmed") && (
+              <div className="doc-summary" style={{ marginTop: 12 }}>
+                <div className="doc-summary-title">DATA CONSISTENCY</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {underwriting.fields.filter(f => f.status === "conflict" || f.status === "confirmed").map((f) => {
+                    const isConflict = f.status === "conflict";
+                    const isConfirmed = f.status === "confirmed";
+                    const busy = underwritingBusy === f.fact_key;
+                    const picked = underwritingPicks[f.fact_key] ?? "";
+                    const formsLabel = (f.forms || []).map(x => x.replace("ACORD_", "ACORD ")).join(", ");
+                    return (
+                      <div key={f.fact_key} style={{
+                        padding: "10px 12px", borderRadius: 8,
+                        border: "1px solid rgba(230,27,132,0.2)",
+                        background: "rgba(230,27,132,0.04)",
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
+                          {isConflict && <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", textTransform: "uppercase" }}>Values differ - confirm</span>}
+                          {isConfirmed && <span style={{ fontSize: 11, fontWeight: 600, color: "#16a34a" }}>Confirmed: {f.confirmed_value}{formsLabel ? ` - applied to ${formsLabel}` : ""}</span>}
+                          {f.status === "consistent" && <span style={{ fontSize: 11, color: "#16a34a" }}>Consistent: {f.values?.[0]?.display}</span>}
+                        </div>
+
+                        {/* Source attribution: which document each value came from (§4.3 item 4) */}
+                        {(isConflict || f.status === "consistent") && (
+                          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                            {f.values.map((v, vi) => (
+                              <div key={vi} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#475569", flexWrap: "wrap" }}>
+                                {isConflict && (
+                                  <input
+                                    type="radio"
+                                    name={`uw-${f.fact_key}`}
+                                    checked={picked === v.display}
+                                    onChange={() => setUnderwritingPicks(p => ({ ...p, [f.fact_key]: v.display }))}
+                                    disabled={busy}
+                                  />
+                                )}
+                                <span style={{ fontWeight: 600, color: "#0f172a" }}>{v.display}</span>
+                                <span style={{ color: "#94a3b8" }}>from</span>
+                                <span style={{ color: "#334155" }}>
+                                  {v.sources.map(s => s.filename).join(", ")}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Confirm control (§4.3 item 5) */}
+                        {isConflict && (
+                          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <input
+                              type="text"
+                              value={picked}
+                              disabled={busy}
+                              placeholder="…or type a value"
+                              onChange={(e) => setUnderwritingPicks(p => ({ ...p, [f.fact_key]: e.target.value }))}
+                              style={{ fontSize: 12, padding: "4px 8px", borderRadius: 6, border: "1px solid #cbd5e1", width: 160 }}
+                            />
+                            <button
+                              type="button"
+                              disabled={busy || !picked}
+                              onClick={() => handleConfirmUnderwriting(f.fact_key, picked)}
+                              style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 6, border: "none", background: picked && !busy ? "#2563eb" : "#cbd5e1", color: "#fff", cursor: picked && !busy ? "pointer" : "not-allowed" }}
+                            >
+                              {busy ? "Applying…" : "Confirm & apply to forms"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {(hardStops.length > 0 || softStops.length > 0) && (
               <div className="stops-row">
                 {hardStops.length > 0 && (
@@ -2009,16 +3124,76 @@ const AcordModal = forwardRef(function AcordModal({
               </div>
             )}
             {canProceedWithWarning && warningStops.length > 0 && (
-              <div className="stops-banner stops-warning" style={{ margin: "8px 0", padding: "12px 16px", background: "#fffbeb", border: "1px solid #f59e0b", borderRadius: 8 }}>
-                <div className="stops-title" style={{ color: "#b45309", fontWeight: 600, marginBottom: 6 }}>
-                  Incomplete Submission — Review Before Generating
+              <div className="stops-banner stops-warning" style={{ margin: "8px 0", padding: "12px 16px", background: "rgba(230,27,132,0.07)", border: "1.5px solid rgba(230,27,132,0.25)", borderRadius: 8 }}>
+                <div className="stops-title" style={{ color: "#9d0f5a", fontWeight: 600, marginBottom: 6 }}>
+                  Incomplete Submission - Review Before Generating
                 </div>
                 {warningStops.map((s, i) => (
-                  <div key={i} className="stop-item" style={{ color: "#92400e", fontSize: 13, marginBottom: 2 }}>- {s}</div>
+                  <div key={i} className="stop-item" style={{ color: "#b01868", fontSize: 13, marginBottom: 2 }}>- {s}</div>
                 ))}
-                <div style={{ marginTop: 10, fontSize: 13, color: "#78350f" }}>
+                <div style={{ marginTop: 10, fontSize: 13, color: "#9d0f5a" }}>
                   This submission is missing information typically required for property coverage. Forms can still be generated, but the underwriter may request additional data.
                 </div>
+              </div>
+            )}
+            {/* DOUBTS-Workstream4 (Brent): producer-answerable "Why are you
+                marketing this account?" - answering re-runs recommendations so
+                ACORD 101 escalates to its correct tier; the answer also flows
+                into later SQS scoring. Optional / non-blocking. Same magenta
+                surface as the panels above; fully fluid for mobile/iOS. */}
+            {recommendations.length > 0 && (
+              <div style={{ margin: "8px 0", padding: "12px 16px", background: "rgba(230,27,132,0.07)", border: "1.5px solid rgba(230,27,132,0.25)", borderRadius: 8 }}>
+                <div style={{ color: "#9d0f5a", fontWeight: 600, fontSize: 13.5, marginBottom: 10 }}>
+                  Why are you marketing this account? (optional)
+                </div>
+                <select
+                  value={marketingReason}
+                  disabled={marketingBusy}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setMarketingReason(v);
+                    setMarketingOther("");
+                    if (v) handleMarketingReason(v);
+                  }}
+                  style={{ width: "100%", maxWidth: 420, boxSizing: "border-box", padding: "9px 12px", fontSize: 13, color: "#1e293b", background: "#fff", border: "1px solid rgba(230,27,132,0.3)", borderRadius: 8, cursor: marketingBusy ? "default" : "pointer" }}
+                >
+                  <option value="">Select a reason...</option>
+                  {MARKETING_REASON_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+                {MARKETING_ADVERSE_REASONS.has(marketingReason) && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#9d0f5a", lineHeight: 1.45 }}>
+                    Adds ACORD 101 (Additional Remarks) to your recommended forms for an underwriter narrative.
+                  </div>
+                )}
+                {marketingReason === "Other" && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, maxWidth: 420 }}>
+                    <input
+                      type="text"
+                      value={marketingOther}
+                      disabled={marketingBusy}
+                      onChange={(e) => setMarketingOther(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && marketingOther.trim()) {
+                          e.preventDefault();
+                          handleMarketingReason(`Other: ${marketingOther.trim()}`);
+                        }
+                      }}
+                      placeholder="Please explain..."
+                      style={{ flex: "1 1 200px", minWidth: 0, boxSizing: "border-box", padding: "7px 11px", fontSize: 12.5, color: "#1e293b", background: "#fff", border: "1px solid rgba(230,27,132,0.3)", borderRadius: 7, outline: "none" }}
+                    />
+                    <button
+                      type="button"
+                      disabled={marketingBusy || !marketingOther.trim()}
+                      onClick={() => handleMarketingReason(`Other: ${marketingOther.trim()}`)}
+                      style={{ flexShrink: 0, padding: "7px 16px", fontSize: 12.5, fontWeight: 600, color: "#fff", border: "none", borderRadius: 7, background: (marketingBusy || !marketingOther.trim()) ? "#e9a8cb" : "#E61B84", cursor: (marketingBusy || !marketingOther.trim()) ? "default" : "pointer" }}
+                    >
+                      Save
+                    </button>
+                  </div>
+                )}
+                {marketingBusy && (
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#9d0f5a" }}>Updating recommendations...</div>
+                )}
               </div>
             )}
             {tier2Score !== null && (
@@ -2028,31 +3203,90 @@ const AcordModal = forwardRef(function AcordModal({
                 {tier2Missing.length > 0 && <div className="tier2-missing">Missing: {tier2Missing.join(" · ")}</div>}
               </div>
             )}
-            <div className="form-selection-list">
-              <div className="form-selection-header"><span className="form-selection-title">Recommended Forms</span><span className="form-selection-hint">{checkedFormIds.size} selected</span></div>
-              {recommendations.map((rec, i) => {
-                const pct = Math.round((rec.confidence || 0) * 100);
-                const tooltipText = rec.fields_total > 0
-                  ? `${rec.fields_filled} of ${rec.fields_total} required fields found in your document`
-                  : rec.reason || "";
+            <div className="form-selection-list" style={{ opacity: marketingBusy ? 0.55 : 1, transition: "opacity 0.18s ease" }}>
+              <div className="form-selection-header">
+                <span style={{ display: "inline-flex", alignItems: "center" }}>
+                  <span className="form-selection-title">Recommended Forms</span>
+                  {marketingBusy && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, marginLeft: 8, fontSize: 11, fontWeight: 600, color: "#9d0f5a" }}>
+                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}>
+                        <circle cx="8" cy="8" r="6" stroke="rgba(230,27,132,0.25)" strokeWidth="2.5" />
+                        <path d="M8 2a6 6 0 0 1 6 6" stroke="#E61B84" strokeWidth="2.5" strokeLinecap="round" />
+                      </svg>
+                      Updating...
+                    </span>
+                  )}
+                </span>
+                <span className="form-selection-hint">{checkedFormIds.size} selected</span>
+              </div>
+              {/* Account context (Beta Report §7.2 item 5): business class /
+                  account type / coverage goals that the list is filtered by. */}
+              {accountProfile && (accountProfile.business_class_label || accountProfile.coverage_goals?.length > 0) && (
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, margin: "0 2px 10px", fontSize: 11, color: "#64748b" }}>
+                  <span style={{ fontWeight: 600, color: "#475569" }}>Tailored for:</span>
+                  {accountProfile.business_class_label && (
+                    <span style={{ padding: "2px 9px", borderRadius: 20, background: "rgba(230,27,132,0.07)", color: "#be185d", fontWeight: 600 }}>{accountProfile.business_class_label}</span>
+                  )}
+                  {accountProfile.account_type_label && (
+                    <span style={{ padding: "2px 9px", borderRadius: 20, background: "#f1f5f9", color: "#475569", fontWeight: 600 }}>{accountProfile.account_type_label}</span>
+                  )}
+                  {accountProfile.transaction_type && (
+                    <span style={{ padding: "2px 9px", borderRadius: 20, background: "#f1f5f9", color: "#475569", fontWeight: 600 }}>{accountProfile.transaction_type === "renewal" ? "Renewal" : "New Business"}</span>
+                  )}
+                  {accountProfile.coverage_goals?.length > 0 && (
+                    <span>Lines: {accountProfile.coverage_goals.join(" · ")}</span>
+                  )}
+                </div>
+              )}
+              {groupedRecs.map((group) => {
+                const meta = TIER_META[group.tier] || TIER_META.recommended;
                 return (
-                  <div key={rec.form_id} className={`form-select-row ${checkedFormIds.has(rec.form_id) ? "form-row-checked" : ""}`}>
-                    <label className="form-select-checkbox-label">
-                      <input type="checkbox" checked={checkedFormIds.has(rec.form_id)} onChange={() => toggleForm(rec.form_id)} className="form-select-checkbox" />
-                      <div className="form-select-info">
-                        <div className="form-select-name"><span className="rec-rank">#{i + 1}</span>{rec.form_name}</div>
-                        <div className="form-select-meta">
-                          <span
-                            className="confidence-badge"
-                            title={tooltipText}
-                            style={{ cursor: "help" }}
-                          >
-                            Match {pct}%
-                          </span>
-                          <span className="form-select-reason">{rec.reason || rec.trigger_reason}</span>
+                  <div key={group.tier} className="form-tier-group" style={{ marginTop: 12 }}>
+                    {/* Tier header (Required / Recommended / Optional / Needs Confirmation) */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "0 2px 7px", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: meta.color, background: meta.bg, padding: "2px 10px", borderRadius: 20 }}>{meta.label}</span>
+                      <span style={{ fontSize: 11, color: "#94a3b8" }}>{group.items.length} form{group.items.length !== 1 ? "s" : ""} · {meta.hint}</span>
+                    </div>
+                    {group.items.map((rec) => {
+                      const pct = Math.round((rec.confidence || 0) * 100);
+                      return (
+                        <div key={rec.form_id} className={`form-select-row ${checkedFormIds.has(rec.form_id) ? "form-row-checked" : ""}`}>
+                          <label className="form-select-checkbox-label">
+                            <input type="checkbox" checked={checkedFormIds.has(rec.form_id)} onChange={() => toggleForm(rec.form_id)} className="form-select-checkbox" />
+                            <div className="form-select-info" style={rec.profile_relevant === false ? { opacity: 0.82 } : undefined}>
+                              <div className="form-select-name">{rec.form_name}</div>
+                              <div className="form-select-meta">
+                                <span
+                                  className="confidence-badge"
+                                  title={rec.fields_total > 0
+                                    ? `Match ${pct}% · ${rec.fields_filled} of ${rec.fields_total} required fields found in your documents`
+                                    : `Match score: how strongly your documents indicate this form is relevant`}
+                                  style={{ cursor: "help" }}
+                                >
+                                  Match {pct}%
+                                </span>
+                                <span className="form-select-reason">{rec.reason_label || rec.reason || rec.trigger_reason}</span>
+                                {rec.relevance_label && (
+                                  <span style={{ fontSize: 11, fontWeight: 600, fontStyle: "normal", color: "#be185d", background: "rgba(230,27,132,0.07)", padding: "1px 8px", borderRadius: 20 }}>
+                                    {rec.relevance_label}
+                                  </span>
+                                )}
+                              </div>
+                              {rec.is_source_document && (
+                                <div style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}>
+                                  Source document detected - generate a clean copy only if you need one.
+                                </div>
+                              )}
+                              {rec.profile_relevant === false && rec.relevance_reason && (
+                                <div style={{ fontSize: 11, color: "#64748b", marginTop: 3 }}>
+                                  {rec.relevance_reason}
+                                </div>
+                              )}
+                            </div>
+                          </label>
                         </div>
-                      </div>
-                    </label>
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -2119,6 +3353,12 @@ const AcordModal = forwardRef(function AcordModal({
                 <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} title="Hide panel">✕</button>
               </div>
               <div style={{ padding: "14px 14px 12px" }}>
+                {/* Workstream 6 9.1 - next-step guidance, driven by the live package
+                    SQS: flips to "Ready to Send Submission" at 90+, and re-renders
+                    whenever edits or questionnaire answers change the package score. */}
+                <div style={{ marginBottom: 12 }}>
+                  <NextStepBanner text={(packageSqs?.package_sqs_score ?? 0) >= 90 ? "Ready to Send Submission" : "Ready to Download Forms"} />
+                </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Generated Forms</span>
                   <span style={{ fontSize: 11, fontWeight: 700, color: "#E61B84", background: "rgba(230,0,122,0.08)", padding: "1px 7px", borderRadius: 20 }}>{formIdList.length}</span>
@@ -2135,7 +3375,7 @@ const AcordModal = forwardRef(function AcordModal({
                         <div style={{ fontSize: 12, fontWeight: 600, color: isActive ? "#E61B84" : "#1e293b" }}>
                           {fd?.form_name || fid}
                           {signedForms.has(fid) && <span style={{ color: "#10b981", fontSize: 10 }}> (signed)</span>}
-                          {pdfLoading[fid] ? <span style={{ color: "#f59e0b", fontSize: 10 }}> (loading)</span> : <span style={{ color: "#10b981", fontSize: 10 }}> (ready)</span>}
+                          {pdfLoading[fid] && <span style={{ color: "#f59e0b", fontSize: 10 }}> (loading)</span>}
                         </div>
                         {sq && <div style={{ display: "flex", gap: 6, marginTop: 2 }}><span style={{ fontSize: 10, fontWeight: 700, color: gradeColor(sq.grade) }}>{sq.sqs_score} {sq.grade}</span><span style={{ fontSize: 10, color: "#94a3b8" }}>{sq.tier}</span></div>}
                       </div>
@@ -2167,6 +3407,15 @@ const AcordModal = forwardRef(function AcordModal({
                       </div>
                     </div>
 
+                    {/* ── Match Score (§6.1 AC#1): raw field coverage, distinct from SQS ── */}
+                    {activeSqs.match_score != null && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, padding: "4px 8px", background: "#f8fafc", borderRadius: 5, border: "1px solid #e2e8f0" }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>Match Score</span>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: activeSqs.match_score >= 70 ? "#10b981" : activeSqs.match_score >= 40 ? "#f59e0b" : "#ef4444" }}>{activeSqs.match_score}%</span>
+                        <span style={{ fontSize: 9, color: "#94a3b8" }}>· raw field coverage from uploaded docs</span>
+                      </div>
+                    )}
+
                     {/* ── Confidence fill rate ── */}
                     {activeSqs.confidence_fill_rate != null && (
                       <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "7px 10px", marginBottom: 10, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
@@ -2192,17 +3441,35 @@ const AcordModal = forwardRef(function AcordModal({
                       // backend delta computation); fall back to first entry.
                       const baseline = packageSqs.sqs_history.find(h => h?.stage === "initial_extract")
                         || packageSqs.sqs_history[0];
+                      // §6.2: detect an arq_remediated stage in history so we can
+                      // show fill rate before/after for form completion tracking.
+                      const arqEntry = packageSqs.sqs_history.find(h => h?.stage === "arq_remediated");
+                      const fillBefore = baseline?.avg_fill_rate;
+                      const fillAfter  = arqEntry?.avg_fill_rate;
+                      const fillDelta  = (fillBefore != null && fillAfter != null) ? fillAfter - fillBefore : null;
                       return (
-                        <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "6px 10px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                          <span style={{ fontSize: 14 }}></span>
-                          <div>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: packageSqs.delta_this_session >= 0 ? "#059669" : "#dc2626" }}>
-                              {packageSqs.delta_this_session >= 0 ? "+" : ""}{packageSqs.delta_this_session} pts this session
-                            </span>
-                            <div style={{ fontSize: 10, color: "#94a3b8" }}>
-                              Started at {baseline?.score ?? "—"} → now {packageSqs.package_sqs_score}
+                        <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "6px 10px", marginBottom: 10, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 14 }}></span>
+                            <div>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: packageSqs.delta_this_session >= 0 ? "#059669" : "#dc2626" }}>
+                                {packageSqs.delta_this_session >= 0 ? "+" : ""}{packageSqs.delta_this_session} pts this session
+                              </span>
+                              <div style={{ fontSize: 10, color: "#94a3b8" }}>
+                                Started at {baseline?.score ?? "-"} → now {packageSqs.package_sqs_score}
+                              </div>
                             </div>
                           </div>
+                          {/* §6.2 / Req 4: form completion delta after ARQ remediation */}
+                          {fillDelta != null && (
+                            <div style={{ marginTop: 5, paddingTop: 5, borderTop: "1px solid #f9a8d4", display: "flex", alignItems: "center", gap: 4 }}>
+                              <span style={{ width: 9, height: 9, background: "rgb(187,247,208)", border: "1px solid #86efac", borderRadius: 2, display: "inline-block", flexShrink: 0 }} />
+                              <span style={{ fontSize: 10, color: "#047857", fontWeight: 600 }}>
+                                Quality Fill Rate: {fillBefore}% → {fillAfter}%
+                                {fillDelta > 0 ? ` (+${fillDelta}% after client answers)` : " (unchanged after client answers)"}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       );
                     })()}
@@ -2216,7 +3483,7 @@ const AcordModal = forwardRef(function AcordModal({
                           priority_review: "Priority Review",
                           standard_review: "Standard Review",
                           full_review: "Full Package Review",
-                          hold: "Hold — Remediation Required",
+                          hold: "Hold - Remediation Required",
                         }[activeSqs.routing_decision] || activeSqs.routing_decision}
                       </div>
                     )}
@@ -2227,23 +3494,30 @@ const AcordModal = forwardRef(function AcordModal({
                       const docSourced = new Set(["property_integrity", "loss_history_alignment", "narrative_quality"]);
                       return (
                         <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
-                          {Object.entries(activeSqs.breakdown || {}).map(([key, val]) => (
+                          {Object.entries(activeSqs.breakdown || {}).map(([key, val]) => {
+                            // umbrella_limit_adequacy is null when no umbrella is in the
+                            // submission (§6.5 - N/A, not a perfect score).
+                            const isNA = val === null || val === undefined;
+                            return (
                             <div key={key}>
                               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
                                 <span style={{ color: "#000" }}>
                                   {SQS_LABELS[key] || key}
                                   <span style={{ color: "#94a3b8" }}> ({SQS_WEIGHTS[key] || 0}%)</span>
                                   {docSourced.has(key) && (
-                                    <span title="Sourced from uploaded documents — editing form fields won't change this" style={{ marginLeft: 4, fontSize: 9, color: "#94a3b8", cursor: "help" }}>(doc)</span>
+                                    <span title="Sourced from uploaded documents - editing form fields won't change this" style={{ marginLeft: 4, fontSize: 9, color: "#94a3b8", cursor: "help" }}>(doc)</span>
                                   )}
                                 </span>
-                                <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>
+                                {isNA
+                                  ? <span style={{ fontWeight: 700, color: "#94a3b8", fontSize: 10 }}>N/A</span>
+                                  : <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>}
                               </div>
                               <div style={{ height: 5, background: "#f1f5f9", borderRadius: 3, overflow: "hidden" }}>
-                                <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 3, transition: "width 0.6s ease" }} />
+                                {!isNA && <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 3, transition: "width 0.6s ease" }} />}
                               </div>
                             </div>
-                          ))}
+                            );
+                          })}
                           <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 2 }}>(doc) = sourced from uploaded docs, not form edits</div>
                         </div>
                       );
@@ -2262,19 +3536,135 @@ const AcordModal = forwardRef(function AcordModal({
                             <span style={{ fontSize: 9, color: "#94a3b8" }}>/100</span>
                           </div>
                         </div>
+                        {/* §6.1: distinguish SQS from per-form Match % */}
+                        <div style={{ fontSize: 9, color: "#94a3b8", marginTop: -3, marginBottom: 7, lineHeight: 1.45 }}>
+                          SQS = how complete &amp; underwriting-ready the submission is. Match % (shown on each form) = how strongly the documents suggest a form fits.
+                        </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                          {Object.entries(packageSqs.pillars || {}).map(([key, val]) => (
+                          {Object.entries(packageSqs.pillars || {}).map(([key, val]) => {
+                            // umbrella_limit_adequacy is null when not applicable (§6.5).
+                            const isNA = val === null || val === undefined;
+                            const cats = packageSqs.category_breakdown?.[key];
+                            const hasCats = cats && Object.keys(cats).length > 0;
+                            const expanded = expandedPillars.has(key);
+                            const toggle = () => setExpandedPillars(prev => {
+                              const n = new Set(prev);
+                              n.has(key) ? n.delete(key) : n.add(key);
+                              return n;
+                            });
+                            return (
                             <div key={key}>
-                              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginBottom: 2 }}>
-                                <span style={{ color: "#000" }}>{PACKAGE_PILLAR_LABELS[key] || key}</span>
-                                <span style={{ fontWeight: 700, color: barColor(val) }}>{val}</span>
+                              <div onClick={hasCats ? toggle : undefined} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 10, marginBottom: 2, cursor: hasCats ? "pointer" : "default" }}>
+                                <span style={{ color: "#000" }}>
+                                  {hasCats && <span style={{ display: "inline-block", width: 9, fontSize: 7, color: "#94a3b8", transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>▶</span>}
+                                  {PACKAGE_PILLAR_LABELS[key] || key}
+                                </span>
+                                {isNA
+                                  ? <span title="No umbrella in this submission" style={{ fontWeight: 700, color: "#94a3b8", fontSize: 9 }}>N/A</span>
+                                  : <span style={{ fontWeight: 700, color: barColor(val) }}>{val}</span>}
                               </div>
                               <div style={{ height: 3, background: "#e2e8f0", borderRadius: 2, overflow: "hidden" }}>
-                                <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 2 }} />
+                                {!isNA && <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 2 }} />}
+                              </div>
+                              {expanded && hasCats && (
+                                <div style={{ margin: "4px 0 6px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
+                                  {Object.entries(cats).map(([ck, cv]) => {
+                                    const cs = cv?.score;
+                                    const csNA = cs === null || cs === undefined;
+                                    const stColor = CAT_STATUS_COLOR[cv?.status] || "#94a3b8";
+                                    return (
+                                      <div key={ck} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 9.5, gap: 8 }}>
+                                        <span style={{ color: "#64748b" }}>{cv?.label || ck}</span>
+                                        {csNA
+                                          ? <span style={{ color: stColor, fontWeight: 600, textTransform: "capitalize", whiteSpace: "nowrap" }}>{(cv?.status || "-").replace(/_/g, " ")}</span>
+                                          : <span style={{ color: barColor(cs), fontWeight: 700, whiteSpace: "nowrap" }}>{cs}%</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* §6.1 item 4 - positive scoring signals credited */}
+                        {packageSqs.positive_signals?.length > 0 && (
+                          <div style={{ marginTop: 9 }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Positive signals</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                              {packageSqs.positive_signals.map((s, i) => (
+                                <span key={i} style={{ fontSize: 9.5, fontWeight: 600, color: "#047857", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 10, padding: "1px 7px" }}>{s.label || s.key}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* §6.3 - narrative quality broken down by component (present vs missing) */}
+                        {packageSqs.narrative_components && Object.keys(packageSqs.narrative_components).length > 0 && (
+                          <div style={{ marginTop: 9 }}>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Narrative components</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                              {Object.entries(packageSqs.narrative_components).map(([ck, present]) => (
+                                <span key={ck} style={{
+                                  fontSize: 9, fontWeight: 600, borderRadius: 10, padding: "1px 7px",
+                                  color: present ? "#047857" : "#94a3b8",
+                                  background: present ? "#ecfdf5" : "#f8fafc",
+                                  border: `1px solid ${present ? "#a7f3d0" : "#e2e8f0"}`,
+                                }}>
+                                  {NARRATIVE_COMPONENT_LABELS[ck] || ck}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* §6.5 - umbrella state, follow-form, underlying-limit warnings */}
+                        {packageSqs.umbrella_state && packageSqs.umbrella_state !== "not_applicable" && (
+                          <div style={{ marginTop: 9 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>Umbrella</span>
+                              <span style={{ fontSize: 9.5, fontWeight: 600, color: "#334155", textAlign: "right" }}>{UMBRELLA_STATE_LABEL[packageSqs.umbrella_state] || packageSqs.umbrella_state}</span>
+                            </div>
+                            {packageSqs.follow_form?.message && (
+                              <div style={{ fontSize: 9.5, color: "#64748b", marginTop: 3, lineHeight: 1.4 }}>{packageSqs.follow_form.message}</div>
+                            )}
+                            {packageSqs.umbrella_warnings?.map((w, i) => (
+                              <div key={i} style={{ fontSize: 9.5, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 5, padding: "2px 6px", marginTop: 3, lineHeight: 1.4 }}>{w}</div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* §6.4 - loss-history evidence state */}
+                        {packageSqs.loss_history_state && packageSqs.loss_history_state !== "no_information" && (
+                          <div style={{ marginTop: 9 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>Loss history</span>
+                              <span style={{ fontSize: 9.5, fontWeight: 600, textAlign: "right", color: packageSqs.loss_history_state === "loss_history_conflicting" || packageSqs.loss_history_state === "loss_runs_do_not_match" ? "#dc2626" : "#334155" }}>{LOSS_HISTORY_STATE_LABEL[packageSqs.loss_history_state] || packageSqs.loss_history_state}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* §6.1 item 3 / §6.2 - evidence basis for notable facts */}
+                        {packageSqs.evidence_labels && (() => {
+                          const notable = Object.entries(packageSqs.evidence_labels).filter(([, lbl]) => EVIDENCE_LABEL_COLOR[lbl]);
+                          if (!notable.length) return null;
+                          return (
+                            <div style={{ marginTop: 9 }}>
+                              <div style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Evidence basis</div>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                {notable.map(([fk, lbl]) => {
+                                  const c = EVIDENCE_LABEL_COLOR[lbl];
+                                  return (
+                                    <span key={fk} style={{ fontSize: 9, fontWeight: 600, color: c.fg, background: c.bg, borderRadius: 10, padding: "1px 7px" }}>
+                                      {fk.replace(/_/g, " ")}: {EVIDENCE_LABEL_DISPLAY[lbl] || lbl}
+                                    </span>
+                                  );
+                                })}
                               </div>
                             </div>
-                          ))}
-                        </div>
+                          );
+                        })()}
                         {packageSqs.tier && (
                           <div style={{ marginTop: 8, padding: "3px 8px", borderRadius: 5, fontSize: 10, fontWeight: 700, textAlign: "center", background: { "Submission Ready": "#dcfce7", "Almost There": "#fef9c3", "Needs Work": "#ffedd5", "Major Gaps": "#fee2e2", "Not Ready": "#fee2e2", "Incomplete": "#f1f5f9" }[packageSqs.tier] || "#f1f5f9", color: { "Submission Ready": "#166534", "Almost There": "#854d0e", "Needs Work": "#9a3412", "Major Gaps": "#991b1b", "Not Ready": "#991b1b", "Incomplete": "#64748b" }[packageSqs.tier] || "#374151" }}>
                             {packageSqs.tier}
@@ -2296,7 +3686,7 @@ const AcordModal = forwardRef(function AcordModal({
                           if (typeof r === "string") {
                             return (
                               <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "3px 0" }}>
-                                <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>#{i + 1}</span>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>{i + 1}</span>
                                 <span style={{ flex: 1, fontSize: 11, color: "#000" }}>{r}</span>
                               </div>
                             );
@@ -2305,7 +3695,7 @@ const AcordModal = forwardRef(function AcordModal({
                           return (
                             <div key={i} style={{ padding: "4px 0", borderBottom: i < packageSqs.top_recommendations.length - 1 ? "1px solid #f9a8d4" : "none" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>#{i + 1}</span>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>{i + 1}</span>
                                 <span style={{ flex: 1, fontSize: 11, fontWeight: 700, color: "#000" }}>{pillarLabel}</span>
                                 {typeof r.score === "number" && (
                                   <span style={{ fontSize: 11, fontWeight: 700, color: barColor(r.score) }}>{r.score}%</span>
@@ -2326,7 +3716,7 @@ const AcordModal = forwardRef(function AcordModal({
                         <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>TOP DRIVERS</div>
                         {activeSqs.risk_drivers.map((d, i) => (
                           <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", borderBottom: i < activeSqs.risk_drivers.length - 1 ? "1px solid #f9a8d4" : "none" }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>#{i + 1}</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>{i + 1}</span>
                             <span style={{ flex: 1, fontSize: 11, color: "#000" }}>{d.component}</span>
                             <span style={{ fontSize: 11, fontWeight: 700, color: barColor(d.score) }}>{d.score}%</span>
                           </div>
@@ -2381,7 +3771,7 @@ const AcordModal = forwardRef(function AcordModal({
               <div style={{ height: 1, background: "#f1f5f9", margin: "0 14px" }} />
               <div style={{ padding: "12px 14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
 
-                {/* Primary CTA — Client-in-the-Loop™ */}
+                {/* Primary CTA - Client-in-the-Loop™ */}
                 <button onClick={handleOpenARQ} disabled={arqLoadingQ}
                   style={{ width: "100%", padding: "12px 16px", borderRadius: 14, border: "none", background: "linear-gradient(135deg, #E61B84 0%, #C0157A 100%)", color: "#fff", fontSize: 13, fontWeight: 700, cursor: arqLoadingQ ? "wait" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: arqLoadingQ ? 0.7 : 1, boxShadow: "0 4px 16px rgba(230,0,122,0.35), 0 1px 3px rgba(230,0,122,0.2)", letterSpacing: "0.02em", transition: "all 0.2s" }}
                   onMouseEnter={e => { if (!arqLoadingQ) { e.currentTarget.style.background = "linear-gradient(135deg, #C0157A 0%, #a30055 100%)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(230,0,122,0.45), 0 1px 3px rgba(230,0,122,0.2)"; e.currentTarget.style.transform = "translateY(-1px)"; } }}
@@ -2476,7 +3866,7 @@ const AcordModal = forwardRef(function AcordModal({
 
                         {downloadExpanded && (
                           <div style={{ background: "#fdf2f8", padding: "6px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
-                            {/* This Form — no summary */}
+                            {/* This Form - no summary */}
                             <button
                               onClick={() => handleDownloadOneNoSummary(activeFormId)}
                               disabled={!activeFormId}
@@ -2486,7 +3876,7 @@ const AcordModal = forwardRef(function AcordModal({
                               This Form
                             </button>
 
-                            {/* Entire Package — all forms + summary */}
+                            {/* Entire Package - all forms + summary */}
                             <button
                               onClick={() => handleDownloadAll()}
                               style={{ width: "100%", padding: "7px 10px", borderRadius: 7, border: "1px solid #f9a8d4", background: "#fce7f3", color: "#9d174d", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s", textAlign: "center" }}
@@ -2495,7 +3885,7 @@ const AcordModal = forwardRef(function AcordModal({
                               Entire Package
                             </button>
 
-                            {/* Submission Brief — summary only */}
+                            {/* Submission Brief - summary only */}
                             <button
                               onClick={() => handleLiteCoverSheet()}
                               disabled={liteCoverLoading}

@@ -17,7 +17,11 @@ US_STATES = {
 
 MONOPOLISTIC_WC_STATES = {"ND", "OH", "WA", "WY"}
 
-_DATE_FORMATS = ["%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y", "%m-%d-%Y", "%d/%m/%Y"]
+# Kept for _parse_date / validate_date_range which need datetime objects.
+# validate_date_format now delegates to normalization.normalize_date so this
+# list is only used internally by those two helpers.
+_DATE_FORMATS = ["%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y", "%m-%d-%Y", "%d/%m/%Y",
+                 "%Y/%m/%d", "%m-%d-%y", "%m.%d.%Y", "%m.%d.%y"]
 
 
 # ---------------------------------------------------------------------------
@@ -77,15 +81,16 @@ def validate_fein(fein: str) -> Tuple[bool, str]:
 
 
 def validate_date_format(date_str: str, label: str = "Date") -> Tuple[bool, str]:
-    """Accept common US and ISO date formats. Reject unparseable strings."""
+    """Accept common US and ISO date formats. Reject unparseable strings.
+
+    Delegates to normalization.normalize_date so the accepted format list stays
+    in sync with the rest of the pipeline (no more divergence between validators).
+    """
     if not date_str:
         return True, ""
-    for fmt in _DATE_FORMATS:
-        try:
-            datetime.strptime(date_str.strip(), fmt)
-            return True, ""
-        except ValueError:
-            continue
+    from services.normalization import normalize_date
+    if normalize_date(date_str) is not None:
+        return True, ""
     return False, f"{label} '{date_str}' could not be parsed — use MM/DD/YYYY format"
 
 

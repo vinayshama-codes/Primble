@@ -15,13 +15,23 @@ from utils.crypto import decrypt_field
 from utils.json_logging import get_trace_id
 from utils.helpers import safe_join, check_payment_access
 from services.job_queue import get_job_queue, JOB_TYPE_EXTRACTION, JOB_TYPE_FORM_GENERATION, STATUS_PROCESSING, STATUS_COMPLETED, STATUS_FAILED
-from models.schemas import BulkFormSelectionRequest, FormSelectionRequest, PDFUpdateRequest
+from models.schemas import (
+    BulkFormSelectionRequest, FormSelectionRequest, PDFUpdateRequest,
+    SubmissionIntegrityResolveRequest, DocumentReclassifyRequest,
+    UnderwritingConfirmRequest, MarketingReasonRequest,
+)
 from repositories.session_repository import (
     get_processing_session, new_processing_session, upd_processing_session,
 )
 from services.auth_service import get_current_user
-from services.extraction_pipeline import run_extraction_pipeline, ProcessingIntegrityError
-from services.extraction_service import extract_facts_long, identify_doc_type, merge_facts, select_primary_truth
+from services.extraction_pipeline import (
+    run_extraction_pipeline, resolve_submission_integrity, reclassify_document,
+    confirm_underwriting_value, apply_marketing_reason, ProcessingIntegrityError,
+)
+from services.extraction_service import (
+    extract_facts_long, merge_facts, select_primary_truth,
+    DOC_TYPE_LABELS, ALLOWED_DOC_TYPES,
+)
 from services.form_service import (
     filter_available_forms, load_all_forms, match_forms, process_single_form,
     score_extra_forms,
@@ -36,11 +46,16 @@ from services.pdf_service import (
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
     check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION, classify_stops,
+    _check_loss_run_insured_match,
 )
 from services.audit_service import (
     log_recommendations_presented,
     log_field_change,
     mark_recommendation_resolved,
+    log_integrity_assessed,
+    log_integrity_resolution,
+    log_document_reclassified,
+    log_underwriting_confirmation,
 )
 from utils.rate_limiter import check_upload_rate_limit
 from utils.concurrency import try_acquire_heavy, release_heavy
@@ -49,6 +64,53 @@ from utils.virus_scanner import scan_file_bytes
 
 router = APIRouter(tags=["forms"])
 logger = logging.getLogger(__name__)
+
+
+def _humanize_fact(v):
+    """Render an extracted fact value as a readable string for the
+    'Review extracted data' view. Unwraps {value, confidence} envelopes and
+    flattens lists/dicts (e.g. locations) into a compact human-readable form."""
+    if isinstance(v, dict) and "value" in v:
+        v = v.get("value")
+    if isinstance(v, list):
+        return ", ".join(s for s in (_humanize_fact(i) for i in v) if s)
+    if isinstance(v, dict):
+        parts = []
+        for kk, vv in v.items():
+            sv = _humanize_fact(vv)
+            if sv:
+                parts.append(f"{str(kk).replace('_', ' ')}: {sv}")
+        return "; ".join(parts)
+    if v is None:
+        return ""
+    s = str(v).strip()
+    return "" if s.lower() in ("", "null", "none") else s
+
+
+def _doc_summary_entry(d: dict, primary_filename: str = "") -> dict:
+    """Build a uniform per-document summary for the frontend (Beta Report §4.2).
+
+    Carries the canonical doc_type plus the classification metadata the UI needs
+    to show confidence, the reason it was classified, and the manual-correction
+    affordance (doc_id + whether the type was user-overridden).
+    """
+    dt  = d.get("doc_type") or "unknown"
+    cls = d.get("classification") or {}
+    return {
+        "doc_id":                d.get("doc_id"),
+        "filename":              d.get("filename", ""),
+        "doc_type":              dt,
+        "doc_type_label":        DOC_TYPE_LABELS.get(dt, dt.replace("_", " ").title()),
+        "doc_type_confidence":   d.get("doc_type_confidence") or cls.get("confidence"),
+        "doc_type_source":       d.get("doc_type_source") or cls.get("source"),
+        "doc_type_overridden":   bool(d.get("doc_type_overridden")),
+        "excluded":              bool(d.get("excluded")),
+        "supporting_only":       bool(d.get("supporting_only")),
+        "narrative_categories":  cls.get("narrative_categories", []),
+        "is_primary":            bool(primary_filename) and d.get("filename") == primary_filename,
+        "low_confidence_tokens": d.get("low_confidence_tokens", []),
+        "truncation_warning":    d.get("truncation_warning"),
+    }
 
 # Dedicated pool for sync form-processing work (process_single_form, fill_pdf).
 # Explicit size prevents the default pool from growing unbounded under burst load.
@@ -249,12 +311,15 @@ async def upload_declaration(
         tier1_missing      = pipeline_result["tier1_missing"]
         tier2_score        = pipeline_result["tier2_score"]
         tier2_missing      = pipeline_result["tier2_missing"]
-        hard_stops         = pipeline_result["hard_stops"]
-        soft_stops         = pipeline_result["soft_stops"]
-        doc_conflicts      = pipeline_result["doc_conflicts"]
+        hard_stops           = pipeline_result["hard_stops"]
+        soft_stops           = pipeline_result["soft_stops"]
+        doc_conflicts        = pipeline_result["doc_conflicts"]
+        normalized_differences = pipeline_result.get("normalized_differences") or []
         recommendations    = pipeline_result["recommendations"]
+        account_profile    = pipeline_result.get("account_profile") or {}
         extra_forms_scored = pipeline_result["extra_forms_scored"]
         unique_low_conf    = pipeline_result["unique_low_conf"]
+        integrity          = pipeline_result.get("integrity") or {}
         sid                = pipeline_result["session_id"]
 
         # NOTE: Tier-1 / ACORD 125 baseline is no longer a hard gate.
@@ -264,11 +329,20 @@ async def upload_declaration(
             _tier1_warnings = [f"ACORD 125 minimum field missing: {m}" for m in tier1_missing]
             soft_stops = list(soft_stops) + _tier1_warnings
 
+        # Record the Submission Integrity verdict (Beta Report §4.1). Best-effort:
+        # captures whether a multi-insured warning was raised so a later override
+        # can be traced to the warning that prompted it.
+        await log_integrity_assessed(sid, str(current_user["id"]), integrity)
+
         if _job_id:
             await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": sid})
 
-        # For essentials tier — auto-generate top form in background so SQS/ARQ are ready
-        if current_user.get("subscription_tier") == "essentials" and recommendations:
+        # For essentials tier — auto-generate top form in background so SQS/ARQ are ready.
+        # Suppressed while a Submission Integrity review is pending: we must not
+        # auto-generate on a package that may belong to multiple insureds.
+        if (current_user.get("subscription_tier") == "essentials"
+                and recommendations
+                and not integrity.get("review_required")):
             asyncio.ensure_future(_bg_lite_generate(sid))
 
         truncation_warnings = [
@@ -280,10 +354,8 @@ async def upload_declaration(
 
         return JSONResponse({
             "success": True, "session_id": sid,
-            "doc_summary": [{"filename": d["filename"], "doc_type": d["doc_type"],
-                              "is_primary": d["filename"] == primary["filename"],
-                              "low_confidence_tokens": d.get("low_confidence_tokens", []),
-                              "truncation_warning": d.get("truncation_warning")} for d in processed_docs],
+            "doc_summary": [_doc_summary_entry(d, primary["filename"]) for d in processed_docs],
+            "available_doc_types": [{"value": t, "label": DOC_TYPE_LABELS[t]} for t in ALLOWED_DOC_TYPES],
             "primary_doc": primary["filename"], "flags": mflags,
             "tier2_score": tier2_score, "tier2_missing": tier2_missing,
             "hard_stops": _remaining_hard,
@@ -291,10 +363,20 @@ async def upload_declaration(
             "can_proceed_with_warning": _can_proceed_warn,
             "warning_stops": _downgraded,
             "doc_conflicts": doc_conflicts,
+            "normalized_differences": normalized_differences,
             "recommendations": recommendations,
+            "account_profile": account_profile,
             "low_confidence_tokens": unique_low_conf,
             "truncation_warnings": truncation_warnings,
             "all_available_forms": extra_forms_scored,
+            # Submission Integrity Validation (Beta Report §4.1). When
+            # review_required is true the frontend must show the integrity
+            # review step BEFORE form selection/generation.
+            "integrity": integrity,
+            "integrity_review_required": bool(integrity.get("review_required")),
+            # Core Underwriting Data Consistency (Beta Report §4.3) — Gross Sales
+            # and similar normalized fields, with source attribution + conflicts.
+            "underwriting_consistency": pipeline_result.get("underwriting_consistency") or {},
         })
     except HTTPException as ex:
         if _job_id:
@@ -329,6 +411,358 @@ async def upload_declaration(
 
 
 # ASYNC-SAFE
+def enforce_integrity_gate(session: dict) -> None:
+    """Block downstream processing while a Submission Integrity review is pending.
+
+    Raises HTTP 409 with the integrity verdict when the package was flagged as
+    likely multi-insured and the user has not yet removed documents or chosen to
+    continue. This is the server-side guarantee that unrelated documents are not
+    silently processed as one clean submission (Beta Report §4.1 acceptance
+    criteria). The override is recorded on the session, so once 'Continue
+    anyway' is chosen this gate stays open.
+    """
+    integrity = session.get("integrity") or {}
+    if integrity.get("review_required") and not integrity.get("overridden"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "submission_integrity_review_required",
+                "message": integrity.get("message")
+                or "Submission integrity review required before continuing.",
+                "integrity": integrity,
+            },
+        )
+
+
+# ASYNC-SAFE
+def enforce_building_value_gate(session: dict) -> None:
+    """Block form generation while a building-value conflict is unresolved.
+
+    Client Property Integrity directive: when building values appear duplicated,
+    inflated, or inconsistent across documents, "require review before forms are
+    generated." The cross-document reconciler (underwriting_consistency) already
+    detects the conflict and surfaces the picker; this gate makes that review
+    mandatory before generation. Confirming the correct value (the existing
+    underwriting-confirm flow) clears review_required and opens the gate. Scoring
+    and recommendations are unaffected — only generation is gated.
+    """
+    from services.underwriting_consistency import GENERATION_BLOCKING_RECONCILABLE_KEYS
+    uw = session.get("underwriting_consistency") or {}
+    blocking = [
+        f for f in (uw.get("fields") or [])
+        if f.get("fact_key") in GENERATION_BLOCKING_RECONCILABLE_KEYS
+        and f.get("review_required")
+    ]
+    if blocking:
+        _label = blocking[0].get("label") or "Building Value"
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "building_value_review_required",
+                "message": f"{_label} differs across the submitted documents. "
+                "Confirm the correct value before generating forms.",
+                "underwriting_consistency": uw,
+                "fields": blocking,
+            },
+        )
+
+
+@router.post("/api/submission-integrity/resolve")
+async def submission_integrity_resolve(
+    req: SubmissionIntegrityResolveRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Resolve a pending Submission Integrity review (Beta Report §4.1).
+
+    Actions:
+      • remove_documents — drop the selected documents and re-assess on the rest
+        (no re-OCR; reuses stored per-document facts).
+      • continue_anyway  — keep all documents, record the override, and proceed.
+    """
+    session = await get_processing_session(req.session_id)
+    if session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+
+    if req.action not in ("remove_documents", "continue_anyway", "create_separate_submissions"):
+        raise HTTPException(
+            400,
+            "Unsupported action. Use 'remove_documents', 'continue_anyway', "
+            "or 'create_separate_submissions'.",
+        )
+
+    try:
+        result = await resolve_submission_integrity(
+            session,
+            req.session_id,
+            action=req.action,
+            remove_doc_ids=req.remove_doc_ids,
+            user_id=str(current_user["id"]),
+        )
+    except ValueError as ve:
+        code = str(ve)
+        if code == "integrity_resolve_all_removed":
+            raise HTTPException(400, "You cannot remove every document. Keep at least one.")
+        if code in ("integrity_resolve_no_doc_ids",):
+            raise HTTPException(400, "Select at least one document to remove.")
+        if code in ("integrity_resolve_no_docs",):
+            raise HTTPException(409, "This submission has no stored documents to re-assess.")
+        logger.error(f"submission_integrity_resolve invalid request [trace={get_trace_id()}]: {ve}")
+        raise HTTPException(400, "Could not resolve the submission integrity review.")
+    except Exception as ex:
+        logger.error(f"submission_integrity_resolve error [trace={get_trace_id()}]: {ex}", exc_info=True)
+        raise HTTPException(500, "Failed to resolve submission integrity review.")
+
+    integrity = result.get("integrity") or {}
+
+    # Record how the user resolved the integrity review (Beta Report §4.1) —
+    # including whether they overrode the multi-insured warning. Uses the PRIOR
+    # verdict (the one shown to the user) for status/entities, since the result's
+    # verdict is the post-resolution re-assessment.
+    await log_integrity_resolution(
+        result["session_id"], str(current_user["id"]), req.action,
+        integrity=session.get("integrity") or integrity,
+        removed_doc_ids=req.remove_doc_ids,
+        created_submissions=result.get("created_submissions") or [],
+    )
+
+    _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(
+        result.get("hard_stops") or [], result.get("mflags") or {}
+    )
+    return JSONResponse({
+        "success": True,
+        "session_id": result["session_id"],
+        "action": req.action,
+        "integrity": integrity,
+        "integrity_review_required": bool(integrity.get("review_required")),
+        "recommendations": result.get("recommendations") or [],
+        "account_profile": result.get("account_profile") or {},
+        "all_available_forms": result.get("extra_forms_scored") or [],
+        "hard_stops": _remaining_hard,
+        "soft_stops": (result.get("soft_stops") or []) + _downgraded,
+        "can_proceed_with_warning": _can_proceed_warn,
+        "doc_conflicts": result.get("doc_conflicts") or [],
+        "normalized_differences": result.get("normalized_differences") or [],
+        "doc_summary": [
+            _doc_summary_entry(d, (result.get("primary") or {}).get("filename", ""))
+            for d in (result.get("processed_docs") or [])
+        ],
+        "available_doc_types": [{"value": t, "label": DOC_TYPE_LABELS[t]} for t in ALLOWED_DOC_TYPES],
+        "underwriting_consistency": result.get("underwriting_consistency") or {},
+        # Populated only for the 'create_separate_submissions' action: the list of
+        # submissions the package was split into (first entry is this session).
+        "created_submissions": result.get("created_submissions") or [],
+    })
+
+
+@router.post("/api/document/reclassify")
+async def document_reclassify(
+    req: DocumentReclassifyRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Manually correct a document's classification and recalculate downstream
+    scoring/recommendations (Beta Report §4.2 action items #4–#6).
+
+    Re-runs the post-extraction pipeline on the stored documents (no re-OCR), so
+    the corrected type updates merged facts, SQS (narrative & loss-history
+    pillars), recommendations, cross-form validation, and the integrity verdict.
+    """
+    if req.action not in ("set_type", "exclude", "include", "supporting_only"):
+        raise HTTPException(400, "Unsupported action. Use 'set_type', 'exclude', 'include', or 'supporting_only'.")
+
+    session = await get_processing_session(req.session_id)
+    if session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+
+    try:
+        result = await reclassify_document(
+            session, req.session_id,
+            doc_id=req.doc_id, action=req.action,
+            new_doc_type=req.new_doc_type, user_id=str(current_user["id"]),
+        )
+    except ValueError as ve:
+        code = str(ve)
+        if code == "reclassify_doc_not_found":
+            raise HTTPException(404, "Document not found in this submission.")
+        if code == "reclassify_no_docs":
+            raise HTTPException(409, "This submission has no stored documents to reclassify.")
+        if code == "reclassify_invalid_type":
+            raise HTTPException(400, "Unsupported document type.")
+        logger.error(f"document_reclassify invalid request [trace={get_trace_id()}]: {ve}")
+        raise HTTPException(400, "Could not apply the document classification change.")
+    except Exception as ex:
+        logger.error(f"document_reclassify error [trace={get_trace_id()}]: {ex}", exc_info=True)
+        raise HTTPException(500, "Failed to reclassify the document.")
+
+    # Record the manual classification correction (Beta Report §4.2) with the
+    # before/after document type surfaced by reclassify_document().
+    _reclass = result.get("reclassified") or {}
+    await log_document_reclassified(
+        result["session_id"], str(current_user["id"]),
+        doc_id=_reclass.get("doc_id") or req.doc_id,
+        action=req.action,
+        previous_doc_type=_reclass.get("previous_doc_type"),
+        new_doc_type=_reclass.get("new_doc_type"),
+    )
+
+    integrity = result.get("integrity") or {}
+    _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(
+        result.get("hard_stops") or [], result.get("mflags") or {}
+    )
+    return JSONResponse({
+        "success": True,
+        "session_id": result["session_id"],
+        "action": req.action,
+        "doc_summary": [
+            _doc_summary_entry(d, (result.get("primary") or {}).get("filename", ""))
+            for d in (result.get("processed_docs") or [])
+        ],
+        "available_doc_types": [{"value": t, "label": DOC_TYPE_LABELS[t]} for t in ALLOWED_DOC_TYPES],
+        "recommendations": result.get("recommendations") or [],
+        "account_profile": result.get("account_profile") or {},
+        "all_available_forms": result.get("extra_forms_scored") or [],
+        "flags": result.get("mflags") or {},
+        "hard_stops": _remaining_hard,
+        "soft_stops": (result.get("soft_stops") or []) + _downgraded,
+        "can_proceed_with_warning": _can_proceed_warn,
+        "warning_stops": _downgraded,
+        "doc_conflicts": result.get("doc_conflicts") or [],
+        "normalized_differences": result.get("normalized_differences") or [],
+        "tier2_score": result.get("tier2_score"),
+        "tier2_missing": result.get("tier2_missing") or [],
+        "integrity": integrity,
+        "integrity_review_required": bool(integrity.get("review_required")),
+        "underwriting_consistency": result.get("underwriting_consistency") or {},
+    })
+
+
+@router.post("/api/session/{session_id}/marketing-reason")
+async def session_marketing_reason(
+    session_id: str,
+    req: MarketingReasonRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Capture the producer's "Why are you marketing this account?" answer on the
+    recommendation screen and re-run form recommendations so ACORD 101 escalates
+    to its correct tier (DOUBTS-Workstream4 / Brent).
+
+    The answer persists into the session facts/flags, so it also flows into later
+    SQS scoring and Narrative Quality. Lightweight: it recomputes only the
+    recommendation outputs (no re-OCR, hard/soft stops left untouched).
+
+    NOTE: session_id is a PATH segment (not the body) so this never collides with
+    GET /api/session/{session_id}, which previously caught the POST and 405'd it.
+    """
+    session = await get_processing_session(session_id)
+    if session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+
+    try:
+        result = await apply_marketing_reason(
+            session, session_id,
+            reason=req.reason, user_id=str(current_user["id"]),
+        )
+    except ValueError as ve:
+        if str(ve) == "marketing_invalid_reason":
+            raise HTTPException(400, "Unsupported marketing reason.")
+        logger.error(f"session_marketing_reason invalid request [trace={get_trace_id()}]: {ve}")
+        raise HTTPException(400, "Could not apply the marketing reason.")
+    except Exception as ex:
+        logger.error(f"session_marketing_reason error [trace={get_trace_id()}]: {ex}", exc_info=True)
+        raise HTTPException(500, "Failed to update recommendations.")
+
+    return JSONResponse({
+        "success": True,
+        "session_id": result["session_id"],
+        "recommendations": result.get("recommendations") or [],
+        "account_profile": result.get("account_profile") or {},
+        "all_available_forms": result.get("extra_forms_scored") or [],
+        "flags": result.get("mflags") or {},
+        "prior_carrier_adverse_action": bool(result.get("prior_carrier_adverse_action")),
+    })
+
+
+@router.post("/api/underwriting/confirm-value")
+async def underwriting_confirm_value(
+    req: UnderwritingConfirmRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Confirm the correct value for a Core Underwriting Data element
+    (Beta Report §4.3, e.g. Gross Sales) when source documents disagree.
+
+    Records the confirmation and re-runs the post-extraction pipeline on the
+    stored documents (no re-OCR), applying the confirmed value consistently
+    across every relevant form and into SQS scoring.
+    """
+    session = await get_processing_session(req.session_id)
+    if session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+
+    try:
+        result = await confirm_underwriting_value(
+            session, req.session_id,
+            fact_key=req.fact_key, value=req.value, user_id=str(current_user["id"]),
+        )
+    except ValueError as ve:
+        code = str(ve)
+        if code == "underwriting_unknown_field":
+            raise HTTPException(400, "This field is not a reconcilable underwriting data element.")
+        if code == "underwriting_empty_value":
+            raise HTTPException(400, "Enter a value to confirm.")
+        if code == "underwriting_invalid_value":
+            raise HTTPException(400, "Enter a valid value (e.g. a dollar amount like $1,000,000).")
+        if code == "underwriting_no_docs":
+            raise HTTPException(409, "This submission has no stored documents.")
+        logger.error(f"underwriting_confirm_value invalid request [trace={get_trace_id()}]: {ve}")
+        raise HTTPException(400, "Could not confirm the value.")
+    except Exception as ex:
+        logger.error(f"underwriting_confirm_value error [trace={get_trace_id()}]: {ex}", exc_info=True)
+        raise HTTPException(500, "Failed to confirm the underwriting value.")
+
+    # Resolve the human label for this fact key so the audit row is readable
+    # without joining to another table. Imported lazily to avoid a circular import.
+    from services.underwriting_consistency import RECONCILABLE_FIELDS
+    _uw_label = (RECONCILABLE_FIELDS.get(req.fact_key) or {}).get("label", req.fact_key)
+    # Previous value: what was in merged_facts BEFORE this confirmation (from
+    # the session loaded at the top of this handler, before confirm_underwriting_value ran).
+    from services.extraction_service import _fv as _efv
+    _prev_facts = session.get("facts") or {}
+    _prev_val = _efv(_prev_facts, req.fact_key)
+    _prev_str = str(_prev_val).strip() if _prev_val is not None else None
+    await log_underwriting_confirmation(
+        req.session_id,
+        str(current_user["id"]),
+        fact_key=req.fact_key,
+        label=_uw_label,
+        confirmed_value=req.value,
+        previous_value=_prev_str,
+    )
+
+    integrity = result.get("integrity") or {}
+    _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(
+        result.get("hard_stops") or [], result.get("mflags") or {}
+    )
+    return JSONResponse({
+        "success": True,
+        "session_id": result["session_id"],
+        "fact_key": req.fact_key,
+        "underwriting_consistency": result.get("underwriting_consistency") or {},
+        "recommendations": result.get("recommendations") or [],
+        "account_profile": result.get("account_profile") or {},
+        "all_available_forms": result.get("extra_forms_scored") or [],
+        "flags": result.get("mflags") or {},
+        "hard_stops": _remaining_hard,
+        "soft_stops": (result.get("soft_stops") or []) + _downgraded,
+        "can_proceed_with_warning": _can_proceed_warn,
+        "warning_stops": _downgraded,
+        "tier2_score": result.get("tier2_score"),
+        "tier2_missing": result.get("tier2_missing") or [],
+        "normalized_differences": result.get("normalized_differences") or [],
+        "doc_conflicts": result.get("doc_conflicts") or [],
+        "integrity": integrity,
+        "integrity_review_required": bool(integrity.get("review_required")),
+    })
+
+
 @router.post("/api/select-forms-bulk")
 async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = Depends(get_current_user)):
     if current_user.get("subscription_tier") == "free":
@@ -351,6 +785,13 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     session = await get_processing_session(req.session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+
+    # Submission Integrity gate (Beta Report §4.1): do not generate forms on a
+    # package that may belong to multiple insureds until the user has reviewed.
+    enforce_integrity_gate(session)
+    # Building-value review gate (client Property Integrity): do not generate forms
+    # while building values conflict across documents and remain unconfirmed.
+    enforce_building_value_gate(session)
 
     await check_upload_rate_limit(str(current_user["id"]))
 
@@ -864,6 +1305,15 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
         # Pass confidence_dict so structural completeness reflects producer edits
         # (1.00) vs AI-high (0.85) vs AI-low (0.50) per spec.
+        # H2 fix: also pass doc-presence params so the narrative/loss-history floors
+        # are not dropped on every field edit (regression introduced by missing params).
+        _edit_docs    = session.get("docs", []) or []
+        _edit_present = {str(d.get("doc_type") or "").strip()
+                         for d in _edit_docs if isinstance(d, dict) and not d.get("excluded")}
+        _edit_app_name = (updated_facts.get("applicant_name") or {})
+        if isinstance(_edit_app_name, dict):
+            _edit_app_name = _edit_app_name.get("value") or ""
+        _edit_app_name = str(_edit_app_name).strip() or None
         sqs = calculate_sqs(
             facts=updated_facts, flags=fresh_flags,
             mapped_data=current_state, form_schema=r.get("schema", {}),
@@ -871,6 +1321,10 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             hard_stops=fresh_hard_stops, soft_stops=fresh_soft_stops,
             tier2_score=session.get("tier2_score", 50),
             confidence_dict=confidence,
+            has_narrative_doc="narrative" in _edit_present,
+            has_loss_run_doc="loss_run" in _edit_present,
+            loss_run_match=_check_loss_run_insured_match(_edit_docs, _edit_app_name),
+            cross_issues_full=_cf_issues,
         )
 
         was_signed      = bool(r.get("signature_applied")) and len(cleared_sig_fields) == 0
@@ -1036,25 +1490,18 @@ async def get_extraction_result(
     docs        = proc_session.get("docs", [])
     primary_doc = proc_session.get("primary_doc", "")
 
-    doc_summary = [
-        {
-            "filename":              d.get("filename", ""),
-            "doc_type":              d.get("doc_type", ""),
-            "is_primary":            d.get("filename") == primary_doc,
-            "low_confidence_tokens": d.get("low_confidence_tokens", []),
-            "truncation_warning":    d.get("truncation_warning"),
-        }
-        for d in docs
-    ]
+    doc_summary = [_doc_summary_entry(d, primary_doc) for d in docs]
 
     hard_stops = proc_session.get("hard_stops", [])
     mflags     = proc_session.get("flags", {})
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
+    integrity  = proc_session.get("integrity") or {}
 
     return JSONResponse({
         "success":               True,
         "session_id":            session_id,
         "doc_summary":           doc_summary,
+        "available_doc_types":   [{"value": t, "label": DOC_TYPE_LABELS[t]} for t in ALLOWED_DOC_TYPES],
         "primary_doc":           primary_doc,
         "flags":                 mflags,
         "hard_stops":            _remaining_hard,
@@ -1064,8 +1511,69 @@ async def get_extraction_result(
         "tier2_score":           proc_session.get("tier2_score"),
         "tier2_missing":         proc_session.get("tier2_missing", []),
         "recommendations":       proc_session.get("recommendations", []),
-        "all_available_forms":   proc_session.get("all_forms", []),
+        "account_profile":       proc_session.get("account_profile", {}),
+        "all_available_forms":   score_extra_forms(
+            proc_session.get("facts", {}),
+            {r["form_id"] for r in proc_session.get("recommendations", [])},
+            filter_available_forms(load_all_forms()),
+        ),
         "low_confidence_tokens": proc_session.get("low_confidence_tokens", []),
+        # Submission Integrity Validation (Beta Report §4.1) — mirror the sync
+        # upload response so the async polling path uses the same review flow.
+        "integrity":                 integrity,
+        "integrity_review_required": bool(integrity.get("review_required")),
+        "underwriting_consistency":  proc_session.get("underwriting_consistency") or {},
+    })
+
+
+@router.get("/api/session/{session_id}/document/{doc_id}/extracted-data")
+async def get_document_extracted_data(
+    session_id: str,
+    doc_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the data extracted from a single uploaded document (Beta Report
+    §4.2 item #6 — "Review extracted data").
+
+    Read-only view so a user can verify what Primble pulled from an Unknown /
+    low-confidence document before deciding to confirm its type, exclude it, or
+    include it as a supporting document only.
+    """
+    proc_session = await get_processing_session(session_id)
+    if proc_session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+
+    docs = proc_session.get("docs", []) or []
+    doc = next((d for d in docs if str(d.get("doc_id")) == str(doc_id)), None)
+    if doc is None:
+        raise HTTPException(404, "Document not found in this submission.")
+
+    facts = doc.get("facts") or {}
+    fields = []
+    for key, raw in facts.items():
+        confidence = raw.get("confidence") if isinstance(raw, dict) and "value" in raw else None
+        display = _humanize_fact(raw)
+        if not display:
+            continue
+        fields.append({
+            "key":        key,
+            "label":      str(key).replace("_", " ").title(),
+            "value":      display,
+            "confidence": confidence,
+        })
+    fields.sort(key=lambda f: f["label"])
+
+    dt = doc.get("doc_type") or "unknown"
+    return JSONResponse({
+        "success":               True,
+        "doc_id":                str(doc.get("doc_id")),
+        "filename":              doc.get("filename", ""),
+        "doc_type":              dt,
+        "doc_type_label":        DOC_TYPE_LABELS.get(dt, dt.replace("_", " ").title()),
+        "fields":                fields,
+        "field_count":           len(fields),
+        "narrative_categories":  (doc.get("classification") or {}).get("narrative_categories", []),
+        "low_confidence_tokens": doc.get("low_confidence_tokens", []),
     })
 
 
@@ -1233,7 +1741,7 @@ async def clarity_analyze(
     from services.pipeline_router import is_assembly
     from services.sqs_service import calculate_sqs_from_facts, cross_validate
     from services.arq_service import generate_arq_questions_from_facts
-    from services.form_service import match_forms_deterministic
+    from services.form_service import match_forms_deterministic, derive_account_profile
 
     check_payment_access(current_user.get("payment_status", "ok"), "form")
     tier = current_user.get("subscription_tier", "free") or "free"
@@ -1255,8 +1763,22 @@ async def clarity_analyze(
     if session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
 
-    matched           = match_forms_deterministic(facts, flags)
+    # Submission Integrity gate (Beta Report §4.1): pause SQS scoring + client
+    # questionnaire generation while a multi-insured review is pending.
+    enforce_integrity_gate(session)
+
+    # Pass the uploaded document text so the dec-page line-item recall paths fire
+    # here too (parity with the Assembly pipeline, extraction_pipeline.match_forms).
+    # Without it, coverage lines that appear only on a dec page would be silently
+    # dropped for Clarity/Lite users while Assembly users see them.
+    combined_text     = " ".join(
+        d.get("text", "") for d in (session.get("docs") or []) if isinstance(d, dict)
+    )
+    matched           = match_forms_deterministic(facts, flags, text=combined_text)
     selected_form_ids = [f["form_id"] for f in matched]
+    account_profile    = derive_account_profile(facts, flags, text=combined_text)
+    triggered_ids      = {f["form_id"] for f in matched}
+    extra_forms_scored = score_extra_forms(facts, triggered_ids, filter_available_forms(load_all_forms()))
 
     sqs_per_form: dict = {}
     for fid in selected_form_ids:
@@ -1269,6 +1791,7 @@ async def clarity_analyze(
                 soft_stops=soft_stops,
                 tier2_score=tier2_score,
                 form_id=fid,
+                session_data=session,
             )
         except Exception as ex:
             logger.error(f"Clarity SQS error for {fid}: {ex}")
@@ -1299,6 +1822,8 @@ async def clarity_analyze(
 
     await upd_processing_session(session_id, {
         "selected_form_ids": selected_form_ids,
+        "recommendations":   matched,
+        "account_profile":   account_profile,
         "clarity_result": {
             "sqs_per_form":   sqs_per_form,
             "sqs_combined":   sqs_combined,
@@ -1313,6 +1838,9 @@ async def clarity_analyze(
         "success":         True,
         "session_id":      session_id,
         "selected_forms":  [{"form_id": f["form_id"], "form_name": f.get("form_name", f["form_id"])} for f in matched],
+        "recommendations": matched,
+        "account_profile": account_profile,
+        "all_available_forms": extra_forms_scored,
         "sqs_per_form":    sqs_per_form,
         "sqs_combined":    sqs_combined,
         "arq_questions":      arq_questions,

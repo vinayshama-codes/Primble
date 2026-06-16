@@ -252,7 +252,7 @@ def _is_schedule_field(field_name: str) -> bool:
 _ACORD_FIELD_RULES = [
     # ── Producer ────────────────────────────────────────────────────────────
     ("Producer_FullName",                                  "producer_name"),
-    ("Producer_CustomerIdentifier",                        "producer_name"),
+    ("Producer_CustomerIdentifier",                        None),            # agency-assigned account ID — not in extraction schema; must not receive producer_name
     ("Producer_ContactPerson_FullName",                    "contact_name"),
     ("Producer_ContactPerson_Phone",                       "contact_phone"),
     ("Producer_ContactPerson_Email",                       "contact_email"),
@@ -1143,7 +1143,27 @@ def _derive_indicator(field_name: str, facts: dict) -> Optional[str]:
             if isinstance(raw, list):
                 # List fact (e.g. lines_of_business): check if match_val appears in any element
                 return "Yes" if any(match_val.lower() in str(item).lower() for item in raw) else "No"
-            val_str = str(raw).lower()
+            # For entity_type, normalize common phrase variants before substring
+            # matching so "Limited Liability Company" and "Limited Liability
+            # Corporation" both resolve to "llc" rather than falling through to
+            # gap fill and letting the LLM mark multiple checkboxes.
+            if fact_key == "entity_type":
+                val_lower = str(raw).lower()
+                for _llc_phrase in (
+                    "limited liability corporation",
+                    "limited liability company",
+                    "limited liability corp",
+                    # Abbreviated forms: "LLC Corp", "LLC Corporation"
+                    # (full-phrase variants above don't match these)
+                    "llc corp",
+                    "llc corporation",
+                ):
+                    if _llc_phrase in val_lower:
+                        val_lower = "llc"
+                        break
+                val_str = val_lower
+            else:
+                val_str = str(raw).lower()
             if match_val.lower() in val_str:
                 return "Yes"
             return "No"
@@ -1170,6 +1190,24 @@ def _deterministic_map(field_name: str, facts: dict):
                 val = str(entry)
             return val if val else None
         return None
+
+    # ── Row-variant guard ────────────────────────────────────────────────────
+    # Fields whose names end with a row suffix (_B, _C … _N) but were NOT
+    # resolved by _resolve_schedule_row above represent additional-entity
+    # slots (2nd named insured, 2nd building location, …).
+    # _ACORD_FIELD_RULES uses substring matching and would blindly stamp the
+    # PRIMARY scalar fact into every _B/_C/_D variant, causing duplicated
+    # values (e.g. Named Insured × 4 on ACORD 101, same premises address in
+    # every CommercialStructure row on ACORD 125).
+    #
+    # By routing these non-primary rows directly through _derive_indicator:
+    #   • Checkbox/indicator fields get correct "Yes"/"No" from facts.
+    #   • All other fields return None → treated as UNMATCHED by the caller
+    #     → gap-fill LLM fills them only if a second entity exists in the doc.
+    # The _A slot (idx=0) is the primary slot and always passes through below.
+    _row_guard = _SCHED_ROW_RE.match(field_name)
+    if _row_guard and _ROW_LETTER_TO_IDX[_row_guard.group(2)] >= 1:
+        return _derive_indicator(field_name, facts)  # None for non-indicator fields
 
     for pattern, fact_key in _ACORD_FIELD_RULES:
         if pattern in field_name:
@@ -2241,6 +2279,13 @@ def _is_nonfillable_field(field: str) -> bool:
         "Attachment_", "Hazard_", "Premium", "Rate_", "Revision",
         "EditionIdentifier", "NeedAppearances",
         "Underwriter", "CarrierCode", "PolicyNumber_Carrier",
+        # CustomerIdentifier / ProducerIdentifier are carrier- or agency-assigned
+        # internal codes not present in policy document text. The gap-fill LLM
+        # cannot infer them and hallucinated the producer name instead
+        # (e.g. "RSG Specialty Atlanta Binding"). Blocking the entire
+        # *Identifier suffix family closes all 116 exposed fields in one shot.
+        "CustomerIdentifier",
+        "ProducerIdentifier",
     )
     return any(s in field for s in _NONFILLABLE_SUBSTRINGS)
 

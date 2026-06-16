@@ -1195,9 +1195,9 @@ body {
 .sqs-drivers {
   margin-bottom: 16px;
   padding: 14px;
-  background: rgba(230, 27, 132, 0.04);
+  background: rgba(230, 27, 132, 0.07);
   border-radius: var(--radius-md);
-  border: 1px solid rgba(230, 27, 132, 0.15);
+  border: 1.5px solid rgba(230, 27, 132, 0.25);
 }
 .drivers-title {
   font-size: 12px;
@@ -1404,26 +1404,27 @@ body {
 
 .stops-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   margin-bottom: 20px;
 }
 .stops-row .stops-banner {
-  flex: 1;
+  flex: 1 1 220px;
   margin-bottom: 0;
 }
 .stops-banner {
   border-radius: var(--radius-md);
   padding: 16px 20px;
-  background: rgba(230, 27, 132, 0.04);
-  border: 1px solid rgba(230, 27, 132, 0.15);
+  background: rgba(230, 27, 132, 0.07);
+  border: 1.5px solid rgba(230, 27, 132, 0.25);
 }
 .stops-banner.stops-hard {
-  background: rgba(230, 27, 132, 0.04);
-  border: 1px solid rgba(230, 27, 132, 0.18);
+  background: rgba(230, 27, 132, 0.07);
+  border: 1.5px solid rgba(230, 27, 132, 0.25);
 }
 .stops-banner.stops-soft {
-  background: rgba(230, 27, 132, 0.04);
-  border: 1px solid rgba(230, 27, 132, 0.18);
+  background: rgba(230, 27, 132, 0.07);
+  border: 1.5px solid rgba(230, 27, 132, 0.25);
 }
 .stops-title {
   font-size: 13px;
@@ -1451,11 +1452,18 @@ body {
 .stop-item-soft {
   color: #1e293b;
 }
+.stops-banner.stops-norm {
+  background: rgba(230, 27, 132, 0.07);
+  border: 1.5px solid rgba(230, 27, 132, 0.25);
+}
+.stops-norm .stops-title {
+  color: #1e293b;
+}
 
 /* ==================== DOC SUMMARY ==================== */
 .doc-summary {
-  background: rgba(230, 27, 132, 0.04);
-  border: 1px solid rgba(230, 27, 132, 0.15);
+  background: rgba(230, 27, 132, 0.07);
+  border: 1.5px solid rgba(230, 27, 132, 0.25);
   border-radius: var(--radius-md);
   padding: 16px 20px;
   margin-bottom: 20px;
@@ -1513,8 +1521,8 @@ body {
 
 /* ==================== TIER 2 BAR ==================== */
 .tier2-bar {
-  background: var(--white);
-  border: 1px solid var(--light-gray);
+  background: rgba(230, 27, 132, 0.07);
+  border: 1.5px solid rgba(230, 27, 132, 0.25);
   border-radius: var(--radius-md);
   padding: 16px 20px;
   margin-bottom: 20px;
@@ -1542,8 +1550,8 @@ body {
 
 /* ==================== CROSS ISSUES ==================== */
 .cross-issues {
-  background: var(--white);
-  border: 1px solid var(--light-gray);
+  background: rgba(230, 27, 132, 0.07);
+  border: 1.5px solid rgba(230, 27, 132, 0.25);
   border-radius: var(--radius-md);
   padding: 14px;
   margin-bottom: 16px;
@@ -1858,7 +1866,7 @@ body {
 
 
 /* Form selection list */
-.form-selection-list { display:flex; flex-direction:column; gap:10px; margin:16px 0; background:none; }
+.form-selection-list { display:flex; flex-direction:column; gap:10px; margin:16px 0 20px; background: rgba(230, 27, 132, 0.07); border: 1.5px solid rgba(230, 27, 132, 0.25); border-radius: var(--radius-md); padding: 16px 20px; }
 .form-selection-header { display:flex; justify-content:space-between; align-items:center; font-weight:700; font-size:13px; color:#1e293b; letter-spacing:0.01em; text-transform:uppercase; margin-bottom:8px; }
 .form-selection-title { font-size:15px; font-weight:700; color:#1e293b; letter-spacing:0.01em; }
 .form-selection-hint { font-size:12px; font-weight:600; color:var(--primary); background:rgba(230,0,122,0.08); padding:2px 10px; border-radius:20px; letter-spacing:0; text-transform:none; }

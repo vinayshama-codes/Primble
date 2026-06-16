@@ -179,13 +179,25 @@ async def _process_extraction_job(job: dict, queue) -> None:
             logger.error("Job %s: no readable text", job_id)
             return
 
-        if not result["tier1_ok"]:
+        # Submission Integrity review (Beta Report §4.1) takes precedence over the
+        # tier1 gate: a multi-insured package is paused for review BEFORE we treat
+        # missing baseline fields as a failure, so the user reaches the review step.
+        _integrity = result.get("integrity") or {}
+        if not result["tier1_ok"] and not _integrity.get("review_required"):
             await queue.update_status(
                 job_id, "failed",
                 error="tier1_validation_failed",
                 result={"missing_fields": result["tier1_missing"], "gate": "tier1_fail"},
             )
             return
+
+        # Record the Submission Integrity verdict (Beta Report §4.1) — mirrors the
+        # synchronous upload route so the async path leaves no audit gap.
+        try:
+            from services.audit_service import log_integrity_assessed
+            await log_integrity_assessed(result["session_id"], user_id, _integrity)
+        except Exception as _audit_ex:
+            logger.warning("Job %s: integrity audit log failed (non-fatal): %s", job_id, _audit_ex)
 
         await queue.update_status(job_id, "completed", result={"session_id": result["session_id"]})
         logger.info("Job %s (extraction) completed: session_id=%s", job_id, result["session_id"])
@@ -236,6 +248,38 @@ async def _process_form_generation_job(job: dict, queue) -> None:
         session = await get_processing_session(session_id)
         if not session:
             await queue.update_status(job_id, "failed", error="session_not_found")
+            return
+
+        # Submission Integrity gate (Beta Report §4.1): never generate forms on a
+        # package still pending multi-insured review. Mirrors the synchronous
+        # guard in form_routes.select_forms_bulk.
+        _integrity = session.get("integrity") or {}
+        if _integrity.get("review_required") and not _integrity.get("overridden"):
+            await queue.update_status(
+                job_id, "failed", error="submission_integrity_review_required"
+            )
+            logger.warning(
+                "Job %s blocked: submission integrity review pending for session %s",
+                job_id, session_id,
+            )
+            return
+
+        # Building-value review gate (client Property Integrity): never generate
+        # forms while building values conflict across documents and remain
+        # unconfirmed. Mirrors form_routes.enforce_building_value_gate.
+        from services.underwriting_consistency import GENERATION_BLOCKING_RECONCILABLE_KEYS
+        _uw = session.get("underwriting_consistency") or {}
+        if any(
+            f.get("fact_key") in GENERATION_BLOCKING_RECONCILABLE_KEYS and f.get("review_required")
+            for f in (_uw.get("fields") or [])
+        ):
+            await queue.update_status(
+                job_id, "failed", error="building_value_review_required"
+            )
+            logger.warning(
+                "Job %s blocked: building-value review pending for session %s",
+                job_id, session_id,
+            )
             return
 
         loop = asyncio.get_running_loop()

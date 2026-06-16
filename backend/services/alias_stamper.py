@@ -45,7 +45,9 @@ logger = logging.getLogger(__name__)
 CANONICAL_TO_EXTRACTION: Dict[str, str] = {
     # ── Producer ────────────────────────────────────────────────────────────
     "producer_full_name":                         "producer_name",
-    "producer_customer_identifier":               "producer_name",
+    # producer_customer_identifier intentionally omitted — it is an agency-assigned
+    # account NUMBER, not the agency name; mapping it to producer_name produces
+    # hallucinated-looking output (e.g. "RSG Specialty Atlanta Binding").
     "producer_contact_person_full_name":          "contact_name",
     "producer_contact_person_phone_number":       "contact_phone",
     "producer_contact_person_email_address":      "contact_email",

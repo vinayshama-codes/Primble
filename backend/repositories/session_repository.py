@@ -330,6 +330,7 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0)
                 updated_at,
                 data->>'last_downloaded_at'                          AS last_downloaded_at,
                 COALESCE(
+                    NULLIF(data->>'submission_label', ''),
                     data->'facts'->'applicant_name'->>'value',
                     data->'facts'->>'applicant_name'
                 )                                                    AS applicant_name,

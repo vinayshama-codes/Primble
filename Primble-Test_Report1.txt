@@ -1,0 +1,1085 @@
+﻿Primble Beta Testing Round 1
+Combined Product Feedback & Engineering Development Report
+Prepared For
+Primble Engineering Team
+Purpose
+This report combines findings from Primble's first round of beta testing into one development-focused summary. The goal is to identify what worked, what needs refinement, and what should be prioritized in the next engineering cycle.
+The findings draw from two beta tests:
+1. Beta Test 1 - a deliberately mismatched document package containing documents from multiple insureds.
+2. Beta Test 2 - a more realistic contractor submission package for Orbin Contracting.
+Together, these tests provided feedback on upload flow, document classification, cross-document validation, SQS scoring, form recommendations, warning logic, remediation workflow, client questionnaire behavior, form generation, and user-facing status messages.
+
+Table of Contents
+1. Executive Summary
+
+2. Testing Context
+
+3. Recommended Engineering Roadmap
+
+4. Workstream 1 - Submission Integrity & Document Classification
+
+5. Workstream 2 - Normalization & Conflict Detection
+
+6. Workstream 3 - SQS, Evidence Handling & Score Recalculation
+
+7. Workstream 4 - ACORD Form Recommendation Logic
+
+8. Workstream 5 - Remediation & Client Questionnaire Controls
+
+9. Workstream 6 - UX Status, Processing & Generation Feedback
+
+10. Product Strengths to Preserve
+
+11. Open Product Decisions
+
+12. Final Development Priorities
+
+13. Bottom Line
+
+1. Executive Summary
+Primble's first round of beta testing was productive. The tests surfaced several important areas for refinement while also confirming that the platform is already identifying meaningful submission issues, underwriting gaps, document conflicts, and form needs.
+The main development themes are:
+1. Add Submission Integrity Validation before downstream processing.
+The system correctly detected that the Beta Test 1 documents belonged to multiple insureds, but that review should happen earlier in the workflow before form recommendations, SQS scoring, client questions, or form generation.
+2. Improve document classification, especially for narratives and loss runs.
+Both tests showed that useful information was extracted from documents that were still classified as "Unknown." This creates downstream issues for scoring, recommendations, and remediation.
+3. Normalize equivalent values before creating conflicts.
+Several false hard stops came from formatting differences rather than substantive conflicts, including applicant name variations, date formats, address formats, entity type labels, carrier names, and insurance abbreviations.
+4. Make SQS scoring more explainable and responsive.
+Users need to understand why a score is low, what evidence was considered, what is missing, what is conflicting, and whether remediation changed the score.
+5. Improve evidence handling for narratives, loss history, umbrella, and key underwriting support documents.
+Narratives, loss runs, employer handbooks, safety manuals, payroll breakdowns, EMOD/XMOD data, and umbrella/excess coverage details should be recognized as meaningful underwriting support when present.
+6. Refine ACORD form recommendations.
+The form recommendation engine is producing useful suggestions, but it needs better state filtering, ranking, confidence tiers, and explanations for why each form appears.
+7. Control client questionnaire volume.
+The questionnaire workflow needs filtering so client-facing questions are limited to high-value, answerable items rather than every missing or unmapped field.
+8. Clarify user-facing status language.
+Statuses such as "Ready" should distinguish between processing completion, review readiness, generation readiness, and true submission readiness.
+The recommended next step is to group the work into six engineering workstreams:
+1. Submission Integrity & Document Classification
+
+2. Normalization & Conflict Detection
+
+3. SQS, Evidence Handling & Score Recalculation
+
+4. ACORD Form Recommendation Logic
+
+5. Remediation & Client Questionnaire Controls
+
+6. UX Status, Processing & Generation Feedback
+
+2. Testing Context
+Beta Test 1 - Mixed / Unrelated Submission Documents
+The first test used three intentionally unrelated documents:
+1. Commercial Package Policy Dec Page for Women's Bar Association
+
+2. Underwriting Narrative for Wake County Government Entity
+
+3. Workers Compensation Loss Runs for Company ABC
+This test evaluated how Primble handled a bad or mismatched upload package.
+Primary areas reviewed:
+* Document extraction
+* Document classification
+* Cross-document validation
+* Form recommendations
+* SQS scoring
+* Hard stops
+* Warning logic
+* Loss history logic
+* Narrative quality scoring
+* Remediation behavior
+Beta Test 2 - Orbin Contracting Submission
+The second test used a more realistic contractor submission package for Orbin Contracting.
+Primary areas reviewed:
+* Upload experience
+* Processing experience
+* Document classification
+* Hard stop logic
+* Conflict detection
+* Normalization failures
+* Submission readiness scoring
+* Form recommendations
+* State-specific form filtering
+* Workers Compensation recommendation logic
+* Form generation experience
+* Form viewer/sidebar recommendations
+* Client questionnaire behavior
+
+3. Recommended Engineering Roadmap
+Phase 1 - Sequencing, Classification & False Positive Reduction
+Objective
+Prevent downstream workflows from running on poorly classified or mismatched document sets, and reduce false hard stops caused by formatting differences.
+Recommended Work Items
+1. Add Submission Integrity Validation.
+2. Improve document classification for narratives and loss runs.
+3. Add filename-based classification signals.
+4. Add manual document classification correction.
+5. Add name normalization.
+6. Add date normalization.
+7. Add address normalization.
+8. Add entity type normalization.
+9. Add insurance terminology normalization.
+10. Add state-specific form filtering.
+11. Add clearer workflow status labels.
+Expected Result
+Primble should better identify whether documents belong together, classify key documents correctly, avoid false hard stops, and prevent irrelevant state forms from appearing.
+
+Phase 2 - SQS Trust & Evidence Handling
+Objective
+Make SQS more explainable, evidence-aware, and responsive to user action.
+Recommended Work Items
+1. Separate Match Score from SQS.
+2. Add scoring breakdowns.
+3. Add evidence labels.
+4. Incorporate narrative evidence into scoring.
+5. Add positive scoring signals.
+6. Improve loss history states.
+7. Improve umbrella evidence logic.
+8. Recalculate scores after remediation.
+9. Add post-remediation statuses.
+Expected Result
+Users should understand why scores were assigned, what evidence was used, what is still missing, and whether remediation improved the package.
+
+Phase 3 - Workflow Usability & Client Remediation Controls
+Objective
+Make remediation and form review workflows easier to use and safer to send externally.
+Recommended Work Items
+1. Add client question audience categories.
+2. Add client question priority levels.
+3. Default to critical client-answerable questions only.
+4. Suppress internal/system questions from client questionnaires.
+5. Group questions by topic and form.
+6. Show score impact for questions.
+7. Improve warning language.
+8. Improve form viewer/sidebar recommendations.
+9. Add form recommendation tiers.
+10. Distinguish uploaded source documents from forms to generate.
+11. Add generation progress indicators if processing time remains long.
+Expected Result
+Users should be able to review, prioritize, and send remediation questions without overwhelming the client or exposing internal/system fields.
+
+4. Workstream 1 - Submission Integrity & Document Classification
+Priority
+P1. Critical
+Summary
+The system correctly detected mismatched insured information in Beta Test 1 and useful narrative/loss data in both tests. The main refinement is to move package-level integrity review and document classification earlier in the workflow so downstream scoring, recommendations, and remediation are based on the correct document context.
+
+4.1 Submission Integrity Validation
+Finding
+In Beta Test 1, Primble correctly identified that the uploaded documents appeared to belong to different insureds:
+* Women's Bar Association
+* Wake County
+* Company ABC
+The system generated hard stops for inconsistencies such as:
+* Applicant name
+* Entity type
+* Mailing address
+* Operations
+* Policy numbers
+This is valuable behavior. The refinement needed is sequencing.
+Current Gap
+The system detected these conflicts, but downstream workflows still continued into form recommendations, SQS scoring, warnings, and remediation.
+A package-level integrity review should happen before downstream processing.
+Engineering Action Items
+1. Create a pre-processing Submission Integrity Validation step.
+  This should run after extraction/classification and before:
+o ACORD form recommendations
+o SQS scoring
+o Cross-form validation
+o Client questionnaire generation
+o Form generation
+o Submission Brief generation
+2. Add an insured/entity clustering process.
+  The system should group extracted entities by likely insured and compare:
+o Applicant name
+o DBA/trade name
+o Mailing address
+o Location addresses
+o Entity type
+o Operations description
+o Policy numbers
+o Effective dates
+o Carrier names
+o Loss run insured name
+o Narrative account description
+3. Create an integrity confidence status.
+  Suggested statuses:
+o High confidence - documents belong together
+o Medium confidence - review recommended
+o Low confidence - documents may belong to multiple submissions
+4. Add a user-facing review step when confidence is low.
+  Suggested message:
+  Submission Integrity Review Needed
+  Primble detected that the uploaded documents may not belong to the same submission.
+  Detected entities:
+o Women's Bar Association
+o Wake County
+o Company ABC
+  These documents appear to reference multiple insureds. Please review the package before continuing.
+5. Add user actions.
+  Recommended actions:
+o Remove selected documents
+o Continue anyway
+o Create separate submissions
+  If "Create separate submissions" is not feasible immediately, include it as a later enhancement and support "Remove Documents" and "Continue Anyway" first.
+Acceptance Criteria
+* Primble identifies when documents likely belong to multiple insureds.
+* The system warns the user before form recommendation and generation.
+* The user can remove documents or continue with acknowledgment.
+* The workflow does not treat unrelated documents as one clean package without review.
+* The system records whether the user overrode the warning.
+
+4.2 Document Classification
+Finding
+Document classification needs improvement across both tests.
+In Beta Test 1:
+* Dec Page was classified correctly.
+* Narrative was classified as "Unknown."
+* Loss Runs were classified as "Unknown."
+In Beta Test 2:
+* Dec Page was identified.
+* Certificate was identified.
+* Underwriting narrative was classified as "Unknown."
+The system extracted useful information from some documents even when classification failed, which suggests classification and extraction should be better connected.
+Current Gap
+When narratives and loss runs are classified as Unknown, downstream logic may not fully use the information for:
+* SQS scoring
+* Narrative quality scoring
+* Loss history scoring
+* Submission readiness scoring
+* Client questionnaire reduction
+* Form recommendations
+* Submission Brief output
+Engineering Action Items
+1. Expand the document classification taxonomy.
+  Add or confirm support for:
+o Dec Page
+o Commercial Insurance Application
+o ACORD Form
+o Supplemental Application
+o Loss Runs
+o Underwriting Narrative
+o Submission Narrative
+o Carrier Narrative
+o Executive Summary
+o Account Overview
+o Schedule of Values
+o Statement of Values
+o Certificate of Insurance
+o Quote Proposal
+o Binder
+o Policy
+o Endorsement
+o COPE Report
+o Financial Statements
+o Payroll Report
+o Gross Sales Report
+o Experience Modification Worksheet
+o Vehicle Schedule
+o Driver Schedule
+o Equipment Schedule
+o Location Schedule
+o Employer Handbook
+o Safety Manual
+o Risk Control Program
+o Unknown
+2. Create narrative detection rules.
+  A document should be flagged as a likely narrative when it contains several of the following:
+o Account overview
+o Named insured / applicant context
+o Operations description
+o Years in business
+o Management experience
+o Risk controls or safety practices
+o Loss history statement
+o Coverage discussion
+o Carrier or market considerations
+o Location or exposure summary
+o Renewal context
+o Prior carrier context
+o Employer handbook or employee handbook information
+o Safety manual, risk control program, or written safety procedures
+o Hiring, training, onboarding, or employee management practices
+o Workers Compensation payroll breakdown by class code
+o Current Experience Modification Factor, EMOD, or XMOD
+o Workers Compensation exposure summaries or classification details
+3. Use filename signals as supporting evidence.
+  Increase classification confidence when filenames include:
+o submission narrative
+o underwriting narrative
+o carrier narrative
+o executive summary
+o account summary
+o account overview
+o narrative
+o submission summary
+o loss run
+o claims history
+o certificate
+o dec page
+o handbook
+o safety manual
+o payroll
+o EMOD
+o XMOD
+  Filename signals should support, not override, content-based classification.
+4. Add manual classification correction.
+  Users should be able to change a document from Unknown to a known type.
+5. Trigger downstream recalculation after classification correction.
+  If a user reclassifies a document as a narrative, loss run, payroll report, safety manual, handbook, or other supporting document, Primble should rerun affected logic:
+o SQS score
+o Narrative score
+o Loss history score
+o Missing items
+o Client questions
+o Form recommendations
+6. Handle Unknown documents explicitly.
+  Unknown documents should have clear options:
+o Confirm document type
+o Exclude from scoring
+o Include as supporting document only
+o Review extracted data
+Acceptance Criteria
+* Narratives are not classified as Unknown when they contain clear narrative signals.
+* Loss runs are recognized when claim tables or loss history are present.
+* Employer handbooks, safety manuals, payroll breakdowns, and EMOD/XMOD documents are recognized as meaningful underwriting support when present.
+* Filename and content signals both contribute to classification confidence.
+* Users can manually correct document type.
+* Corrected classification updates downstream scoring and recommendations.
+* Unknown documents are not silently treated as fully usable or fully ignored.
+
+4.3 Gross Sales and Core Underwriting Data Consistency
+Finding
+Gross Sales and similar underwriting fields should be treated as normalized data elements that may appear across multiple forms or source documents.
+Engineering Action Items
+1. Treat Gross Sales as a normalized underwriting data element.
+2. Validate Gross Sales values across all applicable ACORD forms and source documents.
+3. Flag discrepancies when values differ between documents or forms.
+4. Identify source documents contributing each value.
+5. Allow the user to confirm the correct value and apply it consistently across relevant forms.
+Acceptance Criteria
+* Gross Sales is extracted and normalized where present.
+* Conflicting Gross Sales values are flagged for review.
+* The source of each value is visible.
+* User-confirmed Gross Sales can update applicable forms and scoring logic.
+
+5. Workstream 2 - Normalization & Conflict Detection
+Priority
+P1. Critical
+Summary
+Primble's conflict detection is valuable, but Beta Test 2 showed several false positives caused by equivalent values appearing in different formats. The next refinement is to normalize values before generating hard stops or warnings.
+
+5.1 Normalization Layer
+Finding
+Examples of false positive conflicts included:
+* ORBIN CONTRACTING LLC vs. Orbin Contracting LLC vs. Orbin Contracting, LLC
+* 07/15/25 vs. 7/15/2025
+* LLC vs. Limited Liability Company
+* 4800 DAHLIA ST #D13 vs. 4800 Dahlia Street D13
+* CSL vs. Combined Single Limit
+Current Gap
+Formatting and terminology differences are being treated as conflicts before normalization occurs.
+Engineering Action Items
+1. Add a normalization layer before conflict detection.
+2. Store the raw extracted value.
+3. Store the normalized comparison value.
+4. Compare normalized values.
+5. Preserve raw values for user display.
+6. Generate a conflict only if normalized values materially differ.
+Recommended sequence:
+1. Extract raw value.
+2. Store raw value.
+3. Normalize value.
+4. Compare normalized values.
+5. Preserve raw values for display.
+6. Generate conflict if normalized values materially differ.
+Acceptance Criteria
+* Raw values remain visible to the user.
+* Normalized values are used for comparison.
+* Formatting differences do not generate hard stops.
+* Only substantive unresolved differences become hard stops or review warnings.
+
+5.2 Specific Normalization Rules
+Applicant Name Normalization
+Ignore:
+* Capitalization
+* Commas
+* Periods
+* Extra spaces
+* Minor entity suffix formatting
+Example equivalent values:
+* ORBIN CONTRACTING LLC
+* Orbin Contracting LLC
+* Orbin Contracting, LLC
+Date Normalization
+Treat these as equivalent when they resolve to the same date:
+* 07/15/25
+* 7/15/2025
+* 07/15/2025
+* 2025-07-15
+Entity Type Normalization
+Add synonym mapping:
+* LLC = Limited Liability Company
+* Inc. = Incorporated
+* Corp. = Corporation
+* Co. = Company
+* Ltd. = Limited
+* LLP = Limited Liability Partnership
+* LP = Limited Partnership
+Address Normalization
+Normalize common address terms:
+* Street = St
+* Avenue = Ave
+* Road = Rd
+* Drive = Dr
+* Boulevard = Blvd
+* Suite = Ste
+* Unit = Unit or #
+* #D13 = D13
+Insurance Terminology Normalization
+Add synonym mapping:
+* CSL = Combined Single Limit
+* GL = General Liability
+* CGL = Commercial General Liability
+* WC = Workers Compensation
+* BPP = Business Personal Property
+* BI = Building
+* TIV = Total Insured Value
+* EPLI = Employment Practices Liability Insurance
+* HNOA = Hired and Non-Owned Auto
+* COPE = Construction, Occupancy, Protection, Exposure
+Carrier Alias Handling
+Example from testing:
+* Employers Mutual Casualty Company
+* EMC Property & Casualty Company
+This may require carrier alias mapping or review status rather than immediate hard conflict treatment.
+Acceptance Criteria
+* Equivalent names do not generate hard stops.
+* Equivalent dates do not generate hard stops.
+* Equivalent entity types do not generate hard stops.
+* Equivalent addresses do not generate hard stops.
+* Equivalent insurance terms do not generate hard stops.
+* CGL and Commercial General Liability are treated as equivalent.
+* Carrier alias differences are flagged for review when uncertain rather than treated as definitive hard conflicts.
+
+6. Workstream 3 - SQS, Evidence Handling & Score Recalculation
+Priority
+P1 / P2 depending on scoring category
+Summary
+SQS is useful, but several scores appeared confusing or disconnected from available evidence. The next refinement is to make scoring more explainable, evidence-aware, and responsive to remediation.
+
+6.1 SQS Transparency
+Finding
+Examples from testing included:
+* ACORD 101 had a high match score and high fill rate, but low SQS.
+* Narrative Quality scored 20% even though a narrative was uploaded.
+* Loss History remained low even when loss runs were uploaded or when the user entered "No Prior Losses."
+* Submission Readiness scored 31% in the Orbin test despite narrative support for no losses, experienced ownership, 20+ years construction experience, and an existing insurance program.
+* Umbrella Adequacy scored 100% in one test despite no umbrella information being provided.
+* In another test, umbrella information was present and appeared complete.
+Current Gap
+Users need clearer visibility into why scores were assigned and what action will improve them.
+Engineering Action Items
+1. Separate Match Score from SQS in the UI.
+  Suggested definitions:
+o Match Score - how strongly the available documents suggest a form may be relevant or fillable.
+o SQS - how complete, consistent, supported, and underwriting-ready the submission appears.
+2. Add score breakdowns by category.
+  Suggested categories:
+o Applicant Information
+o Entity Information
+o Operations Description
+o Location Information
+o Coverage Information
+o Loss History
+o Narrative Quality
+o Payroll / Employee Information
+o Revenue / Sales Information
+o COPE Information
+o Prior Carrier Information
+o Effective Date Consistency
+o Policy Term Consistency
+o Supporting Documentation
+o Cross-Document Consistency
+3. Add evidence labels.
+  Each scored item should show the evidence basis:
+o Extracted from uploaded source document
+o Confirmed by user
+o Stated in narrative
+o Inferred from business class
+o Not found
+o Conflicting
+o Not applicable
+o Requires supporting documentation
+4. Add positive scoring signals.
+  The score should credit useful information when present.
+  Examples:
+o Narrative attached
+o Clear operations description
+o No losses stated
+o Loss runs attached
+o Experienced management
+o Years in business stated
+o Existing insurance program described
+o Contractor-specific coverages discussed
+o Risk controls described
+o Locations identified
+o Coverage limits identified
+o Prior carrier identified
+o Employer handbook or safety manual provided
+o Payroll breakdown by Workers Compensation class code provided
+o Current EMOD/XMOD provided
+Acceptance Criteria
+* Match Score and SQS are clearly distinguished.
+* Each major score has a visible breakdown.
+* Users can see what evidence was used.
+* Positive evidence improves scoring.
+* User-provided answers are reflected without being treated the same as source-document evidence unless appropriate.
+
+6.2 Score Recalculation After Remediation
+Finding
+When a user answered a remediation item, such as "No Prior Losses," the recommendation disappeared but the related score did not improve.
+Engineering Action Items
+1. Recalculate relevant scores after remediation.
+2. Update field status after remediation.
+3. Update related warnings or recommendations.
+4. Update form completion status.
+5. Update submission readiness status.
+6. Add post-remediation statuses.
+Suggested post-remediation statuses:
+* Resolved
+* Improved
+* Pending validation
+* User-provided only
+* Still missing
+* Conflicting evidence remains
+* Requires supporting document
+Acceptance Criteria
+* Remediation updates scores and statuses.
+* Resolved recommendations do not continue to depress the related score without explanation.
+* User answers are visible as evidence.
+* User-provided answers are labeled separately from source-document evidence.
+
+6.3 Narrative Quality Logic
+Finding
+Narrative handling was a recurring issue.
+Beta Test 1 included a narrative with:
+* Account overview
+* Operations description
+* Risk management procedures
+* Liability exposures
+* Carrier considerations
+Beta Test 2 included a narrative with:
+* Operations description
+* Experience details
+* Risk management information
+* Loss history
+* Coverage discussion
+In both cases, narrative handling did not fully translate into scoring or classification.
+Engineering Action Items
+1. Create a Narrative Quality model.
+  Score against specific components:
+o Account Overview
+o Operations Description
+o Years in Business
+o Management Experience
+o Risk Controls
+o Loss History Discussion
+o Coverage Discussion
+o Growth Trends
+o Target Markets
+o Location Details
+o Employee / Payroll Context
+o Prior Carrier Context
+2. Use narrative evidence to reduce unnecessary questions.
+  If the narrative already answers a question, do not automatically send that question to the client.
+3. Label narrative evidence separately.
+  Suggested label:
+o Stated in narrative
+4. Allow narrative deficiencies to become targeted recommendations.
+  Example:
+  "Narrative includes operations and loss history, but does not include years in business or management experience."
+Acceptance Criteria
+* Narratives are recognized and incorporated into scoring.
+* Narrative quality is broken down by component.
+* Narrative-supported answers reduce duplicate or unnecessary client questions.
+* Missing narrative components become targeted recommendations.
+
+6.4 Loss History Logic
+Finding
+In Beta Test 1:
+* Loss runs were uploaded.
+* Claim information was extracted.
+* Loss History Score remained 10%.
+* User entered "No Prior Losses."
+* The recommendation disappeared.
+* The score did not improve.
+In Beta Test 2, the narrative stated no losses, but the score still appeared overly punitive.
+Engineering Action Items
+1. Create loss history states.
+  Suggested states:
+o No Loss Information Provided
+o Narrative States No Losses
+o User States No Prior Losses
+o Loss Runs Uploaded
+o Loss Runs Parsed
+o Loss Runs Match Insured
+o Loss Runs Do Not Match Insured
+o Loss Data Reconciled
+o Loss History Conflicting
+o Loss History Pending Validation
+2. Tie loss runs to insured matching.
+  Before crediting loss runs, confirm they appear to match the insured.
+3. Differentiate user confirmation from source-document evidence.
+  "No Prior Losses" entered by the user should improve the status, but should be labeled as user-provided unless supported by loss runs or other documentation.
+4. Update score and warning after loss remediation.
+  If a recommendation disappears, the related score/status should update as well.
+Acceptance Criteria
+* Loss history status reflects actual evidence.
+* Loss runs are matched to insured before crediting them.
+* User-provided loss answers update score/status.
+* The system distinguishes narrative evidence, user-entered evidence, and source-document evidence.
+
+6.5 Umbrella / Excess Adequacy Logic
+Finding
+In Beta Test 1, Umbrella Adequacy scored 100% even though no umbrella information was provided.
+In Beta Test 2, umbrella information was present and the umbrella section appeared complete.
+Engineering Action Items
+1. Create umbrella evidence states.
+  Suggested states:
+o Not Applicable
+o Unknown
+o Insufficient Information
+o Umbrella Information Provided
+o Umbrella Coverage Present
+o Umbrella Coverage Needs Review
+o Adequately Supported
+2. Only award full score when evidence supports it.
+  A 100% score is appropriate when umbrella details are present and complete. It should not be awarded only because no umbrella information was found.
+3. Validate underlying coverage limits against umbrella requirements.
+  The system should compare umbrella/excess requirements against underlying policies and identify situations where required underlying limits are missing, insufficient, or unsupported.
+  Examples:
+o General Liability limits below required attachment points
+o Auto Liability limits below umbrella requirements
+o Employers Liability limits below required underlying thresholds
+o Missing underlying coverage required by the umbrella form
+4. Evaluate follow-form compatibility.
+  Primble should identify whether the umbrella/excess policy appears to follow form with the underlying coverages or whether endorsements, exclusions, or coverage structure suggest additional review is needed.
+  Suggested statuses:
+o Follow Form Confirmed
+o Likely Follow Form
+o Unable to Determine
+o Potential Coverage Gap
+o Requires Underwriter Review
+5. Flag potential umbrella coverage gaps.
+  When umbrella limits, attachment points, underlying schedules, or follow-form indicators cannot be validated, the system should generate a review item explaining what information is missing and why it matters.
+Acceptance Criteria
+* Umbrella adequacy requires supporting evidence for full credit.
+* Underlying coverage limits are validated against umbrella/excess requirements.
+* Potential follow-form issues are identified and surfaced for review.
+* Missing umbrella evidence produces an Unknown or Insufficient Information state rather than a perfect score.
+
+7. Workstream 4 - ACORD Form Recommendation Logic
+Priority
+P1 for state filtering
+P2 for ranking, explanation, and list control
+Summary
+The form recommendation engine produced useful suggestions in both tests, but the recommendation list needs refinement. The next step is to make recommendations better filtered, easier to understand, and more aligned with underwriting workflow.
+
+7.1 Form Recommendation Findings
+Beta Test 1 recommendations included:
+* ACORD 101
+* ACORD 125
+* ACORD 126
+* ACORD 141
+* ACORD 140
+Beta Test 2 recommendations included:
+* ACORD 125
+* ACORD 126
+* ACORD 127
+* ACORD 131
+* ACORD 137
+* ACORD 160
+* ACORD 101
+* ACORD 130
+* ACORD 25
+* ACORD 83
+* ACORD 140
+* ACORD 133
+* California-specific forms, including ACORD 137 CA and ACORD 138 CA
+Some were appropriate. Others need stronger filtering or clearer explanation.
+
+7.2 Engineering Action Items
+1. Add form recommendation reasons.
+  Each form should include a short reason.
+  Examples:
+o Required based on selected package type
+o Recommended based on contractor operations
+o Recommended based on uploaded dec page
+o Recommended because GL exposure was detected
+o Optional based on possible exposure
+o Needs user confirmation
+o State-specific form based on California exposure
+2. Add recommendation tiers.
+  Suggested tiers:
+o Required
+o Recommended
+o Optional
+o Needs Confirmation
+3. Add confidence indicators.
+  Keep match score, but do not rely on it alone.
+  A form can be low-fill but still relevant. Example: ACORD 130 for a contractor where payroll data is missing.
+4. Filter state-specific forms.
+  State-specific forms should only appear when:
+o The insured state matches the form state.
+o A location in that state exists.
+o Operations in that state exist.
+o The user manually selects that state.
+o A coverage or exposure specifically requires that state form.
+5. Reduce overly broad recommendation lists.
+  Filter recommendations by:
+o Account type
+o Business class
+o State
+o Coverage lines detected
+o Uploaded documents
+o Exposure evidence
+o User-selected goals
+o Required vs optional workflow relevance
+6. Distinguish uploaded source documents from forms to generate.
+  Example:
+  ACORD 25 - Certificate of Liability Insurance
+Status: Source document detected
+Suggested action: Generate clean version only if needed
+7. Add line-of-business logic for form ranking.
+  For contractor risks, example grouping:
+  Required
+o ACORD 125
+o ACORD 126
+o ACORD 127
+o ACORD 131
+  Recommended
+o ACORD 186
+o ACORD 140
+o ACORD 141
+  Optional / Confirm Need
+o ACORD 160
+o ACORD 101
+Acceptance Criteria
+* State-specific forms only appear when supported by state or exposure.
+* Each recommended form has a visible reason.
+* Forms are grouped by Required, Recommended, Optional, or Needs Confirmation.
+* Business-class recommendations are clearly labeled.
+* Low fill score does not make a relevant form appear irrelevant.
+* Recommendation lists are not inflated with weakly related forms.
+* Uploaded source documents are distinguished from forms recommended for generation.
+
+8. Workstream 5 - Remediation & Client Questionnaire Controls
+Priority
+P1. Critical for questionnaire volume and score recalculation
+P2. Important for workflow refinement
+Summary
+The remediation concept is strong, but the questionnaire workflow needs tighter controls. The system should not convert every missing field or internal mapping item into a client-facing question.
+
+8.1 Client Questionnaire Findings
+In Beta Test 2, the client questionnaire appeared to include approximately 1,790+ selected questions.
+Visible examples included:
+* Business location mismatch
+* Producer fax number
+* National identifier
+* Policy coverage code
+Not all of these should be sent to a client.
+
+8.2 Engineering Action Items
+1. Categorize remediation items by audience.
+  Suggested audiences:
+o Client-facing
+o Producer-facing
+o Internal/system
+o Carrier/underwriter review
+o Do not send
+2. Categorize questions by priority.
+  Suggested priorities:
+o Critical
+o Important
+o Optional
+o Internal only
+o Suppressed
+3. Default to a curated question set.
+  Recommended default:
+o Critical client-answerable questions selected
+o Important client-answerable questions suggested
+o Producer/internal items deselected
+o Technical/system fields hidden or separated
+4. Suppress questions that should not go to the client.
+  Examples generally not suitable for default client questions:
+o Producer fax number
+o Internal coverage codes
+o System identifiers
+o National identifier fields unless contextually necessary
+o Duplicate questions
+o Questions already answered in uploaded documents
+o Questions already answered in the narrative
+5. Group questions by topic and form.
+  Suggested groups:
+o Applicant Information
+o Operations
+o Locations
+o Property
+o General Liability
+o Auto
+o Workers Compensation
+o Umbrella
+o Loss History
+o Producer Review
+6. Show score impact.
+  Indicate which questions materially improve:
+o SQS
+o Form completion
+o Submission readiness
+o Hard stop resolution
+7. Recalculate after answers are received.
+  Client answers should update:
+o Missing field status
+o Related warnings
+o SQS
+o Form readiness
+o Submission readiness
+Acceptance Criteria
+* The default questionnaire does not select every missing field.
+* Client-facing questions are plain-language and answerable.
+* Internal and producer-side items are not automatically sent to clients.
+* Questions are grouped by topic, audience, and priority.
+* Users can send only critical or recommended questions.
+* Scores and warnings update after answers are submitted.
+
+9. Workstream 6 - UX Status, Processing & Generation Feedback
+Priority
+P2 for readiness/status language
+P3 for general UX polish
+P2 if long generation times are common
+Summary
+The upload and processing experience was generally strong. The main UX refinements are clearer readiness/status labels, better pre-processing visibility, and more granular progress feedback during longer form generation cycles.
+
+9.1 Workflow Status and Readiness Labels
+Finding
+In the form selection workflow, the UI displayed a status similar to:
+Primble - Ready / Your documents have finished processing
+At the same time, hard stops, warnings, and review items were still present.
+Current Gap
+"Ready" can mean several different things:
+* Processing complete
+* Ready for review
+* Ready for form selection
+* Ready for generation
+* Ready for download
+* Submission ready
+These meanings should not be collapsed into one label.
+Engineering Action Items
+1. Create a status hierarchy.
+  Suggested statuses:
+o Upload Complete
+o Processing
+o Processing Complete
+o Documents Processed
+o Submission Integrity Review Needed
+o Hard Stops Present
+o Review Required
+o Ready for Form Selection
+o Ready for Generation
+o Forms Generated
+o Ready for Download
+o Submission Ready
+2. Reserve "Submission Ready" for the final state.
+  "Ready" should not appear if hard stops or critical review items remain.
+3. Use more precise toast/status messages.
+  Instead of:
+  Ready
+  Use:
+  Documents processed. Review required before generation.
+  Or:
+  Processing complete. Hard stops require review.
+  Or:
+  Processing complete. Submission readiness has not been confirmed.
+4. Tie status to unresolved issue count.
+  Example:
+o Hard Stops Present - 3 items require review
+o Review Required - 8 warnings found
+o Ready for Generation - no blocking hard stops
+Acceptance Criteria
+* "Ready" does not appear while hard stops are unresolved.
+* Processing completion is separated from submission readiness.
+* Users know whether they are ready to select forms, generate forms, download forms, or send a submission.
+* Status labels match actual package state.
+
+9.2 Upload and Processing Experience
+What Worked Well
+The upload experience was strong.
+Observed positives:
+* Drag-and-drop area is intuitive.
+* Uploaded documents were accepted without issue.
+* File names were clearly visible.
+* The Analyze button was prominent.
+* The experience felt clean.
+The processing experience was also strong.
+Observed positives:
+* Processing steps were understandable.
+* The user knew the system was working.
+* The progress screen felt professional.
+Engineering Action Items
+Add pre-processing visibility:
+* Document type prediction
+* File page count
+* OCR readiness indicator
+* File status before analysis
+Keep the current processing structure. Copy can be refined later, but this is not a near-term blocker.
+Acceptance Criteria
+* Users know what documents were uploaded.
+* Users receive early document type predictions.
+* Users know whether OCR is likely to succeed.
+* Users understand where they are in the processing sequence.
+
+9.3 Form Generation Experience
+Finding
+One form generation sequence took approximately 12 minutes.
+Engineering Action Items
+If generation times regularly exceed 3-5 minutes, add more granular progress feedback:
+* Preparing form package
+* Generating ACORD 125 - 1 of 8
+* Generating ACORD 126 - 2 of 8
+* Generating ACORD 140 - 3 of 8
+* Validating generated fields
+* Preparing download
+Also consider showing:
+* Number of forms completed
+* Number remaining
+* Estimated time remaining
+* Current form being generated
+Acceptance Criteria
+* Long generation times feel controlled rather than stalled.
+* Users can see which stage is currently running.
+* Users can see approximate progress through the form package.
+
+10. Product Strengths to Preserve
+The beta round also confirmed several strengths that should be preserved.
+Conflict Detection
+Primble is already detecting meaningful cross-document issues, including:
+* Different insureds across uploaded documents
+* Entity type inconsistencies
+* Address inconsistencies
+* Operations inconsistencies
+* Policy number inconsistencies
+* Location count mismatches
+* Missing COPE information
+* Missing wind / hail deductible information
+Hard Stop Concept
+The hard stop structure is useful when applied to true submission issues. It should remain part of the product.
+Submission Readiness Framework
+The Submission Readiness section is useful and should continue to be expanded.
+Helpful missing items included:
+* FEIN
+* Annual Revenue
+* Employee Count
+* Years in Business
+* Payroll
+* X-Mod
+* NAICS Code
+* SIC Code
+Note: NAICS and SIC codes are often important submission elements, although underwriters may ultimately adjust or map these classifications differently based on carrier-specific underwriting requirements.
+Form Recommendation Engine
+The recommendation engine is already producing useful recommendations. The next step is to make it more explainable, better filtered, and better ranked.
+Remediation Workflow
+The remediation workflow remains valuable. The main refinements are prioritization, audience filtering, questionnaire control, and score recalculation.
+
+11. Open Product Decisions
+Submission Integrity
+1. Should Submission Integrity Validation be a hard gate or a warning with user override?
+2. What confidence threshold should trigger a pause?
+3. Should "Create Separate Submissions" be included now, or should the first version support only document removal and continue anyway?
+Document Classification
+4. Should users be able to manually reclassify documents?
+5. Should corrected classification automatically trigger rescoring?
+6. Should unknown documents be allowed to influence SQS?
+7. How heavily should filename signals influence classification compared with document content?
+Narrative Scoring
+8. What minimum elements should define a complete submission narrative?
+9. Should narrative quality vary by industry or coverage type?
+10. Should a strong narrative reduce the number of client questions generated?
+SQS
+11. How much credit should be given to user-entered answers versus uploaded supporting documents?
+12. Should narrative statements count as supporting evidence or partial evidence?
+13. Should "No Prior Losses" require supporting loss runs to receive full credit?
+14. Should scores be displayed as numeric values, status labels, or both?
+15. Should positive scoring be visible to users, or only reflected in the score?
+Forms
+16. Should form recommendations be based on match score, underwriting necessity, business class, or a weighted combination?
+17. How should state-specific ACORD forms be selected when multiple states are involved?
+18. Should users be able to manually override form recommendations?
+19. Should already-uploaded source forms be treated differently from forms recommended for generation?
+Client Questionnaire
+20. What is the maximum reasonable number of default client questions?
+21. Should the system default to critical questions only?
+22. Should producers approve every question before sending?
+23. Should some questions be marked "internal only" by default?
+24. Should questions that do not improve SQS or form completion be hidden by default?
+Status Language
+25. What does "Ready" mean in Primble?
+26. Should there be separate statuses for processing readiness, form generation readiness, and submission readiness?
+27. Should hard stops block "Ready" status?
+
+12. Final Development Priorities
+P1. Critical
+1. Add Submission Integrity Validation before scoring, form recommendations, and generation.
+2. Improve document classification, especially for narratives and loss runs.
+3. Use filename and content signals to classify submission narratives before marking documents Unknown.
+4. Define standards for what makes a submission narrative recognizable and complete.
+5. Normalize applicant names before conflict detection.
+6. Normalize dates before conflict detection.
+7. Normalize addresses before conflict detection.
+8. Normalize entity types before conflict detection.
+9. Normalize common insurance terminology before conflict detection.
+10. Filter state-specific forms based on insured state, exposure state, or user selection.
+11. Incorporate narrative data into SQS scoring.
+12. Improve loss history logic and loss history states.
+13. Recalculate scores after remediation.
+14. Prevent excessive client questionnaire generation.
+15. Prevent internal, system, and form metadata questions from being auto-selected for client questionnaires.
+16. Ensure false formatting differences do not become hard stops.
+17. Add status hierarchy so "Ready" does not appear when hard stops or review requirements remain.
+P2. Important
+18. Explain Match Score vs. SQS.
+19. Add visible scoring breakdowns.
+20. Add positive scoring signals.
+21. Distinguish missing, unavailable, unknown, not applicable, inferred, user-provided, and source-supported data.
+22. Improve umbrella adequacy logic.
+23. Add form recommendation confidence tiers.
+24. Rank forms by underwriting necessity, not only match percentage.
+25. Reduce overly broad form recommendation lists.
+26. Explain form recommendations based on business class.
+27. Distinguish uploaded source documents from forms recommended for generation.
+28. Convert technical warnings into business language.
+29. Clean up form viewer/sidebar recommendation language.
+30. Add carrier alias or carrier relationship handling.
+31. Allow users to confirm or correct document classification.
+32. Add clearer status labels for evidence quality.
+33. Upgrade form generation progress indicators if generation regularly takes several minutes.
+P3. UX Polish
+34. Show document type prediction before processing.
+35. Show file page count.
+36. Show OCR readiness indicator.
+37. Refine processing screen copy over time.
+38. Show current form being generated.
+39. Show number of forms completed.
+40. Show estimated time remaining during generation.
+
+13. Bottom Line
+The first beta round produced useful and actionable feedback.
+The product is already identifying important submission issues, including missing underwriting data, document conflicts, form needs, hard stops, and remediation opportunities.
+The next development cycle should focus on three areas:
+1. Better sequencing and classification
+Confirm document integrity and document type before running downstream workflows.
+2. More reliable scoring and evidence handling
+Make SQS explainable, update scores after remediation, and distinguish between source-supported, user-provided, inferred, missing, and conflicting information.
+3. Cleaner workflow controls
+Improve form recommendations, warning language, status labels, and client questionnaire filtering.
+These improvements should make the platform more predictable, more trustworthy, and easier for users to act on during real submission preparation.

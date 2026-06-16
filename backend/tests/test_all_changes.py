@@ -234,31 +234,34 @@ except Exception as e:
 # TEST 8 — sqs_service.py (loss history gradient scorer)
 # ──────────────────────────────────────────────────────────────────────────────
 try:
-    from services.sqs_service import _loss_history_score
+    # Renamed to calculate_p4_loss_history (tuple return) with client-Q3 tiers.
+    from services.sqs_service import calculate_p4_loss_history
 
-    # Has history + carrier + 2 claims + 50k incurred → score should be high
-    s1 = _loss_history_score(
+    # 5+ years currently valued + prior carrier → full credit (Q3)
+    s1, _ = calculate_p4_loss_history(
         facts={
-            "prior_carrier":   {"value": "Travelers", "ocr_confident": True},
-            "num_claims":      {"value": "2",         "ocr_confident": True},
-            "total_incurred":  {"value": "50000",     "ocr_confident": True},
+            "loss_history_years": {"value": "5"},
+            "loss_run_age_days":  {"value": "30"},
+            "prior_carrier":      {"value": "Travelers"},
         },
-        flags={"has_loss_history": True},
+        flags={},
     )
-    assert s1 >= 85, f"Expected >=85 for full history, got {s1}"
+    assert s1 >= 90, f"Expected full credit for 5yr valued history, got {s1}"
 
-    # High claim count (8) → penalty applied → score lower than s1
-    s2 = _loss_history_score(
-        facts={
-            "num_claims": {"value": "8", "ocr_confident": True},
-        },
-        flags={"has_loss_history": True},
+    # 3 years currently valued → partial credit, below full (Q3)
+    s2, _ = calculate_p4_loss_history(
+        facts={"loss_history_years": {"value": "3"}, "loss_run_age_days": {"value": "30"}},
+        flags={},
     )
-    assert s2 < s1, f"High claim count should score lower than s1={s1}, got s2={s2}"
+    assert s2 < s1, f"3yr partial should score below full, got s2={s2} vs s1={s1}"
 
-    # Nothing provided → baseline 50
-    s3 = _loss_history_score(facts={}, flags={})
-    assert s3 == 50, f"Expected 50 baseline, got {s3}"
+    # Nothing provided → 25 baseline (client V1 approved, updated from 10)
+    s3, _ = calculate_p4_loss_history(facts={}, flags={})
+    assert s3 == 25, f"Expected 25 for no loss info, got {s3}"
+
+    # User/narrative attests no prior losses → credited (Q3 / §6.4)
+    s4, _ = calculate_p4_loss_history(facts={}, flags={"no_prior_losses": True})
+    assert s4 >= 50, f"Expected attestation credit, got {s4}"
 
     _record("loss_history_gradient", True)
 except AssertionError as e:
@@ -352,8 +355,14 @@ try:
     import services.cover_service as _cover_mod
     from services.cover_service import generate_ai_cover_narrative
 
+    # Unique applicant → cover cache key (md5 of applicant|forms|sqs|org) is
+    # guaranteed cold in BOTH cache layers: the in-process L1 (_EXTRACT_CACHE)
+    # AND the shared Redis L2 (1h TTL). The earlier version cleared only L1, so
+    # once Redis was warmed by a prior run the first call hit L2 and groq was
+    # never invoked → 0 calls → false failure. A novel key forces miss-then-hit.
+    import uuid as _uuid
     facts_c = {
-        "applicant_name": {"value": "Test Corp", "ocr_confident": True},
+        "applicant_name": {"value": f"Test Corp {_uuid.uuid4().hex[:8]}", "ocr_confident": True},
         "lines_of_business": ["GL"],
     }
     flags_c = {}
@@ -375,7 +384,9 @@ try:
     # Patch the name in cover_service's own namespace
     _cover_mod.groq_chat = _counting_groq
 
-    # Clear any in-process cache entry that might already exist
+    # Belt-and-suspenders: also drop any stale L1 cover entries. (The unique
+    # applicant above is what actually guarantees a cold start across both the
+    # L1 dict and the shared Redis L2 — this clear alone cannot evict Redis.)
     from services.extraction_service import _EXTRACT_CACHE
     keys_to_del = [k for k in list(_EXTRACT_CACHE.keys()) if k.startswith("cover_ai:")]
     for k in keys_to_del:

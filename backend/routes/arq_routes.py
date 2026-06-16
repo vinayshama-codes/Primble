@@ -26,6 +26,14 @@ from services.arq_service import (
     send_arq_reminder,
     submit_arq_answers,
 )
+from services.arq_service import recalculate_session_scores
+from services.question_classifier import (
+    AUDIENCE_CLIENT,
+    DEFAULT_SELECT_CAP,
+    TOPIC_LABELS,
+    TOPIC_ORDER,
+    apply_default_selection,
+)
 from services.auth_service import get_current_user
 from services.email_service import send_arq_email, send_arq_submitted_notification
 from utils.rate_limiter import check_arq_public_rate_limit, check_arq_submit_rate_limit, check_arq_chat_rate_limit, get_client_ip
@@ -80,6 +88,11 @@ async def generate_questions(
         new_cf = [q for q in cf_questions if q["field_name"] not in existing_fields]
         questions = new_cf + questions
 
+    # Re-apply the curated default-selection policy across the FULL merged list so
+    # the soft cap on pre-selected questions is global, not per-generator
+    # (Beta Report §8.2 item 3 + §11 #20).
+    selection_summary = apply_default_selection(questions)
+
     producer_full_name  = current_user.get("full_name", "") or current_user.get("email", "")
     producer_first_name = producer_full_name.split()[0] if producer_full_name else ""
 
@@ -87,6 +100,10 @@ async def generate_questions(
         "success":             True,
         "questions":           questions,
         "total_count":         len(questions),
+        "selection_summary":   selection_summary,
+        "default_select_cap":  DEFAULT_SELECT_CAP,
+        "topic_order":         TOPIC_ORDER,
+        "topic_labels":        TOPIC_LABELS,
         "producer_full_name":  producer_full_name,
         "producer_first_name": producer_first_name,
     })
@@ -112,7 +129,7 @@ async def send_arq(
         raise HTTPException(400, "Invalid client email address")
     if not questions:
         raise HTTPException(400, "At least one question is required")
-    if len(questions) > 500:
+    if len(questions) > 1000:
         raise HTTPException(400, "Too many questions in a single ARQ")
 
     try:
@@ -133,14 +150,33 @@ async def send_arq(
 
     clean_questions = []
     for q in guarded_questions:
-        clean_questions.append({
+        si = q.get("score_impact") if isinstance(q.get("score_impact"), dict) else {}
+        q_entry = {
             "field_name":    _sanitize_str(q.get("field_name", ""), 128),
             "question":      _sanitize_str(q.get("question", ""), 500),
+            "hint":          _sanitize_str(q.get("hint", ""), 500),
             "forms":         _sanitize_str(q.get("forms", ""), 100),
             "form_ids":      q.get("form_ids", []),
             "field_type":    _sanitize_str(q.get("field_type", "text"), 32),
             "current_value": "",
-        })
+            # Carry the curation taxonomy so the stored ARQ keeps its grouping /
+            # audience / score-impact context (Beta Report §8).
+            "audience":      _sanitize_str(q.get("audience", AUDIENCE_CLIENT), 32),
+            "priority":      _sanitize_str(q.get("priority", "optional"), 32),
+            "topic_group":   _sanitize_str(q.get("topic_group", "other"), 48),
+            "topic_label":   _sanitize_str(q.get("topic_label", "Other"), 64),
+            "score_impact":  {
+                "sqs":                  bool(si.get("sqs")),
+                "form_completion":      bool(si.get("form_completion")),
+                "submission_readiness": bool(si.get("submission_readiness")),
+                "hard_stop_resolution": bool(si.get("hard_stop_resolution")),
+            },
+        }
+        # Preserve select options so the client questionnaire can render a dropdown
+        raw_opts = q.get("options")
+        if isinstance(raw_opts, list) and raw_opts:
+            q_entry["options"] = [_sanitize_str(str(o), 200) for o in raw_opts]
+        clean_questions.append(q_entry)
 
     arq_data = await create_arq_session(
         processing_session_id=session_id,
@@ -219,8 +255,9 @@ async def client_view(token: str, request: Request):
         except Exception:
             draft_answers = {}
 
-    questions_for_client = [
-        {
+    questions_for_client = []
+    for q in arq.get("questions", []):
+        q_item = {
             "field_name":    q["field_name"],
             "question":      q["question"],
             "hint":          q.get("hint", ""),
@@ -228,8 +265,9 @@ async def client_view(token: str, request: Request):
             "field_type":    q.get("field_type", "text"),
             "current_value": "",
         }
-        for q in arq.get("questions", [])
-    ]
+        if q.get("field_type") == "select" and isinstance(q.get("options"), list):
+            q_item["options"] = q["options"]
+        questions_for_client.append(q_item)
 
     return JSONResponse({
         "success":        True,
@@ -318,6 +356,30 @@ async def submit_arq(token: str, request: Request):
         processing_session_id=arq["session_id"],
     )
 
+    # Recalculate scores/stops/readiness so the producer sees the impact of the
+    # client's answers on next view (Beta Report §6.2 / §8.2.7). Pure-Python and
+    # cheap; failures here must not break the client's submission confirmation.
+    score_update = {}
+    if apply_ok and applied_fields:
+        try:
+            score_update = await recalculate_session_scores(arq["session_id"])
+        except Exception as _recalc_ex:
+            logger.error(f"ARQ submit: score recalculation failed: {_recalc_ex}", exc_info=True)
+
+    # §6.2: persist remediation status + answer count so the producer sees them
+    # in the ARQ panel without re-running the recalculation.
+    if score_update.get("ok") and score_update.get("status"):
+        try:
+            async with get_pool().acquire() as conn:
+                await conn.execute(
+                    "UPDATE arq_sessions SET remediation_status=$1, fields_answered_count=$2 WHERE id=$3",
+                    score_update["status"],
+                    len(sanitized_answers),
+                    arq["id"],
+                )
+        except Exception as _persist_ex:
+            logger.error(f"ARQ submit: failed to persist remediation_status: {_persist_ex}")
+
     await create_arq_notification(arq["id"], arq["user_id"], "submitted")
 
     try:
@@ -345,6 +407,7 @@ async def submit_arq(token: str, request: Request):
         "success":        True,
         "message":        "Answers submitted successfully.",
         "fields_updated": len(applied_fields),
+        "score_update":   score_update,
     })
 
 
@@ -455,7 +518,8 @@ async def list_arqs(
     check_payment_access(current_user.get("payment_status", "ok"), "form")
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, status, email, client_name, created_at, submitted_at, expires_at, reminder_count "
+            "SELECT id, status, email, client_name, created_at, submitted_at, expires_at, "
+            "reminder_count, remediation_status, fields_answered_count "
             "FROM arq_sessions WHERE session_id=$1 AND user_id=$2 ORDER BY created_at DESC",
             session_id, current_user["id"],
         )

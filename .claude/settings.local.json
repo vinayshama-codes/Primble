@@ -113,12 +113,13 @@
       "Bash(mv \"c:/Users/lenovo/Desktop/Primble/backend/forms_schemas/_canonical_facts.json\" \"c:/Users/lenovo/Desktop/Primble/backend/forms_aliases/\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK: pdf_service.py parses'\\)\")",
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/pdf_service.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/sqs_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/sqs_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python3 -c \"import json; s=json.load\\(open\\('/c/Users/lenovo/Desktop/Primble/backend/forms_schemas/ACORD_125_schema.json'\\)\\); print\\(f'Total fields: {len\\(s.get\\(\\\\\"fields\\\\\", []\\)\\)}'\\)\")",
+      "Bash(xargs -I {} bash -c 'echo -n \"{}: \" && grep -c \"^@router\\\\.\" {} 2>/dev/null || echo \"0\"')",
+      "Bash(python3)"
     ],
     "additionalDirectories": [
-      "c:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend",
-      "C:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2\\backend\\forms_database",
-      "C:\\Users\\lenovo\\Desktop\\ACORD-PY-VERSION2"
+
     ]
   }
 }

@@ -21,8 +21,8 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
 logger = logging.getLogger(__name__)
 
 # ── Cache versioning (Fix 3) ──────────────────────────────────────────────────
-PROMPT_VERSION = "v6"
-SCHEMA_VERSION = "v6"
+PROMPT_VERSION = "v7"
+SCHEMA_VERSION = "v7"
 
 # ── Model context config ──────────────────────────────────────────────────────
 _MODEL_CHUNK_CHARS: Dict[str, int] = {
@@ -74,6 +74,9 @@ _EXTRACT_SCHEMA = (
     '  "total_revenue": string or null, "total_payroll": string or null,\n'
     '  "num_employees": string or null, "locations": [string],\n'
     '  "operations_description": string or null,\n'
+    # Narrative-only: high-level account/executive summary distinct from operations.
+    # Populated ONLY for underwriting narrative / submission narrative docs; null elsewhere.
+    '  "account_description": string or null,\n'
     # PRIOR/PREVIOUS policy — separate namespace, never overwrite current policy keys
     '  "prior_carrier": string or null,\n'
     '  "prior_policy_number": string or null,\n'
@@ -123,6 +126,8 @@ _EXTRACT_SCHEMA = (
     '  "umbrella_limit": string or null, "umbrella_sir": string or null,\n'
     '  "umbrella_attachment_point": string or null,\n'
     '  "underlying_policies": [{"line": string, "limit": string, "carrier": string, "policy_no": string}],\n'
+    '  "schedule_of_underlying_insurance": string or null,\n'
+    '  "umbrella_follow_form": string or null,\n'
     '  "employers_liability_limits": string or null,\n'
     '  "percent_subcontracted": string or null,\n'
     '  "contractor_type": string or null, "num_claims": string or null,\n'
@@ -319,6 +324,23 @@ _EXTRACT_PROMPT_PREFIX = (
     'primary operations are located. Determine this from the mailing address, physical address, garaging address, '
     'or any explicit state reference in the document. If multiple states appear, use the state in the mailing or '
     'physical address of the named insured. Return null only if no state can be determined.\n\n'
+    'RULE 9 — Revenue / payroll temporal precision:\n'
+    '  • total_revenue: extract the CURRENT or MOST RECENT COMPLETED YEAR figure only.\n'
+    '    If the document contains both a prior year figure and a current year figure, extract ONLY the current year.\n'
+    '    If only one figure is present, extract that figure regardless of label.\n'
+    '    NEVER blend, average, or choose a projected/future figure over a stated current figure.\n'
+    '    Example: "Prior year revenue was $1,200,000. Current year gross sales are $2,500,000." → extract $2,500,000.\n'
+    '    Example: "Annual Revenue: $1,500,000" (no year context) → extract $1,500,000.\n'
+    '  • total_payroll: same rule — extract the current/most recent year figure only.\n\n'
+    'RULE 10 — account_description (narrative documents only):\n'
+    '  Populate `account_description` ONLY when the document is an underwriting narrative, '
+    'submission narrative, account summary, executive summary, or account overview document. '
+    'Extract the opening executive-summary paragraph or any block explicitly labeled '
+    '"Account Overview", "Account Summary", "Company Overview", "Background", or '
+    '"Executive Summary". This field captures the broker\'s high-level account pitch — '
+    'distinct from the factual `operations_description` (what the business does). '
+    'Set `account_description` to null for dec pages, applications, loss runs, certificates, '
+    'and all other structured documents that are not narrative account summaries.\n\n'
     'Return ONLY a valid JSON object with exactly these two top-level keys:\n\n'
     + _EXTRACT_SCHEMA
     + '\n\nReturn ONLY the JSON object. No markdown fences, no explanation, no extra text. '
@@ -533,13 +555,20 @@ async def _cache_set(key: str, value: dict) -> None:
             logger.warning(f"Redis set failed, in-process only: {ex}")
 
 
-# ── Document-type identification ──────────────────────────────────────────────
-# Each keyword tuple is (keyword, weight).
-# High-weight keywords are strong type signals (appear almost exclusively in that doc type).
-# Low-weight keywords are supporting signals (can appear in multiple types).
-# Endorsement keywords "additional insured" / "waiver of subrogation" are intentionally
-# LOW weight because they appear on applications, certs, and dec pages too.
-# The endorsement type requires its HIGH-weight keywords to win.
+# ── Document-type identification (Beta Report §4.2) ───────────────────────────
+# Classification fuses three signals, in priority order:
+#   1. CONTENT keywords  (primary)  — DOC_TYPE_KEYWORDS below.
+#   2. NARRATIVE rules   (content)  — _NARRATIVE_SIGNALS: a doc with several
+#      underwriting-narrative signals is classified `narrative` even though it
+#      has no single strong keyword (the Beta Test 1/2 "Unknown narrative" bug).
+#   3. FILENAME signals  (supporting, NOT overriding) — _FILENAME_SIGNALS adds a
+#      bounded bonus to a type that already has some content support, and can
+#      only classify on its own at LOW confidence.
+#
+# Each keyword tuple is (keyword, weight). High-weight keywords are strong type
+# signals (appear almost exclusively in that doc type); low-weight keywords are
+# supporting signals that can appear across types. The taxonomy mirrors the
+# Beta Report §4.2 action item #1 list, collapsed to canonical snake_case keys.
 DOC_TYPE_KEYWORDS: Dict[str, List[Tuple[str, float]]] = {
     "dec_page": [
         ("declarations page", 3.0), ("dec page", 3.0), ("policy declarations", 3.0),
@@ -553,17 +582,97 @@ DOC_TYPE_KEYWORDS: Dict[str, List[Tuple[str, float]]] = {
         ("certificate holder", 2.0), ("evidence of insurance", 2.0),
     ],
     "loss_run": [
-        ("loss run", 3.0), ("loss history", 3.0), ("paid losses", 2.0),
-        ("date of loss", 2.0), ("claimant", 1.5),
-        ("incurred", 1.0), ("reserve", 1.0),
+        # Specific / tabular signals — strong. A real loss run carries several.
+        ("loss run", 3.0), ("loss runs", 3.0), ("date of loss", 2.0), ("loss date", 2.0),
+        ("paid losses", 2.0), ("claim number", 2.0), ("claimant", 1.5),
+        ("incurred", 1.0), ("reserve", 1.0), ("paid", 0.5), ("open", 0.3),
+        # Prose-y phrases — intentionally MODERATE so a single narrative mention of
+        # "loss history" does not, on its own, override narrative classification.
+        ("loss history", 2.0), ("claims history", 2.0), ("claim history", 2.0),
+        ("loss experience", 2.0),
+    ],
+    "narrative": [
+        ("underwriting narrative", 3.0), ("submission narrative", 3.0),
+        ("carrier narrative", 3.0), ("account narrative", 3.0),
+        ("executive summary", 2.5), ("account overview", 2.5), ("account summary", 2.5),
+        ("submission summary", 2.5), ("company overview", 2.0), ("business narrative", 2.0),
+        ("narrative", 1.5), ("overview", 0.5),
+    ],
+    "supplemental_application": [
+        ("supplemental application", 3.0), ("contractors supplemental", 3.0),
+        ("acord 186", 3.0), ("supplemental questionnaire", 2.5),
+        ("supplement", 1.0),
+    ],
+    "sov": [
+        ("statement of values", 3.0), ("schedule of values", 3.0),
+        ("total insured value", 2.5), ("total insurable value", 2.5),
+        ("building value", 1.0), ("replacement cost", 1.0),
+    ],
+    "cope_report": [
+        ("cope report", 3.0), ("construction occupancy protection exposure", 3.0),
+        ("construction, occupancy, protection", 3.0),
+        ("protection class", 1.5), ("year built", 1.0), ("roof type", 1.0),
+    ],
+    "payroll_report": [
+        ("payroll report", 3.0), ("payroll by class code", 3.0),
+        ("payroll breakdown", 2.5), ("class code", 1.5), ("payroll", 1.0),
+        ("remuneration", 1.5),
+    ],
+    "gross_sales_report": [
+        ("gross sales report", 3.0), ("gross sales", 2.5), ("gross receipts", 2.5),
+        ("annual sales", 1.5), ("sales report", 1.5),
+    ],
+    "emod_worksheet": [
+        ("experience modification worksheet", 3.0), ("experience rating worksheet", 3.0),
+        ("experience modification factor", 2.5), ("mod worksheet", 2.5),
+        ("experience modification", 2.0), ("emod", 2.0), ("xmod", 2.0),
+        ("ncci", 1.5), ("expected losses", 1.0),
+    ],
+    "financial_statement": [
+        ("balance sheet", 3.0), ("income statement", 3.0), ("profit and loss", 3.0),
+        ("financial statement", 3.0), ("statement of cash flows", 3.0),
+        ("net income", 1.0), ("total assets", 1.0), ("total liabilities", 1.0),
+    ],
+    "handbook": [
+        ("employee handbook", 3.0), ("employer handbook", 3.0),
+        ("employee manual", 2.5), ("personnel policy", 2.0), ("code of conduct", 1.5),
+    ],
+    "safety_manual": [
+        ("safety manual", 3.0), ("risk control program", 3.0),
+        ("safety program", 2.5), ("written safety", 2.5), ("safety procedures", 2.0),
+        ("injury and illness prevention", 2.5), ("loss control", 1.5),
+    ],
+    "vehicle_schedule": [
+        ("vehicle schedule", 3.0), ("schedule of vehicles", 3.0),
+        ("vin", 1.0), ("year make model", 1.5), ("gvw", 1.0),
+    ],
+    "driver_schedule": [
+        ("driver schedule", 3.0), ("schedule of drivers", 3.0),
+        ("driver list", 2.5), ("license number", 1.0), ("date of hire", 1.0),
+    ],
+    "equipment_schedule": [
+        ("equipment schedule", 3.0), ("schedule of equipment", 3.0),
+        ("contractors equipment", 2.5), ("acord 138", 2.5), ("serial number", 1.0),
+    ],
+    "location_schedule": [
+        ("location schedule", 3.0), ("schedule of locations", 3.0),
+        ("premises schedule", 2.5), ("location number", 1.0),
     ],
     "schedule": [
-        ("schedule of", 2.0), ("vehicle schedule", 3.0), ("equipment schedule", 3.0),
-        ("location schedule", 3.0), ("driver schedule", 3.0),
+        ("schedule of", 2.0),
     ],
     "quote": [
         ("quoted premium", 3.0), ("estimated premium", 3.0),
+        ("quote proposal", 3.0), ("insurance proposal", 2.5),
         ("quote", 2.0), ("proposal", 2.0), ("indication", 1.5),
+    ],
+    "binder": [
+        ("insurance binder", 3.0), ("binder number", 3.0), ("this binder", 2.5),
+        ("acord 75", 3.0), ("binder", 1.5),
+    ],
+    "policy": [
+        ("policy jacket", 3.0), ("common policy conditions", 3.0),
+        ("policy form", 2.0), ("policy contract", 2.0),
     ],
     "application": [
         ("acord 125", 3.0), ("acord 126", 3.0), ("acord 130", 3.0), ("acord 127", 3.0),
@@ -581,24 +690,286 @@ DOC_TYPE_KEYWORDS: Dict[str, List[Tuple[str, float]]] = {
     ],
 }
 
-_DOC_TYPE_PRIORITY = ["dec_page", "application", "quote", "schedule",
-                      "endorsement", "certificate", "loss_run", "unknown"]
-_DOC_TYPE_MIN_SCORE = 3.0   # raised from 2 — requires at least one meaningful keyword hit
+# Human-readable labels for every canonical doc type (used by the UI + the
+# manual-reclassification dropdown). "unknown" is always last.
+DOC_TYPE_LABELS: Dict[str, str] = {
+    "dec_page":                 "Dec Page",
+    "policy":                   "Policy",
+    "application":              "Commercial Insurance Application",
+    "supplemental_application": "Supplemental Application",
+    "certificate":              "Certificate of Insurance",
+    "loss_run":                 "Loss Runs",
+    "narrative":                "Underwriting Narrative",
+    "quote":                    "Quote Proposal",
+    "binder":                   "Binder",
+    "endorsement":              "Endorsement",
+    "sov":                      "Statement / Schedule of Values",
+    "cope_report":              "COPE Report",
+    "financial_statement":      "Financial Statements",
+    "payroll_report":           "Payroll Report",
+    "gross_sales_report":       "Gross Sales Report",
+    "emod_worksheet":           "Experience Modification Worksheet",
+    "vehicle_schedule":         "Vehicle Schedule",
+    "driver_schedule":          "Driver Schedule",
+    "equipment_schedule":       "Equipment Schedule",
+    "location_schedule":        "Location Schedule",
+    "schedule":                 "Schedule",
+    "handbook":                 "Employer Handbook",
+    "safety_manual":            "Safety Manual / Risk Control Program",
+    "unknown":                  "Unknown",
+}
+
+# Canonical list of every type a user may assign (manual reclassification) and
+# that the classifier may emit. Order is the resolution priority for ties and
+# for select_primary_truth: richer "primary" documents (dec page, application)
+# win over supporting documents (narrative, loss run, schedules).
+ALLOWED_DOC_TYPES: List[str] = list(DOC_TYPE_LABELS.keys())
+
+# Narrative-detection rules (Beta Report §4.2 action item #2). Each entry is a
+# signal CATEGORY -> the phrases that satisfy it. A document that satisfies
+# several distinct categories is a likely underwriting narrative even when it
+# carries no single strong keyword. We count DISTINCT categories so a long
+# prose document that repeats one theme isn't over-credited.
+_NARRATIVE_SIGNALS: Dict[str, Tuple[str, ...]] = {
+    "account_overview":     ("account overview", "company overview", "about the",
+                             "background", "company profile", "overview of operations"),
+    "named_insured":        ("named insured", "applicant", "the insured", "dba", "d/b/a"),
+    "operations":           ("operations", "scope of work", "nature of business",
+                             "services provided", "business operations", "describe operations"),
+    "years_in_business":    ("years in business", "established in", "in business since",
+                             "founded in", "incorporated in", "years of experience"),
+    "management":           ("management experience", "ownership", "principals",
+                             "key personnel", "owner has", "management team", "leadership"),
+    "risk_controls":        ("risk control", "safety practices", "safety program",
+                             "loss control", "risk management", "written safety",
+                             "safety procedures", "quality control"),
+    "loss_history":         ("no prior losses", "no losses", "loss history",
+                             "claims history", "prior claims", "loss experience",
+                             "no claims", "favorable loss"),
+    "coverage_discussion":  ("coverage", "limits of liability", "general liability",
+                             "umbrella", "workers compensation", "deductible",
+                             "coverage requested", "coverage needed"),
+    "carrier_market":       ("prior carrier", "current carrier", "expiring carrier",
+                             "incumbent", "market considerations", "carrier", "renewal"),
+    "location_exposure":    ("location", "premises", "exposure", "square footage",
+                             "address", "operations are performed"),
+    "employee_practices":   ("employee handbook", "employer handbook", "hiring",
+                             "training", "onboarding", "employee management",
+                             "safety manual"),
+    "wc_payroll":           ("payroll by class", "class code", "payroll breakdown",
+                             "remuneration"),
+    "experience_mod":       ("experience modification", "emod", "xmod",
+                             "experience mod", "mod factor"),
+}
+
+# When this many DISTINCT narrative categories appear, the document is treated
+# as a likely underwriting narrative. Tuned so a short cover letter (1-2 themes)
+# does not trip it, but a real account narrative (operations + management + loss
+# + coverage + carrier ...) does.
+_NARRATIVE_MIN_CATEGORIES = 4
+
+# Filename signals (Beta Report §4.2 action item #3) — SUPPORTING evidence only.
+# A filename match adds a bounded bonus to the matching content type; it never
+# overrides a confident content classification. Substrings are matched against
+# the lowercased filename with separators normalised to spaces.
+_FILENAME_SIGNALS: Dict[str, Tuple[str, ...]] = {
+    "narrative":                ("submission narrative", "underwriting narrative",
+                                 "carrier narrative", "executive summary",
+                                 "account summary", "account overview", "narrative",
+                                 "submission summary", "overview"),
+    "loss_run":                 ("loss run", "lossrun", "loss runs", "claims history",
+                                 "claim history", "loss history"),
+    "certificate":              ("certificate", "acord 25", "acord25", "coi"),
+    "dec_page":                 ("dec page", "decpage", "declarations", "dec-page", "declaration"),
+    "handbook":                 ("handbook", "employee manual"),
+    "safety_manual":            ("safety manual", "safety program", "risk control"),
+    "payroll_report":           ("payroll",),
+    "emod_worksheet":           ("emod", "xmod", "experience mod", "mod worksheet"),
+    "sov":                      ("sov", "statement of values", "schedule of values"),
+    "gross_sales_report":       ("gross sales", "sales report"),
+    "supplemental_application": ("supplemental", "supp app", "acord 186"),
+    "application":              ("acord 125", "acord 126", "acord 127", "acord 130",
+                                 "application", "app "),
+    "quote":                    ("quote", "proposal", "indication"),
+    "binder":                   ("binder",),
+    "financial_statement":      ("financials", "balance sheet", "income statement",
+                                 "profit and loss", "p&l", "p and l"),
+}
+
+# Resolution priority for ties + select_primary_truth. Primary "truth" documents
+# (rich, structured) outrank supporting documents.
+_DOC_TYPE_PRIORITY = [
+    "dec_page", "application", "supplemental_application", "policy", "quote",
+    "binder", "certificate", "endorsement",
+    "sov", "cope_report", "vehicle_schedule", "driver_schedule",
+    "equipment_schedule", "location_schedule", "schedule",
+    "loss_run", "emod_worksheet", "payroll_report", "gross_sales_report",
+    "financial_statement", "narrative", "handbook", "safety_manual",
+    "unknown",
+]
+
+_DOC_TYPE_MIN_SCORE = 3.0   # content score required for a confident (non-filename) classification
+_FILENAME_BONUS     = 2.0   # bounded bonus a filename match adds to its type
+
+# Supporting/prose document types whose keywords are easily tripped by an
+# account narrative that merely *discusses* the topic (e.g. a narrative that
+# describes the insured's safety program is not a Safety Manual). When the
+# structured winner is one of these AND the document shows a high density of
+# distinct narrative categories AND the filename does not corroborate the
+# supporting type, we prefer `narrative`.
+_PROSE_CONFUSABLE_TYPES = frozenset({
+    "safety_manual", "handbook", "loss_run", "payroll_report",
+    "gross_sales_report", "cope_report", "financial_statement", "schedule",
+})
 
 
-def identify_doc_type(text: str) -> str:
-    tl     = text.lower()
-    scores = {
+def _content_scores(tl: str) -> Dict[str, float]:
+    """Pure keyword-weighted content score per doc type (no narrative-rule or
+    filename influence — those are layered on separately so broad narrative
+    signals can never out-vote a strong structured keyword)."""
+    return {
         dt: sum(w for kw, w in kws if kw in tl)
         for dt, kws in DOC_TYPE_KEYWORDS.items()
     }
-    best_score = max(scores.values())
-    if best_score < _DOC_TYPE_MIN_SCORE:
-        return "unknown"
+
+
+def narrative_signal_categories(text: str) -> List[str]:
+    """Return the distinct narrative-signal categories present in *text*."""
+    tl = text.lower()
+    return [cat for cat, phrases in _NARRATIVE_SIGNALS.items()
+            if any(p in tl for p in phrases)]
+
+
+def _filename_bonus(filename: Optional[str]) -> Dict[str, float]:
+    """Bounded per-type bonus derived from the filename (supporting evidence)."""
+    if not filename:
+        return {}
+    fl = re.sub(r"[._\-]+", " ", str(filename).lower())
+    fl = re.sub(r"\s+", " ", fl).strip()
+    bonus: Dict[str, float] = {}
+    for dt, sigs in _FILENAME_SIGNALS.items():
+        if any(s in fl for s in sigs):
+            bonus[dt] = _FILENAME_BONUS
+    return bonus
+
+
+def _argmax_by_priority(scores: Dict[str, float]) -> Tuple[str, float]:
+    """Highest-scoring type; ties broken by _DOC_TYPE_PRIORITY."""
+    if not scores:
+        return "unknown", 0.0
+    top = max(scores.values())
+    tied = [dt for dt, s in scores.items() if abs(s - top) < 1e-9]
+    if len(tied) == 1:
+        return tied[0], top
     for dt in _DOC_TYPE_PRIORITY:
-        if scores.get(dt, 0) == best_score:
-            return dt
-    return "unknown"
+        if dt in tied:
+            return dt, top
+    return tied[0], top
+
+
+def classify_document(text: str, filename: Optional[str] = None) -> dict:
+    """Classify a document from content + narrative rules + filename signals.
+
+    Returns a dict:
+        {
+          "doc_type":   canonical key (or "unknown"),
+          "confidence": "high" | "medium" | "low",
+          "source":     "content" | "content+filename" | "narrative_rules"
+                        | "filename" | "none",
+          "scores":     {doc_type: float, ...},   # fused scores (debug/UI)
+          "narrative_categories": [str, ...],      # distinct narrative signals hit
+        }
+
+    Resolution order (Beta Report §4.2). The key design property: narrative
+    rules and filename signals are LAYERED FALLBACKS, never peers of the
+    structured-keyword vote — so a dec page or application is never demoted to
+    `narrative` just because it happens to mention coverage/operations/locations.
+
+      1. Strong structured CONTENT keyword wins (best content score ≥ min).
+      2. Else, enough DISTINCT narrative categories ⇒ `narrative`
+         (the Beta Test 1/2 "Unknown narrative" fix).
+      3. Else, content + FILENAME bonus clears the bar (filename as supporting
+         evidence for a type that already had some content support).
+      4. Else, a filename-only match classifies at LOW confidence (never
+         overrides 1–3); otherwise `unknown`.
+    """
+    tl = text.lower()
+    content = _content_scores(tl)
+    narr_cats = narrative_signal_categories(text)
+    fbonus = _filename_bonus(filename)
+
+    # Fused scores are for display/debug only — decisions below are staged.
+    fused = dict(content)
+    for dt, b in fbonus.items():
+        fused[dt] = fused.get(dt, 0.0) + b
+
+    best_type, best_content = _argmax_by_priority(content)
+
+    # ── (1) Confident structured-content classification ─────────────────────
+    if best_content >= _DOC_TYPE_MIN_SCORE:
+        # A rich account narrative can trip a prose-confusable supporting type
+        # (safety program, handbook, loss history, payroll mentions). When the
+        # narrative-category density is high and the filename does NOT corroborate
+        # the supporting type, prefer `narrative` over the weak supporting match.
+        if (best_type in _PROSE_CONFUSABLE_TYPES
+                and best_type not in fbonus
+                and len(narr_cats) >= _NARRATIVE_MIN_CATEGORIES + 2):
+            return _classification(
+                "narrative", confidence="medium", source="narrative_rules",
+                scores=fused, narr_cats=narr_cats,
+            )
+        had_filename = best_type in fbonus
+        return _classification(
+            best_type,
+            confidence="high" if best_content >= 2 * _DOC_TYPE_MIN_SCORE else "medium",
+            source="content+filename" if had_filename else "content",
+            scores=fused, narr_cats=narr_cats,
+        )
+
+    # ── (2) Narrative detection rules (fallback gate) ───────────────────────
+    if len(narr_cats) >= _NARRATIVE_MIN_CATEGORIES:
+        return _classification(
+            "narrative",
+            confidence="high" if len(narr_cats) >= _NARRATIVE_MIN_CATEGORIES + 2 else "medium",
+            source="narrative_rules",
+            scores=fused, narr_cats=narr_cats,
+        )
+
+    # ── (3) Content + filename bonus clears the bar ─────────────────────────
+    best_fused_type, best_fused_score = _argmax_by_priority(fused)
+    if best_fused_score >= _DOC_TYPE_MIN_SCORE and content.get(best_fused_type, 0.0) > 0:
+        return _classification(
+            best_fused_type, confidence="medium",
+            source="content+filename" if best_fused_type in fbonus else "content",
+            scores=fused, narr_cats=narr_cats,
+        )
+
+    # ── (4) Filename-only (weak) — LOW confidence, never overrides 1–3 ───────
+    if fbonus:
+        fn_type, _ = _argmax_by_priority(fbonus)
+        return _classification(
+            fn_type, confidence="low", source="filename",
+            scores=fused, narr_cats=narr_cats,
+        )
+
+    return _classification("unknown", confidence="low", source="none",
+                           scores=fused, narr_cats=narr_cats)
+
+
+def _classification(doc_type: str, *, confidence: str, source: str,
+                    scores: Dict[str, float], narr_cats: List[str]) -> dict:
+    return {
+        "doc_type":   doc_type,
+        "confidence": confidence,
+        "source":     source,
+        "scores":     {k: round(v, 2) for k, v in scores.items() if v},
+        "narrative_categories": narr_cats,
+    }
+
+
+def identify_doc_type(text: str, filename: Optional[str] = None) -> str:
+    """Backwards-compatible thin wrapper — returns just the canonical type string."""
+    return classify_document(text, filename)["doc_type"]
 
 
 def select_primary_truth(docs: List[dict]) -> dict:
@@ -708,7 +1079,7 @@ def _validate_parsed(result: dict, context: str) -> dict:
         # List → validate + normalize for known fields
         if isinstance(v, list):
 
-            # FIX: normalize locations (list of dict → list of string)
+            # normalize locations (list of dict → list of string, then dedup)
             if field == "locations":
                 if all(isinstance(x, dict) for x in v):
                     try:
@@ -720,15 +1091,21 @@ def _validate_parsed(result: dict, context: str) -> dict:
                         raise RuntimeError(
                             f"_validate_parsed [{context}]: invalid locations structure"
                         )
-        
+
                 elif all(isinstance(x, str) for x in v):
                     pass  # valid
-        
+
                 else:
                     raise RuntimeError(
                         f"_validate_parsed [{context}]: locations must be list of strings"
                     )
-        
+
+                # Deduplicate while preserving first-occurrence order.
+                # The LLM occasionally emits the same address multiple times
+                # across chunks; without this, Location2/Location3 stamp the
+                # same address as Location1 on every form that has those slots.
+                v = list(dict.fromkeys(x.strip() for x in v if x.strip()))
+
             # you can extend similar normalization for other weak fields later
         
             normalized[field] = v
@@ -2206,37 +2583,72 @@ def _get_authoritative_doc(docs: List[dict], field: str) -> Optional[dict]:
     return None
 
 
-def detect_source_conflicts(docs: List[dict]) -> List[str]:
+def detect_source_conflicts(docs: List[dict], skip_fields: Optional[set] = None) -> List[str]:
     """
     Compare field values across documents. Return human-readable conflict messages
     for fields that have materially different non-empty values from two or more docs.
     Only checks scalar fields (not lists) to keep noise low.
+
+    ``skip_fields`` lets a more specialised, normalization-aware reconciler own a
+    set of fields (e.g. the Core Underwriting Data reconciler owns total_revenue,
+    Beta Report §4.3). Those keys are excluded here so a formatting-only
+    difference ($1,000,000 vs 1000000) is not double-reported as a raw-string
+    conflict.
     """
     if len(docs) < 2:
         return []
 
+    # Imported lazily to keep this module import-light and avoid any cycle.
+    from services.normalization import (
+        normalize_value, is_carrier_field,
+    )
+
+    skip_fields = skip_fields or set()
     conflicts: List[str] = []
     all_keys: set = set()
     for d in docs:
         all_keys.update(d.get("facts", {}).keys())
 
     for field in sorted(all_keys):
-        if field in _LIST_FIELDS:
+        if field in _LIST_FIELDS or field in skip_fields:
             continue
         values_by_doc: List[Tuple[str, object]] = []
         for d in docs:
-            v = d.get("facts", {}).get(field)
+            # Unwrap the {value, confidence, source} envelope before comparison so
+            # normalization runs on the actual value, not the dict repr. Without
+            # this the confidence/source labels leak into the normalized string and
+            # (a) defeat carrier-alias / formatting suppression and (b) flag a
+            # false conflict when two docs carry the same value at different
+            # confidence (Beta Report §5).
+            v = _fv(d.get("facts", {}), field)
             if _is_empty(v):
                 continue
             values_by_doc.append((d.get("doc_type", "unknown"), v))
         if len(values_by_doc) < 2:
             continue
-        # Normalise to string for comparison
-        unique_vals = {str(v).strip().lower() for _, v in values_by_doc}
-        if len(unique_vals) > 1:
-            sources = ", ".join(f"{dt}={val}" for dt, val in values_by_doc[:3])
+
+        # Beta Report §5: compare NORMALIZED values so formatting/terminology
+        # differences (case, punctuation, date format, $1,000,000 vs 1000000,
+        # CSL vs Combined Single Limit, LLC vs Limited Liability Company, address
+        # abbreviations) do not manufacture a conflict. Values that normalize to
+        # '' carry no usable signal and are ignored. Raw values are kept in the
+        # message so they remain visible to the user (§5.1).
+        normalized = {n for _, v in values_by_doc if (n := normalize_value(field, v))}
+        if len(normalized) <= 1:
+            continue
+
+        sources = ", ".join(f"{dt}={val}" for dt, val in values_by_doc[:3])
+        if is_carrier_field(field):
+            # §5.2 carrier handling: surface as a REVIEW item when the seed alias
+            # map cannot collapse the names, never as a definitive hard conflict.
             conflicts.append(
-                f"Conflicting values for '{field}' across documents — {sources}. "
+                f"Carrier names differ across documents for '{field}' - {sources}. "
+                "Flagged for review (possible carrier alias); confirm whether these "
+                "refer to the same carrier."
+            )
+        else:
+            conflicts.append(
+                f"Conflicting values for '{field}' across documents - {sources}. "
                 "Review and confirm the correct value."
             )
     return conflicts

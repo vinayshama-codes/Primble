@@ -94,7 +94,7 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
       if (res.ok && data.success) {
         onSaved(base64);
       } else if (res.status === 401) {
-        setError("Session expired — please sign out and sign back in, then try again.");
+        setError("Session expired - please sign out and sign back in, then try again.");
       } else {
         setError(data.detail || "Failed to save signature.");
       }
@@ -115,7 +115,7 @@ export default function SignatureModal({ token, onClose, onSaved, existingSignat
         localStorage.removeItem("acordly_signature");
         onSaved(null);
       } else if (res.status === 401) {
-        setError("Session expired — please sign out and sign back in.");
+        setError("Session expired - please sign out and sign back in.");
       } else {
         setError("Failed to remove signature.");
       }

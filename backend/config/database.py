@@ -251,10 +251,12 @@ async def init_db() -> None:
         """)
 
         for col, definition in [
-            ("client_name",      "TEXT DEFAULT ''"),
-            ("reminder_sent",    "INTEGER DEFAULT 0"),
-            ("reminder_count",   "INTEGER DEFAULT 0"),
-            ("last_reminder_at", "TEXT"),
+            ("client_name",           "TEXT DEFAULT ''"),
+            ("reminder_sent",         "INTEGER DEFAULT 0"),
+            ("reminder_count",        "INTEGER DEFAULT 0"),
+            ("last_reminder_at",      "TEXT"),
+            ("remediation_status",    "TEXT DEFAULT NULL"),
+            ("fields_answered_count", "INTEGER DEFAULT 0"),
         ]:
             if not (_SAFE_IDENT.match(col) and _SAFE_DEF.match(definition)):
                 raise ValueError(f"Unsafe DDL identifier blocked: {col!r} {definition!r}")

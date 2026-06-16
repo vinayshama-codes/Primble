@@ -21,6 +21,28 @@ export async function selectFormsBulk(session_id, form_ids) {
   return { ok: res.ok, status: res.status, data: await res.json() };
 }
 
+export async function resolveSubmissionIntegrity(session_id, action, remove_doc_ids = []) {
+  const res = await fetch(`${API_BASE}/api/submission-integrity/resolve`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id, action, remove_doc_ids }),
+  });
+  return { ok: res.ok, status: res.status, data: await res.json() };
+}
+
+// Manually correct a document's classification (Beta Report §4.2).
+// action: "set_type" (with new_doc_type) | "exclude" | "include".
+export async function reclassifyDocument(session_id, doc_id, action, new_doc_type = null) {
+  const res = await fetch(`${API_BASE}/api/document/reclassify`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id, doc_id, action, new_doc_type }),
+  });
+  return { ok: res.ok, status: res.status, data: await res.json() };
+}
+
 export async function updatePdf(session_id, field_updates) {
   const res = await fetch(`${API_BASE}/api/update-pdf`, {
     method: "POST",

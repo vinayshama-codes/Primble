@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from config.database import get_pool
-from models.schemas import SQS_RECOMMENDATION_AUDIT_STATEMENTS, FIELD_SOURCE_AUDIT_STATEMENTS, DOWNLOAD_AUDIT_STATEMENTS
+from models.schemas import (
+    SQS_RECOMMENDATION_AUDIT_STATEMENTS, FIELD_SOURCE_AUDIT_STATEMENTS,
+    DOWNLOAD_AUDIT_STATEMENTS, SUBMISSION_INTEGRITY_AUDIT_STATEMENTS,
+    UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +23,8 @@ async def init_audit_tables() -> None:
             SQS_RECOMMENDATION_AUDIT_STATEMENTS
             + FIELD_SOURCE_AUDIT_STATEMENTS
             + DOWNLOAD_AUDIT_STATEMENTS
+            + SUBMISSION_INTEGRITY_AUDIT_STATEMENTS
+            + UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS
         ):
             try:
                 await conn.execute(stmt)
@@ -275,3 +281,191 @@ async def get_audit_summary(session_id: str) -> dict:
     except Exception as ex:
         logger.error(f"Failed to get audit summary: {ex}")
         return {"error": str(ex)}
+
+
+# ── Workstream 1 audit trail (Beta Report §4.1 + §4.2) ───────────────────────
+# Best-effort recording of Submission Integrity / Document Classification user
+# events. Every helper swallows DB errors so an audit failure never breaks the
+# user-facing flow (mirrors the recommendation/field audit helpers above).
+
+def _integrity_model_version(integrity: Optional[dict]) -> str:
+    return (integrity or {}).get("model_version") or "unknown"
+
+
+# ASYNC-SAFE
+async def log_integrity_assessed(
+    session_id: str,
+    user_id: Optional[str],
+    integrity: dict,
+) -> None:
+    """Record a Submission Integrity verdict (§4.1) — the clustering result and,
+    critically, whether a multi-insured warning was raised. Pairs with
+    ``log_integrity_resolution`` so a warning issued → override can be traced.
+
+    Skips trivially-clean single-insured verdicts (status 'high', no review) to
+    avoid noise; medium/low or review-required verdicts are always recorded.
+    """
+    integrity = integrity or {}
+    status = integrity.get("status")
+    review_required = bool(integrity.get("review_required"))
+    if status == "high" and not review_required:
+        return
+    try:
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO submission_integrity_audit (
+                    id, session_id, user_id, event_type,
+                    integrity_status, confidence, review_required,
+                    detected_entities, reasons, signals,
+                    model_version, created_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                """,
+                f"sia_{uuid.uuid4().hex}",
+                session_id, str(user_id) if user_id is not None else None,
+                "integrity_assessed",
+                status,
+                integrity.get("confidence"),
+                review_required,
+                integrity.get("detected_entities") or [],
+                integrity.get("reasons") or [],
+                integrity.get("signals") or {},
+                _integrity_model_version(integrity),
+                datetime.now(timezone.utc).isoformat(),
+            )
+        logger.info(
+            f"Logged integrity assessment for session {session_id} "
+            f"(status={status}, review_required={review_required})"
+        )
+    except Exception as ex:
+        logger.error(f"Failed to log integrity assessment: {ex}")
+
+
+# ASYNC-SAFE
+async def log_integrity_resolution(
+    session_id: str,
+    user_id: Optional[str],
+    action: str,
+    integrity: Optional[dict] = None,
+    removed_doc_ids: Optional[List[str]] = None,
+    created_submissions: Optional[List[dict]] = None,
+) -> None:
+    """Record how the user resolved a Submission Integrity review (§4.1).
+
+    ``overridden`` is True whenever the user kept a flagged package
+    (continue_anyway / create_separate_submissions) — this is the explicit
+    "records whether the user overrode the warning" acceptance criterion.
+    """
+    integrity = integrity or {}
+    overridden = action in ("continue_anyway", "create_separate_submissions")
+    try:
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO submission_integrity_audit (
+                    id, session_id, user_id, event_type,
+                    integrity_status, confidence, review_required,
+                    detected_entities, action, overridden,
+                    removed_doc_ids, acknowledged_entities, created_submissions,
+                    model_version, created_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                """,
+                f"sia_{uuid.uuid4().hex}",
+                session_id, str(user_id) if user_id is not None else None,
+                "integrity_resolved",
+                integrity.get("status"),
+                integrity.get("confidence"),
+                bool(integrity.get("review_required")),
+                integrity.get("detected_entities") or [],
+                action,
+                overridden,
+                list(removed_doc_ids or []),
+                integrity.get("detected_entities") or [],
+                created_submissions or [],
+                _integrity_model_version(integrity),
+                datetime.now(timezone.utc).isoformat(),
+            )
+        logger.info(
+            f"Logged integrity resolution for session {session_id} "
+            f"(action={action}, overridden={overridden})"
+        )
+    except Exception as ex:
+        logger.error(f"Failed to log integrity resolution: {ex}")
+
+
+# ASYNC-SAFE
+async def log_document_reclassified(
+    session_id: str,
+    user_id: Optional[str],
+    doc_id: str,
+    action: str,
+    previous_doc_type: Optional[str],
+    new_doc_type: Optional[str],
+) -> None:
+    """Record a manual document-classification correction (§4.2): set_type,
+    exclude, include, or supporting_only — with the before/after doc type."""
+    try:
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO submission_integrity_audit (
+                    id, session_id, user_id, event_type,
+                    action, doc_id, previous_doc_type, new_doc_type, created_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                """,
+                f"sia_{uuid.uuid4().hex}",
+                session_id, str(user_id) if user_id is not None else None,
+                "document_reclassified",
+                action, str(doc_id),
+                previous_doc_type, new_doc_type,
+                datetime.now(timezone.utc).isoformat(),
+            )
+        logger.info(
+            f"Logged document reclassification for session {session_id} "
+            f"(doc={doc_id}, action={action}, {previous_doc_type}->{new_doc_type})"
+        )
+    except Exception as ex:
+        logger.error(f"Failed to log document reclassification: {ex}")
+
+
+# ASYNC-SAFE
+async def log_underwriting_confirmation(
+    session_id: str,
+    user_id: Optional[str],
+    fact_key: str,
+    label: str,
+    confirmed_value: str,
+    previous_value: Optional[str],
+) -> None:
+    """Record a user-confirmed underwriting value (Beta Report §4.3 / §5.1).
+
+    Writes one row to ``underwriting_confirmation_audit`` so every "you chose X
+    on date Y" event is permanently queryable — fact_key, the human label,
+    the confirmed value, the value that was in merged_facts before confirmation,
+    and an exact UTC timestamp. Non-fatal: a logging failure never blocks the
+    confirmation itself.
+    """
+    try:
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO underwriting_confirmation_audit (
+                    id, session_id, user_id, fact_key, label,
+                    confirmed_value, previous_value, confirmed_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                """,
+                f"uwc_{uuid.uuid4().hex}",
+                session_id,
+                str(user_id) if user_id is not None else None,
+                fact_key,
+                label,
+                confirmed_value,
+                previous_value,
+                datetime.now(timezone.utc).isoformat(),
+            )
+        logger.info(
+            "Logged underwriting confirmation session=%s field=%s value=%r",
+            session_id, fact_key, confirmed_value,
+        )
+    except Exception as ex:
+        logger.error(f"Failed to log underwriting confirmation: {ex}")

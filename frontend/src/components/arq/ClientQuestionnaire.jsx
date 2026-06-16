@@ -27,6 +27,7 @@ export default function ClientQuestionnaire({ token }) {
   const [clientName, setClientName]   = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [answers, setAnswersState]    = useState({});
+  const [scoreUpdate, setScoreUpdate] = useState(null);  // §6.2 post-remediation feedback
 
   // Producer contact info
   const [producerEmail, setProducerEmail] = useState('');
@@ -47,7 +48,7 @@ export default function ClientQuestionnaire({ token }) {
   const chatBottomRef                 = useRef(null);
   const chatInputRef                  = useRef(null);
 
-  // Server-side draft save (debounced 1s) — works across browsers, incognito, devices
+  // Server-side draft save (debounced 1s) - works across browsers, incognito, devices
   const saveDraftToServer = useCallback((currentAnswers) => {
     if (!token) return;
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
@@ -57,7 +58,7 @@ export default function ClientQuestionnaire({ token }) {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ answers: pendingAnswersRef.current }),
-      }).catch(() => {}); // silent — draft save failures are non-critical
+      }).catch(() => {}); // silent - draft save failures are non-critical
     }, 1000);
   }, [token]);
 
@@ -82,7 +83,7 @@ export default function ClientQuestionnaire({ token }) {
     const errors = {};
     questions.forEach((q) => {
       const val = (answers[q.field_name] || '').trim();
-      if (!val || q.field_type === 'checkbox') return;
+      if (!val || q.field_type === 'checkbox' || q.field_type === 'select') return;
       const ft = q.field_type || 'text';
       const fn = q.field_name;
 
@@ -105,7 +106,7 @@ export default function ClientQuestionnaire({ token }) {
     const msg = chatInput.trim();
     if (!msg || chatLoading) return;
 
-    // Basic sanitization — strip script tags
+    // Basic sanitization - strip script tags
     const sanitized = msg.replace(/<[^>]*>/g, '').slice(0, 500);
 
     const userMsg = { role: 'user', content: sanitized };
@@ -143,7 +144,7 @@ export default function ClientQuestionnaire({ token }) {
     if (chatOpen) setTimeout(() => chatInputRef.current?.focus(), 150);
   }, [chatOpen]);
 
-  // Load questionnaire data — runs once per token
+  // Load questionnaire data - runs once per token
   useEffect(() => {
     if (!token) {
       setError('Invalid questionnaire link.');
@@ -232,6 +233,7 @@ export default function ClientQuestionnaire({ token }) {
       });
       const data = await res.json();
       if (res.ok && data.success) {
+        setScoreUpdate(data.score_update || null);
         setSubmitted(true);
       } else if (res.status === 422 && data.field_errors) {
         setFieldErrors(data.field_errors);
@@ -303,6 +305,27 @@ export default function ClientQuestionnaire({ token }) {
         <p style={{ fontSize: 16, color: '#475569', marginBottom: 24 }}>
           Your answers have been submitted successfully. Your insurance agent has been notified and the forms will be updated automatically.
         </p>
+        {scoreUpdate && (() => {
+          // All 7 post-remediation states from §6.2 — messages are plain-language
+          // and client-appropriate; nothing technical leaks to the client.
+          const msgs = {
+            resolved:                    { text: 'Your answers resolved outstanding items on this submission — thank you!',                                         bg: '#ecfdf5', border: '#a7f3d0', color: '#065f46' },
+            improved:                    { text: 'Your answers improved this submission — thank you!',                                                               bg: '#ecfdf5', border: '#a7f3d0', color: '#065f46' },
+            score_decreased:             { text: 'Your answers have been submitted. Your agent will review the updated information.',                                bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
+            pending_validation:          { text: 'Your answers have been received and are pending review by your agent.',                                            bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' },
+            user_provided_only:          { text: 'Your answers have been recorded. Your agent will confirm the details.',                                            bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' },
+            conflicting_evidence_remains:{ text: 'Your answers have been submitted. Your agent will review a few items that need clarification.',                    bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
+            requires_supporting_document:{ text: 'Your answers have been submitted. You may also need to provide supporting documents — your agent will be in touch.', bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
+            still_missing:               { text: 'Your answers have been submitted. Your agent may follow up for any remaining information.',                         bg: '#f1f5f9', border: '#cbd5e1', color: '#475569' },
+          };
+          const m = msgs[scoreUpdate.status];
+          if (!m) return null;
+          return (
+            <p style={{ fontSize: 14, color: m.color, background: m.bg, border: `1px solid ${m.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 24, lineHeight: 1.5 }}>
+              {m.text}
+            </p>
+          );
+        })()}
         <button onClick={() => window.close()} style={{ padding: '12px 28px', background: '#E61B84', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: 'pointer', minWidth: 140 }}>
           Close Window
         </button>
@@ -391,6 +414,7 @@ export default function ClientQuestionnaire({ token }) {
             {questions.map((q) => {
               const fieldType  = q.field_type || 'text';
               const isCheckbox = fieldType === 'checkbox';
+              const isSelect   = fieldType === 'select';
               const isAnswered = (answers[q.field_name] || '').trim() !== '';
               const hasError   = !!fieldErrors[q.field_name];
               const hint       = q.hint || '';
@@ -442,6 +466,49 @@ export default function ClientQuestionnaire({ token }) {
                           </button>
                           {!answers[q.field_name] && <span style={{ fontSize: 11, color: '#94a3b8' }}>Tap to answer</span>}
                         </div>
+                      ) : isSelect ? (
+                        (() => {
+                          const rawVal      = answers[q.field_name] ?? '';
+                          const isOtherSel  = rawVal === 'Other' || rawVal.startsWith('Other: ');
+                          const otherText   = rawVal.startsWith('Other: ') ? rawVal.slice(7) : '';
+                          const hasOtherOpt = (q.options || []).includes('Other');
+                          return (
+                            <>
+                              <select
+                                value={isOtherSel ? 'Other' : rawVal}
+                                onChange={(e) => setAnswers({ [q.field_name]: e.target.value })}
+                                style={{
+                                  width: '100%', padding: '9px 12px', fontSize: 13,
+                                  border: `1px solid ${hasError ? '#fca5a5' : '#e2e8f0'}`,
+                                  borderRadius: 7, fontFamily: 'inherit',
+                                  boxSizing: 'border-box', outline: 'none',
+                                  background: '#fff', minHeight: 44, cursor: 'pointer',
+                                  color: rawVal ? '#0f172a' : '#94a3b8',
+                                  appearance: 'auto',
+                                }}
+                              >
+                                <option value="" disabled>Select one...</option>
+                                {(q.options || []).map((opt) => (
+                                  <option key={opt} value={opt}>{opt}</option>
+                                ))}
+                              </select>
+                              {hasOtherOpt && isOtherSel && (
+                                <textarea
+                                  value={otherText}
+                                  onChange={(e) => setAnswers({ [q.field_name]: e.target.value ? `Other: ${e.target.value}` : 'Other' })}
+                                  placeholder="Please explain..."
+                                  rows={2}
+                                  style={{
+                                    marginTop: 6, width: '100%', padding: '8px 12px', fontSize: 13,
+                                    border: '1px solid #e2e8f0', borderRadius: 7,
+                                    fontFamily: 'inherit', boxSizing: 'border-box',
+                                    outline: 'none', resize: 'vertical',
+                                  }}
+                                />
+                              )}
+                            </>
+                          );
+                        })()
                       ) : (
                         <textarea
                           value={answers[q.field_name] ?? ''}

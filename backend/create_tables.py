@@ -63,6 +63,9 @@ def create_tables():
                 "ALTER TABLE arq_sessions ADD COLUMN IF NOT EXISTS reminder_count INTEGER DEFAULT 0",
                 "ALTER TABLE arq_sessions ADD COLUMN IF NOT EXISTS last_reminder_at TEXT",
                 "ALTER TABLE arq_sessions ADD COLUMN IF NOT EXISTS draft_answers JSONB DEFAULT '{}'",
+                # §6.2 post-remediation tracking
+                "ALTER TABLE arq_sessions ADD COLUMN IF NOT EXISTS remediation_status TEXT DEFAULT NULL",
+                "ALTER TABLE arq_sessions ADD COLUMN IF NOT EXISTS fields_answered_count INTEGER DEFAULT 0",
             ]
             for sql in extras:
                 try:

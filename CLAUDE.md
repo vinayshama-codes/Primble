@@ -1,4 +1,4 @@
-# Acordly / Primble: ACORD Form Processing Platform
+Primble: ACORD Form Processing Platform
 
 ## Overview
 
@@ -300,6 +300,10 @@ Expected result after fix: 17 minutes → 3–4 minutes.
 - **Data is sensitive:** PII, insurance claims, financial data, signed documents.
   Any change touching facts, form output, or signatures needs a security review.
 - **Ask Brent** about compliance requirements before any data-handling changes.
+
+## UI / Copy Rules
+
+- **No em-dashes (`—`) in UI text.** Use a plain hyphen-minus (`-`) instead. This applies to all labels, titles, banners, tooltips, and inline copy throughout the frontend.
 
 <!-- code-review-graph MCP tools -->
 ## MCP Tools: code-review-graph

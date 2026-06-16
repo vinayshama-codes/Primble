@@ -83,7 +83,11 @@ def test_acord125_questions_only_use_yellow_missing_required_fields():
         soft_stops=[],
     ))
 
-    assert _question_fields(questions) == {"applicant_name"}
+    # The §6.4 "no prior losses" attestation is an additive, synthetic question
+    # (not derived from an ACORD 125 form field) — exclude it so this test keeps
+    # asserting its real intent: which FORM fields become questions.
+    form_fields = _question_fields(questions) - {"loss_history_no_prior_losses_indicator"}
+    assert form_fields == {"applicant_name"}
 
 
 def test_non_acord125_questions_keep_existing_missing_field_behavior():

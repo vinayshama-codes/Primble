@@ -164,7 +164,7 @@ export default function PDFJsViewer({
     doRender();
   }, [pdfDoc, pageNum]); // eslint-disable-line
 
-  // Rebuild overlay when state changes — always use renderScaleRef so scale matches canvas
+  // Rebuild overlay when state changes - always use renderScaleRef so scale matches canvas
   useEffect(() => {
     if (!canvasRef.current || !overlayRef.current || !fieldsLoaded) return;
     const canvas = canvasRef.current;
@@ -325,13 +325,13 @@ export default function PDFJsViewer({
       const hl  = _getHighlight(field.name, val);
 
       // Highlighted fields use fully-opaque pastel fills so the PDF canvas text
-      // underneath is completely hidden — preventing the double-text ghost effect.
+      // underneath is completely hidden - preventing the double-text ghost effect.
       // Non-highlighted edit fields use a near-opaque white for the same reason.
       let bg = _highlightBg(hl, curEdit);
 
       const wrap = document.createElement("div");
       // Inset by 1px on all sides so the highlight sits strictly inside the field
-      // boundary — prevents sub-pixel bleed at the edges regardless of scale.
+      // boundary - prevents sub-pixel bleed at the edges regardless of scale.
       wrap.style.cssText = `position:absolute;left:${cx+1}px;top:${cy+1}px;width:${Math.max(cw-2,4)}px;height:${Math.max(ch-2,4)}px;pointer-events:${curEdit?"all":"none"};border:none;border-radius:1px;background:${bg};box-sizing:border-box;overflow:hidden;`;
 
       const isSigF = _isSigField(field.name);
@@ -565,7 +565,7 @@ export default function PDFJsViewer({
           {saveStatus === "error"   && <span style={{ color: "#ef4444", fontSize: 11, fontWeight: 600 }}>Failed</span>}
 
           <button onClick={handleRefresh} disabled={loadingStage !== "idle"}
-            title="Refresh — picks up client-submitted answers and shows green highlights"
+            title="Refresh - picks up client-submitted answers and shows green highlights"
             style={{ display: "flex", alignItems: "center", gap: 3, padding: "4px 9px", borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#8b93b0", fontSize: 11, fontWeight: 600, cursor: loadingStage !== "idle" ? "wait" : "pointer", fontFamily: "inherit" }}>
             Refresh
           </button>
@@ -576,7 +576,7 @@ export default function PDFJsViewer({
           </button>
 
           <button onClick={handleSignClick} disabled={applyingSign}
-            title={isSignedLocal ? "Signature applied — enter edit mode to remove" : savedSignature ? "Apply your saved signature" : "Set up a signature"}
+            title={isSignedLocal ? "Signature applied - enter edit mode to remove" : savedSignature ? "Apply your saved signature" : "Set up a signature"}
             style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, border: `1px solid ${isSignedLocal ? "#10b981" : "rgba(230,0,122,0.4)"}`, background: isSignedLocal ? "rgba(16,185,129,0.1)" : "rgba(230,0,122,0.08)", color: isSignedLocal ? "#10b981" : "#E61B84", fontSize: 12, fontWeight: 600, cursor: applyingSign ? "wait" : "pointer", fontFamily: "inherit", opacity: applyingSign ? 0.7 : 1 }}>
             {applyingSign ? <><span style={{ width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Signing…</> : isSignedLocal ? "Signed" : "Sign"}
           </button>
@@ -584,7 +584,7 @@ export default function PDFJsViewer({
           {rendering && <span style={{ color: "#4f7cff", fontSize: 11 }}>Rendering…</span>}
 
           <button onClick={() => goPage(pageNum - 1)} disabled={pageNum <= 1 || rendering} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
-          <span style={{ color: "#6b7899", fontSize: 12, minWidth: 44, textAlign: "center" }}>{totalPages ? `${pageNum}/${totalPages}` : "—"}</span>
+          <span style={{ color: "#6b7899", fontSize: 12, minWidth: 44, textAlign: "center" }}>{totalPages ? `${pageNum}/${totalPages}` : "-"}</span>
           <button onClick={() => goPage(pageNum + 1)} disabled={pageNum >= totalPages || rendering} style={{ width: 28, height: 28, borderRadius: 6, border: "1px solid #2a3047", background: "#252a3d", color: "#e8eaf2", cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
 
           {onFormNav?.total > 1 && (<>
@@ -598,7 +598,7 @@ export default function PDFJsViewer({
 
       {editMode && (
         <div className="pdfviewer-edit-hint" style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any field to edit — "Done Editing" saves all changes</span>
+          <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any field to edit - "Done Editing" saves all changes</span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,243,199,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Required field</span></span>
           <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,226,226,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Low confidence</span></span>
           {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(187,247,208,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Client-filled</span></span>}

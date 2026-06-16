@@ -379,6 +379,7 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
         hard_stops=hard_stops, soft_stops=soft_stops,
         tier2_score=tier2_score,
         form_id=primary_form_id,
+        session_data=proc_session,
     )
     return JSONResponse({"success": True, "sqs": sqs, "hard_stops": hard_stops, "soft_stops": soft_stops, "flags": flags})
 
@@ -421,6 +422,7 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
             selected_form_ids=selected_ids,
             hard_stops=hard_stops, soft_stops=soft_stops,
             tier2_score=tier2_score,
+            session_data=proc_session,
         )
     sqs_results = {"Pre-Submission Analysis": sqs}
 

@@ -198,6 +198,13 @@ FACT_REGISTRY: dict[str, dict] = {
         "validate":    lambda v: len(v.strip()) >= 10,
         "format_hint": "Text description (at least 10 characters)",
     },
+    "account_description": {
+        "forms":       set(),   # narrative-only; not stamped onto any ACORD form field
+        "question":    None,    # not surfaced as a client question
+        "tier": None, "required": False,
+        "validate":    lambda v: len(v.strip()) >= 10,
+        "format_hint": "High-level account/executive summary text (at least 10 characters)",
+    },
     "prior_carrier": {
         "forms":       {"ACORD_125"},
         "question":    "Who provided your business insurance most recently? (If none, write 'None')",
@@ -649,6 +656,20 @@ FACT_REGISTRY: dict[str, dict] = {
     "underlying_policies": {
         "forms":       {"ACORD_131"},
         "question":    "Please list your underlying liability policies with limits, carriers, and policy numbers.",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "schedule_of_underlying_insurance": {
+        "forms":       {"ACORD_131"},
+        "question":    "Is a Schedule of Underlying Insurance included with this submission (the list of underlying GL/Auto/EL policies the umbrella sits over)?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": None,
+    },
+    "umbrella_follow_form": {
+        "forms":       {"ACORD_131"},
+        "question":    "Do the submitted documents explicitly state the umbrella follows form over the underlying coverages? Leave blank if it is not explicitly stated - coverage is never assumed.",
         "tier": None, "required": False,
         "validate":    None,
         "format_hint": None,

@@ -11,6 +11,12 @@ import openai
 
 from config.database import get_pool
 from config.settings import FRONTEND_URL, LLM_MODEL
+from services.question_classifier import (
+    AUDIENCE_CLIENT,
+    apply_default_selection,
+    classify_question,
+    decorate_questions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -101,11 +107,19 @@ _FIELD_QUESTION_MAP = {
     # Umbrella / Excess
     "umbrella_limit":           "How much additional liability coverage would you like on top of your other policies? (For example: $1,000,000 or $5,000,000 extra)",
     "umbrella_sir":             "For this extra liability coverage, how much would you be willing to cover yourself before it kicks in?",
+    "schedule_of_underlying_insurance": "Is a Schedule of Underlying Insurance included with this submission (the list of the underlying GL / Auto / Employers Liability policies your umbrella sits over)?",
+    "umbrella_follow_form":     "Do the submitted documents explicitly state the umbrella follows form over the underlying coverages? Leave blank if it is not explicitly stated.",
     # Miscellaneous
     "percent_subcontracted":    "What percentage of your total work is done by outside contractors rather than your own employees?",
     "num_claims":               "How many insurance claims has your business filed in the last 3 to 5 years?",
     "loss_history_years":       "How many years of past insurance claims history are you able to provide?",
+    # §6.4: lets the client attest "no prior losses" so the loss-history score can move.
+    "loss_history_no_prior_losses_indicator": "To the best of your knowledge, has your business had NO insurance claims or losses in the past 5 years? (Answer 'Yes' to confirm no prior losses.)",
     "certificate_holder":       "Is there a company, landlord, or individual who needs written proof of your insurance? If yes, what is their name and address?",
+    # Prior carrier / marketing context (Brent feedback: questionnaire more reliable than document extraction)
+    "carrier_marketing_reason": "Why are you marketing this account at this time?",
+    # Upcoming deadlines / urgency (Brent feedback: gives the underwriter context and supports readiness)
+    "submission_urgency":       "Are there any upcoming deadlines or urgency we should know about?",
 }
 
 
@@ -162,10 +176,15 @@ _FIELD_HINT_MAP = {
     "wc_officer_exclusions":    "List any owners or officers who should be excluded from WC coverage by name, e.g. 'John Smith, Jane Doe'. Leave blank if none.",
     "umbrella_limit":           "Enter the additional liability limit you want above your other policies, e.g. '$2,000,000'.",
     "umbrella_sir":             "Enter your self-insured retention (similar to a deductible) for this umbrella policy, e.g. '$10,000'.",
+    "schedule_of_underlying_insurance": "Answer 'Yes' if the submission includes a Schedule of Underlying Insurance, or briefly list the underlying policies, e.g. 'GL $1M/$2M, Auto $1M CSL, EL $1M'. Leave blank if not provided.",
+    "umbrella_follow_form":     "Enter 'Follows form' only if a document explicitly says so. Coverage is never assumed - leave blank if it is not stated and an underwriter will review.",
     "percent_subcontracted":    "Enter what percentage of your work is performed by subcontractors rather than your own employees, e.g. '30%'.",
     "num_claims":               "Enter the total number of insurance claims your business has filed in the past 3–5 years, e.g. '2'. Enter '0' if none.",
     "loss_history_years":       "Enter how many years of claims history you can provide documentation for, e.g. '5'.",
+    "loss_history_no_prior_losses_indicator": "Answer 'Yes' only if there have been no insurance claims or losses. If you have had any claims, answer 'No' and provide your loss runs or claim count instead.",
     "certificate_holder":       "Enter the name and address of anyone who needs a certificate of insurance, e.g. 'ABC Property Management, 456 Oak Ave, Dallas TX 75201'.",
+    "carrier_marketing_reason": "Select the primary reason for seeking coverage. This helps the underwriter understand the account background and is much more reliable than trying to extract this from documents.",
+    "submission_urgency":       "Optional. Note any binding deadline, renewal date, or time-sensitivity, e.g. 'Need to bind by 07/01 for a new job'. Leave blank if none.",
 }
 
 _PREFIX_HINT_MAP = {
@@ -408,6 +427,40 @@ Fields:
     return {f: _HUMANIZED_CACHE[f] for f in field_names}
 
 
+async def _classify_other_reason_adverse(explanation: str) -> bool:
+    """LLM yes/no: does this 'Other' free-text explanation indicate an adverse
+    carrier action (nonrenewal, cancellation, declination, market exit, or
+    carrier-imposed coverage restrictions)?  Falls back to False on any error."""
+    if not explanation or len(explanation.strip()) < 3:
+        return False
+    try:
+        _timeout = float(os.getenv("LLM_REQUEST_TIMEOUT", "120"))
+        client = openai.AsyncOpenAI(
+            api_key=os.getenv("OPENAI_API_KEY", ""),
+            http_client=httpx.AsyncClient(timeout=_timeout),
+        )
+        prompt = (
+            "You are an insurance underwriting assistant.\n"
+            "A producer selected 'Other' when asked why they are marketing an account "
+            "and provided this explanation:\n\n"
+            f'"{explanation}"\n\n'
+            "Does this explanation indicate an adverse carrier action - such as nonrenewal, "
+            "cancellation, declination, market exit, or carrier-imposed coverage restrictions?\n"
+            "Reply with exactly one word: YES or NO."
+        )
+        response = await client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=5,
+        )
+        answer = response.choices[0].message.content.strip().upper()
+        return answer.startswith("Y")
+    except Exception as ex:
+        logger.warning(f"ARQ: adverse-reason LLM classification failed ({ex}), defaulting to non-adverse")
+        return False
+
+
 def _resolve_question(field_name: str) -> tuple[str, str | None]:
     q = _FIELD_QUESTION_MAP.get(field_name)
     if q:
@@ -560,6 +613,321 @@ def filter_arq_questions_for_session(generated_forms: dict, questions: List[dict
 
 
 # ---------------------------------------------------------------------------
+# Canonical-fact resolution + curation helpers (Beta Report §8 controls)
+# ---------------------------------------------------------------------------
+
+_CANON_CACHE: dict = {}
+_FIELD_RULES_CACHE: dict = {}
+
+
+def _canonical_fact_keys() -> set:
+    """Union of every canonical fact key the system understands.
+
+    Used to decide whether an ARQ field maps to a real underwriting fact (so it
+    can flow into facts + SQS) vs. a raw PDF field with no fact behind it.
+    """
+    if "keys" not in _CANON_CACHE:
+        keys: set = set(_FIELD_QUESTION_MAP.keys())
+        try:
+            from services.fact_registry import FACT_REGISTRY
+            keys |= set(FACT_REGISTRY.keys())
+        except Exception:
+            pass
+        try:
+            from services.sqs_service import FORM_FIELD_INVENTORY
+            for lst in FORM_FIELD_INVENTORY.values():
+                keys |= set(lst)
+        except Exception:
+            pass
+        _CANON_CACHE["keys"] = keys
+    return _CANON_CACHE["keys"]
+
+
+def _acord_field_rules() -> list:
+    if "rules" not in _FIELD_RULES_CACHE:
+        try:
+            from services.pdf_service import _ACORD_FIELD_RULES
+            _FIELD_RULES_CACHE["rules"] = _ACORD_FIELD_RULES
+        except Exception:
+            _FIELD_RULES_CACHE["rules"] = []
+    return _FIELD_RULES_CACHE["rules"]
+
+
+def _canonical_key(field_name: str) -> Optional[str]:
+    """Resolve a question's field name to a canonical fact key, or None.
+
+    Handles three cases: (1) the field IS a canonical key, (2) its
+    instance-suffix-stripped base is, (3) it is a raw ACORD schema field that
+    substring-matches an `_ACORD_FIELD_RULES` mapping. Internal address
+    sub-parts (keys starting with "_") are intentionally not resolved.
+    """
+    if not field_name:
+        return None
+    canon = _canonical_fact_keys()
+    if field_name in canon:
+        return field_name
+    base = re.sub(r'[_\s]+[a-zA-Z]$', '', field_name)
+    base = re.sub(r'[_\s]+\d+$', '', base)
+    if base in canon:
+        return base
+    for pattern, fact_key in _acord_field_rules():
+        if fact_key and not str(fact_key).startswith("_") and pattern in field_name:
+            return fact_key
+    return None
+
+
+def _is_curated_client_field(field_name: str) -> bool:
+    """True when the field resolves to a known plain-language client question."""
+    if not field_name:
+        return False
+    if field_name in _FIELD_QUESTION_MAP:
+        return True
+    base = re.sub(r'[_\s]+[a-z]$', '', field_name)
+    base = re.sub(r'[_\s]+\d+$', '', base)
+    if base in _FIELD_QUESTION_MAP:
+        return True
+    lower, base_lower = field_name.lower(), base.lower()
+    if any(lower.startswith(p) or base_lower.startswith(p) for p, _, __ in _FIELD_PREFIX_MAP):
+        return True
+    return _canonical_key(field_name) is not None
+
+
+def _present_fact_keys(facts: dict) -> set:
+    """Canonical fact keys already filled in the package (for §8.2.4 suppression)."""
+    from services.sqs_service import _fact_is_filled
+    present = set()
+    for k, v in (facts or {}).items():
+        if _fact_is_filled(v):
+            present.add(k)
+    return present
+
+
+# §6.4: the curated "no prior losses" attestation field.
+NO_LOSS_INDICATOR_FIELD = "loss_history_no_prior_losses_indicator"
+
+
+def _maybe_inject_no_loss_question(questions: List[dict], facts: dict, flags: dict) -> None:
+    """Append a curated 'no prior losses' confirmation when loss history is
+    otherwise unestablished, so the client can attest and lift the P4 score
+    (Beta Report §6.4 — the reported "score didn't move" bug). In-place, additive.
+    """
+    from services.sqs_service import _attested_true
+    facts = facts or {}
+    flags = flags or {}
+
+    def _val(key):
+        v = facts.get(key)
+        if isinstance(v, dict):
+            v = v.get("value")
+        return v
+
+    # Already attested, quantified, or evidenced → nothing to ask.
+    if _attested_true(_val("no_prior_losses")) or _attested_true(_val(NO_LOSS_INDICATOR_FIELD)):
+        return
+    if flags.get("no_prior_losses") or flags.get("narrative_states_no_losses"):
+        return
+    _yrs = _val("loss_history_years")
+    _clm = _val("num_claims")
+    if _yrs not in (None, "", "0", 0) or _clm not in (None, "", "0", 0):
+        return
+    if any(q.get("field_name") == NO_LOSS_INDICATOR_FIELD for q in questions):
+        return
+
+    questions.append({
+        "field_name":         NO_LOSS_INDICATOR_FIELD,
+        "question":           _FIELD_QUESTION_MAP[NO_LOSS_INDICATOR_FIELD],
+        "hint":               _FIELD_HINT_MAP.get(NO_LOSS_INDICATOR_FIELD, ""),
+        "forms":              "",
+        "form_ids":           [],
+        "field_type":         "checkbox",
+        "current_value":      "",
+        "_group_label":       None,
+        "_is_curated_client": True,
+        "_canonical_key":     NO_LOSS_INDICATOR_FIELD,
+    })
+
+
+# Prior carrier marketing reason (Brent feedback: ask via questionnaire, not document extraction)
+CARRIER_MARKETING_FIELD = "carrier_marketing_reason"
+
+_CARRIER_MARKETING_OPTIONS = [
+    "Shopping for better pricing",
+    "Seeking broader coverage",
+    "Voluntary carrier change",
+    "Broker change",
+    "Carrier nonrenewal",
+    "Carrier cancellation",
+    "Carrier declined renewal",
+    "Carrier exited market",
+    "Coverage restrictions imposed by carrier",
+    "Coverage concerns",
+    "New venture",
+    "Other",
+]
+
+# Options that indicate a meaningful underwriting concern and should escalate ACORD 101
+# (client DOUBTS-Workstream4 "Trigger ACORD 101" list - includes carrier-imposed
+# coverage restrictions alongside nonrenewal / cancellation / declination / exit).
+_ADVERSE_CARRIER_REASONS = frozenset({
+    "carrier nonrenewal",
+    "carrier cancellation",
+    "carrier declined renewal",
+    "carrier exited market",
+    "coverage restrictions imposed by carrier",
+    "coverage concerns",
+})
+
+
+def _maybe_inject_carrier_marketing_question(questions: List[dict], facts: dict, flags: dict) -> None:
+    """Inject the 'Why are you marketing this account?' question when not already answered.
+
+    Per Brent's feedback: the reason for leaving a carrier rarely appears in uploaded
+    documents. A targeted questionnaire question is more reliable than document extraction
+    and takes the client 15 seconds to answer. Inject whenever prior_carrier is known
+    OR the submission has any active coverage line (nearly all commercial submissions).
+    """
+    facts = facts or {}
+    flags = flags or {}
+
+    def _val(key):
+        v = facts.get(key)
+        if isinstance(v, dict):
+            v = v.get("value")
+        return v
+
+    # Already answered — nothing to ask
+    if _val(CARRIER_MARKETING_FIELD):
+        return
+    # Already queued
+    if any(q.get("field_name") == CARRIER_MARKETING_FIELD for q in questions):
+        return
+    # Only relevant when there is an active submission (prior carrier OR any coverage line)
+    _has_coverage = any(flags.get(k) for k in (
+        "has_general_liability", "has_auto_coverage", "has_property_coverage",
+        "has_workers_comp", "has_umbrella",
+    ))
+    if not _val("prior_carrier") and not _has_coverage:
+        return
+
+    questions.append({
+        "field_name":         CARRIER_MARKETING_FIELD,
+        "question":           _FIELD_QUESTION_MAP[CARRIER_MARKETING_FIELD],
+        "hint":               _FIELD_HINT_MAP.get(CARRIER_MARKETING_FIELD, ""),
+        "forms":              "",
+        "form_ids":           [],
+        "field_type":         "select",
+        "options":            list(_CARRIER_MARKETING_OPTIONS),
+        "current_value":      "",
+        "_group_label":       None,
+        "_is_curated_client": True,
+        "_canonical_key":     CARRIER_MARKETING_FIELD,
+    })
+
+
+# Upcoming deadlines / urgency (Brent feedback: a targeted questionnaire question
+# gives the underwriter context and supports Submission Readiness). Free-text,
+# optional - captured as context and credited as a small narrative-quality nudge.
+SUBMISSION_URGENCY_FIELD = "submission_urgency"
+
+
+def _maybe_inject_urgency_question(questions: List[dict], facts: dict, flags: dict) -> None:
+    """Inject the 'Any upcoming deadlines or urgency?' question when not already
+    answered. Same gate as the marketing question (active submission), in-place,
+    additive. Optional context - never a hard stop.
+    """
+    facts = facts or {}
+    flags = flags or {}
+
+    def _val(key):
+        v = facts.get(key)
+        if isinstance(v, dict):
+            v = v.get("value")
+        return v
+
+    if _val(SUBMISSION_URGENCY_FIELD):
+        return
+    if any(q.get("field_name") == SUBMISSION_URGENCY_FIELD for q in questions):
+        return
+    _has_coverage = any(flags.get(k) for k in (
+        "has_general_liability", "has_auto_coverage", "has_property_coverage",
+        "has_workers_comp", "has_umbrella",
+    ))
+    if not _val("prior_carrier") and not _has_coverage:
+        return
+
+    questions.append({
+        "field_name":         SUBMISSION_URGENCY_FIELD,
+        "question":           _FIELD_QUESTION_MAP[SUBMISSION_URGENCY_FIELD],
+        "hint":               _FIELD_HINT_MAP.get(SUBMISSION_URGENCY_FIELD, ""),
+        "forms":              "",
+        "form_ids":           [],
+        "field_type":         "text",
+        "current_value":      "",
+        "_group_label":       None,
+        "_is_curated_client": True,
+        "_canonical_key":     SUBMISSION_URGENCY_FIELD,
+    })
+
+
+# Umbrella underlying-schedule + follow-form evidence (Brent / DOUBTS-Workstream3
+# Q4 + "No Schedule of Underlying Insurance -15"). These rarely extract cleanly
+# from documents, so when an umbrella IS present and the evidence is still absent
+# we ask the producer directly - the same fallback pattern as the marketing /
+# urgency questions. Follow-form is Option B: only confirmed when explicitly
+# stated, never inferred. Asked ONLY when has_umbrella is true and the field is
+# unanswered, so non-umbrella submissions and already-evidenced umbrellas are
+# untouched.
+_UMBRELLA_EVIDENCE_FIELDS = (
+    "schedule_of_underlying_insurance",
+    "umbrella_follow_form",
+)
+
+# Follow-form is Option B (explicit-only). The affirmative option text deliberately
+# contains "follows form" so the Umbrella Adequacy scorer's phrase detection credits
+# it; the negative option carries no follow-form phrase, so the -10 stands and an
+# underwriter review is recommended. Coverage is never inferred from a blank.
+_FOLLOW_FORM_OPTIONS = [
+    "Follows form - explicitly stated in the submitted documents",
+    "Not stated - underwriter review recommended",
+]
+
+
+def _maybe_inject_umbrella_evidence_questions(questions: List[dict], facts: dict, flags: dict) -> None:
+    facts = facts or {}
+    flags = flags or {}
+    if not flags.get("has_umbrella"):
+        return
+
+    def _val(key):
+        v = facts.get(key)
+        if isinstance(v, dict):
+            v = v.get("value")
+        return v
+
+    for field_name in _UMBRELLA_EVIDENCE_FIELDS:
+        if _val(field_name):
+            continue
+        if any(q.get("field_name") == field_name for q in questions):
+            continue
+        _q = {
+            "field_name":         field_name,
+            "question":           _FIELD_QUESTION_MAP[field_name],
+            "hint":               _FIELD_HINT_MAP.get(field_name, ""),
+            "forms":              "ACORD 131",
+            "form_ids":           ["ACORD_131"],
+            "field_type":         "text",
+            "current_value":      "",
+            "_group_label":       "Umbrella",
+            "_is_curated_client": True,
+            "_canonical_key":     field_name,
+        }
+        if field_name == "umbrella_follow_form":
+            _q["field_type"] = "select"
+            _q["options"]    = list(_FOLLOW_FORM_OPTIONS)
+        questions.append(_q)
+
+
+# ---------------------------------------------------------------------------
 # Question generation
 # ---------------------------------------------------------------------------
 
@@ -623,6 +991,7 @@ async def generate_arq_questions(
 
     questions = []
     seen_field_names = set()
+    seen_canon_keys = set()   # deduplicate row-indexed variants by canonical fact
     group_counts: dict[str, int] = {}
 
     llm_needed = []
@@ -637,6 +1006,16 @@ async def generate_arq_questions(
         base_lower = base.lower()
         if any(lower.startswith(p) or base_lower.startswith(p) for p, _, __ in _FIELD_PREFIX_MAP):
             continue
+        # Only spend an LLM humanization call on fields that will actually reach
+        # the client. Raw/internal form fields get the no-LLM readable fallback
+        # and live in the collapsed "Internal / Producer Review" panel — so the
+        # ~1,700 obscure PDF fields no longer trigger a humanization pass.
+        pre = classify_question(
+            field_name, list(missing_fields[field_name]),
+            is_curated_client=_is_curated_client_field(field_name),
+        )
+        if pre["audience"] != AUDIENCE_CLIENT:
+            continue
         if field_name not in _HUMANIZED_CACHE:
             llm_needed.append(field_name)
 
@@ -647,6 +1026,15 @@ async def generate_arq_questions(
         if field_name in seen_field_names:
             continue
         seen_field_names.add(field_name)
+
+        # Deduplicate row-indexed schema variants (e.g. BusinessInformation_FullTimeEmployeeCount_1,
+        # _2, _3 all resolve to the same canonical fact `num_employees`). Without this guard
+        # the same plain-English question would appear multiple times in the list.
+        canon = _canonical_key(field_name)
+        if canon and not canon.startswith("_") and canon in seen_canon_keys:
+            continue
+        if canon and not canon.startswith("_"):
+            seen_canon_keys.add(canon)
 
         base_question, group_label = _resolve_question(field_name)
 
@@ -697,10 +1085,37 @@ async def generate_arq_questions(
             "field_type":    field_type,
             "current_value": field_current_values.get(field_name, ""),
             "_group_label":  group_label,
+            "_is_curated_client": _is_curated_client_field(field_name),
+            "_canonical_key":     _canonical_key(field_name),
         })
+
+    # §6.4: offer a "no prior losses" attestation when loss history is unestablished.
+    _maybe_inject_no_loss_question(questions, facts, flags)
+    # NOTE: "Why are you marketing this account?" is intentionally NOT injected
+    # here - it is asked upfront on the recommendation screen (producer-facing,
+    # drives ACORD 101 live). Re-asking the client would be redundant, so it is
+    # only collected upfront now.
+    # Upcoming deadlines / urgency: optional underwriter-context question (Brent).
+    _maybe_inject_urgency_question(questions, facts, flags)
+    # Umbrella underlying-schedule + follow-form evidence (only when an umbrella is
+    # present and the evidence is still missing) - the questionnaire fallback that
+    # lets the Umbrella Adequacy -15 / -10 deductions be earned back.
+    _maybe_inject_umbrella_evidence_questions(questions, facts, flags)
+
+    # Curation layer (Beta Report §8): tag audience/priority/topic/score-impact,
+    # then apply the curated default-selection policy.
+    hard_stop_text = " ".join(str(s) for s in (hard_stops or []))
+    decorate_questions(
+        questions,
+        present_fact_keys=_present_fact_keys(facts),
+        hard_stop_text=hard_stop_text,
+    )
+    apply_default_selection(questions)
 
     for q in questions:
         q.pop("_group_label", None)
+        q.pop("_is_curated_client", None)
+        q.pop("_canonical_key", None)
 
     return questions
 
@@ -786,10 +1201,28 @@ def generate_arq_questions_from_facts(
             "field_type":    "text",
             "current_value": "",
             "_group_label":  group_label,
+            "_is_curated_client": _is_curated_client_field(field_name),
+            "_canonical_key":     _canonical_key(field_name),
         })
+
+    # §6.4: offer a "no prior losses" attestation when loss history is unestablished.
+    _maybe_inject_no_loss_question(questions, facts, flags)
+    # Umbrella underlying-schedule + follow-form evidence fallback (umbrella present
+    # but evidence missing) - keeps the Clarity path in step with the form-aware ARQ.
+    _maybe_inject_umbrella_evidence_questions(questions, facts, flags)
+
+    hard_stop_text = " ".join(str(s) for s in (hard_stops or []))
+    decorate_questions(
+        questions,
+        present_fact_keys=_present_fact_keys(facts),
+        hard_stop_text=hard_stop_text,
+    )
+    apply_default_selection(questions)
 
     for q in questions:
         q.pop("_group_label", None)
+        q.pop("_is_curated_client", None)
+        q.pop("_canonical_key", None)
 
     return questions
 
@@ -1011,7 +1444,18 @@ def generate_cross_form_arq_questions(
             "source":        "cross_form_conflict",
             "conflict_code": code,
             "severity":      itype,
+            "_is_cross_form": True,
+            "_is_curated_client": True,
+            "_canonical_key":  _canonical_key(field_name),
         })
+
+    # Cross-form conflicts are client-relevant structural issues; tag them so
+    # the producer UI groups them and flags their hard-stop / SQS impact.
+    decorate_questions(questions)
+    for q in questions:
+        q.pop("_is_cross_form", None)
+        q.pop("_is_curated_client", None)
+        q.pop("_canonical_key", None)
 
     return questions
 
@@ -1196,7 +1640,12 @@ async def apply_arq_answers_to_session(
         logger.error(f"apply_arq_answers: cannot load session {processing_session_id}: {ex}")
         return False, []
 
+    from services.sqs_service import _attested_true
+
     generated = proc_session.get("generated_forms", {})
+    facts     = dict(proc_session.get("facts", {}) or {})
+    flags     = dict(proc_session.get("flags", {}) or {})
+    flags_changed = False
     updated   = []
 
     for field_name, form_ids in field_to_forms.items():
@@ -1207,16 +1656,277 @@ async def apply_arq_answers_to_session(
             if field_name in schema or field_name in field_state or fid in form_ids:
                 field_state[field_name] = new_val
                 form_data["field_state"] = field_state
-                if "confidence" in form_data:
-                    form_data["confidence"][field_name] = "filled"
+                # Label as client-supplied (scores 1.00 in SQS, distinct from
+                # source-document evidence — Beta Report §6 evidence labelling).
+                conf = form_data.get("confidence") or {}
+                conf[field_name] = "client_arq"
+                form_data["confidence"] = conf
+                cff = set(form_data.get("client_filled_fields", []))
+                cff.add(field_name)
+                form_data["client_filled_fields"] = list(cff)
+                # Bust the PDF cache so the next get-pdf regenerates the form
+                # with the client's answer baked in (populated after refresh).
                 form_data["_pdf_cache_hash"] = ""
                 form_data["pdf_bytes"] = None
+        # Mirror the answer into canonical facts so SQS, stops, and readiness can
+        # actually move — the per-form field_state alone never reached the
+        # facts-driven scorers (root cause of "score didn't change", §6.2).
+        canon = _canonical_key(field_name)
+        if canon and not canon.startswith("_"):
+            facts[canon] = {
+                "value":      str(new_val),
+                "confidence": "client_arq",
+                "source":     "client_arq",
+            }
+            # §6.4: an affirmative "no prior losses" attestation must also set the
+            # flag (not just a facts string) so the loss-history pillar moves. A
+            # "No" answer means the client HAS losses — do not set the flag.
+            if canon == NO_LOSS_INDICATOR_FIELD:
+                if _attested_true(new_val):
+                    flags["no_prior_losses"] = True
+                    flags_changed = True
+                else:
+                    # L9 fix: a "No" answer (client has losses) must reset the flag
+                    # so a subsequent recompute doesn't keep awarding the no-loss credit.
+                    if flags.get("no_prior_losses"):
+                        flags["no_prior_losses"] = False
+                        flags_changed = True
+            elif canon == CARRIER_MARKETING_FIELD:
+                # Derive prior_carrier_adverse_action from the selected reason.
+                # Adverse options escalate ACORD 101 and impact Narrative Quality.
+                _val_lower = str(new_val).strip().lower()
+                if _val_lower.startswith("other:"):
+                    _free_text = str(new_val).strip()[6:].strip()
+                    _is_adverse = await _classify_other_reason_adverse(_free_text)
+                else:
+                    _is_adverse = _val_lower in _ADVERSE_CARRIER_REASONS
+                flags["prior_carrier_adverse_action"] = _is_adverse
+                flags_changed = True
         if field_name not in updated:
             updated.append(field_name)
 
-    await upd_processing_session(processing_session_id, {"generated_forms": generated})
+    _update_payload = {"generated_forms": generated, "facts": facts}
+    if flags_changed:
+        _update_payload["flags"] = flags
+    await upd_processing_session(processing_session_id, _update_payload)
     logger.info(f"ARQ {arq_id}: applied {len(updated)} fields to session {processing_session_id}")
     return True, updated
+
+
+# ASYNC-SAFE
+async def recalculate_session_scores(processing_session_id: str) -> dict:
+    """Re-run scoring after ARQ answers are applied (Beta Report §6.2 / §8.2.7).
+
+    Mirrors the producer field-edit recompute path (form_routes.update_pdf):
+    re-evaluate field + cross-form stops, recompute per-form and package SQS,
+    and persist — so missing-field status, related warnings, SQS, form
+    readiness, and submission readiness all reflect the client's answers on the
+    producer's next view. Pure-Python (no LLM, no PDF), safe to run inline.
+    """
+    from repositories.session_repository import (
+        get_processing_session, upd_processing_session,
+    )
+    from services.sqs_service import (
+        evaluate_stops, calculate_sqs, calculate_sqs_from_facts,
+        calculate_package_sqs, _check_loss_run_insured_match,
+    )
+    from services.extraction_service import _fv as _sqs_fv
+    from services.cross_form_validator import (
+        run_cross_form_validation, split_cross_form_issues,
+    )
+
+    try:
+        proc = await get_processing_session(processing_session_id)
+    except Exception as ex:
+        logger.error(f"recalculate_session_scores: cannot load {processing_session_id}: {ex}")
+        return {"ok": False}
+
+    facts        = proc.get("facts", {}) or {}
+    flags        = proc.get("flags", {}) or {}
+    generated    = proc.get("generated_forms", {}) or {}
+    selected_ids = proc.get("selected_form_ids") or list(generated.keys())
+    tier2_score  = proc.get("tier2_score", 50)
+    user_id      = proc.get("user_id")
+
+    score_before = (proc.get("package_sqs") or {}).get("package_sqs_score")
+    hard_before  = len(proc.get("hard_stops", []) or [])
+
+    # §6.2: capture fill rate before recalculation so we can show before/after delta.
+    _fill_before_rates = [
+        fdata.get("sqs", {}).get("confidence_fill_rate")
+        for fdata in generated.values()
+        if isinstance(fdata, dict) and fdata.get("sqs", {}).get("confidence_fill_rate") is not None
+    ]
+    fill_rate_before = int(sum(_fill_before_rates) / len(_fill_before_rates)) if _fill_before_rates else None
+
+    # Re-evaluate field-level + cross-form stops from the latest facts.
+    re_hard, re_soft = evaluate_stops(facts, flags)
+    triggered        = set(selected_ids) | set(generated.keys())
+    cf_issues        = run_cross_form_validation(facts, flags, triggered)
+    cf_hard, cf_soft, _cf_adv = split_cross_form_issues(cf_issues)
+    hard_stops = list(re_hard) + list(cf_hard)
+    soft_stops = list(re_soft) + list(cf_soft)
+
+    seen, cf_deduped = set(), []
+    for i in cf_issues:
+        m = i.get("message", "") if isinstance(i, dict) else ""
+        if m and m not in seen:
+            seen.add(m)
+            cf_deduped.append(i)
+
+    # §6.3/§6.4: classified-doc presence + loss-run insured match so the
+    # narrative/loss-history floors apply on the post-remediation recompute too.
+    _docs        = proc.get("docs", []) or []
+    _present     = {str(d.get("doc_type") or "").strip() for d in _docs if isinstance(d, dict) and not d.get("excluded")}
+    _has_narr    = "narrative" in _present
+    _has_loss    = "loss_run" in _present
+    _loss_match  = _check_loss_run_insured_match(_docs, _sqs_fv(facts, "applicant_name"))
+
+    if generated:
+        for fid, fdata in generated.items():
+            field_state = fdata.get("field_state") or fdata.get("mapped", {})
+            confidence  = fdata.get("confidence", {})
+            schema      = fdata.get("schema", {})
+            try:
+                fdata["sqs"] = calculate_sqs(
+                    facts=facts, flags=flags, mapped_data=field_state,
+                    form_schema=schema, selected_form_ids=selected_ids,
+                    hard_stops=hard_stops, soft_stops=soft_stops,
+                    tier2_score=tier2_score, form_id=fid,
+                    confidence_dict=confidence, session_id=processing_session_id,
+                    user_id=user_id, calculation_stage="arq_remediated",
+                    has_narrative_doc=_has_narr, has_loss_run_doc=_has_loss,
+                    loss_run_match=_loss_match, cross_issues_full=cf_deduped,
+                )
+            except Exception as ex:
+                logger.error(f"recalc per-form SQS failed for {fid}: {ex}")
+        sqs_list = [f.get("sqs") for f in generated.values() if f.get("sqs")]
+    else:
+        # Clarity/Lite path — no generated forms; score directly from facts.
+        sqs_list = []
+        for fid in selected_ids:
+            try:
+                sqs_list.append(calculate_sqs_from_facts(
+                    facts=facts, flags=flags, selected_form_ids=selected_ids,
+                    hard_stops=hard_stops, soft_stops=soft_stops,
+                    tier2_score=tier2_score, form_id=fid,
+                    session_id=processing_session_id, user_id=user_id,
+                    calculation_stage="arq_remediated",
+                    session_data=proc, cross_issues_full=cf_deduped,
+                ))
+            except Exception as ex:
+                logger.error(f"recalc facts SQS failed for {fid}: {ex}")
+
+    try:
+        package_sqs = calculate_package_sqs(
+            facts=facts, flags=flags, form_results=sqs_list,
+            cross_issues=cf_deduped, hard_stops=hard_stops, soft_stops=soft_stops,
+            session_data=proc, session_id=processing_session_id, user_id=user_id,
+            calculation_stage="arq_remediated",
+        )
+    except Exception as ex:
+        logger.error(f"recalc package SQS failed: {ex}", exc_info=True)
+        package_sqs = proc.get("package_sqs")
+
+    await upd_processing_session(processing_session_id, {
+        "generated_forms":   generated,
+        "hard_stops":        hard_stops,
+        "soft_stops":        soft_stops,
+        "package_sqs":       package_sqs,
+        "cross_issues_last": cf_deduped,
+    })
+
+    score_after = (package_sqs or {}).get("package_sqs_score")
+    delta = (score_after - score_before) if (score_before is not None and score_after is not None) else 0
+
+    # §6.2: capture fill rate after so we can compute delta for producer display.
+    _fill_after_rates = [
+        fdata.get("sqs", {}).get("confidence_fill_rate")
+        for fdata in generated.values()
+        if isinstance(fdata, dict) and fdata.get("sqs", {}).get("confidence_fill_rate") is not None
+    ]
+    fill_rate_after = int(sum(_fill_after_rates) / len(_fill_after_rates)) if _fill_after_rates else None
+    fill_rate_delta = (fill_rate_after - fill_rate_before) if (fill_rate_before is not None and fill_rate_after is not None) else None
+
+    # §6.2 — 7-state post-remediation status vocabulary
+    _user_provided_fields = [
+        f for fdata in generated.values()
+        for f in (fdata.get("client_filled_fields") or [])
+    ] if generated else []
+    # Clarity/Lite path has no generated_forms, so client_filled_fields is never
+    # populated. Derive user-provided fields from client_arq-sourced facts instead
+    # so the user_provided_only / pending_validation statuses can still fire (§6.2).
+    if not _user_provided_fields:
+        _user_provided_fields = [
+            k for k, v in facts.items()
+            if isinstance(v, dict)
+            and (v.get("source") == "client_arq" or v.get("confidence") == "client_arq")
+        ]
+
+    _has_conflicts = any(
+        isinstance(i, dict) and i.get("type") == "hard_stop"
+        for i in cf_deduped
+    )
+    # Structured detection: check recommendations for an explicit requires_doc flag first.
+    # Keyword fallback retained for soft_stops that predate the structured approach.
+    _DOC_REQUIRED_SOFT_PATTERNS: tuple = (
+        "no loss history provided",
+        "loss runs requested",
+        "loss runs are",
+        "provide loss",
+        "narrative explanation recommended",
+        "requires supporting",
+        "supporting document",
+        "attach loss",
+        "attach narrative",
+    )
+    _needs_docs_from_recs = any(
+        r.get("requires_doc")
+        for fdata in (generated or {}).values()
+        for r in (fdata.get("recommendations") or [])
+    )
+    _needs_docs_from_stops = any(
+        any(pat in str(s).lower() for pat in _DOC_REQUIRED_SOFT_PATTERNS)
+        for s in soft_stops
+    )
+    _needs_docs = _needs_docs_from_recs or _needs_docs_from_stops
+
+    if hard_before > 0 and len(hard_stops) == 0:
+        status = "resolved"
+    elif delta > 0:
+        status = "improved"
+    elif delta < 0:
+        # Score decreased (e.g. client reveals prior losses). Map to pending_validation
+        # which is the correct §6.2 spec vocab for "submitted, producer must review."
+        status = "pending_validation"
+    elif _user_provided_fields and delta == 0 and len(hard_stops) > 0:
+        status = "pending_validation"
+    elif _user_provided_fields and delta == 0 and not _has_conflicts and not _needs_docs:
+        status = "user_provided_only"
+    elif _has_conflicts:
+        status = "conflicting_evidence_remains"
+    elif _needs_docs:
+        status = "requires_supporting_document"
+    else:
+        status = "still_missing"  # user provided answers but score didn't move and no conflict
+
+    logger.info(
+        f"ARQ recalc {processing_session_id}: {score_before}->{score_after} "
+        f"({status}); hard_stops {hard_before}->{len(hard_stops)}"
+    )
+    return {
+        "ok":                   True,
+        "score_before":         score_before,
+        "score_after":          score_after,
+        "delta":                delta,
+        "status":               status,
+        "hard_stops_remaining": len(hard_stops),
+        "soft_stops_remaining": len(soft_stops),
+        "tier":                 (package_sqs or {}).get("tier"),
+        "fill_rate_before":     fill_rate_before,
+        "fill_rate_after":      fill_rate_after,
+        "fill_rate_delta":      fill_rate_delta,
+    }
 
 
 # ASYNC-SAFE
