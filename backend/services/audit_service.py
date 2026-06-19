@@ -217,7 +217,8 @@ async def mark_recommendation_dismissed(
                 ON CONFLICT (session_id, rec_id) DO UPDATE
                     SET action='dismissed', action_at=EXCLUDED.action_at,
                         sqs_score_at_action=EXCLUDED.sqs_score_at_action,
-                        override_reason=EXCLUDED.override_reason
+                        override_reason=EXCLUDED.override_reason,
+                        form_id=COALESCE(sqs_recommendation_audit.form_id, EXCLUDED.form_id)
                     WHERE sqs_recommendation_audit.action IS NULL
                 """,
                 f"audit_{uuid.uuid4().hex}",
@@ -231,6 +232,23 @@ async def mark_recommendation_dismissed(
     except Exception as ex:
         logger.error(f"Failed to dismiss recommendation: {ex}")
         return False
+
+
+# ASYNC-SAFE
+async def get_dismissed_recommendations(session_id: str) -> List[dict]:
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT rec_id, form_id, message, score_impact, override_reason, action_at
+                   FROM sqs_recommendation_audit
+                   WHERE session_id=$1 AND action='dismissed'
+                   ORDER BY action_at ASC""",
+                session_id,
+            )
+        return [dict(r) for r in rows]
+    except Exception as ex:
+        logger.error(f"Failed to get dismissed recommendations: {ex}")
+        return []
 
 
 # ASYNC-SAFE

@@ -76,13 +76,18 @@ async def generate_questions(
         generated_forms=generated,
         hard_stops=proc_session.get("hard_stops", []),
         soft_stops=proc_session.get("soft_stops", []),
+        session_docs=proc_session.get("docs", []),
     )
 
     # Merge cross-form conflict questions — placed at the front so the client
     # resolves structural conflicts before answering form-level missing fields.
     cross_form_issues = proc_session.get("cross_form_issues", [])
     if cross_form_issues:
-        cf_questions = generate_cross_form_arq_questions(cross_form_issues, generated)
+        cf_questions = generate_cross_form_arq_questions(
+            cross_form_issues, generated,
+            facts=proc_session.get("facts", {}),
+            flags=proc_session.get("flags", {}),
+        )
         # Deduplicate by field_name against per-form questions already in the list
         existing_fields = {q["field_name"] for q in questions}
         new_cf = [q for q in cf_questions if q["field_name"] not in existing_fields]
@@ -360,11 +365,14 @@ async def submit_arq(token: str, request: Request):
     # client's answers on next view (Beta Report §6.2 / §8.2.7). Pure-Python and
     # cheap; failures here must not break the client's submission confirmation.
     score_update = {}
-    if apply_ok and applied_fields:
+    if apply_ok:
         try:
             score_update = await recalculate_session_scores(arq["session_id"])
         except Exception as _recalc_ex:
             logger.error(f"ARQ submit: score recalculation failed: {_recalc_ex}", exc_info=True)
+            # Don't swallow the failure silently: mark it so the producer can be
+            # told scores are stale rather than assuming remediation took effect.
+            score_update = {"ok": False}
 
     # §6.2: persist remediation status + answer count so the producer sees them
     # in the ARQ panel without re-running the recalculation.
@@ -407,6 +415,9 @@ async def submit_arq(token: str, request: Request):
         "success":        True,
         "message":        "Answers submitted successfully.",
         "fields_updated": len(applied_fields),
+        # Explicit flag so the frontend can warn the producer when scores could not
+        # be recalculated (recalc threw or failed) instead of showing stale numbers.
+        "scores_updated": bool(score_update.get("ok")),
         "score_update":   score_update,
     })
 

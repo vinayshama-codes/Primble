@@ -83,10 +83,15 @@ def test_acord125_questions_only_use_yellow_missing_required_fields():
         soft_stops=[],
     ))
 
-    # The §6.4 "no prior losses" attestation is an additive, synthetic question
-    # (not derived from an ACORD 125 form field) — exclude it so this test keeps
-    # asserting its real intent: which FORM fields become questions.
-    form_fields = _question_fields(questions) - {"loss_history_no_prior_losses_indicator"}
+    # The §6.4 "no prior losses" attestation and the §6.3 narrative-enrichment
+    # prompts are additive, synthetic questions (not derived from an ACORD 125
+    # form field) — exclude them so this test keeps asserting its real intent:
+    # which FORM fields become questions.
+    _synthetic = {"loss_history_no_prior_losses_indicator"}
+    form_fields = {
+        f for f in _question_fields(questions)
+        if f not in _synthetic and not f.startswith("narrative_")
+    }
     assert form_fields == {"applicant_name"}
 
 

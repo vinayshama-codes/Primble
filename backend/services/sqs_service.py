@@ -3,12 +3,12 @@
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Tuple, Dict, Optional
 
 from utils.validators import run_field_validations
-from services.extraction_service import _fv, _focr
-from services.normalization import distinct_normalized, normalize_general
+from services.extraction_service import _fv, _focr, _narrative_remarks_text
+from services.normalization import distinct_normalized, normalize_general, normalize_date
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +17,18 @@ SQS_MODEL_VERSION = "2.3.0"
 
 # ── Client-approved underwriting thresholds (Beta Report §6 Q1/Q2/Q3 answers) ─
 _UMB_GL_OCC_MIN    = 1_000_000  # GL each occurrence min for umbrella attachment
+_UMB_GL_AGG_MIN    = 2_000_000  # GL aggregate min for umbrella attachment (client Q1)
 _UMB_AUTO_CSL_MIN  = 1_000_000  # Auto CSL min for umbrella attachment
 _UMB_EL_FULL       = 1_000_000  # EL for full umbrella-over-WC credit
 _UMB_EL_OK         = 500_000    # EL for acceptable credit (slight reduction)
 _LOSS_YEARS_FULL   = 5          # Years for full loss-history credit
 _LOSS_YEARS_PART   = 3          # Years for partial credit
 _LOSS_RECENCY_DAYS = 90         # Grace window for current-valued loss runs
+_LOSS_CONFLICT_CAP = 45         # Loss-history score ceiling while a no-loss
+                                # attestation is contradicted by actual loss-run claims
+_LOSS_NO_MATCH_CAP = 25         # Loss-history ceiling when loss runs do NOT match the
+                                # insured - unmatched runs are not creditable evidence
+                                # for this submission (client §6.4: match before crediting)
 
 # ── Narrative component taxonomy (§6.3 item 1) ────────────────────────────────
 NARRATIVE_COMPONENT_LABELS: Dict[str, str] = {
@@ -36,14 +42,49 @@ NARRATIVE_COMPONENT_LABELS: Dict[str, str] = {
     "carrier_market":      "Prior Carrier Context",
     "location_exposure":   "Location Details",
     "employee_practices":  "Employee / Payroll Context",
-    "growth_trends":       "Growth Trends",
-    "target_markets":      "Target Markets",
+    "growth_trends":       "WC Payroll / Class Code Context",
+    "target_markets":      "EMOD / XMOD Information",
 }
+
+# §6.3 item 2/4: the five narrative-quality components that have NO structured
+# ACORD field behind them (Bucket C). When the narrative does not cover one of
+# these, the ARQ asks the client to supply it; when the narrative covers it, no
+# question is asked. Each maps to a dedicated free-text fact key the client
+# answer lands in - a filled key credits that component (so the score moves and
+# the topic is not re-asked) and joins the narrative scan text.
+NARRATIVE_ENRICHMENT_FIELDS: Dict[str, str] = {
+    "account_overview": "narrative_account_overview",
+    "management":       "narrative_management",
+    "risk_controls":    "narrative_risk_controls",
+    "growth_trends":    "narrative_growth_trends",
+    "target_markets":   "narrative_target_markets",
+}
+
+
+def _narrative_enrichment_present(facts: dict) -> Dict[str, bool]:
+    """Components the client supplied directly via the narrative-enrichment ARQ.
+
+    A component is credited when its dedicated free-text fact key holds a
+    non-empty value, independent of keyword matching - the client explicitly
+    answered the topic, so it is covered (§6.3 item 2).
+    """
+    out: Dict[str, bool] = {}
+    for comp, key in NARRATIVE_ENRICHMENT_FIELDS.items():
+        val = _fv(facts or {}, key)
+        out[comp] = bool(val and str(val).strip() and str(val).strip().lower() not in ("null", "none"))
+    return out
+
+
+def _narrative_enrichment_text(facts: dict) -> str:
+    """Concatenated client narrative-enrichment answers, for the scan text."""
+    vals = [str(_fv(facts or {}, key) or "").strip()
+            for key in NARRATIVE_ENRICHMENT_FIELDS.values()]
+    return " ".join(v for v in vals if v and v.lower() not in ("null", "none"))
 
 _NARRATIVE_SCORE_SIGNALS: Dict[str, Tuple[str, ...]] = {
     "account_overview": (
         "account overview", "company overview", "background", "about the", "company profile",
-        "operates as", "is a ", "provides ", "specializes in", "family-owned", "family owned",
+        "operates as", "specializes in", "family-owned", "family owned",
         "owner-operated", "locally owned", "independently owned",
     ),
     "operations": (
@@ -95,17 +136,33 @@ _NARRATIVE_SCORE_SIGNALS: Dict[str, Tuple[str, ...]] = {
         "seasonal workers", "number of employees",
     ),
     "growth_trends": (
-        "growth", "revenue growth", "expanding", "growing", "year-over-year",
-        "increased revenue", "market growth", "rapid growth", "business growth",
-        "revenue increased", "growing company", "expansion", "revenue trend",
+        "wc class code", "class code", "payroll by class", "payroll breakdown",
+        "payroll allocation", "workers comp payroll", "wc payroll", "payroll schedule",
+        "ncci class", "labor classification", "classification code", "job classification",
+        "payroll by classification", "employee classification", "class codes",
     ),
     "target_markets": (
-        "target market", "market segment", "clientele", "customer base",
-        "target customer", "market focus", "serves residential", "serves commercial",
-        "primary customers", "niche market", "customer profile", "clients include",
-        "markets served", "ideal customer", "primarily serves",
+        "experience modifier", "experience modification", "e-mod", "emod",
+        "x-mod", "xmod", "mod factor", "modification factor", "experience rating",
+        "experience mod", "merit rating", "debit mod", "credit mod",
+        "workers comp mod", "experience modification rate", "rating bureau", "ncci mod",
     ),
 }
+
+# Generic single words from the signal table above that also appear routinely in
+# non-narrative boilerplate (certificate / dec-page / application headers, footers,
+# letterhead). When scanning a long raw-OCR narrative body (strict mode), one of
+# these on its own must NOT credit a component - it needs a strong companion signal
+# or a second distinct match. Strong multi-word phrases ("no prior losses",
+# "general liability", "number of locations", "employee handbook", "years of
+# experience"...) are deliberately NOT listed, so they still credit on first mention.
+_NARRATIVE_GENERIC_SIGNALS: frozenset = frozenset({
+    "coverage",
+    "carrier", "renewal",
+    "location", "address", "exposure", "premises", "properties", "sites", "geographic",
+    "employees", "training",
+    "background", "about the",
+})
 
 # ── Narrative underwriting substance signals (40% quality component) ──────────
 # Rewards narratives that provide meaningful underwriting context rather than
@@ -234,15 +291,33 @@ def _attested_true(value) -> bool:
     return ("no " in s and ("loss" in s or "claim" in s))
 
 
-def _score_narrative_components(text: str) -> Dict[str, bool]:
-    """Return per-component presence dict for the §6.3 narrative quality model."""
+def _score_narrative_components(text: str, strict: bool = False) -> Dict[str, bool]:
+    """Return per-component presence dict for the §6.3 narrative quality model.
+
+    strict=False (default) credits a component on a SINGLE matched signal phrase -
+    identical to the previous `any(...)` behaviour, so every existing caller is
+    unchanged. It suits the short, curated narrative fields (account_description /
+    acord101_remarks / operations) where one clear mention is meaningful.
+
+    strict=True is for scanning long raw-OCR narrative bodies, which contain
+    incidental boilerplate words. There a component is credited only when it matches
+    at least one STRONG (specific) signal, OR at least two DISTINCT signals overall.
+    A lone generic word (a stray "coverage" / "location" / "carrier" in a header)
+    therefore cannot falsely credit a component, while a strong phrase such as
+    "no prior losses" or "general liability" still credits on first mention.
+    """
     if not text:
         return {k: False for k in NARRATIVE_COMPONENT_LABELS}
     t = text.lower()
-    return {
-        key: any(phrase in t for phrase in phrases)
-        for key, phrases in _NARRATIVE_SCORE_SIGNALS.items()
-    }
+    out: Dict[str, bool] = {}
+    for key, phrases in _NARRATIVE_SCORE_SIGNALS.items():
+        matched = [p for p in phrases if p in t]
+        if not strict:
+            out[key] = bool(matched)
+        else:
+            strong = [p for p in matched if p not in _NARRATIVE_GENERIC_SIGNALS]
+            out[key] = bool(strong) or len(matched) >= 2
+    return out
 
 
 def _score_narrative_substance(text: str) -> int:
@@ -265,6 +340,64 @@ def _score_narrative_substance(text: str) -> int:
         if any(p in t for p in phrases)
     )
     return int(present / len(_NARRATIVE_SUBSTANCE_SIGNALS) * 100)
+
+
+_NARRATIVE_LLM_MAX_CHARS = 16000  # bound the fallback doc-body scan in _extract_narrative_doc_text
+
+# Component → canonical fact keys for which the narrative PROSE is itself a
+# legitimate basis for the stored value. Lets evidence labels ("Stated in
+# narrative") be attributed from the profile WITHOUT depending on a document
+# being classified as "narrative" (closes the §6.3 classification-dependency
+# gap). Deliberately conservative: it excludes precise figures (claim counts,
+# payroll, headcount, addresses) that the narrative only gives CONTEXT for - the
+# exact value still comes from a structured source, so those are not labelled as
+# narrative-sourced. Components with no curated fact key map to ().
+NARRATIVE_COMPONENT_FACT_KEYS: Dict[str, Tuple[str, ...]] = {
+    "account_overview":    (),
+    "operations":          ("operations_description",),
+    "years_in_business":   ("years_in_business",),
+    "management":          (),
+    "risk_controls":       (),
+    "loss_history":        ("loss_history_no_prior_losses_indicator",),
+    "coverage_discussion": (),
+    "carrier_market":      ("prior_carrier",),
+    "location_exposure":   (),
+    "employee_practices":  (),
+    "growth_trends":       (),
+    "target_markets":      (),
+}
+
+
+def narrative_profile_present_map(profile: Optional[dict]) -> Dict[str, bool]:
+    """Reduce a detection profile to {component: present_bool}, evidence-gated.
+
+    A component is counted present only when the model flagged it present AND
+    returned a non-empty evidence quote - this stops a hallucinated "present"
+    (no supporting text) from crediting a component, keeping the score and the
+    "includes X but not Y" recommendations honest in both directions.
+    """
+    out = {k: False for k in NARRATIVE_COMPONENT_LABELS}
+    if not isinstance(profile, dict):
+        return out
+    for k in NARRATIVE_COMPONENT_LABELS:
+        v = profile.get(k)
+        if isinstance(v, dict):
+            out[k] = bool(v.get("present")) and bool(str(v.get("evidence") or "").strip())
+    return out
+
+
+def narrative_profile_fact_keys(profile: Optional[dict]) -> set:
+    """Canonical fact keys evidenced by present components in the profile.
+
+    Used by the pipeline to attribute "stated_in_narrative" labels from the
+    profile rather than from doc classification alone.
+    """
+    present = narrative_profile_present_map(profile)
+    keys: set = set()
+    for comp, ok in present.items():
+        if ok:
+            keys.update(NARRATIVE_COMPONENT_FACT_KEYS.get(comp, ()))
+    return keys
 
 
 # ── Tier field definitions ────────────────────────────────────────────────────
@@ -320,22 +453,39 @@ def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
     return len(missing) == 0, missing
 
 
-def check_tier2(facts: dict) -> Tuple[int, List[str]]:
+# WC-specific Tier 2 fields. These are mechanical ACORD 130 requirements, not
+# part of the client's Underwriting Information spec (Revenue, Payroll, Employees,
+# Years in Business, Operations Description, FEIN, NAICS). They must only count
+# toward the Underwriting Profile denominator when WC coverage is actually present
+# - otherwise every GL-only / non-WC submission takes a ~25-point structural
+# penalty for fields that can never apply to it.
+_TIER2_WC_FIELDS = ("wc_xmod", "wc_payroll_period", "wc_officer_exclusions")
+
+
+def check_tier2(facts: dict, flags: dict | None = None) -> Tuple[int, List[str]]:
     # The industry-classification requirement is satisfied by EITHER a NAICS or a
     # SIC code (Beta Report §10 lists both as readiness items and notes they are
     # mapped flexibly). A submission carrying a SIC code but no NAICS is now
     # credited (previously it was penalised), and when both are absent the gap is
-    # surfaced as one combined "NAICS or SIC" item rather than ignoring SIC. The
-    # denominator is unchanged, so this never inflates an existing NAICS score.
+    # surfaced as one combined "NAICS or SIC" item rather than ignoring SIC.
+    #
+    # WC-specific fields are excluded from both the missing list AND the
+    # denominator when the submission has no Workers Comp coverage, so a complete
+    # non-WC submission can reach 100 (previously capped at ~75).
+    has_wc = bool((flags or {}).get("has_workers_comp"))
+    fields = {
+        f: lbl for f, lbl in TIER2_FIELDS.items()
+        if has_wc or f not in _TIER2_WC_FIELDS
+    }
     missing: List[str] = []
-    for field, label in TIER2_FIELDS.items():
+    for field, label in fields.items():
         if field == "naics_code":
             if not (_fv(facts, "naics_code") or _fv(facts, "sic_code")):
                 missing.append("NAICS or SIC industry code")
             continue
         if not _fv(facts, field):
             missing.append(label)
-    score = max(0, round(100 - len(missing) * (100 / len(TIER2_FIELDS))))
+    score = max(0, round(100 - len(missing) * (100 / len(fields))))
     return score, missing
 
 
@@ -399,7 +549,7 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         soft.append(naics_issue[1])
 
     # ── Prior carrier adverse action ──────────────────────────────────────────
-    if flags.get("prior_carrier_adverse_action") and not _fv(facts, "acord101_remarks"):
+    if flags.get("prior_carrier_adverse_action") and not _narrative_remarks_text(facts):
         soft.append(
             "Carrier adverse action indicated (nonrenewal / cancellation / declined) - "
             "narrative explanation recommended to give underwriter account context"
@@ -1029,7 +1179,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     def _has_date_explanation(d):
         if _fv(d["facts"], "policy_period_explanation"):
             return True
-        remarks_lower = str(_fv(d["facts"], "acord101_remarks") or "").lower()
+        remarks_lower = _narrative_remarks_text(d["facts"]).lower()
         if not remarks_lower:
             return False
         return any(kw in remarks_lower for kw in (
@@ -1152,6 +1302,74 @@ def loss_integrity_coefficient(
     return round(years_ratio * recency_ratio, 3)
 
 
+# ── Deterministic loss-run dating & conflict (§6.4 Q3) ───────────────────────
+
+def _parse_iso_date(value) -> Optional[datetime]:
+    """Parse a loosely-formatted date via the shared normalizer; None if unparseable."""
+    iso = normalize_date(value)
+    if not iso:
+        return None
+    try:
+        return datetime.strptime(iso, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _loss_run_age_days(facts: dict) -> Optional[int]:
+    """Resolve loss-run age in days - deterministic and evidence-based:
+
+      1. (today - 'valued as of' date) when a parseable valuation date was
+         extracted from the loss run. This is the authoritative value.
+      2. else an explicit, parseable loss_run_age_days the model stated.
+      3. else None - age is UNVERIFIED. Callers must NOT assume a value. The old
+         "default 365" punished every loss run whose date the model failed to
+         state and printed a fabricated "365 days old" warning (§6.4 / Beta 2).
+    """
+    valued = _parse_iso_date(_fv(facts, "loss_run_valuation_date"))
+    if valued is not None:
+        age = (datetime.now(timezone.utc).date() - valued.date()).days
+        return age if age >= 0 else None   # future date = mis-extraction; don't trust it
+    stated = _to_int(_fv(facts, "loss_run_age_days"))
+    if stated is not None and stated >= 0:
+        return stated
+    return None
+
+
+def _resolve_loss_history_years(facts: dict) -> int:
+    """Years of loss history. Deterministic from the loss-run experience period
+    (start -> 'valued as of' / period end) when both dates were extracted, so the
+    full/partial/incomplete tier no longer rests solely on a model-stated count
+    that can miscount (§6.4 Q3 secondary). Clamped to [1, 10] so a single stray
+    date cannot inflate the tier. Falls back to the model's count otherwise.
+    """
+    start = _parse_iso_date(_fv(facts, "loss_run_period_start"))
+    end   = (_parse_iso_date(_fv(facts, "loss_run_period_end"))
+             or _parse_iso_date(_fv(facts, "loss_run_valuation_date")))
+    if start is not None and end is not None and end >= start:
+        return max(1, min(round((end - start).days / 365.25), 10))
+    return _to_int(_fv(facts, "loss_history_years")) or 0
+
+
+def _loss_history_conflict(facts: dict, flags: dict) -> bool:
+    """True when a no-loss attestation (user or narrative) is contradicted by
+    ACTUAL loss-run claims (§6.4 item 1 'conflicting').
+
+    Single source of truth shared by the P4 score and the state label so the two
+    can never disagree. Note: years of loss history alone do NOT contradict a
+    no-loss attestation (a clean multi-year loss run CONFIRMS it) - only real
+    claims / incurred amounts do.
+    """
+    claims   = _to_int(_fv(facts, "num_claims")) or 0
+    incurred = _to_float(_fv(facts, "total_incurred")) or 0.0
+    no_loss = (
+        bool(flags.get("no_prior_losses"))
+        or bool(flags.get("narrative_states_no_losses"))
+        or _attested_true(_fv(facts, "no_prior_losses"))
+        or _attested_true(_fv(facts, "loss_history_no_prior_losses_indicator"))
+    )
+    return no_loss and (claims > 0 or incurred > 0)
+
+
 def calculate_p4_loss_history(
     facts: dict,
     flags: dict,
@@ -1160,12 +1378,12 @@ def calculate_p4_loss_history(
 ) -> Tuple[int, List[str]]:
     """Loss History Integrity pillar - client-approved year tiers & recency (Q3).
 
-    Year tiers (Q3):  ≥5 yr fully valued = 100 | ≥3 yr = 75 | <3 yr = 40
+    Year tiers (Q3):  ≥5 yr fully valued = 100 | ≥3 yr = 80 | <3 yr = 40
     Recency (Q3):     90-day grace window, then gradual reduction (max 25 pts)
     Insured match (Q3): strong (name+FEIN/policy) = full | possible = -15 pts + warning
     """
-    years    = _to_int(_fv(facts, "loss_history_years")) or 0
-    age_days = _to_int(_fv(facts, "loss_run_age_days")) or 365
+    years    = _resolve_loss_history_years(facts)
+    age_days = _loss_run_age_days(facts)          # None when recency is UNVERIFIED
     has_carrier = bool(_fv(facts, "prior_carrier"))
 
     # Fix: also read the actual canonical alias key (fixes dead-key bug §6.4).
@@ -1178,6 +1396,30 @@ def calculate_p4_loss_history(
     )
 
     recs: List[str] = []
+
+    # §6.4 item 1: a no-loss attestation contradicted by ACTUAL loss-run claims
+    # cannot earn full credit. Cap every return path so the number matches the
+    # 'conflicting' state label (single source: _loss_history_conflict).
+    _conflict = _loss_history_conflict(facts, flags)
+    # Client §6.4 item 2: loss runs must be matched to the insured BEFORE they can
+    # be credited. An insured-name mismatch means the runs are not creditable
+    # evidence for THIS submission, so the score cannot exceed the no-information
+    # baseline regardless of how many years they contain - otherwise the year-tier
+    # path could award 70+ for loss runs that do not belong to the insured.
+    _no_match = (loss_run_match == "no_match")
+
+    def _result(score: int, msgs: List[str]) -> Tuple[int, List[str]]:
+        capped = score
+        out_msgs = list(msgs)
+        if _no_match:
+            capped = min(capped, _LOSS_NO_MATCH_CAP)
+        if _conflict:
+            capped = min(capped, _LOSS_CONFLICT_CAP)
+            out_msgs.append(
+                "Loss history conflict: a no-loss attestation contradicts the "
+                "uploaded loss run claims - reconcile before submission."
+            )
+        return capped, out_msgs
 
     # ── Base score by year tier (client's recommended scoring) ──────────────
     #     5 yr current loss runs = 100 | 3-4 yr = 80 | 1-2 yr = 40
@@ -1195,7 +1437,24 @@ def calculate_p4_loss_history(
         base_score = 40
         recs.append("Loss history incomplete - fewer than 3 years provided")
     elif has_loss_run_doc:
-        match_credit = {"strong": 50, "moderate": 43, "possible": 35, "no_match": 15, "no_loss_run": 50}
+        # §6.4 pending-status shortcut: a document classified as a loss_run that only
+        # MENTIONS runs are pending/requested (loss_run_status extracted as "pending" or
+        # "requested", no claim years and no claim amounts found) is a cover letter or
+        # narrative, not an actual loss run. Honour the pending state instead of treating
+        # it as an uploaded-but-unconfirmed run. Must be checked FIRST so it takes
+        # priority over the rest of the has_loss_run_doc credit logic below.
+        _lrs = str(_fv(facts, "loss_run_status") or "").lower()
+        _has_claims = (
+            (_to_int(_fv(facts, "num_claims")) or 0) > 0
+            or (_to_float(_fv(facts, "total_incurred")) or 0.0) > 0.0
+        )
+        if _lrs in ("pending", "requested") and years == 0 and not _has_claims:
+            return _result(70, ["Loss runs requested / pending - update score when received"])
+        # Client three-tier match (sqs-pillars spec): name + FEIN/policy = strong;
+        # name + address = moderate; name only = possible. Each tier earns distinct
+        # credit - address is a meaningful secondary identifier, not equivalent to
+        # FEIN/policy, but it does provide more certainty than name alone.
+        match_credit = {"strong": 50, "moderate": 42, "possible": 35, "no_match": 15, "no_loss_run": 50}
         credit = match_credit.get(loss_run_match, 50)
         if loss_run_match == "moderate":
             recs.append("Loss run ownership partially verified - name and address match but FEIN/policy number not confirmed")
@@ -1213,39 +1472,58 @@ def calculate_p4_loss_history(
         else:
             credit = max(0, credit - 10)
             recs.append("Prior carrier name missing - add carrier details to strengthen the loss history record")
-        # L6 fix: Q3 says ">90 days → reduce + warn" - apply recency even on the
-        # doc-only path. The previous early-return skipped this entirely.
-        if age_days > _LOSS_RECENCY_DAYS:
+        # L6 fix: Q3 says ">90 days -> reduce + warn" - apply recency even on the
+        # doc-only path, but ONLY when the age is KNOWN (a real valuation date or a
+        # stated age). Never fabricate an age when it could not be determined.
+        if age_days is not None and age_days > _LOSS_RECENCY_DAYS:
             excess      = age_days - _LOSS_RECENCY_DAYS
             recency_pen = min(15, int(excess / 18))   # gentler cap (max 15) since years unknown
             credit      = max(0, credit - recency_pen)
             recs.append(f"Loss runs are {age_days} days old - updated loss runs may be required.")
-        return credit, recs
+        elif age_days is None:
+            recs.append("Loss run valuation date not detected - confirm recency before submission.")
+        return _result(credit, recs)
     elif no_loss_attested:
-        return 60, ["No prior losses (attested) - attach loss runs to fully confirm"]
+        # §6.4 item 3: differentiate evidence quality in the SCORE, not just the
+        # label. An explicit user/curated attestation carries more credibility than
+        # an incidental narrative mention, so it earns more (60 vs 45). Both remain
+        # below documented loss runs and both stay flagged as user/narrative-only.
+        _user_attested = (
+            bool(flags.get("no_prior_losses"))
+            or _attested_true(_fv(facts, "no_prior_losses"))
+            or _attested_true(_fv(facts, "loss_history_no_prior_losses_indicator"))
+        )
+        if _user_attested:
+            return _result(60, ["No prior losses (attested by user) - attach loss runs to fully confirm"])
+        return _result(60, ["No prior losses (stated in narrative) - confirm with the insured or attach loss runs to corroborate"])
     elif flags.get("loss_run_pending") or str(_fv(facts, "loss_run_status") or "").lower() in ("pending", "requested"):
-        return 70, ["Loss runs requested / pending - update score when received"]
+        return _result(70, ["Loss runs requested / pending - update score when received"])
     else:
-        return 25, ["No loss history provided - required for carrier submission"]
+        return _result(25, ["No loss history provided - required for carrier submission"])
 
     # ── Prior-carrier adjustment (client: present +10, missing -10) ──────────
-    # Applies on the year-tier path (actual loss years parsed). Prior carrier is
-    # important underwriting information commonly found on loss runs / prior
-    # policies; its presence strengthens and its absence weakens the loss record.
+    # Applies uniformly on the year-tier path regardless of year tier achieved.
     if has_carrier:
         base_score = min(100, base_score + 10)
     else:
         base_score = max(0, base_score - 10)
-        recs.append("Prior carrier name missing - add carrier details to strengthen the loss history record")
+        recs.append("Prior carrier name missing - add carrier details to complete the underwriting picture")
 
     # ── Recency adjustment (Q3: 90-day grace, then gradual reduction) ────────
-    if age_days > _LOSS_RECENCY_DAYS:
+    # Only when the age is KNOWN (deterministic from a valuation date, or a stated
+    # age). Never assume an age - the old "default 365" punished loss runs whose
+    # date the model failed to state and printed a fabricated age (Beta 2).
+    if age_days is not None and age_days > _LOSS_RECENCY_DAYS:
         excess      = age_days - _LOSS_RECENCY_DAYS
         recency_pen = min(25, int(excess / 11))   # max 25 pt penalty at ~365 days
         base_score  = max(0, base_score - recency_pen)
         recs.append(f"Loss runs are {age_days} days old - updated loss runs may be required.")
+    elif age_days is None and has_loss_run_doc:
+        recs.append("Loss run valuation date not detected - confirm recency before submission.")
 
     # ── Insured match adjustment (for docs where years were already parsed) ──
+    # Three distinct tiers (sqs-pillars spec): strong = no deduction; moderate
+    # (name + address) = partial deduction; possible (name only) = larger deduction.
     if loss_run_match == "moderate":
         base_score = max(0, base_score - 8)
         recs.append("Loss run ownership partially verified - name and address match but FEIN/policy number not confirmed")
@@ -1274,7 +1552,7 @@ def calculate_p4_loss_history(
             base_score = max(0, base_score - 15)
             recs.append(f"Loss ratio {loss_ratio*100:.1f}% exceeds 10% of exposure - review with underwriter")
 
-    return base_score, recs
+    return _result(base_score, recs)
 
 
 # ── LOB inference ─────────────────────────────────────────────────────────────
@@ -1539,6 +1817,56 @@ def _calculate_exposure_consistency(
     return score, subscores
 
 
+# ── Follow-form detection (Option B, client Q3) ──────────────────────────────
+# Follow-form is coverage-critical and "should never be guessed" (client Q3).
+# It is confirmed ONLY when documentation explicitly and AFFIRMATIVELY states it.
+# A naive substring match would mis-read negations ("does not follow form") and
+# interrogative / uncertain mentions ("unable to determine whether the umbrella
+# follows form") as confirmations - so any match whose own clause carries a
+# negation or uncertainty cue is rejected.
+_FF_TERMS: Tuple[str, ...] = (
+    "follow form", "follows form", "follow the form",
+    "following form", "follows the underlying",
+    "follow-form", "follows-form",
+)
+_FF_NEGATION_WORDS: frozenset = frozenset({
+    "not", "never", "unable", "unclear", "unknown",
+    "whether", "cannot", "except", "rather",
+})
+
+
+def _has_explicit_follow_form(text) -> bool:
+    """True only when *text* affirmatively, explicitly states follow-form.
+
+    Option B (client Q3): never infer follow-form. Any occurrence preceded -
+    within its own clause - by a negation or uncertainty cue ("does not", "n't",
+    "unable", "whether"...) is rejected so a coverage-critical status is never
+    guessed from a negated or hypothetical mention.
+    """
+    if not text:
+        return False
+    t = str(text).lower()
+    for term in _FF_TERMS:
+        start = 0
+        while True:
+            idx = t.find(term, start)
+            if idx == -1:
+                break
+            window = t[max(0, idx - 60):idx]
+            # Restrict to the current clause so a negation in a PRIOR sentence
+            # ("GL is not claims-made. Umbrella follows form.") never false-rejects.
+            clause_cut = max(window.rfind(s) for s in (".", ";", "\n"))
+            if clause_cut != -1:
+                window = window[clause_cut + 1:]
+            negated = ("n't" in window) or bool(
+                set(re.findall(r"[a-z]+", window)) & _FF_NEGATION_WORDS
+            )
+            if not negated:
+                return True
+            start = idx + len(term)
+    return False
+
+
 # ── Umbrella evidence state (§6.5 item 1) ────────────────────────────────────
 
 def _get_umbrella_state(facts: dict, flags: dict) -> str:
@@ -1570,7 +1898,22 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
     if not gl_val and not auto_val:
         return "unknown"
 
-    gl_ok   = gl_val   is None or gl_val   >= _UMB_GL_OCC_MIN
+    # Required-but-absent underlying coverage (mirror the score's -20 deduction):
+    # a present coverage flag with no extracted limit cannot be validated against
+    # the umbrella, so the evidence "needs review" rather than reading as complete.
+    # Without this the state could report umbrella_coverage_present / adequately_
+    # supported while the score is penalising the same missing limit (state/score
+    # contradiction). Handled symmetrically for GL and Auto.
+    if (gl_val is None and flags.get("has_general_liability")) or \
+       (auto_val is None and flags.get("has_auto_coverage")):
+        return "umbrella_coverage_needs_review"
+
+    # GL must satisfy BOTH halves of the client baseline (occurrence $1M /
+    # aggregate $2M); a below-baseline aggregate demotes the state so it cannot
+    # contradict the matching score reduction.
+    gl_agg  = _to_int(_fv(facts, "gl_aggregate"))
+    gl_ok   = (gl_val is None or gl_val >= _UMB_GL_OCC_MIN) and \
+              (gl_agg is None or gl_agg >= _UMB_GL_AGG_MIN)
     auto_ok = auto_val is None or auto_val >= _UMB_AUTO_CSL_MIN
     if not gl_ok or not auto_ok:
         return "umbrella_coverage_needs_review"
@@ -1587,12 +1930,11 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
         or _fv(facts, "underlying_insurance_schedule")
     )
     _ff_combined = " ".join([
-        str(_fv(facts, "acord101_remarks") or ""),
+        _narrative_remarks_text(facts),
         str(_fv(facts, "umbrella_follow_form") or ""),
         str(_fv(facts, "policy_notes") or ""),
-    ]).lower()
-    _FF_TERMS = ("follow form", "follows form", "follow the form", "following form", "follows the underlying")
-    _has_ff = any(t in _ff_combined for t in _FF_TERMS)
+    ])
+    _has_ff = _has_explicit_follow_form(_ff_combined)
 
     if not _has_schedule or not _has_ff:
         return "umbrella_coverage_present"
@@ -1603,12 +1945,11 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
 def _get_follow_form_status(facts: dict) -> dict:
     """Option B (client Q4): only confirm follow-form when docs explicitly state it (§6.5 item 4)."""
     combined = " ".join([
-        str(_fv(facts, "acord101_remarks") or ""),
+        _narrative_remarks_text(facts),
         str(_fv(facts, "umbrella_follow_form") or ""),
         str(_fv(facts, "policy_notes") or ""),
-    ]).lower()
-    _FF_TERMS = ("follow form", "follows form", "follow the form", "following form", "follows the underlying")
-    if any(t in combined for t in _FF_TERMS):
+    ])
+    if _has_explicit_follow_form(combined):
         return {
             "status": "follow_form_confirmed",
             "message": "Follow form confirmed by submitted documents.",
@@ -1641,6 +1982,28 @@ _EVIDENCE_SOURCE_MAP: Dict[Optional[str], str] = {
     None:            "not_found",
 }
 
+# Fields that must NEVER be labelled "stated_in_narrative" even when the value
+# physically appears inside a narrative-classified document. Three categories:
+#   1. Identity / structural — always deterministic, never prose
+#   2. Technical form fields — ISO symbols, VIN lists, class codes, WC mechanics;
+#      these require exact structured sources, not narrative inference
+#   3. Loss-run analytical fields — derived values, not prose-stated
+_NEVER_NARRATIVE_KEYS: frozenset = frozenset({
+    # Identity / structural
+    "applicant_name", "mailing_address", "physical_address",
+    "effective_date", "expiration_date",
+    "fein", "entity_type", "producer_name",
+    "naics_code", "sic_code", "lines_of_business",
+    "contact_name", "contact_phone", "contact_email",
+    # Technical / actuarial form fields — cannot be prose-stated
+    "wc_class_codes", "gl_class_codes_by_location",
+    "wc_xmod", "wc_payroll_period", "wc_officer_exclusions",
+    "auto_covered_symbols", "auto_vin_schedule", "auto_drivers",
+    "schedule_of_underlying_insurance", "umbrella_follow_form",
+    # Loss-run analytical fields (derived, not prose-stated)
+    "loss_run_age_days", "loss_history_years",
+})
+
 _SCORED_FACT_KEYS: Tuple[str, ...] = (
     # Tier 1 - Applicant Information
     "applicant_name", "mailing_address", "effective_date", "expiration_date",
@@ -1666,8 +2029,8 @@ _SCORED_FACT_KEYS: Tuple[str, ...] = (
     "no_prior_losses", "loss_history_no_prior_losses_indicator", "num_claims",
     # Umbrella evidence
     "schedule_of_underlying_insurance", "umbrella_follow_form",
-    # Narrative
-    "acord101_remarks",
+    # Narrative (read under either key - see _narrative_remarks_text)
+    "acord101_remarks", "additional_remarks_text",
 )
 
 
@@ -1701,22 +2064,42 @@ def _derive_evidence_labels(
         if isinstance(raw, dict):
             conf   = raw.get("confidence")
             source = str(raw.get("source", "")).lower()
-            if "narrative" in source:
+            if key in _NEVER_NARRATIVE_KEYS:
+                # Identity/structural fields are always labelled as extracted
+                # regardless of which document they were found in. A FEIN or
+                # effective date that appears inside a narrative doc is still
+                # a structured fact, not a narrative statement.
+                labels[key] = _EVIDENCE_SOURCE_MAP.get(conf, "extracted_from_source")
+            elif "narrative" in source:
                 # Explicit narrative source — always label as stated_in_narrative.
                 labels[key] = "stated_in_narrative"
-            elif source and source not in ("", "client_arq"):
-                # Explicit non-narrative source (e.g. dec_page, policy_doc) means a
-                # source document overwrote a previously narrative-derived value.
-                # Respect the actual source so we don't mislabel post-merge facts.
+            elif source == "client_arq":
+                # The client explicitly confirmed this — strongest provenance.
+                labels[key] = _EVIDENCE_SOURCE_MAP.get(conf, "confirmed_by_user")
+            elif source in ("", "ai") and key in narrative_keys:
+                # Generic LLM provenance ("ai" = extracted from *some* document)
+                # AND the narrative is evidence for this fact (profile-backed, so
+                # it does NOT depend on the doc being classified "narrative").
+                # Attribute to the narrative. A SPECIFIC non-narrative source
+                # (e.g. dec_page, policy_doc, loss_run) is handled below and wins.
+                labels[key] = "stated_in_narrative"
+            elif source and source not in ("",):
+                # Explicit specific non-narrative source means a source document
+                # provided this value. Respect it so we don't mislabel post-merge
+                # facts (a dec page that overwrote a narrative-derived value).
                 labels[key] = _EVIDENCE_SOURCE_MAP.get(conf, "extracted_from_source")
             elif key in narrative_keys:
-                # No explicit source metadata — fall back to narrative_keys attribution.
+                # No source metadata — fall back to narrative_keys attribution.
                 labels[key] = "stated_in_narrative"
             else:
                 labels[key] = _EVIDENCE_SOURCE_MAP.get(conf, "extracted_from_source")
         else:
-            # Plain-string fact has no source metadata — narrative_keys is authoritative.
-            labels[key] = "stated_in_narrative" if key in narrative_keys else "extracted_from_source"
+            # Plain-string fact has no source metadata — narrative_keys is authoritative,
+            # except for identity fields which are never attributed to the narrative.
+            if key in _NEVER_NARRATIVE_KEYS:
+                labels[key] = "extracted_from_source"
+            else:
+                labels[key] = "stated_in_narrative" if key in narrative_keys else "extracted_from_source"
     return labels
 
 
@@ -1743,7 +2126,7 @@ def _compute_positive_signals(
     )
 
     _sig("narrative_attached",      "Narrative attached",
-         has_narrative_doc or bool(_fv(facts, "acord101_remarks")))
+         has_narrative_doc or bool(_narrative_remarks_text(facts)))
     _sig("operations_description",  "Clear operations description",
          bool(_fv(facts, "operations_description"))
          and len(str(_fv(facts, "operations_description") or "")) > 30)
@@ -1768,7 +2151,7 @@ def _compute_positive_signals(
     # §6.1 item 4 - narrative-derived positive signals (management, risk controls,
     # employer handbook / safety manual). Detected from the narrative text, which
     # is also where they earn Narrative-Quality component credit.
-    _narr_text  = str(_fv(facts, "acord101_remarks") or _fv(facts, "operations_description") or "")
+    _narr_text  = _narrative_remarks_text(facts) or str(_fv(facts, "operations_description") or "")
     _narr_comps = _score_narrative_components(_narr_text) if _narr_text else {}
     _narr_lower = _narr_text.lower()
     _sig("experienced_management",  "Experienced management",
@@ -1883,8 +2266,7 @@ def _get_loss_history_state(
     conflict the report asked for (user/narrative attest no losses while loss runs
     actually show claims).
     """
-    years  = _to_int(_fv(facts, "loss_history_years")) or 0
-    claims = _to_int(_fv(facts, "num_claims")) or 0
+    years = _resolve_loss_history_years(facts)
     no_loss_attested = (
         bool(flags.get("no_prior_losses"))
         or _attested_true(_fv(facts, "no_prior_losses"))
@@ -1892,22 +2274,38 @@ def _get_loss_history_state(
     )
     narrative_no_loss = bool(flags.get("narrative_states_no_losses"))
 
-    # Conflict: an explicit no-loss attestation while loss runs show actual claims.
-    if (no_loss_attested or narrative_no_loss) and (claims > 0 or years > 0):
+    # Conflict (single source of truth shared with the P4 score): a no-loss
+    # attestation contradicted by ACTUAL loss-run claims.
+    if _loss_history_conflict(facts, flags):
         return "loss_history_conflicting"
 
     if has_loss_run_doc:
+        # Mirror the pending-status shortcut from calculate_p4_loss_history: a doc
+        # classified as a loss_run that only mentions runs are pending with no actual
+        # years or claims extracted should show the pending state, not "uploaded".
+        _lrs = str(_fv(facts, "loss_run_status") or "").lower()
+        _has_claims = (
+            (_to_int(_fv(facts, "num_claims")) or 0) > 0
+            or (_to_float(_fv(facts, "total_incurred")) or 0.0) > 0.0
+        )
+        if _lrs in ("pending", "requested") and years == 0 and not _has_claims:
+            return "loss_runs_pending"
         if loss_run_match == "no_match":
             return "loss_runs_do_not_match"
         if years > 0:
             # Claim years parsed — map state by ownership match strength.
             if loss_run_match == "strong":
                 return "loss_data_reconciled"
-            if loss_run_match == "moderate":
-                return "loss_runs_parsed"
-            # "possible" = name matches but no FEIN/policy corroboration: data is
-            # parsed but ownership validation is still pending (§6.4 state 10).
-            return "loss_history_pending_validation"
+            if loss_run_match in ("moderate", "possible"):
+                # Weak ownership (name only, or name+address - address is not a
+                # client-sanctioned identifier): years are parsed but ownership is
+                # NOT fully confirmed, so validation is still pending. moderate is
+                # treated exactly like possible here so the label never understates
+                # ownership uncertainty (§6.4 item 2).
+                return "loss_history_pending_validation"
+            # Years parsed with no strong/weak/mismatch ownership verdict: the bare
+            # parsing milestone itself (§6.4 'Loss Runs Parsed').
+            return "loss_runs_parsed"
         if loss_run_match == "strong":
             return "loss_runs_match_insured"
         return "loss_runs_uploaded"
@@ -1941,12 +2339,13 @@ def _compute_category_breakdown(
     Display breakdown nested under the 6 SQS pillars.
     Returns {pillar_key: {category_key: {score, status, label}}}
 
-    Sub-row structure (client-approved):
-      Structural Completeness  - Applicant Info, Entity Info, Effective Date Consistency,
-                                 Policy Term Consistency, Supporting Documentation
+    Sub-row structure (client-approved, updated to reflect actual scoring inputs):
+      Structural Completeness  - Applicant Info (tier1), Underwriting Profile (tier2),
+                                 Form Fill Quality (conf_rate) — these ARE the P1 formula
       Exposure Consistency     - Operations, Coverage Info, Payroll/Employee,
                                  Revenue/Sales, Cross-Document Consistency
-      Property Integrity       - COPE Info, Location Info
+      Property Integrity       - Minimum COPE (hard-stop gate), Carrier-Grade Required (Tier1),
+                                 Carrier-Grade Preferred (Tier2) — mirrors _calculate_cope_score
       Loss History             - Loss History
       Umbrella Adequacy        - Umbrella Limits
       Narrative Quality        - Narrative Quality, Prior Carrier Context
@@ -1969,20 +2368,22 @@ def _compute_category_breakdown(
         return "ok" if s >= 90 else ("partial" if s >= 50 else "insufficient")
 
     # ── Structural Completeness — 5 client-approved sub-rows ─────────────────
+    # Each sub-row is computed directly from the relevant facts so the expanded
+    # detail reflects the actual submission data for that category.
 
-    # 1. Applicant Information: who the applicant/producer is
-    _app_fields = ["applicant_name", "mailing_address", "producer_name", "lines_of_business"]
-    _app_ok     = sum(1 for f in _app_fields if _ok(f))
-    _app_contact = 1 if any(_ok(f) for f in ("contact_name", "contact_phone", "contact_email")) else 0
-    app_score   = int((_app_ok + _app_contact) / (len(_app_fields) + 1) * 100)
+    # 1. Applicant Info: producer identity + applicant identity + contact
+    _app_fields  = ["applicant_name", "mailing_address", "producer_name", "lines_of_business"]
+    _app_ok      = sum(1 for f in _app_fields if _ok(f))
+    _app_ok     += 1 if any(_ok(f) for f in ("contact_name", "contact_phone", "contact_email")) else 0
+    app_score    = int(_app_ok / 5 * 100)
 
-    # 2. Entity Information: how the entity is classified
+    # 2. Entity Info: business classification (entity type, FEIN, vintage, industry)
     _entity_fields = ["entity_type", "fein", "years_in_business"]
     _entity_ok     = sum(1 for f in _entity_fields if _ok(f))
     _entity_ok    += 1 if (_ok("naics_code") or _ok("sic_code")) else 0
     entity_score   = int(_entity_ok / 4 * 100)
 
-    # 3. Effective Date Consistency: date present and not in conflict
+    # 3. Effective Date Consistency: effective date present and not in conflict
     _eff_present  = _ok("effective_date")
     _eff_conflict = _conflict_in("effective_date")
     if not _eff_present:
@@ -1992,7 +2393,7 @@ def _compute_category_breakdown(
     else:
         eff_score, eff_st = 100, "ok"
 
-    # 4. Policy Term Consistency: expiration date and policy number, minus conflicts
+    # 4. Policy Term Consistency: expiration date and policy number present, no conflict
     _pol_fields   = ["expiration_date", "policy_number"]
     _pol_ok       = sum(1 for f in _pol_fields if _ok(f))
     _pol_conflict = _conflict_in("expiration_date") or _conflict_in("policy_number")
@@ -2001,8 +2402,8 @@ def _compute_category_breakdown(
         pol_score = max(0, pol_score - 25)
     pol_st = _sc_status(pol_score)
 
-    # 5. Supporting Documentation: conf_rate (AI fill confidence, the actual 3rd
-    # component of the P1 formula) when available; doc-type presence as fallback.
+    # 5. Supporting Documentation: AI fill confidence across generated forms,
+    # or doc-type presence as a proxy when form data is unavailable.
     _KEY_SUPP_DOC_WEIGHTS: Dict[str, int] = {
         "dec_page": 40, "loss_run": 30, "sov": 20, "schedule_of_values": 20,
         "prior_policy": 15, "policy_doc": 20, "supplemental": 10,
@@ -2043,36 +2444,33 @@ def _compute_category_breakdown(
 
     # ── Property Integrity — 2 client-approved sub-rows ──────────────────────
     if flags.get("has_property_coverage"):
-        # COPE Info: structural/physical characteristics of the property
+        # 1. COPE Info: structural and physical characteristics of the building.
+        # Covers minimum-viable fields (occupancy, construction) plus carrier-grade
+        # fields (year_built, roof_year, sprinkler, fire protection, valuation method).
         _cope_fields = [
             "occupancy_type", "construction_type",
-            "year_built", "roof_year", "sprinkler_system", "fire_protection_class",
-            "valuation_method",
+            "year_built", "roof_year", "sprinkler_system",
+            "fire_protection_class", "valuation_method",
         ]
-        _cope_ok    = sum(1 for f in _cope_fields if _ok(f))
-        cope_score  = int(_cope_ok / len(_cope_fields) * 100)
+        _cope_ok        = sum(1 for f in _cope_fields if _ok(f))
+        cope_info_score = int(_cope_ok / len(_cope_fields) * 100)
         if _acv_rcv_conflict(facts):
-            cope_score = max(0, cope_score - 10)
-        cope_st = "ok" if cope_score >= 90 else ("partial" if cope_score >= 50 else "missing")
+            cope_info_score = max(0, cope_info_score - 10)
+        cope_info_st = "ok" if cope_info_score >= 90 else ("partial" if cope_info_score >= 50 else "insufficient")
 
-        # Location Info: where the property is and its insurable value
-        _loc_required  = ["locations"]
-        _loc_preferred = [
-            "property_building_value", "distance_to_hydrant",
-            "fire_department_type", "business_income_limit",
-        ]
-        _loc_ok = sum(1 for f in _loc_required if _ok(f))
-        # building value or bpp value satisfies the value requirement
-        _loc_val_ok = 1 if (_ok("property_building_value") or _ok("property_bpp_value")) else 0
-        _loc_ok += _loc_val_ok + sum(
-            1 for f in _loc_preferred[1:] if _ok(f)  # distance_to_hydrant, fire_dept, bi_limit
-        )
-        _loc_total  = len(_loc_required) + len(_loc_preferred)
-        loc_score   = int(_loc_ok / _loc_total * 100)
-        loc_st      = "ok" if loc_score >= 90 else ("partial" if loc_score >= 50 else "missing")
+        # 2. Location Info: where the property is and its insurable value.
+        # Required: property address (locations) + building or BPP value.
+        # Quality: distance to hydrant, fire department type, business income limit.
+        _loc_quality  = ["distance_to_hydrant", "fire_department_type", "business_income_limit"]
+        _loc_ok       = (1 if _ok("locations") else 0)
+        _loc_ok      += 1 if (_ok("property_building_value") or _ok("property_bpp_value")) else 0
+        _loc_ok      += sum(1 for f in _loc_quality if _ok(f))
+        _loc_total    = 2 + len(_loc_quality)   # locations + value + 3 quality fields = 5
+        loc_info_score = int(_loc_ok / _loc_total * 100)
+        loc_info_st   = "ok" if loc_info_score >= 90 else ("partial" if loc_info_score >= 50 else "insufficient")
     else:
-        cope_score, cope_st = None, "not_applicable"
-        loc_score,  loc_st  = None, "not_applicable"
+        cope_info_score, cope_info_st = None, "not_applicable"
+        loc_info_score,  loc_info_st  = None, "not_applicable"
 
     # ── Prior Carrier (under Narrative Quality per client mapping) ───────────
     carrier_s  = 100 if _ok("prior_carrier") else 0
@@ -2101,16 +2499,16 @@ def _compute_category_breakdown(
 
     return {
         "structural_completeness": {
-            "applicant_information":      _cat(app_score,      _sc_status(app_score),      "Applicant Info"),
-            "entity_information":         _cat(entity_score,   _sc_status(entity_score),   "Entity Info"),
-            "effective_date_consistency": _cat(eff_score,      eff_st,                     "Effective Date Consistency"),
-            "policy_term_consistency":    _cat(pol_score,      pol_st,                     "Policy Term Consistency"),
-            "supporting_documentation":   _cat(supp_doc_score, _sc_status(supp_doc_score), "Supporting Documentation"),
+            "applicant_information":      _cat(app_score,       _sc_status(app_score),       "Applicant Info"),
+            "entity_information":         _cat(entity_score,    _sc_status(entity_score),    "Entity Info"),
+            "effective_date_consistency": _cat(eff_score,       eff_st,                      "Effective Date Consistency"),
+            "policy_term_consistency":    _cat(pol_score,       pol_st,                      "Policy Term Consistency"),
+            "supporting_documentation":   _cat(supp_doc_score,  _sc_status(supp_doc_score),  "Supporting Documentation"),
         },
         "exposure_consistency": _exp_cats,
         "property_integrity": {
-            "cope_info":    _cat(cope_score, cope_st, "COPE Info"),
-            "location_info": _cat(loc_score, loc_st,  "Location Info"),
+            "cope_info":     _cat(cope_info_score, cope_info_st, "COPE Info"),
+            "location_info": _cat(loc_info_score,  loc_info_st,  "Location Info"),
         },
         "loss_history_alignment": {
             "loss_history": _cat(None, "computed_separately", "Loss History"),
@@ -2151,6 +2549,16 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
 
     score = 100
 
+    # AC#4 (§6.5): an umbrella whose OWN limit is missing is "Insufficient
+    # Information" evidence - the §6.5 finding requires that case to surface a
+    # state rather than a perfect score, and item 2 reserves full credit for when
+    # "umbrella details are present and complete". The evidence-state machine
+    # (_get_umbrella_state) already returns "insufficient_information" here; this
+    # keeps the headline number from contradicting that state by removing the
+    # "complete" credit. Underlying adequacy is still scored below.
+    if not _fv(facts, "umbrella_limit"):
+        score -= 25
+
     # GL - penalise both "present but below minimum" AND "required but absent".
     # A submission with GL exposure (has_general_liability) but no GL limits
     # is a gap; umbrella spec §218 requires underlying GL (client Q1 / M4 fix).
@@ -2158,6 +2566,14 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
         score -= 20              # Present but below $1M - warn, don't block (Q1)
     elif gl_val is None and flags.get("has_general_liability"):
         score -= 20              # Required underlying GL missing (M4)
+
+    # GL aggregate (client Q1 baseline: $2M / occurrence $1M). The aggregate is the
+    # other half of the client's stated GL baseline, so an extracted aggregate below
+    # $2M reduces score (warn, never block - Q1). A merely-unextracted aggregate is
+    # NOT penalised, to avoid a false warning when only the occurrence was captured.
+    gl_agg = _to_int(_fv(facts, "gl_aggregate"))
+    if gl_agg is not None and gl_agg < _UMB_GL_AGG_MIN:
+        score -= 20
 
     # Auto - same logic: present-and-low OR required-but-absent.
     if auto_val is not None and auto_val < _UMB_AUTO_CSL_MIN:
@@ -2188,31 +2604,50 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
 
     # Follow-form evidence: -10 when unable to confirm (Option B per client Q4)
     _ff_combined = " ".join([
-        str(_fv(facts, "acord101_remarks") or ""),
+        _narrative_remarks_text(facts),
         str(_fv(facts, "umbrella_follow_form") or ""),
         str(_fv(facts, "policy_notes") or ""),
-    ]).lower()
-    _FF_TERMS = ("follow form", "follows form", "follow the form", "following form", "follows the underlying")
-    if not any(t in _ff_combined for t in _FF_TERMS):
+    ])
+    if not _has_explicit_follow_form(_ff_combined):
         score -= 10  # Follow-form status unable to determine
 
     return max(0, score)
 
 
 def _calculate_narrative_quality(
-    facts: dict, has_narrative_doc: bool = False, flags: Optional[dict] = None
-) -> Tuple[int, Dict[str, bool]]:
+    facts: dict,
+    has_narrative_doc: bool = False,
+    flags: Optional[dict] = None,
+    narrative_doc_text: str = "",
+) -> Tuple[int, Dict[str, bool], int]:
     """P6 - Narrative Quality (10% of SQS) with §6.3 component model.
 
-    Returns (score, component_breakdown) where component_breakdown is a
-    per-component present/absent dict keyed by NARRATIVE_COMPONENT_LABELS.
+    Returns (score, component_breakdown, substance_pct) where component_breakdown
+    is a per-component present/absent dict keyed by NARRATIVE_COMPONENT_LABELS and
+    substance_pct is the 0-100 underwriting-substance half of the score.
 
     Scoring: 60% component coverage + 40% text quality, blended.
     Floor of 40 when a narrative document is classified in the package.
+
+    narrative_doc_text: concatenated full OCR text of all narrative docs
+    (from _extract_narrative_doc_text). When non-empty it is unioned with the
+    structured-field text so that body sections of a standalone narrative
+    (risk controls, carrier context, etc.) reach the component model even
+    when RULE 10 only put the executive summary into account_description.
+    Defaults to "" so all existing callers remain unaffected.
     """
-    remarks = str(_fv(facts, "acord101_remarks") or "").strip()
+    remarks = _narrative_remarks_text(facts).strip()
     ops     = str(_fv(facts, "operations_description") or "").strip()
     empty_components = {k: False for k in NARRATIVE_COMPONENT_LABELS}
+
+    # §6.3 item 2: client-supplied narrative-enrichment answers (Bucket-C topics
+    # the narrative lacked and the ARQ asked the client to provide). A filled
+    # answer credits its component directly and joins the structured scan text so
+    # both the component breakdown and the substance half reflect it.
+    _enrich_present = _narrative_enrichment_present(facts)
+    _enrich_text    = _narrative_enrichment_text(facts)
+    if _enrich_text:
+        remarks = " ".join(filter(None, [remarks, _enrich_text])).strip()
 
     # Small underwriter-context credit when the producer/client provided upcoming
     # deadline / urgency via the questionnaire (Brent feedback). Bounded + gated:
@@ -2220,29 +2655,86 @@ def _calculate_narrative_quality(
     # where the field is absent (every existing submission / test is unaffected).
     _urgency_bonus = 8 if _fv(facts, "submission_urgency") else 0
 
-    if remarks:
+    # Build the component-scan text by unioning every available source.
+    # Priority: narrative_doc_text (full body) is always included when present.
+    # remarks (account_description / acord101_remarks / additional_remarks_text)
+    # is included alongside it. ops falls back when nothing richer is available.
+    # The source_factor penalises submissions where only operations_description
+    # is available (no real narrative), but never penalises when a real narrative
+    # doc exists alongside the structured fields.
+    if narrative_doc_text:
+        # Full narrative body available - union with any structured remarks.
+        # Never penalise: a real doc was uploaded, source_factor = 1.0.
+        text          = " ".join(filter(None, [narrative_doc_text, remarks])) or ops
+        source_factor = 1.0
+    elif remarks:
         text          = remarks
         source_factor = 1.0
     elif ops:
         text          = ops
         source_factor = 0.75  # ops is a weaker substitute for a real narrative
     else:
-        # No narrative text at all. Still credit carrier_market if the producer
-        # answered the marketing-reason questionnaire (provides underwriter context).
+        # No structured narrative text reached the scorer. The stored LLM profile
+        # may still have detected components (e.g. a mis-classified narrative whose
+        # body never became narrative_doc_text), so honour it before giving up.
+        _prof_present = narrative_profile_present_map((flags or {}).get("narrative_profile"))
+        if any(_prof_present.values()):
+            components = dict(_prof_present)
+            if _fv(facts, "carrier_marketing_reason"):
+                components["carrier_market"] = True
+            present_count = sum(1 for v in components.values() if v)
+            component_pct = int(present_count / len(components) * 100)
+            # No readable text for the 40% substance half; floor at 40 because a
+            # real (if mis-classified) narrative exists.
+            raw = max(int(component_pct * 0.6), 40)
+            raw = min(100, raw + _urgency_bonus)
+            return raw, components, 0
+        # Still credit carrier_market if the producer answered the marketing-reason
+        # questionnaire (provides underwriter context even without a narrative).
         score = min(100, (40 if has_narrative_doc else 0) + _urgency_bonus)
         if _fv(facts, "carrier_marketing_reason"):
             carrier_components = dict(empty_components)
             carrier_components["carrier_market"] = True
-            return score, carrier_components
-        return score, empty_components
+            return score, carrier_components, 0
+        return score, empty_components, 0
 
-    # §6.3 component model
-    components = _score_narrative_components(text)
+    # §6.3 component model. The short, curated fields (account_description /
+    # acord101_remarks / operations) credit a component on a single mention. The
+    # full raw-OCR narrative body is noisier, so it must hit >=2 DISTINCT signal
+    # phrases before crediting a component - this stops incidental words (a stray
+    # "coverage" / "location" / "carrier" in letterhead or boilerplate) from
+    # marking components present, keeping the per-component breakdown and the
+    # targeted "includes X but not Y" gaps honest. The two are OR-ed so a genuine
+    # single-mention in the curated field is never lost.
+    components = _score_narrative_components(remarks or ops)
+    if narrative_doc_text:
+        _body_components = _score_narrative_components(narrative_doc_text, strict=True)
+        components = {
+            k: bool(components.get(k) or _body_components.get(k))
+            for k in NARRATIVE_COMPONENT_LABELS
+        }
     # Credit carrier_market when carrier_marketing_reason is supplied via ARQ
     # (the questionnaire answer provides the underwriter context even when the
     # submitted documents don't explicitly discuss the carrier situation).
     if _fv(facts, "carrier_marketing_reason"):
         components["carrier_market"] = True
+    # §6.3 robustness: union the meaning-based LLM profile over the keyword scan
+    # so a paraphrased component the fixed phrases missed is still credited.
+    # Evidence-gated in narrative_profile_present_map (cannot over-credit); a
+    # no-op when the flag is off or detection failed (empty profile).
+    _prof_present = narrative_profile_present_map((flags or {}).get("narrative_profile"))
+    if any(_prof_present.values()):
+        components = {
+            k: bool(components.get(k) or _prof_present.get(k))
+            for k in NARRATIVE_COMPONENT_LABELS
+        }
+    # §6.3 item 2: credit any Bucket-C component the client supplied via the
+    # narrative-enrichment ARQ (so an answered topic counts and is not re-asked).
+    if any(_enrich_present.values()):
+        components = {
+            k: bool(components.get(k) or _enrich_present.get(k))
+            for k in NARRATIVE_COMPONENT_LABELS
+        }
     present_count = sum(1 for v in components.values() if v)
     total_count   = len(components)
     component_pct = int(present_count / total_count * 100) if total_count else 0
@@ -2258,10 +2750,35 @@ def _calculate_narrative_quality(
     # Blend: 60% component coverage, 40% underwriting substance
     raw = int((component_pct * 0.6 + substance_pct * 0.4) * source_factor)
     raw = min(100, raw)
-    if has_narrative_doc:
+    # Floor of 40 for a real narrative - credited from classification OR from the
+    # evidence-backed LLM profile, so a mis-classified narrative still earns it.
+    if has_narrative_doc or any(_prof_present.values()):
         raw = max(raw, 40)
     raw = min(100, raw + _urgency_bonus)
-    return raw, components
+    return raw, components, substance_pct
+
+
+def _narrative_gap_message(components: Dict[str, bool]) -> str:
+    """§6.3 AC#4: a targeted narrative recommendation that names both what the
+    narrative already covers AND what it is missing - the client-requested
+    format, e.g. "Narrative includes Operations Description and Loss History
+    Discussion, but does not include Years in Business, Management Experience."
+
+    Returns "" when nothing is missing (caller decides whether to emit anything),
+    and falls back to a missing-only message when no component is present.
+    """
+    present = [NARRATIVE_COMPONENT_LABELS[k] for k, ok in components.items() if ok]
+    absent  = [NARRATIVE_COMPONENT_LABELS[k] for k, ok in components.items() if not ok]
+    if not absent:
+        return ""
+
+    def _join(items: List[str]) -> str:
+        head = ", ".join(items[:4])
+        return head + (f" (+{len(items) - 4} more)" if len(items) > 4 else "")
+
+    if present:
+        return f"Narrative includes {_join(present)}, but does not include {_join(absent)}"
+    return f"Narrative is missing: {_join(absent)}"
 
 
 def _acv_rcv_conflict(facts: dict) -> bool:
@@ -2297,8 +2814,11 @@ def _calculate_cope_score(facts: dict, flags: dict) -> int:
       • Tier 2 Preferred fields      → drive score from ~80 to 100
 
     Tier 1 Required (4 fields): year_built, roof_year, sprinkler_system, protection_class
-    Tier 2 Preferred (5 fields): valuation_method, distance_to_hydrant, fire_department_type,
+    Tier 2 Preferred (4 fields, client-approved): distance_to_hydrant, fire_department_type,
                                   business_income_limit, period_of_restoration
+    valuation_method is NOT a Tier 2 credit field - the client placed it under a
+    separate "Additional Validation" rule (the ACV/RCV conflict check below), so
+    counting it here permanently capped a fully carrier-grade submission at 96.
     ACV/RCV conflict: -10 if both cost-valuation signals detected simultaneously.
     """
     if not flags.get("has_property_coverage"):
@@ -2319,9 +2839,11 @@ def _calculate_cope_score(facts: dict, flags: dict) -> int:
     tier1_filled = [bool(_fv(facts, k)) for k in _tier1]
     tier1_count  = sum(tier1_filled)
 
-    # Tier 2 Preferred: 5 fields → drive ~80 up to 100.
+    # Tier 2 Preferred: 4 client-approved fields → drive ~80 up to 100.
+    # Each Tier 2 field is worth 5 pts so the four client-approved fields reach a
+    # clean 100 (60 + 4×5 + 4×5) without relying on a special-case promotion.
     _tier2 = [
-        "valuation_method", "distance_to_hydrant", "fire_department_type",
+        "distance_to_hydrant", "fire_department_type",
         "business_income_limit", "period_of_restoration",
     ]
     tier2_filled = [bool(_fv(facts, k)) for k in _tier2]
@@ -2331,9 +2853,7 @@ def _calculate_cope_score(facts: dict, flags: dict) -> int:
     # Integrity at ~60-70, NOT 30, and Carrier-Grade reaches 100. Base 60 also
     # keeps this in step with the per-form COPE path in calculate_sqs (also 60-
     # floored) - the two diverging (30 vs 60) was a real scoring bug.
-    score = 60 + tier1_count * 5 + tier2_count * 4  # 60 + 0-20 + 0-20 = 60-100
-    if tier1_count == len(_tier1) and tier2_count == len(_tier2):
-        score = 100  # all carrier-grade fields complete
+    score = 60 + tier1_count * 5 + tier2_count * 5  # 60 + 0-20 + 0-20 = 60-100
 
     # ACV vs RCV conflict: -10 when the source documents and the generated-form
     # valuation basis disagree (client Property Integrity validation). Detection
@@ -2375,6 +2895,148 @@ def _present_doc_types(session_data: dict) -> set:
     }
 
 
+def _extract_narrative_doc_text(session_docs: list) -> str:
+    """Return text for keyword-based narrative component scoring.
+
+    Primary: concatenated full OCR text of all docs classified as 'narrative'.
+    RULE 10 puts only the executive-summary block into account_description; the
+    body (risk controls, carrier context, loss discussion) lives in doc["text"].
+
+    Fallback: when no doc is classified as 'narrative', scan the bodies of all
+    non-excluded docs. This closes the mis-classification gap: an uploaded
+    narrative tagged "unknown" or "supplemental_application" still reaches the
+    keyword component detector. The LLM profile (RULE 11 in extraction) already
+    handles paraphrases; this fallback extends the keyword scan to the same set.
+    Bounded to _NARRATIVE_LLM_MAX_CHARS to avoid unbounded text in the scanner.
+    """
+    parts = [
+        str(d.get("text") or "")
+        for d in (session_docs or [])
+        if isinstance(d, dict)
+        and not d.get("excluded")
+        and str(d.get("doc_type") or "").strip() == "narrative"
+        and d.get("text")
+    ]
+    if parts:
+        return " ".join(parts)
+    # No classified narrative — scan all non-excluded doc bodies as fallback
+    fallback = [
+        str(d.get("text") or "").strip()
+        for d in (session_docs or [])
+        if isinstance(d, dict) and not d.get("excluded") and d.get("text")
+    ]
+    return "\n\n".join(f for f in fallback if f)[:_NARRATIVE_LLM_MAX_CHARS]
+
+
+def _build_narrative_scan_text(session_docs: list, facts: dict) -> str:
+    """Union the text the LLM narrative detector should read.
+
+    Deliberately NOT limited to docs classified as "narrative": it unions the
+    classified-narrative bodies with the structured remarks/account-description
+    and operations fields, and - when classification found no narrative at all -
+    falls back to the bodies of the other (non-excluded) uploaded documents so a
+    genuine narrative that was mis-classified is still considered (§6.3
+    classification-dependency gap). Bounded to _NARRATIVE_LLM_MAX_CHARS.
+    """
+    facts = facts or {}
+    parts: List[str] = []
+    narr = _extract_narrative_doc_text(session_docs)
+    if narr:
+        parts.append(narr)
+    remarks = _narrative_remarks_text(facts).strip()
+    if remarks:
+        parts.append(remarks)
+    ops = str(_fv(facts, "operations_description") or "").strip()
+    if ops:
+        parts.append(ops)
+    if not narr:
+        # No classified narrative — scan the other document bodies as a safety
+        # net so a mis-classified narrative still reaches the detector.
+        for d in (session_docs or []):
+            if not isinstance(d, dict) or d.get("excluded"):
+                continue
+            t = str(d.get("text") or "").strip()
+            if t:
+                parts.append(t)
+    return "\n\n".join(p for p in parts if p)[:_NARRATIVE_LLM_MAX_CHARS]
+
+
+# ── Umbrella enrichment (§6.5) - single source of truth for BOTH package scorers ─
+# Shared so calculate_package_sqs and calculate_package_sqs_spec_compliant can
+# never diverge on the umbrella warnings / review items (audit: spec-compliant
+# variant must emit the same §6.5 enrichment if it is ever re-wired).
+
+def _build_umbrella_warnings(facts: dict, flags: dict, p5: Optional[int]) -> List[str]:
+    """Underlying-limit warning messages (client Q1/Q2). Empty unless an umbrella
+    is present and its adequacy score is below full credit."""
+    warnings: List[str] = []
+    if not (flags.get("has_umbrella") and p5 is not None and p5 < 100):
+        return warnings
+
+    _gl_val  = _to_int(_fv(facts, "gl_limits") or _fv(facts, "gl_each_occurrence"))
+    _gl_agg  = _to_int(_fv(facts, "gl_aggregate"))
+    _auto_val = _to_int(_fv(facts, "auto_liability_limit"))
+    if _gl_val is not None and _gl_val < _UMB_GL_OCC_MIN:
+        warnings.append(
+            f"Underlying GL limits may not meet umbrella requirements "
+            f"(found ${_gl_val:,}, expected ${_UMB_GL_OCC_MIN:,}+)."
+        )
+    if _gl_agg is not None and _gl_agg < _UMB_GL_AGG_MIN:
+        warnings.append(
+            f"Underlying GL aggregate limit may not meet umbrella requirements "
+            f"(found ${_gl_agg:,}, expected ${_UMB_GL_AGG_MIN:,}+)."
+        )
+    if _auto_val is not None and _auto_val < _UMB_AUTO_CSL_MIN:
+        warnings.append(
+            f"Underlying Auto limits may not meet umbrella requirements "
+            f"(found ${_auto_val:,}, expected ${_UMB_AUTO_CSL_MIN:,}+)."
+        )
+    # Client Q2: surface a low/missing Employers Liability when umbrella is over WC.
+    if flags.get("has_workers_comp"):
+        _el_val = _to_int(_fv(facts, "employers_liability_limits"))
+        if _el_val is None:
+            warnings.append(
+                "Employers Liability limit not provided for umbrella over Workers Comp "
+                f"(${_UMB_EL_OK:,} minimum, ${_UMB_EL_FULL:,} preferred)."
+            )
+        elif _el_val < _UMB_EL_OK:
+            warnings.append(
+                f"Employers Liability limit (${_el_val:,}) is below the ${_UMB_EL_OK:,} "
+                "minimum preferred by umbrella markets."
+            )
+    # Client (DOUBTS-Workstream3): "No Schedule of Underlying Insurance -15" must
+    # generate a warning. Mirror _calculate_umbrella_adequacy's detection so the
+    # deduction is explained rather than silently applied.
+    _has_schedule = bool(
+        _fv(facts, "schedule_of_underlying_insurance")
+        or _fv(facts, "underlying_schedule")
+        or _fv(facts, "underlying_insurance_schedule")
+    )
+    if not _has_schedule:
+        warnings.append(
+            "No Schedule of Underlying Insurance provided - umbrella adequacy "
+            "reduced. Add the schedule of underlying GL / Auto / EL policies."
+        )
+    return warnings
+
+
+def _build_umbrella_review_items(
+    flags: dict, follow_form: dict, p5: Optional[int]
+) -> List[dict]:
+    """Persistent review items that must never be dropped by the top_recs cap
+    (§6.5 item 5). Currently the follow-form gap when it cannot be confirmed."""
+    items: List[dict] = []
+    if flags.get("has_umbrella") and follow_form.get("status") == "unable_to_determine":
+        items.append({
+            "pillar":  "umbrella_limit_adequacy",
+            "score":   p5 if p5 is not None else 0,
+            "action":  "Unable to determine whether umbrella follows form. Recommend underwriter review.",
+            "missing": ["umbrella follow-form confirmation"],
+            "review_item": True,
+        })
+    return items
+
+
 def calculate_package_sqs(
     facts: dict,
     flags: dict,
@@ -2412,7 +3074,7 @@ def calculate_package_sqs(
 
     # P1 - Structural Completeness
     tier1_ok, tier1_missing = check_tier1(facts, flags)
-    tier2_score, tier2_missing = check_tier2(facts)
+    tier2_score, tier2_missing = check_tier2(facts, flags)
     tier1_score = 100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)
     _form_structs = [
         r.get("breakdown", {}).get("structural_completeness")
@@ -2461,44 +3123,63 @@ def calculate_package_sqs(
     p5 = _calculate_umbrella_adequacy(facts, flags)
 
     # P6 - Narrative Quality with component model (§6.3)
-    p6, _narrative_components = _calculate_narrative_quality(facts, has_narrative_doc=_has_narrative, flags=flags)
+    _narr_doc_text = _extract_narrative_doc_text(_session_docs)
+    p6, _narrative_components, _narr_substance = _calculate_narrative_quality(
+        facts, has_narrative_doc=_has_narrative, flags=flags,
+        narrative_doc_text=_narr_doc_text,
+    )
 
-    # Package SQS headline
-    _per_form_scores = [
-        r.get("sqs_score") for r in (form_results or [])
-        if isinstance(r, dict) and isinstance(r.get("sqs_score"), (int, float))
-    ]
-    if _per_form_scores:
-        raw = int(round(sum(_per_form_scores) / len(_per_form_scores)))
+    # ── Package pillars = the package's OWN independent calculation ───────────
+    # The package SQS is computed independently from the per-form scores. Each of
+    # the six pillars (p1-p6 above) is derived directly from the merged facts /
+    # flags / session evidence by the package-level calculators, and the headline
+    # below is the WEIGHTED SUM of those six pillars. It is NOT an average of the
+    # per-form headlines and NOT an average of the per-form pillars (the prior
+    # model). This is the client-approved design: the package carries its own
+    # structural blend (P1 = tier1/tier2/form-fill), its own exposure / COPE /
+    # loss / umbrella / narrative reads, plus the cross-form caps applied below -
+    # factors no single form can see. Consequently the package score genuinely
+    # differs from any individual form, even when only one form is in the
+    # submission (different P1 formula, and none of the per-form structural cap
+    # gates), which is exactly what the "Form vs Package can differ" UI note
+    # explains. p1-p6 are already set from facts above; nothing overrides them.
+    # form_results is still consumed (P1's form-fill grounding above), but never
+    # to copy or average a per-form headline into the package score.
+
+    # Package SQS headline = weighted sum of the package's own six pillars
+    # (re-normalised when the umbrella pillar is N/A so it counts as excluded, not
+    # zero). Computed independently of the per-form scores. Hard stops cap at 60,
+    # soft stops at 85.
+    if p5 is None:
+        _na_w   = SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"]
+        _scale  = 1.0 / (1.0 - _na_w)
+        raw = int(
+            p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] * _scale +
+            p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"]    * _scale +
+            p3 * SPEC_PILLAR_WEIGHTS["property_integrity"]      * _scale +
+            p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"]  * _scale +
+            p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]       * _scale
+        )
     else:
-        # Re-normalise weights when umbrella pillar is N/A
-        if p5 is None:
-            _na_w   = SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"]
-            _scale  = 1.0 / (1.0 - _na_w)
-            raw = int(
-                p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] * _scale +
-                p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"]    * _scale +
-                p3 * SPEC_PILLAR_WEIGHTS["property_integrity"]      * _scale +
-                p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"]  * _scale +
-                p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]       * _scale
-            )
-        else:
-            raw = int(
-                p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] +
-                p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"] +
-                p3 * SPEC_PILLAR_WEIGHTS["property_integrity"] +
-                p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"] +
-                p5 * SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"] +
-                p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
-            )
-        if hard_stops or hard_cross:
-            raw = min(raw, 60)
-        elif soft_stops:
-            raw = min(raw, 85)
+        raw = int(
+            p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] +
+            p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"] +
+            p3 * SPEC_PILLAR_WEIGHTS["property_integrity"] +
+            p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"] +
+            p5 * SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"] +
+            p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
+        )
+    if hard_stops or hard_cross:
+        raw = min(raw, 60)
+    elif soft_stops:
+        raw = min(raw, 85)
     raw = max(0, min(100, raw))
 
+    # Tier boundary aligned with the frontend submission banner: "Submission Ready"
+    # (and "Ready for submission") require a score ABOVE 90, so exactly 90 reads as
+    # "Almost There" / "Ready to Download Forms" - the two never disagree at 90.
     tier = (
-        "Submission Ready" if raw >= 90 else
+        "Submission Ready" if raw > 90 else
         "Almost There"     if raw >= 80 else
         "Needs Work"       if raw >= 70 else
         "Major Gaps"       if raw >= 60 else
@@ -2537,11 +3218,17 @@ def calculate_package_sqs(
         "exposure_consistency":    p2,
         "property_integrity":      p3,
         "loss_history_alignment":  p4,
-        "umbrella_limit_adequacy": p5 if p5 is not None else 100,
+        "umbrella_limit_adequacy": p5,  # None when N/A — excluded from ranking
         "narrative_quality":       p6,
     }
+    # N/A pillars (None) are excluded from recommendations entirely rather than
+    # being given a fictitious 100, which would make the dict unsortable with mixed
+    # types and could silently misrank other pillars when p5 is missing.
     _ranked_pillars = [
-        (k, v) for k, v in sorted(_pillar_scores.items(), key=lambda x: x[1]) if v < 90
+        (k, v) for k, v in sorted(
+            ((k, v) for k, v in _pillar_scores.items() if v is not None),
+            key=lambda x: x[1],
+        ) if v < 90
     ][:3]
     # §6.3 AC#4: build per-component narrative gap list so top_recs can emit a
     # targeted message instead of the generic "Improve narrative quality" fallback.
@@ -2565,11 +3252,18 @@ def calculate_package_sqs(
         if len(top_recs) >= 3:
             break
         miss_list = _miss_by_pillar.get(pillar, [])
-        if pillar == "narrative_quality" and miss_list:
-            _comp_msg = "Narrative is missing: " + ", ".join(miss_list[:4])
-            if len(miss_list) > 4:
-                _comp_msg += f" (+{len(miss_list) - 4} more)"
-            _action = _comp_msg
+        if pillar == "narrative_quality" and _narrative_components:
+            # §6.3 AC#4: state what the narrative covers alongside what it lacks.
+            _action = _narrative_gap_message(_narrative_components)
+            if not _action:
+                # All components present but substance quality is thin
+                if _narr_substance < 30:
+                    _action = (
+                        "Narrative covers all required topics but lacks underwriting depth - "
+                        "add specific risk details, loss context, and market considerations"
+                    )
+                else:
+                    _action = miss_list[0] if miss_list else "Improve narrative quality"
         else:
             _action = miss_list[0] if miss_list else f"Improve {pillar.replace('_', ' ')}"
         top_recs.append({"pillar": pillar, "score": score,
@@ -2613,59 +3307,17 @@ def calculate_package_sqs(
 
     # L7 fix: emit follow-form gap as a tracked top-recommendation when umbrella is
     # present but follow-form status cannot be confirmed (§6.5 item 5).
-    if flags.get("has_umbrella") and _follow_form.get("status") == "unable_to_determine":
-        _ff_rec = {
-            "pillar":  "umbrella_limit_adequacy",
-            "score":   p5 if p5 is not None else 0,
-            "action":  "Unable to determine whether umbrella follows form. Recommend underwriter review.",
-            "missing": ["umbrella follow-form confirmation"],
-            "review_item": True,
-        }
-        # Only add if we still have room in top_recs (max 3).
-        if len(top_recs) < 3:
-            top_recs.append(_ff_rec)
+    # The follow-form review item is ALSO carried in a dedicated review_items array
+    # (outside the 3-item top_recs cap) so a coverage-critical follow-form gap is
+    # never silently dropped when higher-priority hard stops already fill top_recs.
+    review_items = _build_umbrella_review_items(flags, _follow_form, p5)
+    # Surface the follow-form review item in top_recs too when there is still room
+    # (max 3). It is never lost regardless - review_items carries it unconditionally.
+    if review_items and len(top_recs) < 3:
+        top_recs.append(review_items[0])
 
-    # Umbrella warning message for low underlying limits (client Q1: warn, not block)
-    _umbrella_warnings: List[str] = []
-    if flags.get("has_umbrella") and p5 is not None and p5 < 100:
-        _gl_val  = _to_int(_fv(facts, "gl_limits") or _fv(facts, "gl_each_occurrence"))
-        _auto_val = _to_int(_fv(facts, "auto_liability_limit"))
-        if _gl_val is not None and _gl_val < _UMB_GL_OCC_MIN:
-            _umbrella_warnings.append(
-                f"Underlying GL limits may not meet umbrella requirements "
-                f"(found ${_gl_val:,}, expected ${_UMB_GL_OCC_MIN:,}+)."
-            )
-        if _auto_val is not None and _auto_val < _UMB_AUTO_CSL_MIN:
-            _umbrella_warnings.append(
-                f"Underlying Auto limits may not meet umbrella requirements "
-                f"(found ${_auto_val:,}, expected ${_UMB_AUTO_CSL_MIN:,}+)."
-            )
-        # Client Q2: surface a low/missing Employers Liability when umbrella is over WC.
-        if flags.get("has_workers_comp"):
-            _el_val = _to_int(_fv(facts, "employers_liability_limits"))
-            if _el_val is None:
-                _umbrella_warnings.append(
-                    "Employers Liability limit not provided for umbrella over Workers Comp "
-                    f"(${_UMB_EL_OK:,} minimum, ${_UMB_EL_FULL:,} preferred)."
-                )
-            elif _el_val < _UMB_EL_OK:
-                _umbrella_warnings.append(
-                    f"Employers Liability limit (${_el_val:,}) is below the ${_UMB_EL_OK:,} "
-                    "minimum preferred by umbrella markets."
-                )
-        # Client (DOUBTS-Workstream3): "No Schedule of Underlying Insurance -15"
-        # must generate a warning. Mirror _calculate_umbrella_adequacy's detection
-        # so the deduction is explained rather than silently applied.
-        _has_schedule = bool(
-            _fv(facts, "schedule_of_underlying_insurance")
-            or _fv(facts, "underlying_schedule")
-            or _fv(facts, "underlying_insurance_schedule")
-        )
-        if not _has_schedule:
-            _umbrella_warnings.append(
-                "No Schedule of Underlying Insurance provided - umbrella adequacy "
-                "reduced. Add the schedule of underlying GL / Auto / EL policies."
-            )
+    # Umbrella warning messages for low underlying limits (client Q1/Q2: warn, not block)
+    _umbrella_warnings = _build_umbrella_warnings(facts, flags, p5)
 
     return {
         "package_sqs_score": raw,
@@ -2701,6 +3353,7 @@ def calculate_package_sqs(
         "loss_history_state":    _loss_history_state,
         "follow_form":           _follow_form,
         "umbrella_warnings":     _umbrella_warnings,
+        "review_items":          review_items,
         "evidence_labels":       _evidence_labels,
         "positive_signals":      _positive_signals,
         "category_breakdown":    _category_breakdown,
@@ -2744,7 +3397,7 @@ def calculate_package_sqs_spec_compliant(
 
     # P1: Structural Completeness (ACORD 125 + required forms)
     tier1_ok, tier1_missing = check_tier1(facts, flags)
-    tier2_score, tier2_missing = check_tier2(facts)
+    tier2_score, tier2_missing = check_tier2(facts, flags)
     conf_rate = confidence_fill_rate(mapped_data or {}, confidence_dict or {})
     p1 = int((
         (100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)) * 0.4 +
@@ -2769,7 +3422,11 @@ def calculate_package_sqs_spec_compliant(
     p5 = _calculate_umbrella_adequacy(facts, flags)
 
     # P6: Narrative Quality (returns (score, components) - unpack the score).
-    p6, _ = _calculate_narrative_quality(facts, has_narrative_doc=_has_narrative)
+    _spec_session_docs = (session_data or {}).get("docs") or []
+    p6, _, _ = _calculate_narrative_quality(
+        facts, has_narrative_doc=_has_narrative, flags=flags,
+        narrative_doc_text=_extract_narrative_doc_text(_spec_session_docs),
+    )
 
     # Calculate weighted score using SPEC-COMPLIANT weights (re-normalise if P5 N/A)
     if p5 is None:
@@ -2832,6 +3489,14 @@ def calculate_package_sqs_spec_compliant(
     delta = (raw - _baseline["score"]) if (_baseline and len(history) > 1) else 0
     all_recs = list(tier1_missing) + list(tier2_missing)[:3]
 
+    # §6.5 umbrella enrichment - emitted via the SAME shared helpers as the live
+    # scorer so this variant never silently drops the coverage-gap signals if it is
+    # ever re-wired into a route (audit finding: spec-compliant divergence).
+    _umbrella_state    = _get_umbrella_state(facts, flags)
+    _follow_form       = _get_follow_form_status(facts)
+    _umbrella_warnings = _build_umbrella_warnings(facts, flags, p5)
+    _review_items      = _build_umbrella_review_items(flags, _follow_form, p5)
+
     return {
         "package_sqs_score": raw,
         "package_sqs_score_spec_compliant": raw,
@@ -2861,6 +3526,11 @@ def calculate_package_sqs_spec_compliant(
         "session_id": session_id,
         "user_id": user_id,
         "calculation_stage": calculation_stage,
+        # §6.5 enrichment (parity with calculate_package_sqs via shared helpers)
+        "umbrella_state":    _umbrella_state,
+        "follow_form":       _follow_form,
+        "umbrella_warnings": _umbrella_warnings,
+        "review_items":      _review_items,
     }
 
 
@@ -2912,6 +3582,8 @@ def calculate_sqs(
     has_loss_run_doc:  bool = False,
     loss_run_match:    str  = "no_loss_run",
     cross_issues_full: Optional[List[dict]] = None,
+    # §6.3: full narrative doc text for component scoring (default "" = no-op)
+    narrative_doc_text: str = "",
 ) -> dict:
     """Per-form SQS calculation with full metadata and structured recommendations."""
     extraction_quality = facts.get("_extraction_quality", 1.0)
@@ -3042,19 +3714,23 @@ def calculate_sqs(
                 "priority": 1,
             })
         else:
-            carrier_cope_fields = [
-                ("year_built",           "year built"),
-                ("roof_year",            "roof year"),
-                ("sprinkler_system",     "sprinkler system"),
-                ("fire_protection_class","fire protection class"),
-                ("valuation_method",     "valuation method (RCV/ACV)"),
-                ("coinsurance_percentage","coinsurance %"),
-                ("business_income_limit","business income limit"),
-                ("period_of_restoration","period of restoration"),
-                ("property_deductible_aop","AOP deductible"),
+            _cope_t1 = [
+                ("year_built",            "year built"),
+                ("roof_year",             "roof year"),
+                ("sprinkler_system",      "sprinkler system"),
+                ("fire_protection_class", "fire protection class"),
             ]
-            carrier_cope = [bool(_fv(facts, k)) for k, _ in carrier_cope_fields]
-            struct = int(60 + (sum(carrier_cope) / len(carrier_cope)) * 40)
+            _cope_t2 = [
+                ("distance_to_hydrant",   "distance to hydrant"),
+                ("fire_department_type",  "fire department type"),
+                ("business_income_limit", "business income limit"),
+                ("period_of_restoration", "period of restoration"),
+            ]
+            _t1_ok = [bool(_fv(facts, k)) for k, _ in _cope_t1]
+            _t2_ok = [bool(_fv(facts, k)) for k, _ in _cope_t2]
+            struct = 60 + sum(_t1_ok) * 5 + sum(_t2_ok) * 5
+            carrier_cope_fields = _cope_t1 + _cope_t2
+            carrier_cope = _t1_ok + _t2_ok
             mc = [(lbl, fk) for (fk, lbl), ok in zip(carrier_cope_fields, carrier_cope) if not ok]
             for label, field_name in mc:
                 recommendations.append({
@@ -3063,7 +3739,7 @@ def calculate_sqs(
                     "component": "property_integrity",
                     "message": f"For Carrier-Grade COPE provide: {label}",
                     "type": "suggestion",
-                    "score_impact": 6,
+                    "score_impact": 5,
                     "priority": 2,
                 })
     elif fid == "ACORD_133":
@@ -3323,7 +3999,7 @@ def calculate_sqs(
 
     elif fid == "ACORD_101":
         # Additional Remarks: free-text narrative is the primary value.
-        remarks_text = str(_fv(facts, "acord101_remarks") or _fv(facts, "remarks_text") or "")
+        remarks_text = _narrative_remarks_text(facts) or str(_fv(facts, "remarks_text") or "")
         chks = [
             bool(_fv(facts, "applicant_name")),
             bool(_fv(facts, "effective_date")),
@@ -3439,7 +4115,7 @@ def calculate_sqs(
         exp_score = int(sum(chks) / len(chks) * 100)
 
     elif fid == "ACORD_101":
-        remarks_text = str(_fv(facts, "acord101_remarks") or _fv(facts, "remarks_text") or "")
+        remarks_text = _narrative_remarks_text(facts) or str(_fv(facts, "remarks_text") or "")
         chks = [
             bool(_fv(facts, "form_reference")),
             bool(_fv(facts, "explanation_of_yes_answers") or remarks_text),
@@ -3536,11 +4212,9 @@ def calculate_sqs(
             prop = 0
             issues.append("Minimum Viable COPE incomplete")
         else:
-            cc = [bool(_fv(facts, k)) for k in [
-                "year_built", "roof_year", "sprinkler_system",
-                "fire_protection_class", "valuation_method", "coinsurance_percentage",
-            ]]
-            prop = int(60 + (sum(cc) / len(cc)) * 40)
+            _p_t1 = ["year_built", "roof_year", "sprinkler_system", "fire_protection_class"]
+            _p_t2 = ["distance_to_hydrant", "fire_department_type", "business_income_limit", "period_of_restoration"]
+            prop = 60 + sum(bool(_fv(facts, k)) for k in _p_t1) * 5 + sum(bool(_fv(facts, k)) for k in _p_t2) * 5
     else:
         prop = 100
 
@@ -3616,9 +4290,12 @@ def calculate_sqs(
     elif flags.get("has_umbrella") and umbrella_score is not None and umbrella_score < 100:
         _uw = []
         _gl_v  = _to_int(_fv(facts, "gl_limits") or _fv(facts, "gl_each_occurrence"))
+        _gl_ag = _to_int(_fv(facts, "gl_aggregate"))
         _au_v  = _to_int(_fv(facts, "auto_liability_limit"))
         if _gl_v is not None and _gl_v < _UMB_GL_OCC_MIN:
             _uw.append(f"Underlying GL limits may not meet umbrella requirements (${_gl_v:,} found, ${_UMB_GL_OCC_MIN:,}+ expected).")
+        if _gl_ag is not None and _gl_ag < _UMB_GL_AGG_MIN:
+            _uw.append(f"Underlying GL aggregate limit may not meet umbrella requirements (${_gl_ag:,} found, ${_UMB_GL_AGG_MIN:,}+ expected).")
         if _au_v is not None and _au_v < _UMB_AUTO_CSL_MIN:
             _uw.append(f"Underlying Auto limits may not meet umbrella requirements (${_au_v:,} found, ${_UMB_AUTO_CSL_MIN:,}+ expected).")
         for w in _uw:
@@ -3626,12 +4303,13 @@ def calculate_sqs(
     breakdown["umbrella_limit_adequacy"] = umbrella_score  # None for N/A
 
     # ── Narrative quality with §6.3 component model ───────────────────────────
-    narrative_score, _narrative_components = _calculate_narrative_quality(
-        facts, has_narrative_doc=has_narrative_doc, flags=flags
+    narrative_score, _narrative_components, _narr_substance = _calculate_narrative_quality(
+        facts, has_narrative_doc=has_narrative_doc, flags=flags,
+        narrative_doc_text=narrative_doc_text,
     )
     breakdown["narrative_quality"] = narrative_score
 
-    # §6.3 AC#4: per-component gap as a targeted recommendation, not a generic message.
+    # §6.3 AC#4: per-component gap as a targeted recommendation.
     if _narrative_components and narrative_score < 80:
         _absent_comps = [
             NARRATIVE_COMPONENT_LABELS[k]
@@ -3639,9 +4317,7 @@ def calculate_sqs(
             if not present
         ]
         if _absent_comps:
-            _comp_msg = "Narrative is missing: " + ", ".join(_absent_comps[:4])
-            if len(_absent_comps) > 4:
-                _comp_msg += f" (+{len(_absent_comps) - 4} more)"
+            _comp_msg = _narrative_gap_message(_narrative_components)
             recommendations.append({
                 "rec_id":       "rec_narrative_components",
                 "field":        "acord101_remarks",
@@ -3650,6 +4326,20 @@ def calculate_sqs(
                 "type":         "missing_field",
                 "score_impact": max(5, min(20, len(_absent_comps) * 3)),
                 "priority":     2,
+            })
+        elif _narr_substance < 30:
+            # All components present but narrative is shallow - flag thin content
+            recommendations.append({
+                "rec_id":       "rec_narrative_substance",
+                "field":        "acord101_remarks",
+                "component":    "narrative_quality",
+                "message":      (
+                    "Narrative covers all required topics but lacks underwriting depth - "
+                    "add specific risk details, loss context, and market considerations"
+                ),
+                "type":         "quality",
+                "score_impact": 10,
+                "priority":     3,
             })
 
     # ── Weighted score (re-normalise if umbrella is N/A) ──────────────────────
@@ -3682,8 +4372,11 @@ def calculate_sqs(
     raw_score = max(0, raw_score - fraud_penalty)
 
     # ── Tier and routing ──────────────────────────────────────────────────────
+    # Top boundary uses ">" 90 to match the package tier ladder (calculate_package_sqs)
+    # and the submission banner: exactly 90 reads as "Almost There", not "Submission
+    # Ready", so the form chip and the package chip never disagree at 90.
     tier, tc = (
-        ("Submission Ready", "green")  if raw_score >= 90 else
+        ("Submission Ready", "green")  if raw_score > 90 else
         ("Almost There",     "yellow") if raw_score >= 80 else
         ("Needs Work",       "orange") if raw_score >= 70 else
         ("Major Gaps",       "red")    if raw_score >= 60 else
@@ -3963,4 +4656,5 @@ def calculate_sqs_from_facts(
         has_loss_run_doc=_has_loss,
         loss_run_match=_loss_match,
         cross_issues_full=cross_issues_full,
+        narrative_doc_text=_extract_narrative_doc_text(_docs),
     )

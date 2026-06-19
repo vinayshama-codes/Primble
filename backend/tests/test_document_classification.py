@@ -169,11 +169,11 @@ def test_unknown_when_no_signal():
 # ── Classification → SQS connection (Beta Report §4.2 acceptance) ─────────────
 
 def test_narrative_presence_floors_narrative_quality():
-    # §6.3: now returns (score, component_breakdown).
-    score, components = sq._calculate_narrative_quality({})
+    # §6.3: returns (score, component_breakdown, substance_pct).
+    score, components, _ = sq._calculate_narrative_quality({})
     assert score == 0
     assert isinstance(components, dict) and components and not any(components.values())
-    floored, _ = sq._calculate_narrative_quality({}, has_narrative_doc=True)
+    floored, _, _ = sq._calculate_narrative_quality({}, has_narrative_doc=True)
     assert floored >= 40
 
 

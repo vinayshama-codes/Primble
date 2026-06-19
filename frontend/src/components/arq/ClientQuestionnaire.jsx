@@ -311,7 +311,6 @@ export default function ClientQuestionnaire({ token }) {
           const msgs = {
             resolved:                    { text: 'Your answers resolved outstanding items on this submission — thank you!',                                         bg: '#ecfdf5', border: '#a7f3d0', color: '#065f46' },
             improved:                    { text: 'Your answers improved this submission — thank you!',                                                               bg: '#ecfdf5', border: '#a7f3d0', color: '#065f46' },
-            score_decreased:             { text: 'Your answers have been submitted. Your agent will review the updated information.',                                bg: '#fffbeb', border: '#fde68a', color: '#92400e' },
             pending_validation:          { text: 'Your answers have been received and are pending review by your agent.',                                            bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' },
             user_provided_only:          { text: 'Your answers have been recorded. Your agent will confirm the details.',                                            bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af' },
             conflicting_evidence_remains:{ text: 'Your answers have been submitted. Your agent will review a few items that need clarification.',                    bg: '#fffbeb', border: '#fde68a', color: '#92400e' },

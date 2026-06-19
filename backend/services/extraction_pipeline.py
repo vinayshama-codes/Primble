@@ -45,6 +45,7 @@ from services.form_service import (
 )
 from services.sqs_service import (
     check_tier1, check_tier2, evaluate_stops, check_doc_consistency,
+    _has_explicit_follow_form,
 )
 from services.cross_form_validator import run_cross_form_validation, split_cross_form_issues
 from services.submission_integrity import assess_submission_integrity
@@ -263,10 +264,14 @@ async def _finalize_pipeline(
     # ── Wire loss-history flags that the scoring pillars depend on ───────────
     # Fix: no_prior_losses / narrative_states_no_losses were never set by the
     # pipeline — root cause of "score didn't move" after loss remediation (§6.4).
+    # Use _attested_true (not raw truthiness) so a stored "No"/"false"/"0" is NOT
+    # misread as an attestation - bool("No") is True in Python, which would have
+    # wrongly credited a no-loss attestation for an insured that DOES have losses.
+    from services.sqs_service import _attested_true
     _npl = merged_facts.get("loss_history_no_prior_losses_indicator")
     if isinstance(_npl, dict):
         _npl = _npl.get("value")
-    if _npl:
+    if _attested_true(_npl):
         mflags["no_prior_losses"] = True
 
     _no_loss_phrases = (
@@ -277,10 +282,20 @@ async def _finalize_pipeline(
     # _derive_evidence_labels can emit "stated_in_narrative" for them.
     _narrative_fact_keys: set = set()
     for _ndoc in active_docs:
-        if _ndoc.get("doc_type") == "narrative" and not _ndoc.get("excluded"):
-            _ndoc_text = str(_ndoc.get("text", "") or "").lower()
-            if any(p in _ndoc_text for p in _no_loss_phrases):
-                mflags["narrative_states_no_losses"] = True
+        if _ndoc.get("excluded"):
+            continue
+        _ndoc_text = str(_ndoc.get("text", "") or "").lower()
+        # Scan ALL non-excluded docs for no-loss phrases — not just narrative-typed ones.
+        # A PDF containing both a narrative section ("no prior losses") and a loss run
+        # table is classified as loss_run, so the old narrative-only gate missed it.
+        # The conflict guard in _loss_history_conflict() (claims > 0 or incurred > 0)
+        # prevents false positives: a clean loss run mentioning "no losses" won't fire
+        # conflict because num_claims = 0.
+        if any(p in _ndoc_text for p in _no_loss_phrases):
+            mflags["narrative_states_no_losses"] = True
+        # Fact provenance attribution stays narrative-only — we only label facts as
+        # "stated in narrative" when the source document is actually a narrative.
+        if _ndoc.get("doc_type") == "narrative":
             _ndoc_facts = _ndoc.get("facts") or {}
             for _nk, _nv in _ndoc_facts.items():
                 # Only credit keys that actually have a value in this narrative doc.
@@ -289,6 +304,21 @@ async def _finalize_pipeline(
                     _narrative_fact_keys.add(_nk)
     if _narrative_fact_keys:
         mflags["_narrative_fact_keys"] = list(_narrative_fact_keys)
+
+    # §6.3: narrative_components are detected inside every extraction call (RULE 11
+    # in the extraction prompt) and OR-merged across chunks and documents during
+    # merge_facts. Promote from mflags into narrative_profile here so all
+    # downstream paths (scoring, suppression, labelling, recommendations) read one
+    # authoritative source. No extra LLM call — detection is free.
+    try:
+        from services.sqs_service import narrative_profile_fact_keys
+        _narr_profile = mflags.get("narrative_components") or {}
+        if _narr_profile:
+            mflags["narrative_profile"] = _narr_profile
+            _narrative_fact_keys |= narrative_profile_fact_keys(_narr_profile)
+            mflags["_narrative_fact_keys"] = list(_narrative_fact_keys)
+    except Exception as _narr_ex:  # pragma: no cover - defensive
+        logger.warning("narrative profile aggregation skipped: %s", _narr_ex)
 
     # ── Umbrella underlying-schedule + follow-form text fallback ─────────────
     # The Umbrella Adequacy pillar deducts -15 (no Schedule of Underlying
@@ -309,10 +339,6 @@ async def _finalize_pipeline(
             "schedule of underlying", "underlying insurance schedule",
             "schedule of underlying insurance",
         )
-        _follow_form_phrases = (
-            "follow form", "follows form", "follow the form",
-            "following form", "follows the underlying",
-        )
         _need_schedule    = not _fact_present("schedule_of_underlying_insurance")
         _need_follow_form = not _fact_present("umbrella_follow_form")
         if _need_schedule or _need_follow_form:
@@ -328,7 +354,7 @@ async def _finalize_pipeline(
                         "confidence": "filled", "source": "policy_doc_text",
                     }
                     _need_schedule = False
-                if _need_follow_form and any(p in _utext for p in _follow_form_phrases):
+                if _need_follow_form and _has_explicit_follow_form(_utext):
                     merged_facts["umbrella_follow_form"] = {
                         # Value intentionally contains "follows form" so the umbrella
                         # scorer's phrase detection credits it (parity with extraction).
@@ -350,7 +376,7 @@ async def _finalize_pipeline(
 
     tier1_ok, tier1_missing = check_tier1(merged_facts, mflags)
 
-    tier2_score, tier2_missing = check_tier2(merged_facts)
+    tier2_score, tier2_missing = check_tier2(merged_facts, mflags)
     hard_stops, soft_stops     = evaluate_stops(merged_facts, mflags)
 
     # DEBUG (Beta Report §5): dump each document's extracted identity/policy

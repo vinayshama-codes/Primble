@@ -88,6 +88,7 @@ def test_wi1_missing_schedule_warning_surfaced():
 def test_wi1_schedule_and_followform_earn_full_umbrella_credit():
     # The whole point: with both evidence facts present, the umbrella reaches 100.
     facts = {
+        "umbrella_limit": "5000000",
         "gl_limits": "1000000", "auto_liability_limit": "1000000",
         "schedule_of_underlying_insurance": "GL $1M/$2M; Auto $1M CSL; EL $1M",
         "umbrella_follow_form": "follows form over underlying policies",
@@ -142,39 +143,59 @@ def test_wi2_matching_building_values_do_not_block():
     assert bv["review_required"] is False
 
 
-# ── WI-3: structural 3rd sub-row is "Supporting Documents" (client spec) ────
+# ── WI-3: structural sub-rows are the 5 client-approved categories ───────────
+# Structural Completeness now shows: Applicant Info, Entity Info,
+# Effective Date Consistency, Policy Term Consistency, Supporting Documentation.
 
-def test_wi3_structural_supporting_documents_label():
+def test_wi3_structural_rows_are_client_approved():
     cats = sq._compute_category_breakdown({}, {})
     sc = cats["structural_completeness"]
-    assert "supporting_documents" in sc, "3rd structural row must be 'supporting_documents'"
-    assert sc["supporting_documents"]["label"] == "Supporting Documents"
-    assert "form_fill_quality" not in sc, "'form_fill_quality' must not appear (replaced by supporting_documents)"
+    assert set(sc.keys()) == {
+        "applicant_information", "entity_information",
+        "effective_date_consistency", "policy_term_consistency",
+        "supporting_documentation",
+    }, "structural rows must be the 5 client-approved sub-categories"
+    assert sc["applicant_information"]["label"] == "Applicant Info"
+    assert sc["entity_information"]["label"] == "Entity Info"
+    assert sc["effective_date_consistency"]["label"] == "Effective Date Consistency"
+    assert sc["policy_term_consistency"]["label"] == "Policy Term Consistency"
+    assert sc["supporting_documentation"]["label"] == "Supporting Documentation"
+    # Old 3-row keys must be gone.
+    assert "underwriting_profile" not in sc and "form_fill_quality" not in sc
 
 
-# ── WI-4: property breakdown surfaces the ACV/RCV deduction ───────────────────
+# ── WI-4: property breakdown shows 2 client-approved sub-rows ────────────────
+# Property Integrity now shows: COPE Info, Location Info.
+# The ACV/RCV conflict still deducts within the COPE Info sub-row.
 
-def test_wi4_property_breakdown_has_valuation_basis_row():
+def test_wi4_property_breakdown_has_client_rows():
     flags = {"has_property_coverage": True}
-    cats = sq._compute_category_breakdown({}, flags)
-    pi = cats["property_integrity"]
-    assert "valuation_basis" in pi
-    assert pi["valuation_basis"]["label"] == "Valuation Basis (ACV vs RCV)"
+    pi = sq._compute_category_breakdown({}, flags)["property_integrity"]
+    assert set(pi.keys()) == {"cope_info", "location_info"}
+    assert pi["cope_info"]["label"] == "COPE Info"
+    assert pi["location_info"]["label"] == "Location Info"
 
 
-def test_wi4_valuation_basis_flags_acv_rcv_conflict():
+def test_wi4_acv_rcv_conflict_penalises_cope_info():
     flags = {"has_property_coverage": True}
-    facts = {
-        "valuation_method": "ACV",
-        "property_replacement_cost": "1000000",  # RCV signal on another field
+    # Baseline: all COPE structural fields present, no conflict.
+    base_facts = {
+        "occupancy_type": "office", "construction_type": "frame",
+        "year_built": "2005", "roof_year": "2005",
+        "sprinkler_system": "wet", "fire_protection_class": "3",
+        "valuation_method": "RCV",
     }
-    cats = sq._compute_category_breakdown(facts, flags)
-    assert cats["property_integrity"]["valuation_basis"]["status"] == "conflict_found"
+    base = sq._compute_category_breakdown(base_facts, flags)["property_integrity"]["cope_info"]["score"]
+    # Same fields but with a contradicting ACV signal → COPE Info is reduced by 10.
+    conflict_facts = dict(base_facts, property_actual_cash_value="800000")
+    conflicted = sq._compute_category_breakdown(conflict_facts, flags)["property_integrity"]["cope_info"]["score"]
+    assert conflicted == max(0, base - 10), "ACV/RCV conflict must dock COPE Info by 10"
 
 
-def test_wi4_valuation_basis_not_applicable_without_property():
-    cats = sq._compute_category_breakdown({}, {})
-    assert cats["property_integrity"]["valuation_basis"]["status"] == "not_applicable"
+def test_wi4_cope_rows_not_applicable_without_property():
+    pi = sq._compute_category_breakdown({}, {})["property_integrity"]
+    assert pi["cope_info"]["status"] == "not_applicable"
+    assert pi["location_info"]["status"] == "not_applicable"
 
 
 # ── WI-5: class-code vs operations mismatch (hardened) ───────────────────────

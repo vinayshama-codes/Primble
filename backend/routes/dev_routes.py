@@ -294,3 +294,75 @@ async def count_download(current_user: dict = Depends(get_current_user)):
             )
 
     return {"success": True}
+
+
+@router.post("/api/dev/umbrella-probe")
+async def umbrella_probe(request: Request):
+    """Exercise the §6.5 umbrella adequacy logic directly from a facts/flags blob,
+    bypassing upload -> OCR -> LLM extraction. Localhost-only, dev-routes-gated.
+
+    Body:
+      {
+        "facts":  { "umbrella_limit": "5000000", "gl_each_occurrence": "500000", ... },
+        "flags":  { "has_umbrella": true, "has_workers_comp": true, ... },
+        "triggered_ids": ["ACORD_125","ACORD_130","ACORD_131"]   // optional
+      }
+
+    The umbrella SCORE / STATE / FOLLOW-FORM / WARNINGS are derived from facts+flags
+    only (no triggered_ids needed). triggered_ids is passed to the cross-form layer
+    so its form-specific inner checks (EL-over-WC, etc.) can also be observed; it
+    defaults to a set that drives underlying-coverage presence from the FACTS rather
+    than from form selection, so the "no underlying => hard stop" path is visible.
+    """
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Only accessible from localhost")
+
+    body  = await request.json()
+    facts = body.get("facts") or {}
+    flags = body.get("flags") or {}
+    if not isinstance(facts, dict) or not isinstance(flags, dict):
+        raise HTTPException(400, "facts and flags must be objects")
+    triggered_ids = set(body.get("triggered_ids") or ["ACORD_125", "ACORD_130", "ACORD_131"])
+
+    # Lazy imports: sqs_service pulls in the heavy scoring/validation graph.
+    from services.sqs_service import (
+        _calculate_umbrella_adequacy, _get_umbrella_state, _get_follow_form_status,
+        _build_umbrella_warnings, _build_umbrella_review_items,
+        _UMB_GL_OCC_MIN, _UMB_GL_AGG_MIN, _UMB_AUTO_CSL_MIN, _UMB_EL_FULL, _UMB_EL_OK,
+    )
+    from services.cross_form_validator import (
+        run_cross_form_validation, split_cross_form_issues,
+    )
+
+    score        = _calculate_umbrella_adequacy(facts, flags)   # None when N/A
+    state        = _get_umbrella_state(facts, flags)
+    follow_form  = _get_follow_form_status(facts)
+    warnings     = _build_umbrella_warnings(facts, flags, score)
+    review_items = _build_umbrella_review_items(flags, follow_form, score)
+
+    cf_issues          = run_cross_form_validation(facts, flags, triggered_ids)
+    cf_hard, cf_soft, cf_adv = split_cross_form_issues(cf_issues)
+    umbrella_cf = [i for i in cf_issues if "umbrella" in (i.get("code") or "")]
+
+    return {
+        "umbrella_adequacy_score": score,           # None = Not Applicable (excluded from SQS)
+        "is_not_applicable":       score is None,
+        "umbrella_state":          state,
+        "follow_form":             follow_form,
+        "umbrella_warnings":       warnings,
+        "review_items":            review_items,
+        "cross_form": {
+            "umbrella_issues": umbrella_cf,
+            "hard_stops":      cf_hard,
+            "soft_stops":      cf_soft,
+        },
+        "thresholds": {
+            "gl_each_occurrence_min": _UMB_GL_OCC_MIN,
+            "gl_aggregate_min":       _UMB_GL_AGG_MIN,
+            "auto_csl_min":           _UMB_AUTO_CSL_MIN,
+            "el_full_credit":         _UMB_EL_FULL,
+            "el_acceptable_min":      _UMB_EL_OK,
+        },
+        "inputs_echo": {"facts": facts, "flags": flags, "triggered_ids": sorted(triggered_ids)},
+    }

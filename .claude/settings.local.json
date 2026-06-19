@@ -116,10 +116,37 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('backend/services/sqs_service.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(python3 -c \"import json; s=json.load\\(open\\('/c/Users/lenovo/Desktop/Primble/backend/forms_schemas/ACORD_125_schema.json'\\)\\); print\\(f'Total fields: {len\\(s.get\\(\\\\\"fields\\\\\", []\\)\\)}'\\)\")",
       "Bash(xargs -I {} bash -c 'echo -n \"{}: \" && grep -c \"^@router\\\\.\" {} 2>/dev/null || echo \"0\"')",
-      "Bash(python3)"
+      "Bash(python3)",
+      "Bash(./venv/Scripts/python.exe -m pytest tests/test_sqs_scoring.py tests/test_workstream2_integration.py tests/test_workstream3_closure.py tests/test_form_recommendation.py -q)",
+      "PowerShell(Get-Command py -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Command uvicorn -ErrorAction SilentlyContinue)",
+      "Bash(git log *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('services/sqs_service.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(py -c \"import services.sqs_service as sq; print\\('import OK', sq.SQS_MODEL_VERSION\\)\")",
+      "Bash(PYTHONPATH=\"c:/Users/lenovo/OneDrive/Desktop/Primble/backend\" py /tmp/verify_sqs_parity.py)",
+      "Bash(venv/Scripts/python.exe -m pytest --version)",
+      "Bash(venv/Scripts/python.exe -m pytest tests/test_sqs_scoring.py tests/test_workstream3_closure.py -q)",
+      "Bash(cd \"c:/Users/lenovo/OneDrive/Desktop/Primble/backend\" && venv/Scripts/python.exe -m pytest tests/test_sqs_scoring.py -q 2>&1 | tail -20 && rm -f /tmp/verify_sqs_parity.py /tmp/verify_sqs_avg.py)",
+      "Bash(venv/Scripts/python.exe -m pytest tests/ -q)",
+      "Bash(venv/Scripts/python.exe -m pytest \"tests/test_document_classification.py::test_narrative_presence_floors_narrative_quality\" -q)",
+      "Bash(venv/Scripts/python.exe -m pytest \"tests/test_arq_acord125_missing_only.py::test_acord125_questions_only_use_yellow_missing_required_fields\" -q)",
+      "Bash(cd \"c:/Users/lenovo/.claude/projects/c--Users-lenovo-OneDrive-Desktop-Primble/memory\")",
+      "Bash(ls -la)",
+      "Bash(cat MEMORY.md)",
+      "PowerShell($py = \\(Get-Command python -ErrorAction SilentlyContinue\\); if \\($py\\) { $py.Source } else { \\(Get-Command py -ErrorAction SilentlyContinue\\).Source })",
+      "PowerShell(& \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m pytest \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\tests\\\\test_sqs_scoring.py\" \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\tests\\\\test_workstream3_closure.py\" -q 2>&1)",
+      "PowerShell(& \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m py_compile \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\routes\\\\form_routes.py\" \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\services\\\\arq_service.py\")",
+      "PowerShell(if \\($?\\) { \"COMPILE OK\" })",
+      "PowerShell(& \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m pytest \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\tests\\\\test_sqs_scoring.py\" -q 2>$null)",
+      "PowerShell(& \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m py_compile \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\services\\\\sqs_service.py\")",
+      "PowerShell(if \\($?\\) { \"compile OK\" })",
+      "PowerShell(& \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\scripts\\\\generate_conflict_test_pdfs.py\")",
+      "PowerShell(& \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m pytest \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\tests\" -q 2>$null)",
+      "PowerShell(& \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m pytest \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\tests\\\\test_arq_acord125_missing_only.py::test_acord125_questions_only_use_yellow_missing_required_fields\" \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\tests\\\\test_document_classification.py::test_narrative_presence_floors_narrative_quality\" -q 2>$null)"
     ],
     "additionalDirectories": [
-
+      "\\tmp",
+      "c:\\Users\\lenovo\\.claude\\projects\\c--Users-lenovo-OneDrive-Desktop-Primble\\memory"
     ]
   }
 }

@@ -21,8 +21,8 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
 logger = logging.getLogger(__name__)
 
 # ── Cache versioning (Fix 3) ──────────────────────────────────────────────────
-PROMPT_VERSION = "v7"
-SCHEMA_VERSION = "v7"
+PROMPT_VERSION = "v8"
+SCHEMA_VERSION = "v8"
 
 # ── Model context config ──────────────────────────────────────────────────────
 _MODEL_CHUNK_CHARS: Dict[str, int] = {
@@ -156,6 +156,14 @@ _EXTRACT_SCHEMA = (
     # Property location schedule: one object per location row
     '  "property_locations": [{"address": string, "building_value": string or null, "bpp_value": string or null, "construction_type": string or null, "year_built": string or null}],\n'
     '  "loss_run_age_days": string or null,\n'
+    # Loss-run dating: the "valued as of" / valuation / evaluation date printed on
+    # the loss run, and the earliest experience-period (policy-period) start date
+    # the loss runs cover. Used to compute recency and years deterministically.
+    '  "loss_run_valuation_date": string or null, "loss_run_period_start": string or null,\n'
+    # Loss-run availability status: set to "pending" or "requested" when the submission
+    # explicitly mentions loss runs have been requested but not yet received.
+    # Null when loss run data is actually present or when no loss runs are mentioned.
+    '  "loss_run_status": "pending"|"requested"|null,\n'
     '  "risk_transfer": {\n'
     '    "additional_insured_required": boolean,\n'
     '    "additional_insured_names": [string],\n'
@@ -249,7 +257,21 @@ _EXTRACT_SCHEMA = (
     '  "has_garage_coverage": boolean,\n'
     '  "has_dealers_coverage": boolean,\n'
     '  "has_garage_liability": boolean,\n'
-    '  "has_garage_keepers": boolean\n'
+    '  "has_garage_keepers": boolean,\n'
+    '  "narrative_components": {\n'
+    '    "account_overview":    {"present": boolean, "evidence": string or null},\n'
+    '    "operations":          {"present": boolean, "evidence": string or null},\n'
+    '    "years_in_business":   {"present": boolean, "evidence": string or null},\n'
+    '    "management":          {"present": boolean, "evidence": string or null},\n'
+    '    "risk_controls":       {"present": boolean, "evidence": string or null},\n'
+    '    "loss_history":        {"present": boolean, "evidence": string or null},\n'
+    '    "coverage_discussion": {"present": boolean, "evidence": string or null},\n'
+    '    "carrier_market":      {"present": boolean, "evidence": string or null},\n'
+    '    "location_exposure":   {"present": boolean, "evidence": string or null},\n'
+    '    "employee_practices":  {"present": boolean, "evidence": string or null},\n'
+    '    "growth_trends":       {"present": boolean, "evidence": string or null},\n'
+    '    "target_markets":      {"present": boolean, "evidence": string or null}\n'
+    '  }\n'
     '}'
 )
 
@@ -341,6 +363,29 @@ _EXTRACT_PROMPT_PREFIX = (
     'distinct from the factual `operations_description` (what the business does). '
     'Set `account_description` to null for dec pages, applications, loss runs, certificates, '
     'and all other structured documents that are not narrative account summaries.\n\n'
+    'RULE 11 — narrative_components: For each of the 12 components, set present=true only if '
+    'THIS CHUNK OF TEXT contains meaningful prose discussing that topic (not just a heading or '
+    'label). Include a short verbatim quote (30 words max) as evidence. Set present=false and '
+    'evidence=null when the topic is absent from this chunk.\n'
+    '  account_overview: high-level account summary, executive summary, broker account pitch.\n'
+    '  operations: what the business does day-to-day, scope of work, services provided.\n'
+    '  years_in_business: how long the company has operated, founding year, tenure in business.\n'
+    '  management: leadership team, principals, owner experience, org structure, key personnel.\n'
+    '  risk_controls: safety programs, loss prevention, certifications, written procedures.\n'
+    '  loss_history: prior claims, loss history, claims summary, loss experience discussion.\n'
+    '  coverage_discussion: coverage needs, existing lines, limits discussion, gaps analysis.\n'
+    '  carrier_market: prior or current carriers, market context, market appetite.\n'
+    '  location_exposure: premises, locations, geographic footprint, facilities.\n'
+    '  employee_practices: HR policies, workforce description, hiring practices, turnover.\n'
+    '  growth_trends: workers comp payroll by class code, WC class codes, payroll breakdown by classification, NCCI class, labor classification, payroll schedule.\n'
+    '  target_markets: experience modifier, EMOD, XMOD, experience modification rate, mod factor, merit rating, debit mod, credit mod, rating bureau, workers comp mod.\n\n'
+    'RULE 12 — loss_run_status: Set to "pending" or "requested" ONLY when the document '
+    'explicitly states that loss runs have been requested but not yet received — phrases '
+    'such as "loss runs requested", "loss runs pending", "awaiting loss runs", "loss runs '
+    'have been ordered", "loss runs on order", or "loss runs to follow". '
+    'Set to null in ALL other cases, including when actual loss run data is present '
+    'in this document (use loss_history, loss_run_valuation_date, and related fields for '
+    'that). Do NOT infer pending status from the absence of loss runs alone.\n\n'
     'Return ONLY a valid JSON object with exactly these two top-level keys:\n\n'
     + _EXTRACT_SCHEMA
     + '\n\nReturn ONLY the JSON object. No markdown fences, no explanation, no extra text. '
@@ -430,6 +475,30 @@ def _fv(facts: dict, key: str, default=None):
     if isinstance(raw, dict) and "value" in raw:
         return raw["value"]
     return raw
+
+
+def _narrative_remarks_text(facts: dict) -> str:
+    """Resolve the free-text ACORD-101 / submission narrative from a facts dict.
+
+    Three possible homes for narrative prose:
+    - acord101_remarks         -- legacy key some scorers historically read
+    - additional_remarks_text  -- canonical ACORD-101 schema key written by the chunked
+                                  extractor for ACORD-101 remarks text
+    - account_description      -- RULE 10: populated ONLY for standalone underwriting /
+                                  submission narratives (account overview, executive summary).
+                                  This is where broker account narratives land; mapped to no
+                                  form field. Resolving it here is what makes standalone
+                                  narratives score correctly.
+
+    Priority: explicit legacy key > canonical remarks key > standalone narrative home.
+    Returns "" when none present.
+    """
+    return str(
+        _fv(facts, "acord101_remarks")
+        or _fv(facts, "additional_remarks_text")
+        or _fv(facts, "account_description")
+        or ""
+    )
 
 
 def _focr(facts: dict, key: str) -> bool:
@@ -1844,10 +1913,23 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
     merged_flags: dict = {}
     for partial in partials:
         for k, v in partial.get("flags", {}).items():
+            if k == "narrative_components":
+                continue  # OR-merged below
             if isinstance(v, bool):
                 merged_flags[k] = merged_flags.get(k, False) or v
             elif k not in merged_flags or merged_flags[k] is None:
                 merged_flags[k] = v
+
+    # OR-merge narrative_components: a component is present if any chunk/doc detected it
+    # with a non-empty evidence quote (evidence-gate prevents false positives).
+    _nc_merged: dict = {}
+    for partial in partials:
+        for comp, data in ((partial.get("flags") or {}).get("narrative_components") or {}).items():
+            if isinstance(data, dict) and data.get("present") and data.get("evidence"):
+                if not _nc_merged.get(comp, {}).get("present"):
+                    _nc_merged[comp] = data
+    if _nc_merged:
+        merged_flags["narrative_components"] = _nc_merged
 
     return {"facts": merged_facts, "flags": merged_flags}
 
@@ -2699,7 +2781,15 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
                     mf[field] = auth_val
 
     for k, v in primary.get("flags", {}).items():
-        if isinstance(v, bool):
+        if k == "narrative_components":
+            _existing = mg.get("narrative_components") or {}
+            for comp, data in (v or {}).items():
+                if isinstance(data, dict) and data.get("present") and data.get("evidence"):
+                    if not _existing.get(comp, {}).get("present"):
+                        _existing[comp] = data
+            if _existing:
+                mg["narrative_components"] = _existing
+        elif isinstance(v, bool):
             mg[k] = mg.get(k, False) or v
         elif not _is_empty(v):
             mg[k] = v

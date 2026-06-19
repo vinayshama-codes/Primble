@@ -78,6 +78,22 @@ def _issue(issue_type: str, code: str, message: str, forms: List[str]) -> dict:
     return {"type": issue_type, "code": code, "message": message, "forms": forms}
 
 
+def _umbrella_in_scope(flags: dict) -> bool:
+    """Single gate for every umbrella cross-form check (§6.5).
+
+    Gates on the umbrella coverage flag alone - the SAME signal the SQS score
+    pillar and the umbrella evidence state use - so scoring, evidence state and
+    cross-form validation always agree on whether an umbrella is present. This
+    keeps all umbrella checks uniform and is independent of which forms the user
+    selected (it fires whenever umbrella coverage is detected, even if the
+    umbrella form was deselected). A dec-page umbrella line that never set the
+    coverage flag is therefore treated as "not yet a confirmed umbrella"
+    everywhere - the recommender still surfaces the umbrella form for the user
+    to confirm, at which point the flag is set and all layers engage together.
+    """
+    return bool(flags.get("has_umbrella"))
+
+
 # ── Individual rule functions ─────────────────────────────────────────────────
 
 
@@ -307,9 +323,7 @@ def _check_umbrella_attachment_stack(
     """
     issues: List[dict] = []
 
-    if "ACORD_131" not in triggered_ids:
-        return issues
-    if not flags.get("has_umbrella"):
+    if not _umbrella_in_scope(flags):
         return issues
 
     # 1. SIR vs GL deductible - hard stop (was soft warning)
@@ -363,7 +377,7 @@ def _check_umbrella_attachment_stack(
 
     # Spec: misaligned effective/expiration dates = HARD STOP unless explained.
     # An ACORD 101 narrative is treated as the "explained" exception.
-    _dates_explained = bool(_fv(facts, "acord101_remarks") or _fv(facts, "policy_period_explanation"))
+    _dates_explained = bool(_fv(facts, "acord101_remarks") or _fv(facts, "additional_remarks_text") or _fv(facts, "policy_period_explanation"))
     _date_sev = "soft_warning" if _dates_explained else "hard_stop"
 
     if umb_eff and gl_eff and _dates_differ(umb_eff, gl_eff):
@@ -610,7 +624,7 @@ def _check_gl_missing_when_umbrella(
     """
     issues: List[dict] = []
 
-    if "ACORD_131" not in triggered_ids:
+    if not _umbrella_in_scope(flags):
         return issues
 
     has_gl   = "ACORD_126" in triggered_ids or bool(_fv(facts, "gl_limits"))
@@ -1032,9 +1046,7 @@ def _check_umbrella_period_vs_auto_wc(
     """
     issues: List[dict] = []
 
-    if "ACORD_131" not in triggered_ids:
-        return issues
-    if not flags.get("has_umbrella"):
+    if not _umbrella_in_scope(flags):
         return issues
 
     umb_eff = _fv(facts, "umbrella_effective_date")
@@ -1044,7 +1056,7 @@ def _check_umbrella_period_vs_auto_wc(
         return issues
 
     # Spec: underlying policy period misalignment = HARD STOP unless explained.
-    _dates_explained = bool(_fv(facts, "acord101_remarks") or _fv(facts, "policy_period_explanation"))
+    _dates_explained = bool(_fv(facts, "acord101_remarks") or _fv(facts, "additional_remarks_text") or _fv(facts, "policy_period_explanation"))
     _date_sev = "soft_warning" if _dates_explained else "hard_stop"
 
     # Auto period alignment
@@ -1100,18 +1112,24 @@ def _check_umbrella_gl_minimum_limits(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
     """
-    GL underlying limits must meet umbrella attachment requirements - not just
-    Auto.  If GL limits are present but below the umbrella limit, this is an
-    attachment failure risk.
+    GL underlying limits are compared against umbrella attachment requirements -
+    not just Auto. If GL limits are present but below the baseline, this is an
+    attachment risk worth surfacing.
 
-    Spec: "Verify GL/Auto limits meet umbrella minimums. If not → hard stop
-    (umbrella cannot attach without required underlying)."
+    Client Q1 (§6.5): underlying limits below the baseline must NOT fail the
+    submission - they produce a WARNING + score reduction, never a hard stop,
+    because carrier attachment requirements vary. (Missing ALL underlying
+    coverage remains a hard stop - handled by _check_gl_missing_when_umbrella.)
+
+    Gate: umbrella in scope (coverage flag OR umbrella form recommended), not
+    ACORD 131 form selection, so the check runs whenever umbrella coverage is
+    detected in the documents, regardless of whether the user explicitly
+    selected ACORD 131. Shared with every other umbrella check and aligned with
+    the SQS scoring layer.
     """
     issues: List[dict] = []
 
-    if "ACORD_131" not in triggered_ids:
-        return issues
-    if not flags.get("has_umbrella"):
+    if not _umbrella_in_scope(flags):
         return issues
 
     umb_limit = _to_int(_fv(facts, "umbrella_limit"))
@@ -1121,17 +1139,17 @@ def _check_umbrella_gl_minimum_limits(
     gl_limit_raw = _fv(facts, "gl_each_occurrence") or _fv(facts, "gl_limits")
     gl_limit = _to_int(gl_limit_raw)
 
-    # Standard umbrella requires at least $1M GL each-occurrence underlying
+    # Client Q1 baseline: $1M GL each-occurrence underlying for umbrella attachment.
     _GL_MINIMUM = 1_000_000
 
     if gl_limit is not None and gl_limit < _GL_MINIMUM:
         issues.append(_issue(
-            "hard_stop",
+            "soft_warning",
             "umbrella_gl_attachment_failure",
             (
-                f"GL each-occurrence limit (${gl_limit:,}) is below the standard "
-                f"minimum of ${_GL_MINIMUM:,} required for umbrella attachment. "
-                "Increase GL limits or provide attachment documentation."
+                f"Underlying GL each-occurrence limit (${gl_limit:,}) may not meet "
+                f"umbrella requirements (${_GL_MINIMUM:,}+ typically expected). "
+                "Carrier attachment requirements vary - verify before binding."
             ),
             ["ACORD_126", "ACORD_131"],
         ))
@@ -1150,6 +1168,62 @@ def _check_umbrella_gl_minimum_limits(
     return issues
 
 
+def _check_umbrella_auto_minimum_limits(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """
+    Auto underlying limits are compared against umbrella attachment requirements,
+    giving Auto parity with the GL minimum check at the cross-form layer.
+
+    Client Q1 (§6.5): underlying limits below the baseline must NOT fail the
+    submission - they produce a WARNING + score reduction, never a hard stop,
+    because carrier attachment requirements vary. (Missing ALL underlying
+    coverage remains a hard stop - handled by _check_gl_missing_when_umbrella.)
+
+    Gate: umbrella in scope (coverage flag OR umbrella form recommended) —
+    matches the gate used by every other umbrella check and the SQS scoring
+    layer.
+    """
+    issues: List[dict] = []
+
+    if not _umbrella_in_scope(flags):
+        return issues
+
+    umb_limit = _to_int(_fv(facts, "umbrella_limit"))
+    if not umb_limit:
+        return issues
+
+    auto_limit = _to_int(_fv(facts, "auto_liability_limit"))
+
+    # Client Q1 baseline: $1M Auto CSL underlying for umbrella attachment.
+    _AUTO_MINIMUM = 1_000_000
+
+    if auto_limit is not None and auto_limit < _AUTO_MINIMUM:
+        issues.append(_issue(
+            "soft_warning",
+            "umbrella_auto_attachment_failure",
+            (
+                f"Underlying Auto combined single limit (${auto_limit:,}) may not "
+                f"meet umbrella requirements (${_AUTO_MINIMUM:,}+ CSL typically "
+                "expected). Carrier attachment requirements vary - verify before binding."
+            ),
+            ["ACORD_127", "ACORD_131"],
+        ))
+    elif "ACORD_127" in triggered_ids and not auto_limit:
+        issues.append(_issue(
+            "soft_warning",
+            "umbrella_auto_limits_not_found",
+            (
+                "Umbrella is present and Auto is triggered but the Auto combined "
+                "single limit could not be determined. Verify Auto limits meet "
+                "umbrella attachment requirements."
+            ),
+            ["ACORD_127", "ACORD_131"],
+        ))
+
+    return issues
+
+
 def _check_umbrella_sir_vs_auto_deductible(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
@@ -1161,9 +1235,9 @@ def _check_umbrella_sir_vs_auto_deductible(
     """
     issues: List[dict] = []
 
-    if "ACORD_131" not in triggered_ids or "ACORD_127" not in triggered_ids:
+    if not _umbrella_in_scope(flags):
         return issues
-    if not flags.get("has_umbrella") or not flags.get("has_auto_coverage"):
+    if "ACORD_127" not in triggered_ids or not flags.get("has_auto_coverage"):
         return issues
 
     sir      = _to_int(_fv(facts, "umbrella_sir"))
@@ -1572,7 +1646,7 @@ def _check_builders_risk_project_value(
     project_cost = _to_float(_fv(facts, "builders_risk_project_cost"))
     if not project_cost:
         # If an ACORD 101 narrative is provided, treat as soft instead of hard.
-        explained = bool(_fv(facts, "acord101_remarks"))
+        explained = bool(_fv(facts, "acord101_remarks") or _fv(facts, "additional_remarks_text"))
         issues.append(_issue(
             "soft_warning" if explained else "hard_stop",
             "builders_risk_project_value_missing",
@@ -1779,6 +1853,7 @@ _RULE_FUNCTIONS = [
     _check_location_address_reconciliation,
     _check_umbrella_attachment_stack,
     _check_umbrella_gl_minimum_limits,
+    _check_umbrella_auto_minimum_limits,
     _check_umbrella_sir_vs_auto_deductible,
     _check_umbrella_period_vs_auto_wc,
     _check_gl_missing_when_umbrella,

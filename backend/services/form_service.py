@@ -9,7 +9,7 @@ from typing import Dict, FrozenSet, List, Optional, Tuple
 from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_INDEX
 from services.extraction_service import _fv, _is_empty
 from services.pdf_service import extract_form_schema, map_facts_to_form, fill_pdf
-from services.sqs_service import cross_validate, calculate_sqs, _check_loss_run_insured_match
+from services.sqs_service import cross_validate, calculate_sqs, _check_loss_run_insured_match, _extract_narrative_doc_text
 from utils.validators import US_STATES, run_field_validations
 
 logger = logging.getLogger(__name__)
@@ -1709,6 +1709,7 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
     _has_narr    = "narrative" in _present
     _has_loss    = "loss_run" in _present
     _loss_match  = _check_loss_run_insured_match(_docs, _fv(session["facts"], "applicant_name"))
+    _narr_text   = _extract_narrative_doc_text(_docs)
     sqs              = calculate_sqs(
         facts=session["facts"], flags=session["flags"],
         mapped_data=mapped, form_schema=schema,
@@ -1725,6 +1726,7 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
         has_loss_run_doc=_has_loss,
         loss_run_match=_loss_match,
         cross_issues_full=cross,
+        narrative_doc_text=_narr_text,
     )
     pdf_bytes = fill_pdf(tpl, mapped, confidence)
     return {

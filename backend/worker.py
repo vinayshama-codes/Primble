@@ -337,23 +337,41 @@ async def _process_form_generation_job(job: dict, queue) -> None:
                 seen_msgs.add(msg)
                 cross_issues_deduped.append(issue)
 
-        # Compute package SQS as the average of per-form SQS scores so async
-        # (worker) sessions get the same package-level scoring shown to sync
-        # users. Essential tier uses the single top recommended form which the
-        # average naturally reduces to.
+        # Compute package SQS via the same scorer the sync + remediation paths use
+        # so async (worker) sessions carry the full enriched package summary -
+        # including loss_history_state, umbrella_state, evidence_labels, and the
+        # 6-pillar breakdown - rather than a stripped-down per-form average.
         _sqs_list = [r["sqs"] for r in results.values() if r.get("sqs")]
-        _scores   = [s.get("sqs_score") for s in _sqs_list if s.get("sqs_score") is not None]
-        _avg      = int(round(sum(_scores) / len(_scores))) if _scores else 0
-        _first    = _sqs_list[0] if _sqs_list else {}
-        package_sqs = {
-            "package_sqs_score": _avg,
-            "tier":              _first.get("tier"),
-            "pillars":           _first.get("breakdown", {}),
-            "weights_used":      _first.get("breakdown", {}),
-            "weights_version":   "spec_compliant_v2.1.0",
-            "form_ids":          list(results.keys()),
-            "model_version":     SQS_MODEL_VERSION,
-        } if _sqs_list else None
+        package_sqs = None
+        if _sqs_list:
+            try:
+                package_sqs = calculate_package_sqs(
+                    facts=session["facts"],
+                    flags=session.get("flags", {}),
+                    form_results=_sqs_list,
+                    cross_issues=cross_issues_deduped,
+                    hard_stops=session.get("hard_stops", []),
+                    soft_stops=session.get("soft_stops", []),
+                    session_data=session,
+                    session_id=session_id,
+                    user_id=user_id,
+                    calculation_stage="form_generated",
+                )
+            except Exception as _pkg_ex:
+                # Defensive fallback: a scoring failure must never block form
+                # delivery. Mirror the previous simple per-form average shape.
+                logger.error("Job %s: calculate_package_sqs failed, using per-form average: %s", job_id, _pkg_ex)
+                _scores = [s.get("sqs_score") for s in _sqs_list if s.get("sqs_score") is not None]
+                _first  = _sqs_list[0]
+                package_sqs = {
+                    "package_sqs_score": int(round(sum(_scores) / len(_scores))) if _scores else 0,
+                    "tier":              _first.get("tier"),
+                    "pillars":           _first.get("breakdown", {}),
+                    "weights_used":      _first.get("breakdown", {}),
+                    "weights_version":   "spec_compliant_v2.1.0",
+                    "form_ids":          list(results.keys()),
+                    "model_version":     SQS_MODEL_VERSION,
+                }
 
         _update_payload = {
             "selected_form_ids": form_ids,

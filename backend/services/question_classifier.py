@@ -162,6 +162,60 @@ _CLIENT_WHITELIST = {
     "gl_class_codes", "gl_class_codes_by_location", "wc_class_codes",
 }
 
+# ── Narrative-supported answers (§6.3 item 2) — all 12 components evaluated ────
+# Every §6.3 narrative-quality component (see sqs_service.NARRATIVE_COMPONENT_
+# LABELS) is evaluated against the client questionnaire and assigned ONE of three
+# policies, so the client's broad goal ("if the narrative answers it, don't make
+# the client redo it") is honoured across the whole taxonomy rather than a slice:
+#
+# Bucket A — SUPPRESS: the free-text narrative IS the answer. The matching
+#   question is dropped from the default client set (labelled "stated in
+#   narrative"); the producer can still send it from the review panel.
+#     • operations        → operations_description : prose IS the answer.
+#     • years_in_business → years_in_business       : "founded in 2008" answers it.
+#     • carrier_market    → prior_carrier           : a narrative naming the
+#         prior/incumbent carrier substitutes for asking who it was.
+#
+# Bucket B — CONTEXT (KEEP + LABEL + DE-PRIORITISE): the narrative discusses the
+#   topic but the FORM still needs the exact figure. The question is NOT
+#   suppressed; it is labelled "stated in narrative" and de-prioritised so it is
+#   not pre-selected (the client just confirms the precise number). This honours
+#   the intent without ever withholding a question only the client can answer.
+#     • loss_history        → claim counts / loss-history attestation
+#     • coverage_discussion → limits (GL / umbrella / auto / EL)
+#     • location_exposure   → locations / addresses
+#     • employee_practices  → headcount / payroll
+#
+# Bucket C — no curated client question exists for these topics.
+#   (account_overview, management, risk_controls, growth_trends, target_markets).
+#   arq_service._maybe_inject_narrative_enrichment_questions() asks the client
+#   when the narrative is missing them and stays silent when it covers them.
+
+# Bucket A — narrative fully answers these: suppress the ARQ question entirely.
+NARRATIVE_SUPPRESS_QUESTION_KEYS = {
+    "operations":        ("operations_description",),
+    "years_in_business": ("years_in_business",),
+    "carrier_market":    ("prior_carrier",),
+}
+
+# Bucket B — narrative covers these topics: suppress the ARQ question entirely.
+# Previously these were kept with a "stated in narrative - confirm value" label,
+# but if the narrative already answers the question there is no reason to ask
+# the client again. Unified with Bucket A: covered = suppressed, missing = asked.
+NARRATIVE_CONTEXT_QUESTION_KEYS = {
+    "loss_history": (
+        "num_claims", "loss_history_no_prior_losses_indicator", "loss_history_years",
+    ),
+    "coverage_discussion": (
+        "gl_limits", "gl_each_occurrence", "gl_aggregate", "gl_deductible",
+        "umbrella_limit", "umbrella_sir", "auto_liability_limit",
+        "employers_liability_limits",
+    ),
+    "location_exposure":  ("locations",),
+    "employee_practices": ("num_employees", "total_payroll", "wc_payroll"),
+}
+# Back-compat alias (was the Bucket-A-only map before §6.3 was widened).
+NARRATIVE_COMPONENT_QUESTION_KEYS = NARRATIVE_SUPPRESS_QUESTION_KEYS
 # ── Topic detection — ordered (first match wins) substring rules ──────────────
 _TOPIC_FIELD_RULES: List[tuple] = [
     (TOPIC_PRODUCER,  ("producer", "subproducer", "agency", "agent_")),
@@ -369,6 +423,7 @@ def decorate_questions(
     questions: List[dict],
     *,
     present_fact_keys: Optional[set] = None,
+    narrative_components: Optional[dict] = None,
     hard_stop_text: str = "",
 ) -> None:
     """Attach taxonomy fields to every question in-place.
@@ -378,8 +433,24 @@ def decorate_questions(
     documents is suppressed — Beta Report §8.2 item 4). Each question may carry
     `_is_curated_client`, `_canonical_key`, `_is_cross_form`, `severity` hints
     set by the generator.
+
+    `narrative_components` is the §6.3 per-component present/absent map for the
+    uploaded narrative. When a component is present, the curated question it
+    answers (per `NARRATIVE_COMPONENT_QUESTION_KEYS`) is suppressed from the
+    default client set and labelled "stated in narrative" instead of being
+    re-asked (§6.3 item 2).
     """
     present = present_fact_keys or set()
+
+    # Canonical keys the narrative covers (§6.3 item 2), split by policy bucket.
+    narrative_suppress: set = set()  # Bucket A — drop from default client set
+    narrative_context:  set = set()  # Bucket B — keep, label, de-prioritise
+    for comp, is_present in (narrative_components or {}).items():
+        if not is_present:
+            continue
+        narrative_suppress.update(NARRATIVE_SUPPRESS_QUESTION_KEYS.get(comp, ()))
+        narrative_context.update(NARRATIVE_CONTEXT_QUESTION_KEYS.get(comp, ()))
+
     for q in questions:
         tax = classify_question(
             q.get("field_name", ""),
@@ -397,6 +468,24 @@ def decorate_questions(
             q["suppressed"] = True
             q["suppressed_reason"] = "already_provided"
             q["priority"] = PRIORITY_SUPPRESSED
+        # Overlay (Bucket A): the narrative fully answers it → suppress from the
+        # default client set. Gated on `not suppressed` and placed after the facts
+        # overlay, so an explicit extracted fact ("already provided") takes
+        # precedence.
+        if canon and canon in narrative_suppress and not q.get("suppressed"):
+            q["suppressed"] = True
+            q["suppressed_reason"] = "stated_in_narrative"
+            q["priority"] = PRIORITY_SUPPRESSED
+        # Bucket B — deliberately removed.
+        # "coverage_discussion detected → suppress all GL/umbrella/auto fields"
+        # caused over-suppression: a single mention of "coverage" in the narrative
+        # was suppressing gl_aggregate, gl_deductible, umbrella_limit etc. even
+        # though the narrative never stated those specific values. The correct
+        # suppressor for field-level values is "already_provided" above: if the
+        # LLM extracted the value from the narrative doc, the field is suppressed;
+        # if it didn't, the client still needs to answer it. NARRATIVE_CONTEXT_QUESTION_KEYS
+        # is retained so the topic→field mapping remains available for future use,
+        # but no overlay is applied here.
 
 
 def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP) -> dict:

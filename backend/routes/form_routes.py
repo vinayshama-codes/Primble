@@ -46,7 +46,7 @@ from services.pdf_service import (
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
     check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION, classify_stops,
-    _check_loss_run_insured_match,
+    _check_loss_run_insured_match, _extract_narrative_doc_text,
 )
 from services.audit_service import (
     log_recommendations_presented,
@@ -1318,13 +1318,17 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             facts=updated_facts, flags=fresh_flags,
             mapped_data=current_state, form_schema=r.get("schema", {}),
             selected_form_ids=session.get("selected_form_ids", []),
-            hard_stops=fresh_hard_stops, soft_stops=fresh_soft_stops,
+            # SQS design: cross-form stops cap the PACKAGE only, never individual
+            # forms - so per-form SQS uses field-level (global) stops only. The
+            # cross-form stops (_cf_*) still cap the package score recomputed below.
+            hard_stops=list(_re_hard), soft_stops=list(_re_soft),
             tier2_score=session.get("tier2_score", 50),
             confidence_dict=confidence,
             has_narrative_doc="narrative" in _edit_present,
             has_loss_run_doc="loss_run" in _edit_present,
             loss_run_match=_check_loss_run_insured_match(_edit_docs, _edit_app_name),
             cross_issues_full=_cf_issues,
+            narrative_doc_text=_extract_narrative_doc_text(_edit_docs),
         )
 
         was_signed      = bool(r.get("signature_applied")) and len(cleared_sig_fields) == 0
@@ -1816,6 +1820,31 @@ async def clarity_analyze(
         if msg not in seen_msgs:
             seen_msgs.add(msg)
             cross_issues.append(issue)
+
+    # Combined SQS comes from the package scorer (the same engine the Assembly and
+    # ARQ-remediation paths use) so the client-tuned pillar logic - not a plain
+    # average of the simplified per-form checklists - drives the Clarity headline
+    # too. The averaged fallback built above is retained only if the scorer raises.
+    try:
+        _clarity_pkg = calculate_package_sqs(
+            facts=facts, flags=flags,
+            form_results=list(sqs_per_form.values()),
+            cross_issues=cross_issues,
+            hard_stops=hard_stops, soft_stops=soft_stops,
+            session_data=session,
+            session_id=session_id, user_id=str(current_user["id"]),
+            calculation_stage="initial_extract",
+        )
+        sqs_combined = {
+            **sqs_combined,
+            "sqs_score":          _clarity_pkg["package_sqs_score"],
+            "breakdown":          _clarity_pkg["pillars"],
+            "tier":               _clarity_pkg["tier"],
+            "routing_decision":   _clarity_pkg["routing_decision"],
+            "category_breakdown": _clarity_pkg.get("category_breakdown", sqs_combined.get("category_breakdown")),
+        }
+    except Exception as _clarity_pkg_ex:
+        logger.error(f"Clarity package SQS failed, keeping per-form average: {_clarity_pkg_ex}")
 
     cross_hard_msgs      = [i["message"] for i in cross_issues if i.get("type") == "hard_stop"]
     effective_hard_stops = list(hard_stops) + [m for m in cross_hard_msgs if m not in hard_stops]

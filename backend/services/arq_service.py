@@ -120,6 +120,13 @@ _FIELD_QUESTION_MAP = {
     "carrier_marketing_reason": "Why are you marketing this account at this time?",
     # Upcoming deadlines / urgency (Brent feedback: gives the underwriter context and supports readiness)
     "submission_urgency":       "Are there any upcoming deadlines or urgency we should know about?",
+    # §6.3 item 2/4: narrative-quality topics with no structured ACORD field.
+    # Asked ONLY when the narrative does not already cover the topic.
+    "narrative_account_overview": "In a few sentences, give a brief overview of your business - how long you've operated, what you do, and anything that helps an underwriter understand your account.",
+    "narrative_management":       "Tell us about the owners and management team - their experience, years in the trade, and relevant background.",
+    "narrative_risk_controls":    "What safety or risk-control measures does your business have in place? (For example: written safety program, employee training, inspections, drug testing, maintenance program)",
+    "narrative_growth_trends":    "Provide your WC payroll breakdown by class code - list each class code, its description, and the associated payroll amount. (For example: 5183 Plumbing - $320,000; 5190 Electrical - $180,000)",
+    "narrative_target_markets":   "What is your workers comp experience modifier (EMOD / XMOD)? Provide the current mod value, the rating bureau, and any relevant context about losses or safety programs that affect it.",
 }
 
 
@@ -185,6 +192,11 @@ _FIELD_HINT_MAP = {
     "certificate_holder":       "Enter the name and address of anyone who needs a certificate of insurance, e.g. 'ABC Property Management, 456 Oak Ave, Dallas TX 75201'.",
     "carrier_marketing_reason": "Select the primary reason for seeking coverage. This helps the underwriter understand the account background and is much more reliable than trying to extract this from documents.",
     "submission_urgency":       "Optional. Note any binding deadline, renewal date, or time-sensitivity, e.g. 'Need to bind by 07/01 for a new job'. Leave blank if none.",
+    "narrative_account_overview": "A short summary of your company and its background. Helps the underwriter understand your account at a glance, e.g. 'Family-owned commercial GC operating in Denver since 2009'.",
+    "narrative_management":       "Describe who runs the business and their experience, e.g. 'Owner has 20 years in commercial roofing; PM has 12 years on the team'.",
+    "narrative_risk_controls":    "List the steps you take to prevent accidents and losses, e.g. 'Written safety program, quarterly training, drug testing, annual equipment inspections'.",
+    "narrative_growth_trends":    "List payroll by class code, e.g. '5183 Plumbing $320,000 | 5190 Electrical $180,000 | 8810 Clerical $95,000'.",
+    "narrative_target_markets":   "State the mod value and bureau, e.g. 'EMOD 0.88 (NCCI) - credit mod reflecting 3 years clean; no lost-time claims'.",
 }
 
 _PREFIX_HINT_MAP = {
@@ -702,6 +714,114 @@ def _present_fact_keys(facts: dict) -> set:
     return present
 
 
+def _narrative_components_from_facts(
+    facts: dict, session_docs: list = None, flags: dict = None
+) -> dict:
+    """Which §6.3 narrative-quality components the uploaded narrative covers.
+
+    Used so a question the narrative already answers is not re-asked (§6.3 item
+    2). Prefers the authoritative LLM component profile detected once during
+    extraction and stored on the session flags - it recognises paraphrased
+    components the keyword scan misses and is consistent with the narrative score
+    and the evidence labels. The keyword scan (full narrative doc body in strict
+    mode, unioned with structured remarks/operations) is unioned in / used as the
+    fallback when no profile is present. Returns {} when no narrative signal of
+    any kind exists.
+    """
+    try:
+        from services.sqs_service import _score_narrative_components, _extract_narrative_doc_text
+        from services.sqs_service import narrative_profile_present_map
+        from services.extraction_service import _fv, _narrative_remarks_text
+    except Exception:
+        return {}
+    facts = facts or {}
+    doc_text  = _extract_narrative_doc_text(session_docs or []).strip()
+    remarks   = _narrative_remarks_text(facts).strip()
+    ops       = str(_fv(facts, "operations_description") or "").strip()
+    _profile  = (flags or {}).get("narrative_profile")
+    _prof_present = narrative_profile_present_map(_profile) if _profile else {}
+    if not (doc_text or remarks or ops or any(_prof_present.values())):
+        return {}
+    # Compact curated fields (account_description / acord101_remarks / operations)
+    # credit a component on a single clear mention. The noisier full doc body is
+    # scanned in strict mode so a stray boilerplate word ("carrier", "operations")
+    # cannot wrongly suppress a legitimate client question.
+    components = _score_narrative_components(remarks or ops)
+    if doc_text:
+        _body = _score_narrative_components(doc_text, strict=True)
+        components = {k: bool(components.get(k) or _body.get(k)) for k in components}
+    # §6.3 robustness: union the meaning-based LLM profile so a paraphrased
+    # component the keywords missed still drives suppression / labelling,
+    # consistent with sqs_service._calculate_narrative_quality.
+    if any(_prof_present.values()):
+        components = {k: bool(components.get(k) or _prof_present.get(k)) for k in components}
+    # §6.3 item 2: a client narrative-enrichment answer covers its component, so
+    # the corresponding question is not re-asked on a later ARQ pass.
+    try:
+        from services.sqs_service import _narrative_enrichment_present
+        _enrich = _narrative_enrichment_present(facts)
+        if any(_enrich.values()):
+            components = {k: bool(components.get(k) or _enrich.get(k)) for k in components}
+    except Exception:
+        pass
+    return components
+
+
+# §6.3 item 2/4: ordered Bucket-C narrative topics asked of the client when the
+# narrative does not cover them (account overview first, the broker-style pitch).
+_NARRATIVE_ENRICHMENT_ORDER = (
+    "account_overview", "management", "risk_controls", "growth_trends", "target_markets",
+)
+
+
+def _maybe_inject_narrative_enrichment_questions(
+    questions: List[dict], facts: dict, flags: dict, session_docs: list = None
+) -> None:
+    """Ask the client for each narrative-quality topic the narrative is MISSING
+    (§6.3 item 2: "if the narrative answers it, don't send it; if not, ask").
+
+    A topic the narrative already covers is simply not injected. A topic the
+    client already answered on a prior pass (its enrichment fact key is filled)
+    is also skipped. In-place and additive - never removes existing questions.
+    """
+    from services.sqs_service import NARRATIVE_ENRICHMENT_FIELDS
+    facts = facts or {}
+    flags = flags or {}
+    components = _narrative_components_from_facts(facts, session_docs=session_docs, flags=flags)
+    existing  = {q.get("field_name") for q in questions}
+    # WC Payroll/Class Code and EMOD/XMOD questions are only relevant when the
+    # submission includes workers compensation coverage.
+    _WC_ONLY_COMPS = frozenset({"growth_trends", "target_markets"})
+    has_wc = bool(flags.get("has_workers_comp"))
+    for comp in _NARRATIVE_ENRICHMENT_ORDER:
+        if comp in _WC_ONLY_COMPS and not has_wc:
+            continue
+        field_key = NARRATIVE_ENRICHMENT_FIELDS.get(comp)
+        if not field_key or field_key in existing:
+            continue
+        # Narrative already covers this topic → do not ask (client requirement #2).
+        if components.get(comp):
+            continue
+        # Already answered/present in facts → do not re-ask.
+        _v = facts.get(field_key)
+        if isinstance(_v, dict):
+            _v = _v.get("value")
+        if _v not in (None, "", "null", "none"):
+            continue
+        questions.append({
+            "field_name":         field_key,
+            "question":           _FIELD_QUESTION_MAP[field_key],
+            "hint":               _FIELD_HINT_MAP.get(field_key, ""),
+            "forms":              "",
+            "form_ids":           [],
+            "field_type":         "text",
+            "current_value":      "",
+            "_group_label":       None,
+            "_is_curated_client": True,
+            "_canonical_key":     field_key,
+        })
+
+
 # §6.4: the curated "no prior losses" attestation field.
 NO_LOSS_INDICATOR_FIELD = "loss_history_no_prior_losses_indicator"
 
@@ -744,6 +864,65 @@ def _maybe_inject_no_loss_question(questions: List[dict], facts: dict, flags: di
         "_group_label":       None,
         "_is_curated_client": True,
         "_canonical_key":     NO_LOSS_INDICATOR_FIELD,
+    })
+
+
+# §6.4 item 1: the conflict-resolution prompt reuses the existing ACORD-101
+# "additional remarks" free-text field (its registry question already names
+# "conflict resolution"), so no new question type or answer plumbing is added -
+# the client's explanation flows through the same apply path, is labelled
+# client-provided, and lands on ACORD 101.
+LOSS_CONFLICT_FIELD = "additional_remarks_text"
+
+_LOSS_CONFLICT_QUESTION = (
+    "Your submission indicates no prior losses, but the uploaded loss runs show "
+    "one or more claims. Please explain the discrepancy - for example, the loss "
+    "runs may belong to a related entity, cover a different period, or those "
+    "claims may now be closed."
+)
+
+
+def _maybe_inject_loss_conflict_question(questions: List[dict], facts: dict, flags: dict) -> None:
+    """Append a conflict-resolution prompt when a no-loss attestation is
+    contradicted by actual loss-run claims (§6.4 item 1). In-place and additive.
+
+    Lets the client explain the discrepancy for the underwriter; it does NOT
+    auto-clear the data conflict (the score stays capped until the underlying
+    loss data is reconciled). Tagged as a conflict so it surfaces like other
+    cross-form conflicts rather than as an optional remark.
+    """
+    from services.sqs_service import _loss_history_conflict
+    facts = facts or {}
+    flags = flags or {}
+
+    if not _loss_history_conflict(facts, flags):
+        return
+    # Don't re-ask if the remarks field is already queued or already answered.
+    if any(q.get("field_name") == LOSS_CONFLICT_FIELD for q in questions):
+        return
+    _existing = facts.get(LOSS_CONFLICT_FIELD)
+    if isinstance(_existing, dict):
+        _existing = _existing.get("value")
+    if _existing not in (None, "", []):
+        return
+
+    questions.append({
+        "field_name":         LOSS_CONFLICT_FIELD,
+        "question":           _LOSS_CONFLICT_QUESTION,
+        "hint":               _FIELD_HINT_MAP.get(LOSS_CONFLICT_FIELD)
+                              or "Briefly explain the loss-history discrepancy for the underwriter.",
+        "forms":              "",
+        "form_ids":           [],
+        "field_type":         "text",
+        "current_value":      "",
+        # Route through the cross-form-conflict classification so it is surfaced
+        # to the client (AUDIENCE_CLIENT / important) instead of an optional remark.
+        "source":             "cross_form_conflict",
+        "conflict_code":      "loss_history_conflict",
+        "severity":           "soft_warning",
+        "_group_label":       None,
+        "_is_curated_client": True,
+        "_canonical_key":     LOSS_CONFLICT_FIELD,
     })
 
 
@@ -938,6 +1117,7 @@ async def generate_arq_questions(
     generated_forms: dict,
     hard_stops: list,
     soft_stops: list,
+    session_docs: list = None,
 ) -> List[dict]:
     facts = facts or {}
     missing_fields: dict = {}
@@ -1091,6 +1271,8 @@ async def generate_arq_questions(
 
     # §6.4: offer a "no prior losses" attestation when loss history is unestablished.
     _maybe_inject_no_loss_question(questions, facts, flags)
+    # §6.4 item 1: ask the client to explain a no-loss / loss-run-claims conflict.
+    _maybe_inject_loss_conflict_question(questions, facts, flags)
     # NOTE: "Why are you marketing this account?" is intentionally NOT injected
     # here - it is asked upfront on the recommendation screen (producer-facing,
     # drives ACORD 101 live). Re-asking the client would be redundant, so it is
@@ -1101,6 +1283,9 @@ async def generate_arq_questions(
     # present and the evidence is still missing) - the questionnaire fallback that
     # lets the Umbrella Adequacy -15 / -10 deductions be earned back.
     _maybe_inject_umbrella_evidence_questions(questions, facts, flags)
+    # §6.3 item 2: ask the client for each narrative-quality topic the narrative
+    # lacks (and stay silent on the ones it already covers).
+    _maybe_inject_narrative_enrichment_questions(questions, facts, flags, session_docs)
 
     # Curation layer (Beta Report §8): tag audience/priority/topic/score-impact,
     # then apply the curated default-selection policy.
@@ -1108,6 +1293,7 @@ async def generate_arq_questions(
     decorate_questions(
         questions,
         present_fact_keys=_present_fact_keys(facts),
+        narrative_components=_narrative_components_from_facts(facts, session_docs=session_docs, flags=flags),
         hard_stop_text=hard_stop_text,
     )
     apply_default_selection(questions)
@@ -1207,16 +1393,21 @@ def generate_arq_questions_from_facts(
 
     # §6.4: offer a "no prior losses" attestation when loss history is unestablished.
     _maybe_inject_no_loss_question(questions, facts, flags)
+    # §6.4 item 1: ask the client to explain a no-loss / loss-run-claims conflict.
+    _maybe_inject_loss_conflict_question(questions, facts, flags)
     # Umbrella underlying-schedule + follow-form evidence fallback (umbrella present
     # but evidence missing) - keeps the Clarity path in step with the form-aware ARQ.
     _maybe_inject_umbrella_evidence_questions(questions, facts, flags)
+    # §6.3 item 2: ask the client for each narrative-quality topic the narrative lacks.
+    _maybe_inject_narrative_enrichment_questions(questions, facts, flags)
 
     hard_stop_text = " ".join(str(s) for s in (hard_stops or []))
     decorate_questions(
         questions,
         present_fact_keys=_present_fact_keys(facts),
+        narrative_components=_narrative_components_from_facts(facts, flags=flags),
         hard_stop_text=hard_stop_text,
-    )
+    )  # session_docs not available on this path; uses the stored profile + facts
     apply_default_selection(questions)
 
     for q in questions:
@@ -1360,6 +1551,14 @@ _CROSS_FORM_QUESTION_MAP: dict[str, tuple[str, str, str, str]] = {
         "gl_each_occurrence",
         "text",
     ),
+    "umbrella_auto_attachment_failure": (
+        "Your Auto combined single limit appears to be below the minimum typically "
+        "required for umbrella attachment. What is your Auto liability limit?",
+        "Enter the Auto combined single limit (CSL), e.g. '$1,000,000'. Umbrella "
+        "coverage typically requires at least $1M Auto CSL underlying.",
+        "auto_liability_limit",
+        "text",
+    ),
     "umbrella_auto_period_misaligned": (
         "Your umbrella and Auto policy effective dates don't match. "
         "What is the correct effective date for your Auto policy?",
@@ -1380,6 +1579,8 @@ _CROSS_FORM_QUESTION_MAP: dict[str, tuple[str, str, str, str]] = {
 def generate_cross_form_arq_questions(
     cross_form_issues: List[dict],
     generated_forms: dict,
+    facts: dict = None,
+    flags: dict = None,
 ) -> List[dict]:
     """
     Convert cross-form validation issues into ARQ questions for the client.
@@ -1450,8 +1651,15 @@ def generate_cross_form_arq_questions(
         })
 
     # Cross-form conflicts are client-relevant structural issues; tag them so
-    # the producer UI groups them and flags their hard-stop / SQS impact.
-    decorate_questions(questions)
+    # the producer UI groups them and flags their hard-stop / SQS impact. Apply
+    # the same narrative suppression/labelling as the other paths so a question
+    # the narrative already covers is not re-asked here either (§6.3 item 2 -
+    # closes the cross-form path inconsistency).
+    decorate_questions(
+        questions,
+        present_fact_keys=_present_fact_keys(facts or {}),
+        narrative_components=_narrative_components_from_facts(facts or {}, flags=flags),
+    )
     for q in questions:
         q.pop("_is_cross_form", None)
         q.pop("_is_curated_client", None)
@@ -1728,7 +1936,8 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
     )
     from services.sqs_service import (
         evaluate_stops, calculate_sqs, calculate_sqs_from_facts,
-        calculate_package_sqs, _check_loss_run_insured_match,
+        calculate_package_sqs, _check_loss_run_insured_match, check_tier2,
+        _extract_narrative_doc_text,
     )
     from services.extraction_service import _fv as _sqs_fv
     from services.cross_form_validator import (
@@ -1745,7 +1954,15 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
     flags        = proc.get("flags", {}) or {}
     generated    = proc.get("generated_forms", {}) or {}
     selected_ids = proc.get("selected_form_ids") or list(generated.keys())
-    tier2_score  = proc.get("tier2_score", 50)
+    # Recompute Tier-2 data completeness from the post-remediation facts rather than
+    # reusing the extraction-time value stored on the session, so the per-form
+    # scorers receive the current value (mirrors how package SQS recomputes it).
+    # Remediation only adds facts, so this never lowers the score; falls back to the
+    # stored value if recomputation fails for any reason.
+    try:
+        tier2_score, _ = check_tier2(facts, flags)
+    except Exception:
+        tier2_score = proc.get("tier2_score", 50)
     user_id      = proc.get("user_id")
 
     score_before = (proc.get("package_sqs") or {}).get("package_sqs_score")
@@ -1781,6 +1998,7 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
     _has_narr    = "narrative" in _present
     _has_loss    = "loss_run" in _present
     _loss_match  = _check_loss_run_insured_match(_docs, _sqs_fv(facts, "applicant_name"))
+    _narr_text   = _extract_narrative_doc_text(_docs)
 
     if generated:
         for fid, fdata in generated.items():
@@ -1791,12 +2009,16 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
                 fdata["sqs"] = calculate_sqs(
                     facts=facts, flags=flags, mapped_data=field_state,
                     form_schema=schema, selected_form_ids=selected_ids,
-                    hard_stops=hard_stops, soft_stops=soft_stops,
+                    # SQS design: cross-form stops cap the PACKAGE only, never
+                    # individual forms - per-form SQS uses field-level (global)
+                    # stops only; cf_* still cap the package score below.
+                    hard_stops=re_hard, soft_stops=re_soft,
                     tier2_score=tier2_score, form_id=fid,
                     confidence_dict=confidence, session_id=processing_session_id,
                     user_id=user_id, calculation_stage="arq_remediated",
                     has_narrative_doc=_has_narr, has_loss_run_doc=_has_loss,
                     loss_run_match=_loss_match, cross_issues_full=cf_deduped,
+                    narrative_doc_text=_narr_text,
                 )
             except Exception as ex:
                 logger.error(f"recalc per-form SQS failed for {fid}: {ex}")
@@ -1836,6 +2058,45 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         "cross_issues_last": cf_deduped,
     })
 
+    # §6.2 / AC2: auto-resolve open recommendation audit records whose underlying
+    # issue was cleared during this recalculation. After the SQS recompute, each
+    # form's recommendations list contains only still-active issues with stable
+    # rec_ids (e.g. "rec_applicant_name"). Any open audit record not in that set
+    # means the client's answers resolved the gap — mark it resolved automatically
+    # so the producer's recommendation panel stays in sync with the score.
+    try:
+        from services.audit_service import get_open_recommendations, mark_recommendation_resolved
+        from services.sqs_service import SQS_MODEL_VERSION
+        active_rec_ids: set = set()
+        for _fdata in generated.values():
+            for _rec in ((_fdata.get("sqs") or {}).get("recommendations") or []):
+                if isinstance(_rec, dict) and _rec.get("rec_id"):
+                    active_rec_ids.add(_rec["rec_id"])
+        for _sqs_item in sqs_list:
+            for _rec in (_sqs_item.get("recommendations") or []):
+                if isinstance(_rec, dict) and _rec.get("rec_id"):
+                    active_rec_ids.add(_rec["rec_id"])
+        _open_recs = await get_open_recommendations(processing_session_id)
+        _score_at_resolve = (package_sqs or {}).get("package_sqs_score") or 0
+        _auto_resolved = 0
+        for _orec in _open_recs:
+            _rid = _orec.get("rec_id")
+            if _rid and _rid not in active_rec_ids:
+                await mark_recommendation_resolved(
+                    session_id=processing_session_id,
+                    rec_id=_rid,
+                    sqs_score_at_action=_score_at_resolve,
+                    model_version=SQS_MODEL_VERSION,
+                )
+                _auto_resolved += 1
+        if _auto_resolved:
+            logger.info(
+                f"ARQ recalc {processing_session_id}: auto-resolved "
+                f"{_auto_resolved} cleared recommendation(s)"
+            )
+    except Exception as _auto_resolve_ex:
+        logger.error(f"ARQ recalc: auto-resolve step failed (non-fatal): {_auto_resolve_ex}")
+
     score_after = (package_sqs or {}).get("package_sqs_score")
     delta = (score_after - score_before) if (score_before is not None and score_after is not None) else 0
 
@@ -1864,7 +2125,7 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         ]
 
     _has_conflicts = any(
-        isinstance(i, dict) and i.get("type") == "hard_stop"
+        isinstance(i, dict) and i.get("type") in ("hard_stop", "soft_warning")
         for i in cf_deduped
     )
     # Structured detection: check recommendations for an explicit requires_doc flag first.
@@ -1883,7 +2144,7 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
     _needs_docs_from_recs = any(
         r.get("requires_doc")
         for fdata in (generated or {}).values()
-        for r in (fdata.get("recommendations") or [])
+        for r in ((fdata.get("sqs") or {}).get("recommendations") or [])
     )
     _needs_docs_from_stops = any(
         any(pat in str(s).lower() for pat in _DOC_REQUIRED_SOFT_PATTERNS)
@@ -1907,8 +2168,10 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         status = "conflicting_evidence_remains"
     elif _needs_docs:
         status = "requires_supporting_document"
+    elif _user_provided_fields:
+        status = "still_missing"
     else:
-        status = "still_missing"  # user provided answers but score didn't move and no conflict
+        status = "pending_validation"
 
     logger.info(
         f"ARQ recalc {processing_session_id}: {score_before}->{score_after} "

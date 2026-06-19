@@ -1,7 +1,7 @@
 ﻿//AcordModal.jsx
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { API_BASE } from "../../config/constants";
-import { gradeColor, barColor } from "../../utils/formatters";
+import { gradeColor, barColor, sqsGradeFromScore } from "../../utils/formatters";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
 import PDFJsViewer from "./PDFJsViewer";
 
@@ -42,6 +42,19 @@ const CAT_STATUS_COLOR = {
   missing: "#ef4444", not_found: "#94a3b8", conflict_found: "#ef4444",
   insufficient: "#ef4444", not_applicable: "#94a3b8", computed_separately: "#94a3b8",
 };
+// Sub-row completeness label - replaces raw percentages on the expandable pillar
+// detail so users read a status word (and never try to average the %s into the
+// weighted headline). Scoring is unchanged; this is display-only.
+function catCompleteness(score) {
+  if (score === null || score === undefined) return { label: "Not applicable", color: "#94a3b8" };
+  if (score >= 90) return { label: "Complete", color: "#10b981" };
+  if (score >= 75) return { label: "Strong",   color: "#10b981" };
+  if (score >= 50) return { label: "Partial",  color: "#f59e0b" };
+  if (score >= 25) return { label: "Limited",  color: "#f59e0b" };
+  if (score >= 1)  return { label: "Minimal",  color: "#ef4444" };
+  return { label: "Missing", color: "#ef4444" };
+}
+
 const EVIDENCE_LABEL_DISPLAY = {
   extracted_from_source: "Extracted from document",
   confirmed_by_user: "Confirmed by user",
@@ -96,8 +109,8 @@ const NARRATIVE_COMPONENT_LABELS = {
   carrier_market:      "Prior Carrier Context",
   location_exposure:   "Location Details",
   employee_practices:  "Employee / Payroll Context",
-  wc_payroll:          "Payroll / WC Class Context",
-  experience_mod:      "EMOD / XMOD Information",
+  growth_trends:       "Growth Trends",
+  target_markets:      "Target Markets",
 };
 
 const REC_TYPE_STYLE = {
@@ -372,6 +385,8 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
             )}
             {/* "Suggested" nudge - for Important questions that are shown but not pre-selected */}
             {q.suggested && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#b45309", background: "#fffbeb", padding: "1px 6px", borderRadius: 10 }}>Suggested</span>}
+            {/* §6.3 item 2/3 - the narrative already answers this, so it isn't auto-sent to the client */}
+            {q.suppressed_reason === "stated_in_narrative" && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#1d4ed8", background: "#eff6ff", padding: "1px 6px", borderRadius: 10 }}>Stated in narrative</span>}
           </div>
           <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#0f172a", lineHeight: 1.45 }}>{q.question}</p>
           {q.current_value && <p style={{ margin: "3px 0 0", fontSize: 11, color: "#94a3b8" }}>Current: {q.current_value}</p>}
@@ -543,7 +558,17 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
 const qsBtn = { fontSize: 11, fontWeight: 600, color: "#4f7cff", background: "rgba(79,124,255,0.06)", border: "1px solid rgba(79,124,255,0.2)", borderRadius: 6, padding: "3px 10px", cursor: "pointer" };
 
 // ── ARQ Status Panel ───────────────────────────────────────────────────────
-function ARQStatusPanel({ arqSessions, token, onRefresh }) {
+const _ARQ_REMEDIATION_LABEL = {
+  resolved:                     { text: "Resolved",                bg: "#dcfce7", color: "#166534", border: "#86efac" },
+  improved:                     { text: "Score Improved",          bg: "#dcfce7", color: "#166534", border: "#86efac" },
+  pending_validation:           { text: "Pending Validation",      bg: "#eff6ff", color: "#1e40af", border: "#bfdbfe" },
+  user_provided_only:           { text: "User Provided",           bg: "#eff6ff", color: "#1e40af", border: "#bfdbfe" },
+  conflicting_evidence_remains: { text: "Conflicting Evidence",    bg: "#fffbeb", color: "#92400e", border: "#fde68a" },
+  requires_supporting_document: { text: "Supporting Doc Required", bg: "#fffbeb", color: "#92400e", border: "#fde68a" },
+  still_missing:                { text: "Still Missing",           bg: "#f1f5f9", color: "#475569", border: "#cbd5e1" },
+};
+
+function ARQStatusPanel({ arqSessions, token, onRefresh, scoreImprovement }) {
   const [reminding, setReminding] = useState(null);
   const handleRemind = async (arq_id) => {
     setReminding(arq_id);
@@ -551,6 +576,7 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
     setReminding(null);
   };
   const fmtDate = iso => iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
+  const dotStyle = { width: 9, height: 9, background: "rgb(187,247,208)", border: "1px solid #86efac", borderRadius: 2, display: "inline-block", flexShrink: 0 };
   if (!arqSessions || arqSessions.length === 0) return null;
   return (
     <div style={{ marginTop: 8 }}>
@@ -560,15 +586,38 @@ function ARQStatusPanel({ arqSessions, token, onRefresh }) {
           const isExpired = new Date() > new Date(arq.expires_at) && arq.status !== "submitted";
           const status = isExpired ? "expired" : arq.status;
           const sc = { submitted: { bg: "#dcfce7", color: "#166534", border: "#86efac", label: "Done" }, expired: { bg: "#f1f5f9", color: "#64748b", border: "#cbd5e1", label: "Expired" }, pending: { bg: "#fef9c3", color: "#854d0e", border: "#fde047", label: "Pending" } }[status] || {};
+          const remLabel = _ARQ_REMEDIATION_LABEL[arq.remediation_status];
+          const fieldsCount = arq.fields_answered_count || 0;
           return (
             <div key={arq.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{arq.client_name ? `${arq.client_name} (${arq.email})` : arq.email}</div>
-                  <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 1 }}>{fmtDate(arq.created_at)}</div>
+                  <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 1 }}>{fmtDate(arq.created_at)}{arq.submitted_at && ` - Submitted ${fmtDate(arq.submitted_at)}`}</div>
                 </div>
                 <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, border: `1px solid ${sc.border}`, background: sc.bg, color: sc.color, flexShrink: 0 }}>{sc.label}</span>
               </div>
+              {status === "submitted" && (
+                <div style={{ marginTop: 5, display: "flex", flexDirection: "column", gap: 4 }}>
+                  {remLabel && (
+                    <span style={{ display: "inline-flex", alignItems: "center", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, border: `1px solid ${remLabel.border}`, background: remLabel.bg, color: remLabel.color, alignSelf: "flex-start" }}>
+                      {remLabel.text}
+                    </span>
+                  )}
+                  {fieldsCount > 0 && (
+                    <div style={{ fontSize: 11, color: "#047857", display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={dotStyle} />
+                      {fieldsCount} answer{fieldsCount !== 1 ? "s" : ""} submitted by client
+                    </div>
+                  )}
+                  {scoreImprovement > 0 && (
+                    <div style={{ fontSize: 11, color: "#047857", display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={dotStyle} />
+                      Submission score improved +{scoreImprovement} pts after questionnaire
+                    </div>
+                  )}
+                </div>
+              )}
               {arq.status === "pending" && !isExpired && (
                 <button onClick={() => handleRemind(arq.id)} disabled={reminding === arq.id}
                   style={{ marginTop: 5, fontSize: 10, fontWeight: 600, color: "#4f7cff", background: "rgba(79,124,255,0.06)", border: "1px solid rgba(79,124,255,0.2)", borderRadius: 5, padding: "2px 8px", cursor: reminding === arq.id ? "wait" : "pointer", opacity: reminding === arq.id ? 0.6 : 1 }}>
@@ -1037,6 +1086,8 @@ const AcordModal = forwardRef(function AcordModal({
   // §6.1: which package pillars are expanded to show their 15-category detail.
   const [expandedPillars, setExpandedPillars] = useState(() => new Set());
   const [dismissedRecs, setDismissedRecs] = useState(new Set());
+  const [dismissedRecDetails, setDismissedRecDetails] = useState(new Map());
+  const [showDismissedPanel, setShowDismissedPanel] = useState(false);
   const [showDownloadPreflight, setShowDownloadPreflight] = useState(false);
   const [preflightRecs, setPreflightRecs] = useState([]);
   const [preflightOverrideReason, setPreflightOverrideReason] = useState("");
@@ -1133,17 +1184,63 @@ const AcordModal = forwardRef(function AcordModal({
     setFiles(prev => [...prev, ...uploaded]);
   };
 
+  const loadDismissedRecs = async (sid) => {
+    if (!sid) return;
+    try {
+      const r = await fetch(`${API_BASE}/api/audit/dismissed/${sid}`, { credentials: "include" });
+      const d = r.ok ? await r.json() : null;
+      if (!d?.success) return;
+      const next = new Map();
+      for (const rec of (d.dismissed_recommendations || [])) {
+        next.set(rec.rec_id, {
+          message: rec.message,
+          reason:  rec.override_reason || "",
+          formId:  rec.form_id,
+          impact:  rec.score_impact,
+        });
+      }
+      setDismissedRecs(new Set(next.keys()));
+      setDismissedRecDetails(next);
+    } catch { /* non-fatal */ }
+  };
+
   useEffect(() => {
     if ((step !== "editor" && step !== "lite") || !sessionId) return;
     refreshArqData();
+    loadDismissedRecs(sessionId);
   }, [step, sessionId]); // eslint-disable-line
 
   const refreshArqData = async () => {
     if (!sessionId) return [];
-    fetch(`${API_BASE}/api/arq/list/${sessionId}`, { credentials: "include" })
-      .then(r => r.ok ? r.json() : null).then(d => { if (d?.success) setArqSessions(d.arq_sessions || []); }).catch(() => {});
+    // Await the ARQ list so we can detect submitted sessions before deciding
+    // whether to re-fetch session scores (§6.2 live score update requirement).
+    let arqList = [];
+    try {
+      const arqR = await fetch(`${API_BASE}/api/arq/list/${sessionId}`, { credentials: "include" });
+      const arqD = arqR.ok ? await arqR.json() : null;
+      if (arqD?.success) { arqList = arqD.arq_sessions || []; setArqSessions(arqList); }
+    } catch { /* non-fatal */ }
     fetch(`${API_BASE}/api/arq/notifications`, { credentials: "include" })
       .then(r => r.ok ? r.json() : null).then(d => { if (d?.notifications) setArqNotifCount(d.notifications.filter(n => !n.read_status).length); }).catch(() => {});
+    // §6.2: if any ARQ was submitted, pull fresh SQS + package scores from the
+    // session endpoint so the producer sees the updated scores without a reload.
+    if (arqList.some(a => a.status === "submitted")) {
+      try {
+        const sessR = await fetch(`${API_BASE}/api/session/${sessionId}`, { credentials: "include" });
+        const sessD = sessR.ok ? await sessR.json() : null;
+        if (sessD?.generated_forms) {
+          setGeneratedForms(prev => {
+            const next = { ...prev };
+            for (const [fid, fdata] of Object.entries(sessD.generated_forms)) {
+              if (next[fid] && fdata.sqs) next[fid] = { ...next[fid], sqs: fdata.sqs };
+            }
+            return next;
+          });
+        }
+        if (sessD?.package_sqs != null) setPackageSqs(sessD.package_sqs);
+        if (Array.isArray(sessD?.cross_issues)) setCrossIssues(sessD.cross_issues);
+      } catch { /* non-fatal */ }
+    }
     try {
       const r = await fetch(`${API_BASE}/api/arq/client-filled/${sessionId}`, { credentials: "include" });
       const d = r.ok ? await r.json() : null;
@@ -1166,7 +1263,7 @@ const AcordModal = forwardRef(function AcordModal({
 
   const _resetSqsState = () => {
     setPackageSqs(null);
-    setDismissedRecs(new Set()); setShowDownloadPreflight(false);
+    setDismissedRecs(new Set()); setDismissedRecDetails(new Map()); setShowDownloadPreflight(false);
     setPreflightRecs([]); setPreflightOverrideReason(""); setPreflightCallback(null);
     setSqsNarrative("");
   };
@@ -2052,23 +2149,25 @@ const AcordModal = forwardRef(function AcordModal({
     <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite", marginRight: 4 }} />
   );
 
-  const handleDismissRec = (rec, currentScore, reason = "") => {
+  const handleDismissRec = async (rec, currentScore, reason = "") => {
     const id = rec?.rec_id;
     if (!id) return;
-    // Remove from dismissedRecs set (for filter)
+    // Capture form id now — user may switch forms before the await resolves
+    const formIdAtDismiss = activeFormId;
+    // Remove from dismissedRecs set (for filter) and record details for the dismissed panel
     setDismissedRecs(prev => {
       const next = new Set(prev);
       next.add(id);
       return next;
     });
     // Also remove directly from generatedForms so rec doesn't reappear on re-render
-    if (activeFormId) {
+    if (formIdAtDismiss) {
       setGeneratedForms(prev => {
-        const form = prev[activeFormId];
+        const form = prev[formIdAtDismiss];
         if (!form?.sqs?.recommendations) return prev;
         return {
           ...prev,
-          [activeFormId]: {
+          [formIdAtDismiss]: {
             ...form,
             sqs: {
               ...form.sqs,
@@ -2080,22 +2179,59 @@ const AcordModal = forwardRef(function AcordModal({
         };
       });
     }
-    fetch(`${API_BASE}/api/audit/dismiss`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        session_id: sessionId,
-        rec_id: id,
-        override_reason: reason.trim() || "No reason provided",
-        sqs_score_at_action: currentScore ?? 0,
-        message: rec.message ?? null,
-        field: rec.field ?? null,
-        component: rec.component ?? null,
-        score_impact: rec.score_impact ?? null,
-        form_id: activeFormId ?? null,
-      }),
-    }).catch(() => {});
+    try {
+      const res = await fetch(`${API_BASE}/api/audit/dismiss`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          rec_id: id,
+          override_reason: reason.trim() || "No reason provided",
+          sqs_score_at_action: currentScore ?? 0,
+          message: rec.message ?? null,
+          field: rec.field ?? null,
+          component: rec.component ?? null,
+          score_impact: rec.score_impact ?? null,
+          form_id: formIdAtDismiss ?? null,
+        }),
+      });
+      const data = await res.json();
+      // When the backend credited the score_impact (producer provided a real
+      // override reason), reflect the new score + grade + tier in the UI immediately.
+      // grade/tier/tier_color come from the backend so frontend and DB always agree.
+      if (data.new_sqs_score != null && formIdAtDismiss) {
+        setGeneratedForms(prev => {
+          const form = prev[formIdAtDismiss];
+          if (!form?.sqs) return prev;
+          return {
+            ...prev,
+            [formIdAtDismiss]: {
+              ...form,
+              sqs: {
+                ...form.sqs,
+                sqs_score:  data.new_sqs_score,
+                grade:      data.new_grade      ?? form.sqs.grade,
+                tier:       data.new_tier       ?? form.sqs.tier,
+                tier_color: data.new_tier_color ?? form.sqs.tier_color,
+              },
+            },
+          };
+        });
+      }
+      if (data.new_package_sqs_score != null) {
+        setPackageSqs(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            package_sqs_score: data.new_package_sqs_score,
+            tier: data.new_package_tier ?? prev.tier,
+          };
+        });
+      }
+      // Refresh dismissed panel from DB so it persists across reloads
+      loadDismissedRecs(sessionId);
+    } catch (_) {}
   };
 
   const _runPreflightThenDownload = async (downloadFn) => {
@@ -2559,7 +2695,7 @@ const AcordModal = forwardRef(function AcordModal({
                     onMouseLeave={e => { if (liteReady && !arqLoadingQ) { e.currentTarget.style.background = "#E61B84"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(230,0,122,0.25)"; } }}>
                     {liteGenerating ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Preparing…</> : arqLoadingQ ? <><span style={{ width: 11, height: 11, border: "2px solid #94a3b8", borderTopColor: "#475569", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Loading…</> : "Send to Client"}
                   </button>
-                  <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
+                  <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} scoreImprovement={(() => { const _base = packageSqs?.sqs_history?.find(h => h?.stage === "initial_extract") || packageSqs?.sqs_history?.[0]; const _arq = packageSqs?.sqs_history?.find(h => h?.stage === "arq_remediated"); return (_base?.score != null && _arq?.score != null) ? _arq.score - _base.score : null; })()} />
                 </div>
 
                 {/* Cover Summary */}
@@ -3354,10 +3490,10 @@ const AcordModal = forwardRef(function AcordModal({
               </div>
               <div style={{ padding: "14px 14px 12px" }}>
                 {/* Workstream 6 9.1 - next-step guidance, driven by the live package
-                    SQS: flips to "Ready to Send Submission" at 90+, and re-renders
+                    SQS: flips to "Ready for submission" above 90, and re-renders
                     whenever edits or questionnaire answers change the package score. */}
                 <div style={{ marginBottom: 12 }}>
-                  <NextStepBanner text={(packageSqs?.package_sqs_score ?? 0) >= 90 ? "Ready to Send Submission" : "Ready to Download Forms"} />
+                  <NextStepBanner text={(packageSqs?.package_sqs_score ?? 0) > 90 ? "Ready for submission" : "Ready to Download Forms"} />
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Generated Forms</span>
@@ -3410,9 +3546,7 @@ const AcordModal = forwardRef(function AcordModal({
                     {/* ── Match Score (§6.1 AC#1): raw field coverage, distinct from SQS ── */}
                     {activeSqs.match_score != null && (
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, padding: "4px 8px", background: "#f8fafc", borderRadius: 5, border: "1px solid #e2e8f0" }}>
-                        <span style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>Match Score</span>
-                        <span style={{ fontSize: 12, fontWeight: 800, color: activeSqs.match_score >= 70 ? "#10b981" : activeSqs.match_score >= 40 ? "#f59e0b" : "#ef4444" }}>{activeSqs.match_score}%</span>
-                        <span style={{ fontSize: 9, color: "#94a3b8" }}>· raw field coverage from uploaded docs</span>
+                        <span style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>Form Completion - <span style={{ color: activeSqs.match_score >= 70 ? "#10b981" : activeSqs.match_score >= 40 ? "#f59e0b" : "#ef4444" }}>{activeSqs.match_score}%</span></span>
                       </div>
                     )}
 
@@ -3537,14 +3671,32 @@ const AcordModal = forwardRef(function AcordModal({
                           </div>
                         </div>
                         {/* §6.1: distinguish SQS from per-form Match % */}
-                        <div style={{ fontSize: 9, color: "#94a3b8", marginTop: -3, marginBottom: 7, lineHeight: 1.45 }}>
-                          SQS = how complete &amp; underwriting-ready the submission is. Match % (shown on each form) = how strongly the documents suggest a form fits.
+                        <div style={{ fontSize: 9, background: "rgba(0,0,0,0.035)", borderRadius: 5, padding: "5px 7px", marginBottom: 8, display: "flex", flexDirection: "column", gap: 3 }}>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <span style={{ fontWeight: 700, color: "#475569", minWidth: 44, flexShrink: 0 }}>SQS</span>
+                            <span style={{ color: "#94a3b8", lineHeight: 1.4 }}>Submission completeness and underwriting readiness</span>
+                          </div>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <span style={{ fontWeight: 700, color: "#475569", minWidth: 44, flexShrink: 0 }}>Match %</span>
+                            <span style={{ color: "#94a3b8", lineHeight: 1.4 }}>How strongly uploaded documents fit each form (shown per form, not here)</span>
+                          </div>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <span style={{ fontWeight: 700, color: "#475569", minWidth: 44, flexShrink: 0 }}>Score</span>
+                            <span style={{ color: "#94a3b8", lineHeight: 1.4 }}>Weighted sum of the 6 pillars - not a plain average. Weights shown as (%) on each row below.</span>
+                          </div>
+                          <div style={{ color: "#94a3b8", lineHeight: 1.4, marginTop: 1 }}>
+                            Form SQS rates each form on its own. Package SQS rates the whole submission and includes cross-form checks, so the two can differ.
+                          </div>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                           {Object.entries(packageSqs.pillars || {}).map(([key, val]) => {
                             // umbrella_limit_adequacy is null when not applicable (§6.5).
                             const isNA = val === null || val === undefined;
-                            const cats = packageSqs.category_breakdown?.[key];
+                            const catsRaw = packageSqs.category_breakdown?.[key];
+                            // _rollup (if present from an older payload) is metadata, not a sub-row.
+                            const cats = catsRaw
+                              ? Object.fromEntries(Object.entries(catsRaw).filter(([k]) => k !== "_rollup"))
+                              : null;
                             const hasCats = cats && Object.keys(cats).length > 0;
                             const expanded = expandedPillars.has(key);
                             const toggle = () => setExpandedPillars(prev => {
@@ -3558,6 +3710,7 @@ const AcordModal = forwardRef(function AcordModal({
                                 <span style={{ color: "#000" }}>
                                   {hasCats && <span style={{ display: "inline-block", width: 9, fontSize: 7, color: "#94a3b8", transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>▶</span>}
                                   {PACKAGE_PILLAR_LABELS[key] || key}
+                                  <span style={{ color: "#94a3b8" }}> ({SQS_WEIGHTS[key] || 0}%)</span>
                                 </span>
                                 {isNA
                                   ? <span title="No umbrella in this submission" style={{ fontWeight: 700, color: "#94a3b8", fontSize: 9 }}>N/A</span>
@@ -3569,15 +3722,13 @@ const AcordModal = forwardRef(function AcordModal({
                               {expanded && hasCats && (
                                 <div style={{ margin: "4px 0 6px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
                                   {Object.entries(cats).map(([ck, cv]) => {
-                                    const cs = cv?.score;
-                                    const csNA = cs === null || cs === undefined;
-                                    const stColor = CAT_STATUS_COLOR[cv?.status] || "#94a3b8";
+                                    // Status word instead of a raw % so users don't try to
+                                    // average sub-rows into the weighted pillar headline.
+                                    const comp = catCompleteness(cv?.score);
                                     return (
                                       <div key={ck} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 9.5, gap: 8 }}>
-                                        <span style={{ color: "#64748b" }}>{cv?.label || ck}</span>
-                                        {csNA
-                                          ? <span style={{ color: stColor, fontWeight: 600, textTransform: "capitalize", whiteSpace: "nowrap" }}>{(cv?.status || "-").replace(/_/g, " ")}</span>
-                                          : <span style={{ color: barColor(cs), fontWeight: 700, whiteSpace: "nowrap" }}>{cs}%</span>}
+                                        <span style={{ color: "#475569" }}>{cv?.label || ck}</span>
+                                        <span style={{ color: comp.color, fontWeight: 700, whiteSpace: "nowrap" }}>{comp.label}</span>
                                       </div>
                                     );
                                   })}
@@ -3586,6 +3737,9 @@ const AcordModal = forwardRef(function AcordModal({
                             </div>
                             );
                           })}
+                        </div>
+                        <div style={{ fontSize: 8.5, color: "#94a3b8", marginTop: 5, lineHeight: 1.45, fontStyle: "italic" }}>
+                          When multiple forms are selected, each pillar is averaged across all forms first, then the weights above are applied. This is why the package score may not match a plain average of individual form scores.
                         </div>
 
                         {/* §6.1 item 4 - positive scoring signals credited */}
@@ -3608,9 +3762,9 @@ const AcordModal = forwardRef(function AcordModal({
                               {Object.entries(packageSqs.narrative_components).map(([ck, present]) => (
                                 <span key={ck} style={{
                                   fontSize: 9, fontWeight: 600, borderRadius: 10, padding: "1px 7px",
-                                  color: present ? "#047857" : "#94a3b8",
-                                  background: present ? "#ecfdf5" : "#f8fafc",
-                                  border: `1px solid ${present ? "#a7f3d0" : "#e2e8f0"}`,
+                                  color: present ? "#047857" : "#64748b",
+                                  background: present ? "#ecfdf5" : "#ffffff",
+                                  border: `1px solid ${present ? "#a7f3d0" : "#cbd5e1"}`,
                                 }}>
                                   {NARRATIVE_COMPONENT_LABELS[ck] || ck}
                                 </span>
@@ -3626,22 +3780,37 @@ const AcordModal = forwardRef(function AcordModal({
                               <span style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>Umbrella</span>
                               <span style={{ fontSize: 9.5, fontWeight: 600, color: "#334155", textAlign: "right" }}>{UMBRELLA_STATE_LABEL[packageSqs.umbrella_state] || packageSqs.umbrella_state}</span>
                             </div>
+                            {/* §6.5 item 4: follow-form status - green when confirmed,
+                                amber warning box when it cannot be determined. */}
                             {packageSqs.follow_form?.message && (
-                              <div style={{ fontSize: 9.5, color: "#64748b", marginTop: 3, lineHeight: 1.4 }}>{packageSqs.follow_form.message}</div>
+                              packageSqs.follow_form.status === "follow_form_confirmed" ? (
+                                <div style={{ fontSize: 9.5, color: "#15803d", marginTop: 3, lineHeight: 1.4 }}>{packageSqs.follow_form.message}</div>
+                              ) : (
+                                <div style={{ fontSize: 9.5, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 5, padding: "2px 6px", marginTop: 3, lineHeight: 1.4 }}>{packageSqs.follow_form.message}</div>
+                              )
                             )}
                             {packageSqs.umbrella_warnings?.map((w, i) => (
                               <div key={i} style={{ fontSize: 9.5, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 5, padding: "2px 6px", marginTop: 3, lineHeight: 1.4 }}>{w}</div>
                             ))}
+                            {/* §6.5 item 5: persistent review items (e.g. follow-form gap) that must
+                                never be dropped by the 3-item recommendation cap. De-duplicated against
+                                the follow-form line above so the same text never renders twice. */}
+                            {packageSqs.review_items?.filter((it) => it?.action && it.action !== packageSqs.follow_form?.message).map((it, i) => (
+                              <div key={`ri-${i}`} style={{ fontSize: 9.5, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 5, padding: "2px 6px", marginTop: 3, lineHeight: 1.4 }}>{it.action}</div>
+                            ))}
                           </div>
                         )}
 
-                        {/* §6.4 - loss-history evidence state */}
-                        {packageSqs.loss_history_state && packageSqs.loss_history_state !== "no_information" && (
+                        {/* §6.4 - loss-history evidence state (always shown, incl. no_information) */}
+                        {packageSqs.loss_history_state && (
                           <div style={{ marginTop: 9 }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                               <span style={{ fontSize: 9, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>Loss history</span>
-                              <span style={{ fontSize: 9.5, fontWeight: 600, textAlign: "right", color: packageSqs.loss_history_state === "loss_history_conflicting" || packageSqs.loss_history_state === "loss_runs_do_not_match" ? "#dc2626" : "#334155" }}>{LOSS_HISTORY_STATE_LABEL[packageSqs.loss_history_state] || packageSqs.loss_history_state}</span>
+                              <span style={{ fontSize: 9.5, fontWeight: 600, textAlign: "right", color: packageSqs.loss_history_state === "loss_history_conflicting" || packageSqs.loss_history_state === "loss_runs_do_not_match" ? "#dc2626" : (packageSqs.loss_history_state === "no_information" ? "#b45309" : "#334155") }}>{LOSS_HISTORY_STATE_LABEL[packageSqs.loss_history_state] || packageSqs.loss_history_state}</span>
                             </div>
+                            {packageSqs.loss_history_state === "no_information" && (
+                              <div style={{ fontSize: 9.5, color: "#64748b", marginTop: 3, lineHeight: 1.4 }}>Request loss runs or have the client confirm via the questionnaire.</div>
+                            )}
                           </div>
                         )}
 
@@ -3752,6 +3921,45 @@ const AcordModal = forwardRef(function AcordModal({
                       </div>
                     )}
 
+                    {/* ── Dismissed recommendations — collapsed by default ── */}
+                    {(() => {
+                      const formDismissed = Array.from(dismissedRecDetails.entries())
+                        .filter(([, d]) => d.formId === activeFormId);
+                      if (!formDismissed.length) return null;
+                      return (
+                        <div style={{ marginTop: activeSqs.recommendations?.length > 0 ? 6 : 0 }}>
+                          <button
+                            onClick={() => setShowDismissedPanel(p => !p)}
+                            style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", padding: "2px 0", width: "100%" }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                              Dismissed ({formDismissed.length})
+                            </span>
+                            <span style={{ fontSize: 9, color: "#94a3b8", marginLeft: "auto", transform: showDismissedPanel ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
+                          </button>
+                          {showDismissedPanel && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 5 }}>
+                              {formDismissed.map(([rid, d]) => (
+                                <div key={rid} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
+                                  <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                                    <span style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4, flex: 1, minWidth: 0, textDecoration: "line-through", textDecorationColor: "#cbd5e1" }}>{d.message}</span>
+                                    {d.impact > 0 && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#10b981", background: "#dcfce7", border: "1px solid #86efac", borderRadius: 10, padding: "1px 6px", flexShrink: 0, whiteSpace: "nowrap" }}>+{d.impact} pts credited</span>}
+                                  </div>
+                                  {d.reason ? (
+                                    <div style={{ marginTop: 4, fontSize: 10, color: "#64748b", display: "flex", alignItems: "flex-start", gap: 4 }}>
+                                      <span style={{ flexShrink: 0, color: "#94a3b8" }}>Reason:</span>
+                                      <span style={{ fontStyle: "italic" }}>{d.reason}</span>
+                                    </div>
+                                  ) : (
+                                    <div style={{ marginTop: 4, fontSize: 10, color: "#94a3b8" }}>Dismissed without reason</div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                   </div>
                 </>
               )}
@@ -3781,7 +3989,7 @@ const AcordModal = forwardRef(function AcordModal({
                     : <>Send to Client{arqNotifCount > 0 && <span style={{ background: "#fff", color: "#E61B84", borderRadius: 10, fontSize: 10, padding: "2px 7px", fontWeight: 800, marginLeft: 2 }}>{arqNotifCount}</span>}</>
                   }
                 </button>
-                <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} />
+                <ARQStatusPanel arqSessions={arqSessions} token={token} onRefresh={refreshArqData} scoreImprovement={(() => { const _base = packageSqs?.sqs_history?.find(h => h?.stage === "initial_extract") || packageSqs?.sqs_history?.[0]; const _arq = packageSqs?.sqs_history?.find(h => h?.stage === "arq_remediated"); return (_base?.score != null && _arq?.score != null) ? _arq.score - _base.score : null; })()} />
 
                 {/* Collapsible secondary actions */}
                 <div style={{ borderRadius: 14, overflow: "hidden", border: actionsOpen ? "1.5px solid #f9a8d4" : "1.5px solid #fce7f3", boxShadow: actionsOpen ? "0 8px 28px rgba(230,0,122,0.18)" : "0 2px 8px rgba(230,0,122,0.08)", transition: "box-shadow 0.25s, border-color 0.25s" }}>
