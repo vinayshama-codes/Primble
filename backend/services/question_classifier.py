@@ -331,6 +331,7 @@ def classify_question(
     is_cross_form: bool = False,
     severity: Optional[str] = None,
     is_curated_client: bool = False,
+    canonical_key: Optional[str] = None,
     hard_stop_text: str = "",
 ) -> dict:
     """Return the taxonomy for a single question (audience/priority/topic/impact).
@@ -339,13 +340,25 @@ def classify_question(
     plain-language client question (i.e. it is in the curated question/prefix
     maps or is a canonical fact key). Raw, uncurated form fields default to the
     `internal` audience so they never reach the client by default.
+
+    `canonical_key` is the field's resolved canonical fact key (when known). It
+    is what audience/priority/topic are judged on, so a client fact arriving
+    under its raw ACORD field name is still scored as the fact it represents.
     """
     fn = (field_name or "").lower()
     base = _base_key(field_name or "")
     base_l = base.lower()
-    whitelisted = base in _CLIENT_WHITELIST or field_name in _CLIENT_WHITELIST
+    # Identity is judged on the canonical fact key first: the producer forms key
+    # every field by its raw ACORD name, so a client fact such as `gl_aggregate`
+    # arrives as `CommercialGeneralLiability_GeneralAggregateLimit_Amount` and
+    # would otherwise never match the canonical CRITICAL/IMPORTANT/whitelist sets.
+    # Falls back to the raw field name and its instance-stripped base.
+    identity_keys = {field_name, base}
+    if canonical_key:
+        identity_keys.add(canonical_key)
+    whitelisted = bool(identity_keys & _CLIENT_WHITELIST)
 
-    topic = derive_topic(field_name, form_ids)
+    topic = derive_topic(canonical_key or field_name, form_ids)
 
     # ── Audience + priority decision tree (first match wins) ──────────────────
     if not whitelisted and _matches_any(fn, _DO_NOT_SEND_PATTERNS):
@@ -361,9 +374,9 @@ def classify_question(
         # client-relevant; hard conflicts are critical.
         audience = AUDIENCE_CLIENT
         priority = PRIORITY_CRITICAL if severity == "hard_stop" else PRIORITY_IMPORTANT
-    elif base in CRITICAL_FIELDS or field_name in CRITICAL_FIELDS:
+    elif identity_keys & CRITICAL_FIELDS:
         audience, priority = AUDIENCE_CLIENT, PRIORITY_CRITICAL
-    elif base in IMPORTANT_FIELDS or field_name in IMPORTANT_FIELDS:
+    elif identity_keys & IMPORTANT_FIELDS:
         audience, priority = AUDIENCE_CLIENT, PRIORITY_IMPORTANT
     elif is_curated_client:
         audience, priority = AUDIENCE_CLIENT, PRIORITY_OPTIONAL
@@ -458,6 +471,7 @@ def decorate_questions(
             is_cross_form=bool(q.get("_is_cross_form") or q.get("source") == "cross_form_conflict"),
             severity=q.get("severity"),
             is_curated_client=bool(q.get("_is_curated_client")),
+            canonical_key=q.get("_canonical_key"),
             hard_stop_text=hard_stop_text,
         )
         q.update(tax)

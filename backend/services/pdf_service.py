@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -1856,7 +1857,7 @@ def _fill_unmatched_with_gpt(
         "     - Policy_LineOfBusiness_CommercialGeneralLiability: \"Yes\" if GL coverage is requested\n"
         "     - NamedInsured_LegalEntity_CorporationIndicator: \"Yes\" if entity type is Corporation\n"
         "     - BusinessInformation_BusinessType_ContractorIndicator: \"Yes\" if business is a contractor\n"
-        "     - LossHistory_NoPriorLossesIndicator: \"Yes\" only if document explicitly states no losses\n"
+        "     - LossHistory_NoPriorLossesIndicator: \"Yes\" only if the document clearly indicates the insured has no prior/known losses (by meaning - e.g. \"no known losses\", \"loss-free\", \"clean loss history\"); NEVER infer \"Yes\" from losses simply being unmentioned. If it does not clearly say so, return null.\n"
         "  4. Dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
         "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n"
         "  6. List ALL fields you fill in raw_text_sourced. Do NOT list fields you returned null for.\n"
@@ -2288,6 +2289,99 @@ def _is_nonfillable_field(field: str) -> bool:
         "ProducerIdentifier",
     )
     return any(s in field for s in _NONFILLABLE_SUBSTRINGS)
+
+
+# ── Fact → form-field derivation (Beta Report §4.3) ───────────────────────────
+# Used by the Core Underwriting Data reconciler to (a) name the true, complete
+# set of forms a confirmed value flows into ("applied to N forms" badge) and
+# (b) drive the post-generation cross-form consistency assertion. Pure derivation
+# from static config + form schemas; cached.
+
+@lru_cache(maxsize=1)
+def _all_form_schemas() -> Dict[str, dict]:
+    """Load every ``forms_schemas/ACORD_*_schema.json`` once (the field-name
+    source of truth for fact→form derivation). Cached; pure disk read."""
+    out: Dict[str, dict] = {}
+    try:
+        for name in sorted(os.listdir(FORMS_SCHEMAS_DIR)):
+            if name.startswith("ACORD_") and name.endswith("_schema.json"):
+                form_id = name[: -len("_schema.json")]
+                try:
+                    with open(os.path.join(FORMS_SCHEMAS_DIR, name), encoding="utf-8") as fh:
+                        out[form_id] = json.load(fh)
+                except Exception as exc:                  # noqa: BLE001 — skip & continue
+                    logger.warning("fact-map: failed to load schema %s — %s", name, exc)
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning("fact-map: cannot list schemas dir %s — %s", FORMS_SCHEMAS_DIR, exc)
+    return out
+
+
+def _first_rule_fact(field_name: str) -> Optional[str]:
+    """The fact key the FIRST matching ``_ACORD_FIELD_RULES`` pattern assigns to
+    ``field_name`` — mirrors the substring loop in ``_deterministic_map`` so rule
+    shadowing is respected. None when no rule matches."""
+    for pattern, fact_key in _ACORD_FIELD_RULES:
+        if pattern in field_name:
+            return fact_key
+    return None
+
+
+@lru_cache(maxsize=64)
+def fact_to_form_fields(fact_key: str) -> Dict[str, Tuple[str, ...]]:
+    """Map an extraction fact key to the ACORD form fields that DETERMINISTICALLY
+    receive its value, grouped by form id.
+
+    Mirrors the two deterministic stamping paths used by ``map_facts_to_form``:
+      * Pass 1   — ``_ACORD_FIELD_RULES`` substring rules (first matching rule wins).
+      * Pass 1.5 — per-form alias maps + the ``CANONICAL_TO_EXTRACTION`` bridge.
+
+    Pass 2 (GPT gap fill) is intentionally excluded: it sources from raw document
+    text rather than from the merged/confirmed fact, so it does not propagate a
+    confirmed value. The result therefore reflects exactly the forms/fields a
+    confirmed underwriting value flows into.
+
+    Returns ``{form_id: (field_name, ...)}`` (field names sorted for stability).
+    Pure derivation from static config + form schemas; cached.
+    """
+    result: Dict[str, set] = {}
+
+    # ── Pass 1.5 alias path ──────────────────────────────────────────────────
+    try:
+        from services.alias_stamper import (
+            _ALIAS_MAPS, CANONICAL_TO_EXTRACTION, _load_all_alias_maps,
+        )
+        _load_all_alias_maps()
+        canon_keys = {c for c, k in CANONICAL_TO_EXTRACTION.items() if k == fact_key}
+        if canon_keys:
+            for form_id, alias_map in _ALIAS_MAPS.items():
+                for field, canonical in alias_map.items():
+                    if canonical not in canon_keys or _is_nonfillable_field(field):
+                        continue
+                    # Skip fields a Pass-1 rule deterministically claims for a
+                    # DIFFERENT fact (alias only runs on Pass-1 leftovers).
+                    rf = _first_rule_fact(field)
+                    if rf not in (None, fact_key):
+                        continue
+                    result.setdefault(form_id, set()).add(field)
+    except Exception as exc:                              # noqa: BLE001 — never block
+        logger.warning("fact-map: alias path failed for %s — %s", fact_key, exc)
+
+    # ── Pass 1 deterministic-rule path ───────────────────────────────────────
+    if any(fk == fact_key for _, fk in _ACORD_FIELD_RULES):
+        for form_id, schema in _all_form_schemas().items():
+            for field in schema:
+                if _is_nonfillable_field(field):
+                    continue
+                if _first_rule_fact(field) == fact_key:
+                    result.setdefault(form_id, set()).add(field)
+
+    return {fid: tuple(sorted(fields)) for fid, fields in result.items()}
+
+
+def forms_consuming_fact(fact_key: str) -> List[str]:
+    """Sorted list of ACORD form ids a confirmed value for ``fact_key`` flows
+    into deterministically. Thin wrapper over :func:`fact_to_form_fields`."""
+    return sorted(fact_to_form_fields(fact_key).keys())
 
 
 def compute_form_gaps(form_id: str, schema: dict, facts: dict) -> Tuple[dict, dict, set]:

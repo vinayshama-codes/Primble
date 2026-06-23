@@ -82,6 +82,16 @@ _TEXT_SCAN_PATTERNS: Dict[str, List[str]] = {
         # "Sales / Revenue: $X"
         r"sales\s*/\s*revenue\s*[:\-–]\s*(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)",
     ],
+    # Payroll — "(Total/Estimated/Annual) Payroll: $X" and "Remuneration: $X".
+    # Currency kind, so it uses the same min-amount-floored numeric path as
+    # revenue. Employee Count is integer (not supported by this currency-oriented
+    # scanner) and intentionally relies on LLM extraction only.
+    "total_payroll": [
+        r"(?:total\s+|estimated\s+|annual\s+){0,2}payroll\s*[:\-–]?\s*"
+        r"(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)",
+        r"(?:estimated\s+|annual\s+){0,2}remuneration\s*[:\-–]?\s*"
+        r"(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)",
+    ],
     # Building value — building-specific labels only (the word "building" must
     # precede the amount) so a contents/BPP figure can't masquerade as a conflict.
     "property_building_value": [
@@ -181,7 +191,13 @@ RECONCILABLE_FIELDS: Dict[str, Dict[str, Any]] = {
     "total_revenue": {
         "label": "Gross Sales / Annual Revenue",
         "kind":  "currency",
-        "forms": ["ACORD_125", "ACORD_126", "ACORD_131"],
+        # Fallback only — the live "applied to" list is derived dynamically from
+        # the real stamping paths (rules + alias bridge) via pdf_service.
+        # forms_consuming_fact, which also covers ACORD 160/186. ACORD 125 is
+        # intentionally absent: its sole revenue field is the location-level
+        # CommercialStructure_AnnualRevenueAmount, which is never stamped with
+        # the business-level Gross Sales figure.
+        "forms": ["ACORD_126", "ACORD_131", "ACORD_160", "ACORD_186"],
     },
     # Building Value duplication/inflation/inconsistency across documents (client
     # Property Integrity directive). Reconciled exactly like Gross Sales: when two
@@ -191,7 +207,10 @@ RECONCILABLE_FIELDS: Dict[str, Dict[str, Any]] = {
     "property_building_value": {
         "label": "Building Value",
         "kind":  "currency",
-        "forms": ["ACORD_140", "ACORD_141", "ACORD_28"],
+        # Fallback only — live list derived dynamically (see total_revenue note).
+        # Building Value is stamped deterministically into ACORD 140's premises
+        # limit rows; ACORD 141/28 have no deterministic building-value field.
+        "forms": ["ACORD_140"],
     },
     # ── Identity / policy fields (Beta Report §5 picker) ─────────────────────
     # kind "identity" routes through the Workstream-2 normalization layer
@@ -210,11 +229,23 @@ RECONCILABLE_FIELDS: Dict[str, Dict[str, Any]] = {
     "effective_date":   {"label": "Policy Effective Date",     "kind": "identity", "forms": []},
     "expiration_date":  {"label": "Policy Expiration Date",    "kind": "identity", "forms": []},
     "carrier_name":     {"label": "Carrier",                   "kind": "identity", "forms": []},
+    # ── Core underwriting numeric fields (Beta Report §4.3 "and similar fields") ─
+    # Reconciled exactly like Gross Sales: cross-document conflicts are flagged
+    # for review (non-blocking) with source attribution and a confirmation path,
+    # and a confirmed value flows across forms + scoring. "forms" is a fallback
+    # only — the live list is derived dynamically (see total_revenue note).
+    "total_payroll": {
+        "label": "Total Annual Payroll",
+        "kind":  "currency",
+        "forms": ["ACORD_131", "ACORD_160", "ACORD_186"],
+    },
+    "num_employees": {
+        "label": "Employee Count",
+        "kind":  "integer",
+        "forms": ["ACORD_125", "ACORD_126", "ACORD_131", "ACORD_186"],
+    },
     # ── Extend here (no other code change needed) ────────────────────────────
-    # "total_payroll":     {"label": "Total Annual Payroll", "kind": "currency",
-    #                        "forms": ["ACORD_125", "ACORD_130"]},
-    # "num_employees":     {"label": "Employee Count",       "kind": "integer",
-    #                        "forms": ["ACORD_125", "ACORD_130"]},
+    # Add a one-line entry: {"label": ..., "kind": "currency"|"integer", "forms": [...]}.
 }
 
 # Fields whose conflict is a HARD STOP until the user resolves it (kept blocking
@@ -325,6 +356,30 @@ def _normalize(value: Any, kind: str, fact_key: Optional[str] = None) -> Optiona
     return norm
 
 
+# ── Applied-to form list (derived dynamically) ───────────────────────────────
+
+def _forms_for_field(fact_key: str, cfg: dict) -> List[str]:
+    """The ACORD forms a confirmed value for this field flows into.
+
+    For currency/integer fields the list is derived dynamically from the real
+    stamping paths (deterministic rules + alias bridge) via
+    ``pdf_service.forms_consuming_fact`` so the "applied to N forms" badge always
+    names the true, complete set. Identity fields keep their declared list
+    (empty) so their picker behaviour and UI stay unchanged. Any failure falls
+    back to the static registry list — it never regresses.
+    """
+    static = list(cfg.get("forms") or [])
+    if cfg.get("kind") not in ("currency", "integer"):
+        return static
+    try:
+        from services.pdf_service import forms_consuming_fact
+        dynamic = forms_consuming_fact(fact_key)
+        return dynamic or static
+    except Exception as exc:                              # pragma: no cover
+        logger.warning("underwriting_consistency: dynamic form list failed for %s — %s", fact_key, exc)
+        return static
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def assess_underwriting_consistency(
@@ -367,6 +422,24 @@ def assess_underwriting_consistency(
     docs = docs or []
     merged_facts = merged_facts or {}
     confirmations = confirmations or {}
+
+    # Beta Report §4.3 item 3: flag documents with no raw OCR text. For these the
+    # raw-text safety-net scan cannot run, so their cross-document comparison is
+    # AI-extraction only and may miss a value the LLM collapsed. Logged once per
+    # assessment (only when there is more than one document to compare).
+    if len(docs) > 1:
+        _no_text = [
+            (d.get("filename") or f"document_{i + 1}")
+            for i, d in enumerate(docs)
+            if not str(d.get("text") or "").strip()
+        ]
+        if _no_text:
+            logger.warning(
+                "underwriting_consistency: %d of %d document(s) have no raw text; "
+                "their cross-document comparison is AI-extraction only and may be "
+                "incomplete (text-scan skipped): %s",
+                len(_no_text), len(docs), ", ".join(_no_text),
+            )
 
     fields_out: List[dict] = []
     conflict_count = 0
@@ -455,7 +528,7 @@ def assess_underwriting_consistency(
             "fact_key":        fact_key,
             "label":           label,
             "kind":            kind,
-            "forms":           list(cfg.get("forms") or []),
+            "forms":           _forms_for_field(fact_key, cfg),
             "status":          status,
             "review_required": review_required,
             "merged_value":    _display(_fv(merged_facts, fact_key)),
@@ -494,11 +567,20 @@ def apply_confirmations(merged_facts: dict, confirmations: Optional[dict]) -> di
     for fact_key, raw in confirmations.items():
         if fact_key not in RECONCILABLE_FIELDS or raw is None:
             continue
-        out[fact_key] = {
+        envelope = {
             "value":      str(raw),
             "confidence": _CONFIRMED_CONFIDENCE,
             "source":     _CONFIRMED_SOURCE,
         }
+        # Beta Report §4.3 item 5: store the normalized canonical alongside the
+        # raw string as additive provenance, so any consumer that wants a clean
+        # number has one without re-parsing. The raw ``value`` is preserved
+        # unchanged — what gets stamped onto forms and read by scoring is
+        # untouched (display fidelity); this key is metadata only.
+        norm = _normalize(raw, RECONCILABLE_FIELDS[fact_key]["kind"], fact_key)
+        if norm:
+            envelope["normalized"] = norm
+        out[fact_key] = envelope
     return out
 
 
@@ -526,3 +608,136 @@ def validate_confirmation(fact_key: str, value: Any) -> Optional[str]:
     if not norm:
         raise ValueError("underwriting_invalid_value")
     return str(value).strip()
+
+
+def verify_stamped_consistency(
+    generated_forms: Optional[dict],
+    merged_facts: Optional[dict] = None,
+    confirmations: Optional[dict] = None,
+) -> dict:
+    """Post-generation cross-form assertion (Beta Report §4.3 action item 2).
+
+    After all selected forms are generated, read the value ACTUALLY stamped into
+    every form for each reconcilable currency/integer field and confirm they all
+    agree (after normalization) with the expected figure — the user-confirmed
+    value when one exists, otherwise the merged-facts value.
+
+    A disagreement is logged as a warning and returned; this check NEVER mutates
+    a form, changes a value, or blocks the response — it is a safety assertion
+    that the deterministic stamping stayed consistent with the confirmed figure.
+
+    Only genuinely numeric stamped values are compared (the field's native
+    normalizer must parse them), so a field shared with another rule that holds a
+    non-numeric value can never raise a false mismatch.
+
+    Returns
+    -------
+    {"checked": int, "mismatches": [ {fact_key, label, form_id, field,
+     expected, stamped} ], "ok": bool}
+    """
+    generated_forms = generated_forms or {}
+    merged_facts    = merged_facts or {}
+    confirmations   = confirmations or {}
+
+    try:
+        from services.pdf_service import fact_to_form_fields
+    except Exception as exc:                              # pragma: no cover
+        logger.warning("verify_stamped_consistency: pdf_service unavailable — %s", exc)
+        return {"checked": 0, "mismatches": [], "ok": True}
+
+    def _norm_native(value: Any, kind: str) -> Optional[str]:
+        if kind == "currency":
+            return _normalize_currency(value)
+        if kind == "integer":
+            return _normalize_integer(value)
+        return None
+
+    mismatches: List[dict] = []
+    checked = 0
+
+    for fact_key, cfg in RECONCILABLE_FIELDS.items():
+        kind = cfg["kind"]
+        if kind not in ("currency", "integer"):
+            continue
+
+        # Expected = confirmed value if present, else the merged-facts value.
+        expected_raw = confirmations.get(fact_key)
+        if expected_raw is None:
+            expected_raw = _fv(merged_facts, fact_key)
+        if expected_raw is None:
+            continue
+        expected_norm = _norm_native(expected_raw, kind)
+        if not expected_norm:
+            continue
+
+        form_fields = fact_to_form_fields(fact_key)
+        if not form_fields:
+            continue
+
+        for form_id, form_result in generated_forms.items():
+            mapped = (form_result or {}).get("mapped") or {}
+            for field in form_fields.get(form_id, ()):
+                val = mapped.get(field)
+                if val is None or str(val).strip() in ("", "null", "None"):
+                    continue
+                vnorm = _norm_native(val, kind)
+                if not vnorm:
+                    # Stamped value is not a number of this kind → not this
+                    # fact's value; skip (no false mismatch).
+                    continue
+                checked += 1
+                if vnorm != expected_norm:
+                    mismatches.append({
+                        "fact_key": fact_key, "label": cfg["label"],
+                        "form_id":  form_id,   "field": field,
+                        "expected": str(expected_raw), "stamped": str(val),
+                    })
+
+    if mismatches:
+        logger.warning(
+            "underwriting_consistency: post-generation stamp MISMATCH on %d field-value(s) — %s",
+            len(mismatches),
+            "; ".join(
+                f"{m['label']} on {m['form_id']} stamped {m['stamped']!r} != expected {m['expected']!r}"
+                for m in mismatches
+            ),
+        )
+    else:
+        logger.info(
+            "underwriting_consistency: post-generation stamp check OK "
+            "(%d field-value(s) verified across %d form(s))",
+            checked, len(generated_forms),
+        )
+
+    return {"checked": checked, "mismatches": mismatches, "ok": not mismatches}
+
+
+def stamp_mismatch_issues(stamp_check: Optional[dict]) -> List[dict]:
+    """Translate a :func:`verify_stamped_consistency` result into cross-issue
+    dicts (shape ``{type, code, message, forms}``) so a cross-form stamp
+    discrepancy is surfaced to the user through the existing cross-issues channel
+    on the generation screen (Beta Report §4.3 "…or forms").
+
+    Returns ``[]`` when there are no mismatches, so the normal case adds nothing.
+    One issue per field, listing the forms involved. Display only — callers must
+    NOT feed these into SQS scoring.
+    """
+    if not stamp_check or stamp_check.get("ok", True):
+        return []
+    by_fact: Dict[tuple, set] = {}
+    for m in stamp_check.get("mismatches") or []:
+        by_fact.setdefault((m.get("fact_key"), m.get("label")), set()).add(m.get("form_id"))
+    issues: List[dict] = []
+    for (fact_key, label), forms in by_fact.items():
+        flist = sorted(f for f in forms if f)
+        pretty = ", ".join(f.replace("ACORD_", "ACORD ") for f in flist)
+        issues.append({
+            "type":    "soft_warning",
+            "code":    "underwriting_stamp_mismatch",
+            "message": (
+                f"{label or fact_key} appears inconsistently across generated forms "
+                f"({pretty}). Re-confirm the value so it applies uniformly."
+            ),
+            "forms":   flist,
+        })
+    return issues

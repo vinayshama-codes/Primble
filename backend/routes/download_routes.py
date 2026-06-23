@@ -26,6 +26,31 @@ logger = logging.getLogger(__name__)
 
 
 # ASYNC-SAFE
+def _enforce_integrity_gate(proc_session: dict) -> None:
+    """Block scoring / Submission Brief generation while a Submission Integrity
+    review is pending (Beta Report §4.1).
+
+    Mirrors form_routes.enforce_integrity_gate and the worker.py guard. The lower
+    tiers' facts-based scoring (/api/lite/analyze) and downloadable Submission
+    Brief (/api/lite/cover-sheet) can both score straight from the extracted facts
+    without any generated forms, so without this guard a package flagged as likely
+    multi-insured could still produce a score or a brief - bypassing the review.
+    Applies to EVERY paid tier (essentials / professional / business).
+    """
+    integrity = proc_session.get("integrity") or {}
+    if integrity.get("review_required") and not integrity.get("overridden"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "submission_integrity_review_required",
+                "message": integrity.get("message")
+                or "Submission integrity review required before continuing.",
+                "integrity": integrity,
+            },
+        )
+
+
+# ASYNC-SAFE
 @router.post("/api/acord/confirm-license")
 async def confirm_acord_license(
     request: Request,
@@ -359,6 +384,9 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    # Submission Integrity gate (Beta Report §4.1): do not score a package still
+    # pending multi-insured review (this path computes SQS straight from facts).
+    _enforce_integrity_gate(proc_session)
     facts       = proc_session.get("facts") or {}
     flags       = proc_session.get("flags", {})
     hard_stops  = proc_session.get("hard_stops", [])
@@ -398,6 +426,10 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
     proc_session = await get_processing_session(session_id)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    # Submission Integrity gate (Beta Report §4.1): do not score or brief a package
+    # still pending multi-insured review (the cover sheet is the lower tiers'
+    # downloadable Submission Brief and can score straight from facts below).
+    _enforce_integrity_gate(proc_session)
     facts       = proc_session.get("facts") or {}
     flags       = proc_session.get("flags", {})
     hard_stops  = proc_session.get("hard_stops", [])

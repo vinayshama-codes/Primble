@@ -103,8 +103,11 @@ async def try_acquire_heavy() -> "str | bool":
     Callers must pass the return value to release_heavy().
     """
     if _redis is not None:
-        token = await _redis_acquire()
-        return token if token else False
+        try:
+            token = await _redis_acquire()
+            return token if token else False
+        except Exception as ex:
+            logger.warning(f"concurrency: Redis semaphore failed, using in-process fallback: {ex}")
 
     sem = get_heavy_sem()
     if sem.locked():

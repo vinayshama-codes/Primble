@@ -21,8 +21,8 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
 logger = logging.getLogger(__name__)
 
 # ── Cache versioning (Fix 3) ──────────────────────────────────────────────────
-PROMPT_VERSION = "v8"
-SCHEMA_VERSION = "v8"
+PROMPT_VERSION = "v9"
+SCHEMA_VERSION = "v9"
 
 # ── Model context config ──────────────────────────────────────────────────────
 _MODEL_CHUNK_CHARS: Dict[str, int] = {
@@ -234,6 +234,7 @@ _EXTRACT_SCHEMA = (
     '  "has_property_coverage": boolean, "has_auto_coverage": boolean,\n'
     '  "has_workers_comp": boolean, "has_umbrella": boolean,\n'
     '  "has_multiple_locations": boolean, "has_loss_history": boolean,\n'
+    '  "asserts_no_known_losses": boolean,\n'
     '  "is_contractor": boolean, "has_certificate_request": boolean,\n'
     '  "is_certificate_doc": boolean, "gl_is_claims_made": boolean,\n'
     '  "auto_has_physical_damage": boolean, "auto_split_limits": boolean,\n'
@@ -296,7 +297,7 @@ _EXTRACT_PROMPT_PREFIX = (
     'RULE 4 — Extract ALL financial figures exactly as printed: limits, premiums, payrolls, '
     'deductibles, values. Include currency symbols and formatting as-is.\n\n'
     'RULE 5 — For addresses: extract the full address string including city, state, ZIP.\n\n'
-    'RULE 6 — Flag definitions. Set each boolean flag based on these exact criteria:\n'
+    'RULE 6 — Flag definitions. Judge each boolean flag by the MEANING of the document, not the mere presence of exact keywords - the example terms listed are illustrative, not an exhaustive checklist, so set a flag true for clear equivalents and paraphrases too (e.g. "ransomware incident response" or "we hold customer health and card data" implies cyber even without the word "cyber"). This does NOT relax any "Do NOT set true" restriction below - those guards still apply in full. Criteria:\n'
     '  is_commercial_policy: true if document is a commercial insurance policy, application, dec page, certificate, or quote (not personal lines).\n'
     '  has_general_liability: true if document mentions "General Liability", "GL", "premises/operations", "products/completed operations", "personal and advertising injury", GL limits, or GL premiums.\n'
     '  has_property_coverage: true if document explicitly lists a building limit or BPP (business personal property) value, commercial property premium, or COPE data (construction type, year built, occupancy, protection class) for a covered location. Do NOT set true based on mailing addresses alone, certificate holder addresses, or GL-only premises descriptions.\n'
@@ -305,6 +306,7 @@ _EXTRACT_PROMPT_PREFIX = (
     '  has_umbrella: true if the document explicitly shows an umbrella or excess liability LIMIT or PREMIUM (e.g. "$2M Umbrella", "Excess Liability – $5,000,000") for coverage above a primary GL or auto policy. Do NOT set true merely because the words "excess", "limits", "attachment point", or "SIR" appear without a distinct umbrella/excess policy section or stated dollar amount.\n'
     '  has_multiple_locations: true if document lists 2 or more distinct insured property addresses or locations.\n'
     '  has_loss_history: true if document contains a loss run, claims history table, prior claims, loss amounts, or any mention of paid/incurred/open claims.\n'
+    '  asserts_no_known_losses: true ONLY if the document affirmatively states the insured has had NO prior or known losses/claims — judge this by MEANING, not exact wording. Set true for any clear paraphrase, e.g. "no known losses", "no prior losses", "loss-free", "claims-free", "clean loss history", "favorable loss experience with no claims", "no reported claims in the past N years", "the insured reports no losses". Set FALSE when the document merely discusses, lists, or summarizes losses/claims, when any actual claim (paid, incurred, reserved, or open) appears, or when loss history is simply absent/not mentioned. This is a no-loss ASSERTION, not the presence of loss data.\n'
     '  is_contractor: true only if the named INSURED\'s PRIMARY BUSINESS is a construction or installation contracting trade (general contractor, roofing contractor, electrical, plumbing, excavation, demolition contractor, etc.). Do NOT set true if construction trades are only mentioned in loss history, claims descriptions, operations of a third party, or as endorsement requirements listed for certificate holders.\n'
     '  has_certificate_request: true if document contains language requesting issuance of a certificate of insurance, lists a certificate holder, or shows "certificate required".\n'
     '  is_certificate_doc: true if the document IS itself an ACORD 25 Certificate of Liability Insurance or ACORD 28 Evidence of Property — identifiable by "Certificate of Liability Insurance" or "Evidence of Commercial Property Insurance" as the document title.\n'
@@ -357,9 +359,10 @@ _EXTRACT_PROMPT_PREFIX = (
     'RULE 10 — account_description (narrative documents only):\n'
     '  Populate `account_description` ONLY when the document is an underwriting narrative, '
     'submission narrative, account summary, executive summary, or account overview document. '
-    'Extract the opening executive-summary paragraph or any block explicitly labeled '
-    '"Account Overview", "Account Summary", "Company Overview", "Background", or '
-    '"Executive Summary". This field captures the broker\'s high-level account pitch — '
+    'Extract the opening paragraph(s) that read as a high-level account summary, whether or '
+    'not they carry an explicit heading - commonly (but not always) labeled "Account Overview", '
+    '"Account Summary", "Company Overview", "Background", or "Executive Summary", though an '
+    'unlabeled opening pitch paragraph qualifies just as well. This field captures the broker\'s high-level account pitch — '
     'distinct from the factual `operations_description` (what the business does). '
     'Set `account_description` to null for dec pages, applications, loss runs, certificates, '
     'and all other structured documents that are not narrative account summaries.\n\n'
@@ -379,13 +382,15 @@ _EXTRACT_PROMPT_PREFIX = (
     '  employee_practices: HR policies, workforce description, hiring practices, turnover.\n'
     '  growth_trends: workers comp payroll by class code, WC class codes, payroll breakdown by classification, NCCI class, labor classification, payroll schedule.\n'
     '  target_markets: experience modifier, EMOD, XMOD, experience modification rate, mod factor, merit rating, debit mod, credit mod, rating bureau, workers comp mod.\n\n'
-    'RULE 12 — loss_run_status: Set to "pending" or "requested" ONLY when the document '
-    'explicitly states that loss runs have been requested but not yet received — phrases '
-    'such as "loss runs requested", "loss runs pending", "awaiting loss runs", "loss runs '
-    'have been ordered", "loss runs on order", or "loss runs to follow". '
-    'Set to null in ALL other cases, including when actual loss run data is present '
-    'in this document (use loss_history, loss_run_valuation_date, and related fields for '
-    'that). Do NOT infer pending status from the absence of loss runs alone.\n\n'
+    'RULE 12 — loss_run_status: Set to "pending" or "requested" when the document indicates, '
+    'by MEANING, that loss runs have been requested or ordered but not yet received - whether '
+    'stated plainly ("loss runs requested", "loss runs pending", "awaiting loss runs", "loss '
+    'runs on order", "loss runs to follow") or paraphrased ("loss history is being compiled", '
+    '"we will forward the loss runs once the prior carrier provides them", "claims experience '
+    'to be supplied under separate cover"). Two strict guards still apply: set to null when '
+    'actual loss run data IS present in this document (use loss_history, loss_run_valuation_date, '
+    'and related fields for that), and do NOT infer pending status from the absence of loss '
+    'runs alone - there must be an affirmative statement that they are outstanding.\n\n'
     'Return ONLY a valid JSON object with exactly these two top-level keys:\n\n'
     + _EXTRACT_SCHEMA
     + '\n\nReturn ONLY the JSON object. No markdown fences, no explanation, no extra text. '
@@ -772,6 +777,7 @@ DOC_TYPE_LABELS: Dict[str, str] = {
     "quote":                    "Quote Proposal",
     "binder":                   "Binder",
     "endorsement":              "Endorsement",
+    "acord_form":               "ACORD Form",
     "sov":                      "Statement / Schedule of Values",
     "cope_report":              "COPE Report",
     "financial_statement":      "Financial Statements",
@@ -799,36 +805,71 @@ ALLOWED_DOC_TYPES: List[str] = list(DOC_TYPE_LABELS.keys())
 # several distinct categories is a likely underwriting narrative even when it
 # carries no single strong keyword. We count DISTINCT categories so a long
 # prose document that repeats one theme isn't over-credited.
+#
+# One theme PER Beta Report §4.2 signal (18 total) so each listed signal is
+# counted independently — e.g. "renewal context" and "prior carrier context"
+# are no longer folded into one carrier theme. Phrases are scoped to avoid
+# substring overlap between sibling themes (e.g. "risk controls" vs "risk
+# control program") so a single mention can't credit two themes at once.
 _NARRATIVE_SIGNALS: Dict[str, Tuple[str, ...]] = {
+    # 1. Account overview
     "account_overview":     ("account overview", "company overview", "about the",
                              "background", "company profile", "overview of operations"),
+    # 2. Named insured / applicant context
     "named_insured":        ("named insured", "applicant", "the insured", "dba", "d/b/a"),
+    # 3. Operations description
     "operations":           ("operations", "scope of work", "nature of business",
                              "services provided", "business operations", "describe operations"),
+    # 4. Years in business
     "years_in_business":    ("years in business", "established in", "in business since",
                              "founded in", "incorporated in", "years of experience"),
+    # 5. Management experience
     "management":           ("management experience", "ownership", "principals",
                              "key personnel", "owner has", "management team", "leadership"),
-    "risk_controls":        ("risk control", "safety practices", "safety program",
-                             "loss control", "risk management", "written safety",
-                             "safety procedures", "quality control"),
+    # 6. Risk controls or safety practices
+    "risk_controls":        ("risk controls", "safety practices", "loss control",
+                             "risk management", "quality control", "loss prevention"),
+    # 7. Loss history statement
     "loss_history":         ("no prior losses", "no losses", "loss history",
                              "claims history", "prior claims", "loss experience",
                              "no claims", "favorable loss"),
+    # 8. Coverage discussion
     "coverage_discussion":  ("coverage", "limits of liability", "general liability",
                              "umbrella", "workers compensation", "deductible",
                              "coverage requested", "coverage needed"),
-    "carrier_market":       ("prior carrier", "current carrier", "expiring carrier",
-                             "incumbent", "market considerations", "carrier", "renewal"),
+    # 9. Carrier or market considerations
+    "carrier_market":       ("market considerations", "market appetite", "insurance market",
+                             "marketing this account", "remarketing", "coverage placement"),
+    # 10. Location or exposure summary
     "location_exposure":    ("location", "premises", "exposure", "square footage",
                              "address", "operations are performed"),
-    "employee_practices":   ("employee handbook", "employer handbook", "hiring",
-                             "training", "onboarding", "employee management",
-                             "safety manual"),
+    # 11. Renewal context
+    "renewal_context":      ("renewal", "up for renewal", "renewal date", "renewing",
+                             "expiring policy", "policy expires", "renewal term"),
+    # 12. Prior carrier context
+    "prior_carrier":        ("prior carrier", "previous carrier", "current carrier",
+                             "expiring carrier", "incumbent carrier", "incumbent"),
+    # 13. Employer / employee handbook
+    "handbook":             ("employee handbook", "employer handbook", "employee manual",
+                             "personnel policy", "personnel manual", "code of conduct"),
+    # 14. Safety manual, risk control program, or written safety procedures
+    "safety_program":       ("safety manual", "risk control program", "safety program",
+                             "written safety", "safety procedures", "safety policy",
+                             "injury and illness prevention", "iipp"),
+    # 15. Hiring, training, onboarding, or employee management practices
+    "employee_practices":   ("hiring", "training", "onboarding", "employee management",
+                             "staff management", "personnel management", "workforce"),
+    # 16. Workers Compensation payroll breakdown by class code
     "wc_payroll":           ("payroll by class", "class code", "payroll breakdown",
                              "remuneration"),
+    # 17. Current Experience Modification Factor, EMOD, or XMOD
     "experience_mod":       ("experience modification", "emod", "xmod",
-                             "experience mod", "mod factor"),
+                             "experience mod", "mod factor", "experience rating"),
+    # 18. Workers Compensation exposure summaries or classification details
+    "wc_exposure":          ("workers compensation exposure", "wc exposure",
+                             "workers comp classification", "wc classification",
+                             "governing classification", "classification code",
+                             "exposure summary", "classification details"),
 }
 
 # When this many DISTINCT narrative categories appear, the document is treated
@@ -836,6 +877,16 @@ _NARRATIVE_SIGNALS: Dict[str, Tuple[str, ...]] = {
 # does not trip it, but a real account narrative (operations + management + loss
 # + coverage + carrier ...) does.
 _NARRATIVE_MIN_CATEGORIES = 4
+
+# Stage-1 prose-confusable flip guard (below): a structured doc whose top keyword
+# is a prose-confusable supporting type is re-labelled `narrative` ONLY when it
+# shows this many distinct narrative themes. Set higher than _NARRATIVE_MIN_CATEGORIES
+# because the §4.2 themes above are fine-grained — a genuine account narrative spans
+# many themes (account + operations + management + loss + carrier + renewal + ...),
+# while a focused safety manual / handbook stays within its own cluster and must NOT
+# be flipped. Preserves the pre-split behaviour (real safety manuals stay safety
+# manuals) under the finer theme set.
+_PROSE_CONFUSABLE_NARRATIVE_MIN = 8
 
 # Filename signals (Beta Report §4.2 action item #3) — SUPPORTING evidence only.
 # A filename match adds a bounded bonus to the matching content type; it never
@@ -869,7 +920,7 @@ _FILENAME_SIGNALS: Dict[str, Tuple[str, ...]] = {
 # (rich, structured) outrank supporting documents.
 _DOC_TYPE_PRIORITY = [
     "dec_page", "application", "supplemental_application", "policy", "quote",
-    "binder", "certificate", "endorsement",
+    "binder", "certificate", "endorsement", "acord_form",
     "sov", "cope_report", "vehicle_schedule", "driver_schedule",
     "equipment_schedule", "location_schedule", "schedule",
     "loss_run", "emod_worksheet", "payroll_report", "gross_sales_report",
@@ -879,6 +930,11 @@ _DOC_TYPE_PRIORITY = [
 
 _DOC_TYPE_MIN_SCORE = 3.0   # content score required for a confident (non-filename) classification
 _FILENAME_BONUS     = 2.0   # bounded bonus a filename match adds to its type
+
+# A generic ACORD-form reference, e.g. "ACORD 28", "ACORD-101", "ACORD form".
+# Used ONLY as a fallback after the specific-type stages, so a recognised
+# application / certificate / endorsement is never demoted to the generic bucket.
+_ACORD_FORM_RE = re.compile(r"acord\s*[-#]?\s*\d{2,4}", re.IGNORECASE)
 
 # Supporting/prose document types whose keywords are easily tripped by an
 # account narrative that merely *discusses* the topic (e.g. a narrative that
@@ -922,6 +978,22 @@ def _filename_bonus(filename: Optional[str]) -> Dict[str, float]:
     return bonus
 
 
+def _references_acord_form(text_lower: str, filename: Optional[str]) -> bool:
+    """True when a document clearly references an ACORD form by number or name.
+
+    Pure FALLBACK signal: callers must consult it only after the specific-type
+    stages, so it never overrides a recognised application/certificate/etc. It
+    catches the ACORD forms the keyword taxonomy doesn't name individually (e.g.
+    ACORD 28/101/133/141/160) so they land in a generic ACORD bucket, not Unknown."""
+    if "acord form" in text_lower or _ACORD_FORM_RE.search(text_lower):
+        return True
+    if filename:
+        fl = re.sub(r"[._\-]+", " ", str(filename).lower())
+        if "acord form" in fl or _ACORD_FORM_RE.search(fl):
+            return True
+    return False
+
+
 def _argmax_by_priority(scores: Dict[str, float]) -> Tuple[str, float]:
     """Highest-scoring type; ties broken by _DOC_TYPE_PRIORITY."""
     if not scores:
@@ -944,7 +1016,7 @@ def classify_document(text: str, filename: Optional[str] = None) -> dict:
           "doc_type":   canonical key (or "unknown"),
           "confidence": "high" | "medium" | "low",
           "source":     "content" | "content+filename" | "narrative_rules"
-                        | "filename" | "none",
+                        | "acord_form" | "filename" | "none",
           "scores":     {doc_type: float, ...},   # fused scores (debug/UI)
           "narrative_categories": [str, ...],      # distinct narrative signals hit
         }
@@ -959,6 +1031,9 @@ def classify_document(text: str, filename: Optional[str] = None) -> dict:
          (the Beta Test 1/2 "Unknown narrative" fix).
       3. Else, content + FILENAME bonus clears the bar (filename as supporting
          evidence for a type that already had some content support).
+      3.5 Else, a clear ACORD-form reference ⇒ generic `acord_form` (catches the
+         ACORD forms the taxonomy doesn't name individually; runs only here, so
+         it never demotes a recognised specific type).
       4. Else, a filename-only match classifies at LOW confidence (never
          overrides 1–3); otherwise `unknown`.
     """
@@ -982,7 +1057,7 @@ def classify_document(text: str, filename: Optional[str] = None) -> dict:
         # the supporting type, prefer `narrative` over the weak supporting match.
         if (best_type in _PROSE_CONFUSABLE_TYPES
                 and best_type not in fbonus
-                and len(narr_cats) >= _NARRATIVE_MIN_CATEGORIES + 2):
+                and len(narr_cats) >= _PROSE_CONFUSABLE_NARRATIVE_MIN):
             return _classification(
                 "narrative", confidence="medium", source="narrative_rules",
                 scores=fused, narr_cats=narr_cats,
@@ -1010,6 +1085,17 @@ def classify_document(text: str, filename: Optional[str] = None) -> dict:
         return _classification(
             best_fused_type, confidence="medium",
             source="content+filename" if best_fused_type in fbonus else "content",
+            scores=fused, narr_cats=narr_cats,
+        )
+
+    # ── (3.5) Generic ACORD-form fallback ───────────────────────────────────
+    # A document that references an ACORD form by number/name but matched no
+    # SPECIFIC ACORD type above (e.g. ACORD 28 / 101 / 133 / 141 / 160) is a
+    # generic ACORD form - not Unknown. Reached only after the specific-type
+    # stages, so it can never demote a recognised application/certificate/etc.
+    if _references_acord_form(tl, filename):
+        return _classification(
+            "acord_form", confidence="medium", source="acord_form",
             scores=fused, narr_cats=narr_cats,
         )
 

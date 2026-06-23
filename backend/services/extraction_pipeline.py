@@ -261,6 +261,28 @@ async def _finalize_pipeline(
     merged_facts, mflags = merge_facts(active_docs, primary)
     mflags["_doc_type"]  = primary.get("doc_type", "unknown")
 
+    # ── Deterministic has_umbrella safety net (Umbrella / Excess Adequacy) ────
+    # The umbrella pillar is EXCLUDED (scored N/A) whenever has_umbrella is false,
+    # so a single missed LLM flag silently drops the entire umbrella evaluation -
+    # the client's original "100% with no umbrella" complaint, inverted. When the
+    # LLM did not set the flag, re-derive it from raw text using the SAME standard
+    # the extraction prompt enforces: a distinct umbrella/excess section with a
+    # STATED dollar amount (an umbrella/excess phrase in close proximity to a $
+    # figure) - never the bare words "excess"/"limits"/"SIR" alone. Purely
+    # additive (only ever sets the flag True), and intentionally scoped to this
+    # one flag so no other pillar's behaviour changes. Runs BEFORE the umbrella
+    # schedule / follow-form text fallback below, which is gated on this flag.
+    if not mflags.get("has_umbrella"):
+        _umb_scan = " ".join(
+            str(d.get("text", "") or "") for d in active_docs if not d.get("excluded")
+        ).lower()
+        if re.search(
+            r"(umbrella|excess)\s+(liability|coverage|policy)[^.\n]{0,60}\$\s*[\d,]+"
+            r"|\$\s*[\d,]+[^.\n]{0,60}(umbrella|excess)\s+(liability|coverage|policy)",
+            _umb_scan,
+        ):
+            mflags["has_umbrella"] = True
+
     # ── Wire loss-history flags that the scoring pillars depend on ───────────
     # Fix: no_prior_losses / narrative_states_no_losses were never set by the
     # pipeline — root cause of "score didn't move" after loss remediation (§6.4).
@@ -304,6 +326,18 @@ async def _finalize_pipeline(
                     _narrative_fact_keys.add(_nk)
     if _narrative_fact_keys:
         mflags["_narrative_fact_keys"] = list(_narrative_fact_keys)
+
+    # AI-judged fallback for the literal phrase scan above. The keyword list can only
+    # catch exact wordings; the extraction LLM (RULE 6: asserts_no_known_losses) reads
+    # each document semantically and flags paraphrases the list misses ("loss-free",
+    # "no adverse claim experience", "clean record", "claims-free for 5 years", ...).
+    # Treated as narrative/document evidence - NOT a user attestation (no_prior_losses
+    # stays reserved for the explicit questionnaire answer, preserving evidence-type
+    # differentiation). The conflict guard in _loss_history_conflict still caps the
+    # score when actual claims are present, so a false positive degrades into a
+    # conflict prompt rather than wrongful credit - same safety property as the scan.
+    if mflags.get("asserts_no_known_losses"):
+        mflags["narrative_states_no_losses"] = True
 
     # §6.3: narrative_components are detected inside every extraction call (RULE 11
     # in the extraction prompt) and OR-merged across chunks and documents during
@@ -733,6 +767,15 @@ async def resolve_submission_integrity(
     raise ValueError(f"integrity_resolve_unknown_action:{action}")
 
 
+# Corrected types whose extraction differs from the default path. Re-running
+# extraction on a correction TO one of these recovers behaviour the first
+# (mis-classified) pass skipped — Loss Runs get the claim-count text backstop and
+# a larger page budget; Schedules get a larger page budget. Every other type uses
+# the default extraction path, so a re-run would only repeat identical work and is
+# skipped to avoid a needless LLM call (Beta Report §4.2 item #5).
+_REEXTRACT_DOC_TYPES = {"loss_run", "schedule"}
+
+
 async def reclassify_document(
     session: dict,
     session_id: str,
@@ -748,7 +791,10 @@ async def reclassify_document(
     Actions:
       • set_type — set the document's type to ``new_doc_type`` (manual
                    correction; e.g. Unknown → Underwriting Narrative). Clears any
-                   prior scoring exclusion.
+                   prior scoring exclusion. When the corrected type uses
+                   type-specific extraction (Loss Runs / Schedules), the document
+                   is re-extracted from its stored text (no re-OCR) so the new
+                   type's extraction behaviour is applied.
       • exclude  — exclude the document from scoring; it stays in the session for
                    display ("Exclude from scoring").
       • include  — re-include a document as a normal scoring participant (clears
@@ -784,6 +830,28 @@ async def reclassify_document(
         cls = dict(target.get("classification") or {})
         cls.update({"doc_type": nt, "source": "manual", "confidence": "high"})
         target["classification"] = cls
+
+        # §4.2 item #5: re-run extraction when the corrected type uses
+        # type-specific extraction behaviour the first (mis-classified) pass
+        # skipped. Reuses the stored OCR text (no re-OCR). Non-fatal — on failure
+        # we keep the previously extracted facts so the correction still applies.
+        if nt in _REEXTRACT_DOC_TYPES and target.get("text"):
+            try:
+                _raw = await extract_facts_long(
+                    target["text"], nt,
+                    low_confidence_tokens=target.get("low_confidence_tokens") or [],
+                )
+                _ex = _validate_extraction_output(_raw, nt)
+                target["facts"] = _ex.get("facts", {})
+                target["flags"] = _ex.get("flags", {})
+                target["manual_confirmation_required"] = _ex.get("manual_confirmation_required") or []
+                target["truncation_warning"] = _ex.get("truncation_warning")
+                logger.info("reclassify: re-extracted doc=%s as %s", doc_id, nt)
+            except Exception as _reex:
+                logger.warning(
+                    "reclassify: re-extraction failed doc=%s type=%s — keeping prior facts: %s",
+                    doc_id, nt, _reex,
+                )
     elif action == "exclude":
         target["excluded"] = True
     elif action == "include":

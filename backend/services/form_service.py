@@ -1050,10 +1050,13 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
     # "following form excess of $1M over GL") produced NO ACORD 131 at all.
     #
     # Tier (client Q1 - "Umbrella confirmed = ACORD 131 Required"):
-    #   REQUIRED           - flag set AND corroborated by an umbrella fact or the
-    #                        literal "umbrella" / "excess liability" wording.
-    #   NEEDS CONFIRMATION - flag set but uncorroborated (bare flag, no supporting
-    #                        data yet), OR a dec-page-only line the flag missed.
+    #   REQUIRED           - has_umbrella flag confirmed by the LLM. Exactly like the
+    #                        other four primary line forms (126/127/130/140), a
+    #                        confirmed flag makes the form Required on the flag ALONE;
+    #                        an extracted umbrella fact or literal wording only refines
+    #                        the reason shown, never the tier.
+    #   NEEDS CONFIRMATION - a dec-page umbrella line WITHOUT the structured flag (the
+    #                        LLM did not confirm it), pending broker review.
     _umb_facts = any([
         _fv(facts, "umbrella_limit"),
         _fv(facts, "umbrella_attachment_point"),
@@ -1064,14 +1067,16 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
     _umb_line = _dec_line_present(search, _UMB_LINE_PHRASES)
     _umb_flag = bool(flags.get("has_umbrella"))
     if _umb_flag or _umb_line:
-        _umb_confirmed = _umb_flag and (_umb_facts or _umb_kw_in_text)
-        if _umb_confirmed:
+        # Corroboration (an umbrella fact or literal wording) refines ONLY the reason
+        # text - the tier is driven purely by whether the LLM confirmed the flag.
+        _umb_corroborated = _umb_facts or _umb_kw_in_text
+        if _umb_flag and _umb_corroborated:
             _umb_reason = "has_umbrella flag detected with supporting umbrella data"
             _umb_label  = "Umbrella / Excess coverage detected"
         elif _umb_flag:
-            _umb_reason = ("has_umbrella flag set but no umbrella limit / attachment "
-                           "point or 'umbrella' / 'excess liability' wording found to corroborate")
-            _umb_label  = "Umbrella / Excess requested - confirm underlying limits"
+            _umb_reason = ("has_umbrella flag confirmed; underlying umbrella limit / "
+                           "attachment point not yet extracted")
+            _umb_label  = "Umbrella / Excess coverage confirmed"
         else:
             _umb_reason = "umbrella / excess line detected on document (flag unconfirmed)"
             _umb_label  = "Umbrella / Excess shown on document - confirm"
@@ -1080,7 +1085,7 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
              trigger_weight=0.95,
              trigger_reason=_umb_reason,
              template_pending=True,
-             tier=TIER_REQUIRED if _umb_confirmed else TIER_NEEDS_CONFIRMATION,
+             tier=TIER_REQUIRED if _umb_flag else TIER_NEEDS_CONFIRMATION,
              reason_label=_umb_label)
 
     _prop_line = _dec_line_present(search, _PROP_LINE_PHRASES) or bool(_PROP_VALUE_RE.search(search))
@@ -1321,15 +1326,21 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
             )
 
     _cross_issues = cross_validate(facts, flags, [m["form_id"] for m in matches])
-    if len(_cross_issues) >= 2:
-        # Multiple independent conflicts → genuine underwriting concern; escalate.
+    # Client Q1 (Workstream 4): genuine "data conflicts" / "cross-document
+    # inconsistencies" escalate ACORD 101 to Recommended. A single HARD conflict is
+    # already a real underwriting concern, so it escalates on its own; a lone SOFT
+    # warning (formatting / extraction variance) still needs a second issue before
+    # it escalates, so one minor mismatch does not force 101 into every packet.
+    _cross_hard = [i for i in _cross_issues if isinstance(i, dict) and i.get("type") == "hard_stop"]
+    if _cross_hard or len(_cross_issues) >= 2:
+        # A genuine hard conflict, or multiple independent issues → escalate.
         _101_recommended_reasons.append(
             f"cross-validation flagged {len(_cross_issues)} issue(s) - data conflicts or inconsistencies require explanation"
         )
     elif _cross_issues:
-        # Single issue only → likely a minor formatting mismatch or extraction
-        # variance; keep as Optional so the broker can add context if needed
-        # without forcing an ACORD 101 into every single-document submission.
+        # A single SOFT warning only → likely a minor formatting mismatch or
+        # extraction variance; keep as Optional so the broker can add context if
+        # needed without forcing an ACORD 101 into every single-document submission.
         _101_optional_reasons.append(
             f"cross-validation flagged {len(_cross_issues)} issue(s) - review may be needed"
         )

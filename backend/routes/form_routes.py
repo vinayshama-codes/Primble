@@ -357,7 +357,13 @@ async def upload_declaration(
             "doc_summary": [_doc_summary_entry(d, primary["filename"]) for d in processed_docs],
             "available_doc_types": [{"value": t, "label": DOC_TYPE_LABELS[t]} for t in ALLOWED_DOC_TYPES],
             "primary_doc": primary["filename"], "flags": mflags,
-            "tier2_score": tier2_score, "tier2_missing": tier2_missing,
+            # Submission Integrity (§4.1): withhold the lightweight readiness number
+            # and its missing-field list while a multi-insured review is pending, so
+            # nothing derived from a possibly-mixed package is sent to the client
+            # before the review is resolved. Restored by the resolve response once the
+            # review clears.
+            "tier2_score": None if integrity.get("review_required") else tier2_score,
+            "tier2_missing": [] if integrity.get("review_required") else tier2_missing,
             "hard_stops": _remaining_hard,
             "soft_stops": soft_stops + _downgraded,
             "can_proceed_with_warning": _can_proceed_warn,
@@ -542,6 +548,12 @@ async def submission_integrity_resolve(
         "can_proceed_with_warning": _can_proceed_warn,
         "doc_conflicts": result.get("doc_conflicts") or [],
         "normalized_differences": result.get("normalized_differences") or [],
+        # Restore the readiness number once the review clears (it was withheld on
+        # upload / reload while paused); still withheld if the package remains flagged
+        # after a partial document removal, in which case the client stays on the
+        # review step and never reads these.
+        "tier2_score": None if bool(integrity.get("review_required")) else result.get("tier2_score"),
+        "tier2_missing": [] if bool(integrity.get("review_required")) else (result.get("tier2_missing") or []),
         "doc_summary": [
             _doc_summary_entry(d, (result.get("primary") or {}).get("filename", ""))
             for d in (result.get("processed_docs") or [])
@@ -608,6 +620,51 @@ async def document_reclassify(
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(
         result.get("hard_stops") or [], result.get("mflags") or {}
     )
+
+    # §4.2 item #5: recompute the Submission Readiness (SQS) from the corrected,
+    # re-scored session so the readiness score reflects the reclassification
+    # immediately and any previously persisted package SQS is refreshed rather
+    # than left stale. Deterministic (no LLM). Non-fatal — a failure here never
+    # blocks the reclassification itself.
+    package_sqs = None
+    try:
+        from services.sqs_service import calculate_sqs_from_facts
+        _facts    = result.get("merged_facts") or {}
+        _flags    = result.get("mflags") or {}
+        _form_ids = [r.get("form_id") for r in (result.get("recommendations") or []) if r.get("form_id")]
+        if _form_ids:
+            _sess = await get_processing_session(result["session_id"])
+            _hard = result.get("hard_stops") or []
+            _soft = result.get("soft_stops") or []
+            _t2   = result.get("tier2_score") or 50
+            _seen, _cross = set(), []
+            for _iss in cross_validate(_facts, _flags, _form_ids):
+                _m = _iss.get("message", "")
+                if _m not in _seen:
+                    _seen.add(_m); _cross.append(_iss)
+            _per_form = []
+            for _fid in _form_ids:
+                try:
+                    _per_form.append(calculate_sqs_from_facts(
+                        facts=_facts, flags=_flags, selected_form_ids=_form_ids,
+                        hard_stops=_hard, soft_stops=_soft, tier2_score=_t2,
+                        form_id=_fid, session_data=_sess,
+                    ))
+                except Exception as _sf_ex:
+                    logger.warning(f"reclassify per-form SQS failed for {_fid}: {_sf_ex}")
+            package_sqs = calculate_package_sqs(
+                facts=_facts, flags=_flags, form_results=_per_form,
+                cross_issues=_cross, hard_stops=_hard, soft_stops=_soft,
+                session_data=_sess, session_id=result["session_id"],
+                user_id=str(current_user["id"]),
+            )
+            try:
+                await upd_processing_session(result["session_id"], {"package_sqs": package_sqs})
+            except Exception as _persist_ex:
+                logger.warning(f"reclassify persist package_sqs failed: {_persist_ex}")
+    except Exception as _sqs_ex:
+        logger.warning(f"reclassify readiness recompute failed: {_sqs_ex}")
+
     return JSONResponse({
         "success": True,
         "session_id": result["session_id"],
@@ -629,6 +686,7 @@ async def document_reclassify(
         "normalized_differences": result.get("normalized_differences") or [],
         "tier2_score": result.get("tier2_score"),
         "tier2_missing": result.get("tier2_missing") or [],
+        "package_sqs": package_sqs,
         "integrity": integrity,
         "integrity_review_required": bool(integrity.get("review_required")),
         "underwriting_consistency": result.get("underwriting_consistency") or {},
@@ -655,6 +713,10 @@ async def session_marketing_reason(
     session = await get_processing_session(session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+    # Submission Integrity gate (Beta Report §4.1): this path recomputes form
+    # recommendations directly (not through the short-circuiting pipeline), so it
+    # must not run on a package still pending multi-insured review.
+    enforce_integrity_gate(session)
 
     try:
         result = await apply_marketing_reason(
@@ -922,6 +984,27 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             await _queue.update_status(_job_id, STATUS_FAILED, error="No forms could be generated")
             raise HTTPException(400, "No forms could be generated")
 
+        # ── §4.3 item 2: post-generation cross-form consistency assertion ────
+        # Confirm the value actually stamped into every generated form for each
+        # reconcilable underwriting field (e.g. Gross Sales) agrees with the
+        # confirmed/merged figure. Non-blocking: any drift is surfaced to the
+        # user via the cross-issues channel and persisted for audit; it never
+        # alters a form or affects scoring.
+        _stamp_check  = {"ok": True, "checked": 0, "mismatches": []}
+        _stamp_issues = []
+        try:
+            from services.underwriting_consistency import (
+                verify_stamped_consistency, stamp_mismatch_issues,
+            )
+            _stamp_check = verify_stamped_consistency(
+                results,
+                merged_facts=session.get("facts") or {},
+                confirmations=session.get("underwriting_confirmations") or {},
+            )
+            _stamp_issues = stamp_mismatch_issues(_stamp_check)
+        except Exception as _vex:
+            logger.warning("select_forms_bulk: stamped-consistency check skipped: %s", _vex)
+
         cross_issues_raw     = cross_validate(session["facts"], session["flags"], combined_ids)
         seen_msgs            = set()
         cross_issues_deduped = []
@@ -931,10 +1014,15 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                 seen_msgs.add(msg)
                 cross_issues_deduped.append(issue)
 
+        # Display copy = cross-form validation issues + any stamp-mismatch
+        # advisory. cross_issues_deduped stays pure for SQS scoring below.
+        _display_cross = cross_issues_deduped + _stamp_issues
+
         await upd_processing_session(req.session_id, {
             "selected_form_ids": combined_ids, "generated_forms": results,
             "active_form_id": combined_ids[0] if combined_ids else None,
-            "cross_issues_last": cross_issues_deduped,
+            "cross_issues_last": _display_cross,
+            "underwriting_stamp_consistency": _stamp_check,
         })
 
         summary = {}
@@ -987,8 +1075,9 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             "success": True,
             "generated": summary,
             "form_ids": combined_ids,
-            "cross_issues": cross_issues_deduped,
+            "cross_issues": _display_cross,
             "package_sqs": package_sqs,
+            "stamp_consistency": _stamp_check,
         })
     except HTTPException:
         raise
@@ -1512,8 +1601,11 @@ async def get_extraction_result(
         "soft_stops":            proc_session.get("soft_stops", []) + _downgraded,
         "can_proceed_with_warning": _can_proceed_warn,
         "warning_stops":         _downgraded,
-        "tier2_score":           proc_session.get("tier2_score"),
-        "tier2_missing":         proc_session.get("tier2_missing", []),
+        # Submission Integrity (§4.1): same withholding as the upload response - a
+        # paused session reloaded (e.g. browser refresh on the review screen) must
+        # not re-transmit the readiness number derived from a possibly-mixed package.
+        "tier2_score":           None if integrity.get("review_required") else proc_session.get("tier2_score"),
+        "tier2_missing":         [] if integrity.get("review_required") else proc_session.get("tier2_missing", []),
         "recommendations":       proc_session.get("recommendations", []),
         "account_profile":       proc_session.get("account_profile", {}),
         "all_available_forms":   score_extra_forms(

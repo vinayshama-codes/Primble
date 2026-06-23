@@ -112,7 +112,18 @@ def _normalize_name(value: Any) -> str:
 
 
 def _normalize_fein(value: Any) -> str:
-    """Digits-only FEIN. Returns '' if fewer than 9 digits (incomplete / not a FEIN)."""
+    """Digits-only FEIN. Returns '' unless EXACTLY 9 digits (a complete US FEIN).
+
+    INTENTIONAL DECISION (§4.1, mirrors services.normalization.normalize_fein):
+    requiring exactly 9 digits means a partial/over-long OCR read normalizes to ''
+    (treated as ABSENT, so identity falls back to the applicant name) rather than a
+    distinct value that could manufacture a FALSE cross-document FEIN conflict and a
+    spurious multi-insured pause. We deliberately do NOT loosen this to 8-digit /
+    near-match: a near-FEIN cannot be compared reliably (a dropped middle digit
+    makes the same insured look like two), so loosening would trade a rare missed
+    detection - already covered by name clustering - for false blocks. Keep these
+    two normalizers in lockstep.
+    """
     if value is None:
         return ""
     digits = re.sub(r"\D", "", str(value))
@@ -377,7 +388,17 @@ def assess_submission_integrity(docs: List[dict]) -> dict:
 
 
 def _soft_divergence_reasons(doc_sigs: List[dict]) -> List[str]:
-    """Non-blocking signals: same/compatible names but other identity fields differ."""
+    """Non-blocking signals: same/compatible names but other identity fields differ.
+
+    INTENTIONAL DECISION (§4.1 action item 2): when the applicant names align, a
+    difference in DBA / address / entity type / operations / policy number /
+    effective date / carrier / account description downgrades the verdict to MEDIUM
+    (review recommended) but does NOT pause the workflow. These are normal for a
+    single insured - multiple locations, a renewal onto a new carrier, several
+    policies - so escalating them to a blocking LOW would generate false positives.
+    Only distinct insured NAMES or distinct FEINs drive a blocking pause; this is a
+    deliberate product choice, not a missing block.
+    """
     reasons: List[str] = []
 
     def _distinct(field: str) -> List[str]:

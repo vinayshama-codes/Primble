@@ -134,11 +134,19 @@ def test_umbrella_gl_aggregate_meeting_baseline_keeps_full_credit():
 def test_umbrella_state_machine():
     assert sq._get_umbrella_state({}, {}) == "not_applicable"
     assert sq._get_umbrella_state({}, {"has_umbrella": True}) == "insufficient_information"
-    assert sq._get_umbrella_state({"umbrella_limit": "5000000"}, {"has_umbrella": True}) == "umbrella_information_provided"
+    # Umbrella limit present but NO underlying GL/Auto value: scorer returns 0 and a
+    # hard stop fires, so the state must read as a problem (Unknown), never a benign
+    # "information provided" label (§6.5 state/score-agreement fix).
+    assert sq._get_umbrella_state({"umbrella_limit": "5000000"}, {"has_umbrella": True}) == "unknown"
     low = {"umbrella_limit": "5000000", "gl_limits": "500000"}
     assert sq._get_umbrella_state(low, {"has_umbrella": True}) == "umbrella_coverage_needs_review"
+    # Limits meet thresholds but NO supporting evidence (no schedule, no follow-form)
+    # → information is provided yet coverage is not corroborated (§6.5 7th state).
     ok = {"umbrella_limit": "5000000", "gl_limits": "1000000", "auto_liability_limit": "1000000"}
-    assert sq._get_umbrella_state(ok, {"has_umbrella": True}) == "umbrella_coverage_present"
+    assert sq._get_umbrella_state(ok, {"has_umbrella": True}) == "umbrella_information_provided"
+    # One supporting document present (schedule OR follow-form) → coverage present.
+    ok_partial = {**ok, "schedule_of_underlying_insurance": "GL $1M/$2M; Auto $1M CSL"}
+    assert sq._get_umbrella_state(ok_partial, {"has_umbrella": True}) == "umbrella_coverage_present"
     full = {
         "umbrella_limit": "5000000", "gl_limits": "1000000", "auto_liability_limit": "1000000",
         "schedule_of_underlying_insurance": "GL $1M/$2M; Auto $1M CSL",
@@ -165,10 +173,11 @@ def test_umbrella_state_demotes_when_flagged_coverage_limit_missing():
     assert sq._get_umbrella_state(
         gl_missing, {"has_umbrella": True, "has_general_liability": True}
     ) == "umbrella_coverage_needs_review"
-    # No coverage flag set → absent underlying limit is not demoted (unchanged path).
+    # No coverage flag set → absent underlying limit is NOT demoted to needs_review;
+    # with no supporting evidence it reads as information provided (§6.5 7th state).
     assert sq._get_umbrella_state(
         {"umbrella_limit": "5000000", "gl_limits": "1000000"}, {"has_umbrella": True}
-    ) == "umbrella_coverage_present"
+    ) == "umbrella_information_provided"
 
 
 # ── Follow-form Option B (Q4) ─────────────────────────────────────────────────
@@ -928,6 +937,36 @@ def test_derive_evidence_labels_normal_without_narrative_keys():
     facts = {"applicant_name": {"value": "Acme Corp", "confidence": "filled"}}
     labels = sq._derive_evidence_labels(facts)
     assert labels.get("applicant_name") == "extracted_from_source"
+
+
+def test_evidence_labels_not_applicable_and_requires_doc():
+    # §6.1 item 3: coverage-specific facts absent when their line of business is not in
+    # the submission read "not applicable"; the umbrella underlying schedule / follow-form
+    # absent (umbrella present) and loss-run years absent (no loss run, no attestation)
+    # read "requires supporting documentation".
+    facts = {"applicant_name": {"value": "Acme", "confidence": "filled"}}
+    flags = {"has_umbrella": True}
+    labels = sq._derive_evidence_labels(facts, flags=flags, has_loss_run_doc=False)
+    # No GL / Auto / WC / property coverage flags → those coverage facts are not applicable.
+    assert labels.get("gl_each_occurrence") == "not_applicable"
+    assert labels.get("auto_liability_limit") == "not_applicable"
+    assert labels.get("employers_liability_limits") == "not_applicable"
+    assert labels.get("year_built") == "not_applicable"
+    # Umbrella present but underlying schedule / follow-form absent → requires a document.
+    assert labels.get("schedule_of_underlying_insurance") == "requires_supporting_doc"
+    assert labels.get("umbrella_follow_form") == "requires_supporting_doc"
+    # Loss-run years absent with no loss run on file and no attestation → requires loss runs.
+    assert labels.get("loss_history_years") == "requires_supporting_doc"
+
+
+def test_evidence_labels_requires_doc_cleared_by_attestation_and_coverage():
+    # A no-loss attestation clears the loss "requires doc"; with no umbrella the
+    # underlying schedule is "not applicable" rather than "requires doc".
+    facts = {"applicant_name": {"value": "Acme", "confidence": "filled"}}
+    flags = {"no_prior_losses": True}
+    labels = sq._derive_evidence_labels(facts, flags=flags, has_loss_run_doc=False)
+    assert labels.get("loss_history_years") == "not_found"
+    assert labels.get("schedule_of_underlying_insurance") == "not_applicable"
 
 
 # ── Fix #2: warning language — messages humanized, machine matching preserved ──

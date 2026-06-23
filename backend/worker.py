@@ -328,6 +328,24 @@ async def _process_form_generation_job(job: dict, queue) -> None:
             await queue.update_status(job_id, "failed", error="no_forms_generated")
             return
 
+        # §4.3 item 2: post-generation cross-form consistency assertion (mirrors
+        # the sync select_forms_bulk path). Non-blocking: any drift is surfaced
+        # via the cross-issues channel and persisted for audit; scoring untouched.
+        _stamp_check  = {"ok": True, "checked": 0, "mismatches": []}
+        _stamp_issues = []
+        try:
+            from services.underwriting_consistency import (
+                verify_stamped_consistency, stamp_mismatch_issues,
+            )
+            _stamp_check = verify_stamped_consistency(
+                results,
+                merged_facts=session.get("facts") or {},
+                confirmations=session.get("underwriting_confirmations") or {},
+            )
+            _stamp_issues = stamp_mismatch_issues(_stamp_check)
+        except Exception as _vex:
+            logger.warning("Job %s: stamped-consistency check skipped: %s", job_id, _vex)
+
         cross_issues_raw     = cross_validate(session["facts"], session.get("flags", {}), form_ids)
         seen_msgs            = set()
         cross_issues_deduped = []
@@ -373,11 +391,14 @@ async def _process_form_generation_job(job: dict, queue) -> None:
                     "model_version":     SQS_MODEL_VERSION,
                 }
 
+        # Display copy = cross-form validation + any stamp-mismatch advisory.
+        # SQS above used the pure cross_issues_deduped, so scoring is untouched.
         _update_payload = {
             "selected_form_ids": form_ids,
             "generated_forms":   results,
             "active_form_id":    form_ids[0] if form_ids else None,
-            "cross_issues_last": cross_issues_deduped,
+            "cross_issues_last": cross_issues_deduped + _stamp_issues,
+            "underwriting_stamp_consistency": _stamp_check,
         }
         if package_sqs is not None:
             _update_payload["package_sqs"] = package_sqs

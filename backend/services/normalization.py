@@ -60,9 +60,50 @@ CARRIER_FIELDS = frozenset({
 })
 FEIN_FIELDS = frozenset({"fein", "fein_ssn", "tax_id"})
 
+# Curated name-like keys that hold an organization name but do NOT end in
+# "_name" (holder / payee style). Extend here if new such keys appear.
+_NAME_LIKE_KEYS = frozenset({"certificate_holder"})
+
+
+def _infer_field_category(field: str) -> Optional[str]:
+    """Infer a normalization category from the SHAPE of a fact key.
+
+    The explicit *_FIELDS sets are the authoritative overrides; this is the
+    fallback so any SECONDARY or NEW key carrying a known data type still gets
+    type-correct normalization instead of silently dropping to the generic text
+    normalizer (Beta Report §5: normalization must be generic for any document,
+    not only the canonical identity fields). Returns one of
+    {"date", "address", "carrier", "name"} or None.
+    """
+    if not field:
+        return None
+    f = field.lower()
+    # Date: any "..._date" key (effective / expiration / retro / completion / ...).
+    if f.endswith("_date"):
+        return "date"
+    # Address: any "..._address" / "..._addresses" key.
+    if f.endswith("_address") or f.endswith("_addresses"):
+        return "address"
+    # Carrier: any key naming a carrier/insurer - but NOT a NAIC code, a coverage
+    # "type", or a generic "_code" (those are not carrier NAMES).
+    if ("carrier" in f or "insurer" in f) and "naic" not in f \
+            and not f.endswith("_type") and not f.endswith("_code"):
+        return "carrier"
+    # Organization name: any "..._name" key, plus curated holder/payee keys.
+    if f.endswith("_name") or f in _NAME_LIKE_KEYS:
+        return "name"
+    return None
+
 
 def is_carrier_field(field: str) -> bool:
-    return field in CARRIER_FIELDS
+    """True when ``field`` names a carrier/insurer.
+
+    Mirrors the carrier dispatch in normalize_value (explicit set OR inferred
+    shape) so the cross-document detector labels carrier differences - including
+    secondary keys like wc_prior_carrier - as a REVIEW item rather than a
+    definitive conflict (Beta Report §5.2).
+    """
+    return field in CARRIER_FIELDS or _infer_field_category(field) == "carrier"
 
 
 # ── Entity suffixes / synonyms ────────────────────────────────────────────────
@@ -174,6 +215,21 @@ _UNIT_MARKERS = frozenset({
     "fl", "floor", "bldg",
 })
 
+# Compass directionals collapsed to their abbreviation so "North Main" and
+# "N Main" compare equal. Directionals were not enumerated in §5.2 but follow the
+# same suffix-abbreviation intent. DISTINCT directions stay distinct (n != s), so
+# this only suppresses formatting noise - it never merges two different addresses.
+_DIRECTIONALS = {
+    "north": "n", "n": "n",
+    "south": "s", "s": "s",
+    "east": "e", "e": "e",
+    "west": "w", "w": "w",
+    "northeast": "ne", "ne": "ne",
+    "northwest": "nw", "nw": "nw",
+    "southeast": "se", "se": "se",
+    "southwest": "sw", "sw": "sw",
+}
+
 
 # ── Carrier seed alias map (Beta Report §5.2 carrier handling) ────────────────
 
@@ -196,10 +252,17 @@ _CARRIER_ALIASES = {
 # ── Low-level cleaners ────────────────────────────────────────────────────────
 
 def _basic(s: Any) -> str:
-    """Lowercase, replace '&' with 'and', drop punctuation, collapse whitespace."""
+    """Lowercase, replace '&' with 'and', drop punctuation, collapse whitespace.
+
+    Dotted initialisms are collapsed first (N.A. -> na, L.L.C. -> llc, U.S.A. ->
+    usa) so periods are truly ignored per Beta Report §5.2 and a dotted entity
+    suffix matches its plain form. Only sequences of 2+ single-letter-dot groups
+    are collapsed, so "St.Mary" (glued OCR) and "Inc." are left untouched.
+    """
     if s is None:
         return ""
     s = str(s).lower().replace("&", " and ")
+    s = re.sub(r"(?:\b[a-z]\.){2,}", lambda m: m.group(0).replace(".", ""), s)
     s = re.sub(r"[^a-z0-9\s]+", " ", s)
     return re.sub(r"\s+", " ", s).strip()
 
@@ -278,9 +341,10 @@ def normalize_address(value: Any) -> str:
     """Street address for comparison.
 
     Lowercases, treats '#' as a separator, drops punctuation, maps street-suffix
-    words to their abbreviation (Street->st, Avenue->ave, ...), and removes unit
-    markers (Suite/Ste/Unit/#) so "4800 DAHLIA ST #D13" and "4800 Dahlia Street
-    D13" both reduce to "4800 dahlia st d13".
+    words to their abbreviation (Street->st, Avenue->ave, ...), standardizes
+    compass directionals (North->n, ...), and removes unit markers
+    (Suite/Ste/Unit/#) so "4800 DAHLIA ST #D13" and "4800 Dahlia Street D13" both
+    reduce to "4800 dahlia st d13".
     """
     if value is None:
         return ""
@@ -291,6 +355,7 @@ def normalize_address(value: Any) -> str:
     for tok in tokens:
         if tok in _UNIT_MARKERS:
             continue
+        tok = _DIRECTIONALS.get(tok, tok)
         out.append(_STREET_SUFFIXES.get(tok, tok))
     return " ".join(out).strip()
 
@@ -324,11 +389,18 @@ def normalize_carrier(value: Any) -> str:
 
 
 def normalize_fein(value: Any) -> str:
-    """Digits-only FEIN. Returns '' when fewer than 9 digits (incomplete)."""
+    """Digits-only FEIN. Returns '' unless exactly 9 digits (a complete US FEIN).
+
+    A US FEIN/EIN is exactly 9 digits. Requiring an exact length (rather than ">=
+    9") means an over-long OCR/extraction artifact normalizes to '' (no signal,
+    treated as absent) instead of a distinct value that could manufacture a false
+    cross-document FEIN conflict. Mirrors the rule in submission_integrity so the
+    two modules agree.
+    """
     if value is None:
         return ""
     digits = re.sub(r"\D", "", str(value))
-    return digits if len(digits) >= 9 else ""
+    return digits if len(digits) == 9 else ""
 
 
 def normalize_general(value: Any) -> str:
@@ -358,19 +430,33 @@ def normalize_general(value: Any) -> str:
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
+def _normalize_date_or_general(value: Any) -> str:
+    """ISO date when parseable, else the general text normalization.
+
+    Shared by the explicit DATE_FIELDS and any inferred "_date" key so both paths
+    behave identically: a real date compares by calendar value, while an
+    un-date-like string still compares as text rather than collapsing to ''.
+    """
+    iso = normalize_date(value)
+    # Unparseable dates fall back to general text so two genuinely different
+    # un-date-like strings still differ rather than both collapsing to ''.
+    return iso if iso is not None else normalize_general(value)
+
+
 def normalize_value(field: str, value: Any) -> str:
     """Return the canonical COMPARISON string for ``value`` given its fact key.
 
-    '' means "no usable signal" — the caller should treat it as absent (not as a
-    distinct value), so a missing/garbage value never manufactures a conflict.
+    Dispatch order: the explicit *_FIELDS sets first (authoritative), then a
+    shape-based inference fallback (_infer_field_category) so a secondary or new
+    key of a known type is still normalized correctly instead of dropping to the
+    generic normalizer. '' means "no usable signal" — the caller treats it as
+    absent so a missing/garbage value never manufactures a conflict.
     """
+    # 1. Explicit category sets — authoritative; never changes existing behavior.
     if field in NAME_FIELDS:
         return normalize_name(value)
     if field in DATE_FIELDS:
-        iso = normalize_date(value)
-        # Unparseable dates fall back to general text so two genuinely different
-        # un-date-like strings still differ rather than both collapsing to ''.
-        return iso if iso is not None else normalize_general(value)
+        return _normalize_date_or_general(value)
     if field in ENTITY_TYPE_FIELDS:
         return normalize_entity_type(value)
     if field in ADDRESS_FIELDS:
@@ -379,6 +465,18 @@ def normalize_value(field: str, value: Any) -> str:
         return normalize_carrier(value)
     if field in FEIN_FIELDS:
         return normalize_fein(value)
+    # 2. Shape-based inference for keys outside the explicit sets (Beta Report §5:
+    #    normalization must be generic for any document, not only canonical keys).
+    category = _infer_field_category(field)
+    if category == "date":
+        return _normalize_date_or_general(value)
+    if category == "address":
+        return normalize_address(value)
+    if category == "carrier":
+        return normalize_carrier(value)
+    if category == "name":
+        return normalize_name(value)
+    # 3. Generic fallback (insurance synonyms, currency, punctuation).
     return normalize_general(value)
 
 

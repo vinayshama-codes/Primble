@@ -86,7 +86,7 @@ const UMBRELLA_STATE_LABEL = {
 // §6.4: loss-history evidence states (mirror backend LOSS_HISTORY_STATE_LABELS).
 const LOSS_HISTORY_STATE_LABEL = {
   no_information:                  "No loss information provided",
-  user_states_no_losses:          "User states no prior losses",
+  user_states_no_losses:          "User states No Known Losses",
   narrative_states_no_losses:     "Narrative states no losses",
   loss_runs_pending:              "Loss runs requested / pending",
   loss_runs_uploaded:             "Loss runs uploaded - years not yet confirmed",
@@ -109,8 +109,8 @@ const NARRATIVE_COMPONENT_LABELS = {
   carrier_market:      "Prior Carrier Context",
   location_exposure:   "Location Details",
   employee_practices:  "Employee / Payroll Context",
-  growth_trends:       "Growth Trends",
-  target_markets:      "Target Markets",
+  growth_trends:       "WC Payroll / Class Code Context",
+  target_markets:      "EMOD / XMOD Information",
 };
 
 const REC_TYPE_STYLE = {
@@ -1547,7 +1547,7 @@ const AcordModal = forwardRef(function AcordModal({
       body = statusOverride.body || "";
     } else if (kind === "generate") {
       title = "Primble - Forms Generated";
-      body = "Your ACORD forms are ready to review.";
+      body = "Your ACORD forms are ready for review.";
     } else {
       title = "Primble - Documents Processed";
       body = "Processing complete.";
@@ -1845,6 +1845,9 @@ const AcordModal = forwardRef(function AcordModal({
       setAccountProfile(data.account_profile || null);
       setCheckedFormIds(new Set());
       setUnderwriting(data.underwriting_consistency || null);
+      // Readiness number was withheld while the review was pending; restore it now
+      // that the package is cleared so the bar shows on the recommendations screen.
+      setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
       // Workstream 6 §9.1 - integrity resolved → announce the now-current status
       // (hard stops / warnings / ready) as the user lands on the recommendations
       // screen, so they immediately know what to do next. When the package was
@@ -1900,6 +1903,9 @@ const AcordModal = forwardRef(function AcordModal({
       // corrected classification visibly updates downstream scoring (§4.2).
       if (data.tier2_score !== undefined) setTier2Score(data.tier2_score);
       if (data.tier2_missing) setTier2Missing(data.tier2_missing);
+      // Recomputed Submission Readiness (SQS) returned by the reclassify call
+      // (§4.2 item #5) — keep the package score in sync so it is never stale.
+      if (data.package_sqs) setPackageSqs(data.package_sqs);
       if (data.integrity) setIntegrity(data.integrity);
       if (data.underwriting_consistency) setUnderwriting(data.underwriting_consistency);
     } catch (e) {
@@ -2559,24 +2565,18 @@ const AcordModal = forwardRef(function AcordModal({
           const liteReady = !liteGenerating && !!sqs;
           const liteGradeColor = g => ({ A: "#10b981", B: "#eab308", C: "#f59e0b", D: "#ef4444", F: "#ef4444" }[g] || "#94a3b8");
           const liteGradeBg = g => ({ A: "rgba(16,185,129,0.08)", B: "rgba(234,179,8,0.08)", C: "rgba(245,158,11,0.08)", D: "rgba(239,68,68,0.08)", F: "rgba(239,68,68,0.08)" }[g] || "rgba(148,163,184,0.08)");
-          // Two routing label sets coexist in the backend:
-          //   • per-form  (calculate_sqs):           auto_quote | review | full_review | hold
-          //   • package   (calculate_package_sqs):   auto_quote | priority_review | standard_review | hold
-          // Map both so package-level scores don't render as raw enum strings.
+          // Unified routing ladder (both per-form and package):
+          //   auto_quote > 85 | priority_review >= 70 | standard_review >= 50 | hold
           const routingLabel = {
             auto_quote:       "Auto-Route to Quoting",
-            review:           "Light Review",
             priority_review:  "Priority Review",
             standard_review:  "Standard Review",
-            full_review:      "Full Package Review",
             hold:             "Hold - Remediation Required",
           };
           const routingStyle = {
             auto_quote:      { bg: "#dcfce7", color: "#166534", border: "#86efac" },
-            review:          { bg: "#fef9c3", color: "#854d0e", border: "#fde047" },
             priority_review: { bg: "#fef9c3", color: "#854d0e", border: "#fde047" },
             standard_review: { bg: "#fef3c7", color: "#92400e", border: "#fcd34d" },
-            full_review:     { bg: "#fef2f2", color: "#991b1b", border: "#fecaca" },
             hold:            { bg: "#fee2e2", color: "#991b1b", border: "#fca5a5" },
           };
           const rd = sqs?.routing_decision;
@@ -3328,7 +3328,10 @@ const AcordModal = forwardRef(function AcordModal({
                   </div>
                 )}
                 {marketingBusy && (
-                  <div style={{ marginTop: 8, fontSize: 12, color: "#9d0f5a" }}>Updating recommendations...</div>
+                  <div style={{ marginTop: 8, fontSize: 12, color: "#9d0f5a", display: "flex", alignItems: "center", gap: 7 }}>
+                    <span style={{ width: 11, height: 11, border: "2px solid rgba(230,27,132,0.25)", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite", flexShrink: 0 }} />
+                    Updating recommendations...
+                  </div>
                 )}
               </div>
             )}
@@ -3490,10 +3493,10 @@ const AcordModal = forwardRef(function AcordModal({
               </div>
               <div style={{ padding: "14px 14px 12px" }}>
                 {/* Workstream 6 9.1 - next-step guidance, driven by the live package
-                    SQS: flips to "Ready for submission" above 90, and re-renders
+                    SQS: flips to "Ready to Send Submission" at 90 or above, and re-renders
                     whenever edits or questionnaire answers change the package score. */}
                 <div style={{ marginBottom: 12 }}>
-                  <NextStepBanner text={(packageSqs?.package_sqs_score ?? 0) > 90 ? "Ready for submission" : "Ready to Download Forms"} />
+                  <NextStepBanner text={(packageSqs?.package_sqs_score ?? 0) >= 90 ? "Ready to Send Submission" : "Ready to Download Forms"} />
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Generated Forms</span>
@@ -3612,12 +3615,10 @@ const AcordModal = forwardRef(function AcordModal({
                     {activeSqs.routing_decision && (
                       <div style={{ padding: "5px 9px", fontSize: 11, fontWeight: 700, textAlign: "center", marginBottom: 12, color: "#000" }}>
                         {{
-                          auto_quote: "Auto-Route to Quoting",
-                          review: "Light Review",
-                          priority_review: "Priority Review",
-                          standard_review: "Standard Review",
-                          full_review: "Full Package Review",
-                          hold: "Hold - Remediation Required",
+                          auto_quote:       "Auto-Route to Quoting",
+                          priority_review:  "Priority Review",
+                          standard_review:  "Standard Review",
+                          hold:             "Hold - Remediation Required",
                         }[activeSqs.routing_decision] || activeSqs.routing_decision}
                       </div>
                     )}
@@ -3739,7 +3740,7 @@ const AcordModal = forwardRef(function AcordModal({
                           })}
                         </div>
                         <div style={{ fontSize: 8.5, color: "#94a3b8", marginTop: 5, lineHeight: 1.45, fontStyle: "italic" }}>
-                          When multiple forms are selected, each pillar is averaged across all forms first, then the weights above are applied. This is why the package score may not match a plain average of individual form scores.
+                          Each package pillar is computed directly from the combined facts across all uploaded documents - not averaged from per-form scores. This is why the package score can differ from any individual form&apos;s score.
                         </div>
 
                         {/* §6.1 item 4 - positive scoring signals credited */}

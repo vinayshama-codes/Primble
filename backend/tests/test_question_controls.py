@@ -103,6 +103,39 @@ def test_tier2_and_coverage_fields_are_important():
         assert tax["priority"] == PRIORITY_IMPORTANT, f
 
 
+def test_raw_acord_client_fields_scored_on_canonical_key():
+    # Regression: the producer forms key every field by its raw ACORD name. When
+    # the resolved canonical key is supplied, a client fact arriving under its raw
+    # name must be scored as the fact it represents (critical/important) instead of
+    # being demoted to optional or swept into the internal panel.
+    crit = classify_question(
+        "NamedInsured_FullName", ["ACORD_125"],
+        is_curated_client=True, canonical_key="applicant_name",
+    )
+    assert crit["audience"] == AUDIENCE_CLIENT
+    assert crit["priority"] == PRIORITY_CRITICAL
+    assert crit["topic_group"] == TOPIC_APPLICANT
+
+    imp = classify_question(
+        "CommercialGeneralLiability_GeneralAggregateLimit_Amount", ["ACORD_126"],
+        is_curated_client=True, canonical_key="gl_aggregate",
+    )
+    assert imp["audience"] == AUDIENCE_CLIENT
+    assert imp["priority"] == PRIORITY_IMPORTANT
+    assert imp["topic_group"] == TOPIC_GL
+
+
+def test_raw_acord_plumbing_still_internal_even_with_canonical_signal():
+    # The canonical-key fix must not weaken Rule 7 or the suppression patterns.
+    fax = classify_question("Producer_FaxNumber", ["ACORD_125"], canonical_key=None)
+    assert fax["audience"] == AUDIENCE_DO_NOT_SEND
+    assert fax["suppressed"] is True
+
+    obscure = classify_question("GeneralLiability_Obscure_Field_7", ["ACORD_126"])
+    assert obscure["audience"] == AUDIENCE_INTERNAL
+    assert obscure["suppressed"] is True
+
+
 def test_uncurated_raw_field_defaults_to_internal():
     # Rule 7 — the workhorse. An obscure raw PDF field nobody curated is internal.
     tax = classify_question("GeneralLiability_SupplementalSubcode_Indicator_B", ["ACORD_126"])

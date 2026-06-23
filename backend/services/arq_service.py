@@ -114,7 +114,7 @@ _FIELD_QUESTION_MAP = {
     "num_claims":               "How many insurance claims has your business filed in the last 3 to 5 years?",
     "loss_history_years":       "How many years of past insurance claims history are you able to provide?",
     # §6.4: lets the client attest "no prior losses" so the loss-history score can move.
-    "loss_history_no_prior_losses_indicator": "To the best of your knowledge, has your business had NO insurance claims or losses in the past 5 years? (Answer 'Yes' to confirm no prior losses.)",
+    "loss_history_no_prior_losses_indicator": "To the best of your knowledge, has your business had NO insurance claims or losses in the past 5 years? (Answer 'Yes' to confirm No Known Losses - the industry term for an account with no reported claims.)",
     "certificate_holder":       "Is there a company, landlord, or individual who needs written proof of your insurance? If yes, what is their name and address?",
     # Prior carrier / marketing context (Brent feedback: questionnaire more reliable than document extraction)
     "carrier_marketing_reason": "Why are you marketing this account at this time?",
@@ -875,7 +875,7 @@ def _maybe_inject_no_loss_question(questions: List[dict], facts: dict, flags: di
 LOSS_CONFLICT_FIELD = "additional_remarks_text"
 
 _LOSS_CONFLICT_QUESTION = (
-    "Your submission indicates no prior losses, but the uploaded loss runs show "
+    "Your submission indicates No Known Losses, but the uploaded loss runs show "
     "one or more claims. Please explain the discrepancy - for example, the loss "
     "runs may belong to a related entity, cover a different period, or those "
     "claims may now be closed."
@@ -1186,6 +1186,11 @@ async def generate_arq_questions(
         base_lower = base.lower()
         if any(lower.startswith(p) or base_lower.startswith(p) for p, _, __ in _FIELD_PREFIX_MAP):
             continue
+        # A raw field that resolves to a curated canonical fact reuses that fact's
+        # plain-language question text, so it needs no humanization call.
+        _canon = _canonical_key(field_name)
+        if _canon and _canon in _FIELD_QUESTION_MAP:
+            continue
         # Only spend an LLM humanization call on fields that will actually reach
         # the client. Raw/internal form fields get the no-LLM readable fallback
         # and live in the collapsed "Internal / Producer Review" panel — so the
@@ -1193,6 +1198,7 @@ async def generate_arq_questions(
         pre = classify_question(
             field_name, list(missing_fields[field_name]),
             is_curated_client=_is_curated_client_field(field_name),
+            canonical_key=_canon,
         )
         if pre["audience"] != AUDIENCE_CLIENT:
             continue
@@ -1216,7 +1222,11 @@ async def generate_arq_questions(
         if canon and not canon.startswith("_"):
             seen_canon_keys.add(canon)
 
-        base_question, group_label = _resolve_question(field_name)
+        # Prefer the curated, plain-language question/hint when the raw ACORD
+        # field resolves to a known canonical fact, so a client-facing question
+        # reads cleanly instead of as a mangled raw field name.
+        text_key = canon if (canon and canon in _FIELD_QUESTION_MAP) else field_name
+        base_question, group_label = _resolve_question(text_key)
 
         if group_label is not None:
             group_counts[group_label] = group_counts.get(group_label, 0) + 1
@@ -1248,7 +1258,7 @@ async def generate_arq_questions(
                     field_type = "checkbox"
                     break
 
-        hint = _FIELD_HINT_MAP.get(field_name, "")
+        hint = _FIELD_HINT_MAP.get(text_key, "") or _FIELD_HINT_MAP.get(field_name, "")
         if not hint:
             base_fn = re.sub(r'[_\s]+[a-z]$', '', field_name)
             base_fn = re.sub(r'[_\s]+\d+$', '', base_fn)
@@ -1268,6 +1278,38 @@ async def generate_arq_questions(
             "_is_curated_client": _is_curated_client_field(field_name),
             "_canonical_key":     _canonical_key(field_name),
         })
+
+    # Coverage guarantee (Beta Report §8.2): ensure every curated, client-
+    # answerable fact each selected form actually needs is present as a clean
+    # canonical question - even when no raw ACORD field for it surfaced in the
+    # confidence scan, or its only raw field was un-curated and routed to the
+    # internal panel. Bounded to curated facts (plain-language) that are still
+    # missing and not already represented by canonical key. Left un-tagged to a
+    # form (like the tier-1 injection) so the ACORD-125 yellow-field send guard
+    # never strips them; answers flow back through canonical facts on apply.
+    from services.sqs_service import FORM_FIELD_INVENTORY, _fact_is_filled
+    for _fid in generated_forms:
+        for _fact_key in FORM_FIELD_INVENTORY.get(_fid, []):
+            if _fact_key not in _FIELD_QUESTION_MAP:
+                continue
+            if _fact_key in seen_field_names or _fact_key in seen_canon_keys:
+                continue
+            if _fact_is_filled(facts.get(_fact_key)):
+                continue
+            seen_field_names.add(_fact_key)
+            seen_canon_keys.add(_fact_key)
+            questions.append({
+                "field_name":         _fact_key,
+                "question":           _resolve_question(_fact_key)[0],
+                "hint":               _FIELD_HINT_MAP.get(_fact_key, ""),
+                "forms":              "",
+                "form_ids":           [],
+                "field_type":         "text",
+                "current_value":      "",
+                "_group_label":       None,
+                "_is_curated_client": True,
+                "_canonical_key":     _fact_key,
+            })
 
     # §6.4: offer a "no prior losses" attestation when loss history is unestablished.
     _maybe_inject_no_loss_question(questions, facts, flags)

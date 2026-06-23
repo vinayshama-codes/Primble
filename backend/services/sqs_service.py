@@ -4,7 +4,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Any
 
 from utils.validators import run_field_validations
 from services.extraction_service import _fv, _focr, _narrative_remarks_text
@@ -29,6 +29,13 @@ _LOSS_CONFLICT_CAP = 45         # Loss-history score ceiling while a no-loss
 _LOSS_NO_MATCH_CAP = 25         # Loss-history ceiling when loss runs do NOT match the
                                 # insured - unmatched runs are not creditable evidence
                                 # for this submission (client §6.4: match before crediting)
+_LOSS_RECENCY_MAX_PEN = 25      # Single cap for the ">90 days" reduction. The client
+                                # described ONE recency rule, so the same maximum applies
+                                # whether or not claim years were parsed (no split caps).
+_LOSS_RECENCY_UNKNOWN_PEN = 10  # Fixed penalty when the valuation date cannot be
+                                # determined at all. Client requires "currently valued"
+                                # for full credit; an unverifiable date cannot satisfy
+                                # that bar, so full credit is not awarded.
 
 # ── Narrative component taxonomy (§6.3 item 1) ────────────────────────────────
 NARRATIVE_COMPONENT_LABELS: Dict[str, str] = {
@@ -229,20 +236,40 @@ def _token_diversity(text: str) -> float:
     return len(set(words)) / len(words)
 
 
+# Magnitude suffixes a limit may be written with ("$1M", "1.5mm", "500k",
+# "$1 million"). Longer tokens MUST precede their prefixes in the regex
+# alternation below so "million"/"thousand"/"billion" win over "m"/"b".
+_MAGNITUDE_SUFFIXES = {
+    "mm": 1_000_000, "m": 1_000_000, "million": 1_000_000,
+    "k": 1_000, "thousand": 1_000,
+    "b": 1_000_000_000, "billion": 1_000_000_000,
+}
+
+
 def _to_int(v) -> int | None:
     """Parse a monetary/limit string to int. Returns None on failure.
 
-    Handles plain scalars ("1000000", "$1,000,000") AND combined-limit strings
-    that the ARQ hint map tells clients to enter, e.g.:
+    Handles plain scalars ("1000000", "$1,000,000"), magnitude shorthand
+    ("$1M", "1.5mm", "500k", "$1 million"), AND combined-limit strings that the
+    ARQ hint map tells clients to enter, e.g.:
         "$1,000,000 per occurrence / $2,000,000 aggregate"
         "$1,000,000 combined single limit"
         "1,000,000/1,000,000/1,000,000"
-    Strategy: strip formatting, try direct parse; on failure extract the first
-    numeric token (the each-occurrence / CSL figure, which is always first).
+    Strategy: strip formatting; expand a leading magnitude suffix when present
+    (so "1M" reads as 1,000,000 and never as the literal 1); otherwise try a
+    direct parse, then fall back to the first numeric token (the each-occurrence
+    / CSL figure, which is always first).
     """
     if v is None:
         return None
-    s = str(v).replace(",", "").replace("$", "").strip()
+    s = str(v).replace(",", "").replace("$", "").strip().lower()
+    # Magnitude shorthand: a leading number immediately followed by a unit suffix.
+    _mag = re.match(r"([\d.]+)\s*(million|thousand|billion|mm|m|k|b)\b", s)
+    if _mag:
+        try:
+            return int(float(_mag.group(1)) * _MAGNITUDE_SUFFIXES[_mag.group(2)])
+        except Exception:
+            pass
     try:
         return int(float(s))
     except Exception:
@@ -263,7 +290,7 @@ def _to_float(v) -> float | None:
         return None
 
 
-_TRUTHY_TOKENS = {"yes", "true", "1", "y", "no prior losses", "none", "no losses", "no claims"}
+_TRUTHY_TOKENS = {"yes", "true", "1", "y", "no prior losses", "no losses", "no claims"}
 _FALSY_TOKENS  = {"no", "false", "0", "n", ""}
 
 
@@ -533,6 +560,21 @@ def validate_naics_code(facts: dict) -> tuple | None:
 
 # ── Stop evaluation ───────────────────────────────────────────────────────────
 
+def _dates_differ(a: Any, b: Any) -> bool:
+    """True only when two dates resolve to DIFFERENT calendar dates.
+
+    Format-only differences (07/15/25 vs 7/15/2025) normalize to the same ISO
+    date and are NOT a difference (Beta Report §5.2); falls back to a trimmed
+    raw-string compare when either side is not a parseable date so two genuinely
+    different non-date strings still differ. Kept local (mirrors the helper in
+    cross_form_validator) to avoid a circular import.
+    """
+    na, nb = normalize_date(a), normalize_date(b)
+    if na is not None and nb is not None:
+        return na != nb
+    return str(a).strip() != str(b).strip()
+
+
 def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     """
     Evaluate hard and soft stops from facts/flags.
@@ -666,7 +708,16 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
             soft.append("Multi-state WC - payroll breakdown by state and class code required")
 
     # ── Umbrella ──────────────────────────────────────────────────────────────
-    if flags.get("has_umbrella") and not _fv(facts, "gl_limits") and not _fv(facts, "auto_liability_limit"):
+    # GL presence MUST mirror the scorer / state machine, which prefer the clean
+    # per-occurrence scalar and fall back to the combined string
+    # (gl_each_occurrence or gl_limits). Checking gl_limits alone here would fire a
+    # false "no underlying" hard stop - capping the package at 60 - for a
+    # submission whose GL landed only in gl_each_occurrence, while the umbrella
+    # pillar simultaneously scores it normally. Reading both keeps the headline cap
+    # and the pillar score from contradicting each other (§6.5 acceptance criterion).
+    if (flags.get("has_umbrella")
+            and not _fv(facts, "gl_each_occurrence") and not _fv(facts, "gl_limits")
+            and not _fv(facts, "auto_liability_limit")):
         hard.append("Umbrella detected but no underlying GL or Auto limits found")
 
     # ── ACORD 127: Auto coverage integrity ────────────────────────────────────
@@ -729,12 +780,12 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
 
         umb_eff = _fv(facts, "umbrella_effective_date")
         gl_eff  = _fv(facts, "effective_date")
-        if umb_eff and gl_eff and umb_eff != gl_eff:
+        if umb_eff and gl_eff and _dates_differ(umb_eff, gl_eff):
             soft.append("Umbrella and GL policy periods misaligned.")
 
         umb_exp = _fv(facts, "umbrella_expiration_date")
         gl_exp  = _fv(facts, "expiration_date")
-        if umb_exp and gl_exp and umb_exp != gl_exp:
+        if umb_exp and gl_exp and _dates_differ(umb_exp, gl_exp):
             soft.append("Umbrella and GL expiration dates misaligned.")
 
         sir    = _to_int(_fv(facts, "umbrella_sir"))
@@ -1025,7 +1076,10 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
         if not _fv(facts, "valuation_method"):
             issues.append({"type": "warning", "message": "Property valuation method not specified on ACORD 140"})
 
-    if "ACORD_131" in selected_form_ids and not _fv(facts, "gl_limits"):
+    # GL presence mirrors the scorer / state machine (gl_each_occurrence or
+    # gl_limits) so a GL limit captured only as the clean per-occurrence scalar is
+    # not falsely reported as "GL limits missing" for ACORD 131.
+    if "ACORD_131" in selected_form_ids and not _fv(facts, "gl_each_occurrence") and not _fv(facts, "gl_limits"):
         issues.append({"type": "hard_stop", "message": "Umbrella selected but GL limits missing"})
 
     if flags.get("has_auto_coverage") and flags.get("auto_has_hired_nonowned"):
@@ -1477,25 +1531,28 @@ def calculate_p4_loss_history(
         # stated age). Never fabricate an age when it could not be determined.
         if age_days is not None and age_days > _LOSS_RECENCY_DAYS:
             excess      = age_days - _LOSS_RECENCY_DAYS
-            recency_pen = min(15, int(excess / 18))   # gentler cap (max 15) since years unknown
+            recency_pen = min(_LOSS_RECENCY_MAX_PEN, int(excess / 11))   # same rule/cap as the year-tier path
             credit      = max(0, credit - recency_pen)
-            recs.append(f"Loss runs are {age_days} days old - updated loss runs may be required.")
+            recs.append(f"Loss runs are {age_days} days old. Updated loss runs may be required.")
         elif age_days is None:
-            recs.append("Loss run valuation date not detected - confirm recency before submission.")
+            credit = max(0, credit - _LOSS_RECENCY_UNKNOWN_PEN)
+            recs.append("Loss run valuation date not detected - recency unverified. Updated loss runs may be required.")
         return _result(credit, recs)
     elif no_loss_attested:
-        # §6.4 item 3: differentiate evidence quality in the SCORE, not just the
-        # label. An explicit user/curated attestation carries more credibility than
-        # an incidental narrative mention, so it earns more (60 vs 45). Both remain
-        # below documented loss runs and both stay flagged as user/narrative-only.
+        # §6.4 item 3: a no-loss attestation (user-entered or stated in narrative)
+        # earns the client-approved score of 60 - below documented loss runs but
+        # above no-information (25). Both evidence sources share this score per the
+        # client's approved scoring table; they stay distinguished by the loss-
+        # history STATE, the evidence label, and the recommendation wording below -
+        # not by the number. "No Known Losses" is the industry term surfaced to users.
         _user_attested = (
             bool(flags.get("no_prior_losses"))
             or _attested_true(_fv(facts, "no_prior_losses"))
             or _attested_true(_fv(facts, "loss_history_no_prior_losses_indicator"))
         )
         if _user_attested:
-            return _result(60, ["No prior losses (attested by user) - attach loss runs to fully confirm"])
-        return _result(60, ["No prior losses (stated in narrative) - confirm with the insured or attach loss runs to corroborate"])
+            return _result(60, ["No Known Losses (attested by user) - attach loss runs to fully confirm"])
+        return _result(60, ["No Known Losses (stated in narrative) - confirm with the insured or attach loss runs to corroborate"])
     elif flags.get("loss_run_pending") or str(_fv(facts, "loss_run_status") or "").lower() in ("pending", "requested"):
         return _result(70, ["Loss runs requested / pending - update score when received"])
     else:
@@ -1515,11 +1572,12 @@ def calculate_p4_loss_history(
     # date the model failed to state and printed a fabricated age (Beta 2).
     if age_days is not None and age_days > _LOSS_RECENCY_DAYS:
         excess      = age_days - _LOSS_RECENCY_DAYS
-        recency_pen = min(25, int(excess / 11))   # max 25 pt penalty at ~365 days
+        recency_pen = min(_LOSS_RECENCY_MAX_PEN, int(excess / 11))   # max 25 pt penalty at ~365 days
         base_score  = max(0, base_score - recency_pen)
-        recs.append(f"Loss runs are {age_days} days old - updated loss runs may be required.")
+        recs.append(f"Loss runs are {age_days} days old. Updated loss runs may be required.")
     elif age_days is None and has_loss_run_doc:
-        recs.append("Loss run valuation date not detected - confirm recency before submission.")
+        base_score = max(0, base_score - _LOSS_RECENCY_UNKNOWN_PEN)
+        recs.append("Loss run valuation date not detected - recency unverified. Updated loss runs may be required.")
 
     # ── Insured match adjustment (for docs where years were already parsed) ──
     # Three distinct tiers (sqs-pillars spec): strong = no deduction; moderate
@@ -1873,13 +1931,13 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
     """Return umbrella evidence state string per §6.5 item 1.
 
     7 states (client-approved):
-      not_applicable            – no umbrella in this submission
-      insufficient_information  – has_umbrella flag but no umbrella_limit found
-      umbrella_information_provided – limit present but no underlying context to validate
-      unknown                   – limit present but GL/auto values missing despite coverage flags
+      not_applicable               – no umbrella in this submission
+      insufficient_information     – has_umbrella flag but no umbrella_limit found
+      unknown                      – limit present but no underlying GL/auto value found
       umbrella_coverage_needs_review – underlying limits below thresholds
-      umbrella_coverage_present – limits meet thresholds but supporting evidence incomplete
-      adequately_supported      – limits, EL, schedule, and follow-form all confirmed
+      umbrella_information_provided – limits meet thresholds but NO supporting evidence yet
+      umbrella_coverage_present    – limits meet thresholds and one supporting document present
+      adequately_supported         – limits, EL, schedule, and follow-form all confirmed
     """
     if not flags.get("has_umbrella"):
         return "not_applicable"
@@ -1890,11 +1948,13 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
     gl_val   = _to_int(_fv(facts, "gl_each_occurrence") or _fv(facts, "gl_limits"))
     auto_val = _to_int(_fv(facts, "auto_liability_limit"))
 
-    # No GL/auto flags in submission context → umbrella info collected but no underlying
-    # coverage context available to validate against (client state: "information provided")
-    if not gl_val and not auto_val and not flags.get("has_general_liability") and not flags.get("has_auto_coverage"):
-        return "umbrella_information_provided"
-
+    # Umbrella present but NO underlying GL/Auto value extracted. For this exact
+    # input the scorer returns 0 and evaluate_stops raises a hard stop, so the
+    # evidence state must read as a problem - never a benign "information provided"
+    # label (§6.5: missing underlying must surface an Unknown / Insufficient
+    # Information state, not a reassuring or perfect one). Both the no-flags and
+    # flags-present variants score identically (0), so both map to "unknown"
+    # ("underlying limits not found") to stay consistent with the score and stop.
     if not gl_val and not auto_val:
         return "unknown"
 
@@ -1923,7 +1983,11 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
         if el_val is None or el_val < _UMB_EL_OK:
             return "umbrella_coverage_needs_review"
 
-    # Underlying limits meet thresholds. Check supporting evidence completeness.
+    # Underlying limits meet thresholds. Grade by how much supporting evidence
+    # (schedule of underlying insurance + follow-form) corroborates the coverage:
+    #   neither present → umbrella_information_provided (limits stated, nothing corroborated yet)
+    #   one present     → umbrella_coverage_present     (partially corroborated)
+    #   both present    → adequately_supported
     _has_schedule = bool(
         _fv(facts, "schedule_of_underlying_insurance")
         or _fv(facts, "underlying_schedule")
@@ -1936,9 +2000,11 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
     ])
     _has_ff = _has_explicit_follow_form(_ff_combined)
 
-    if not _has_schedule or not _has_ff:
+    _support = (1 if _has_schedule else 0) + (1 if _has_ff else 0)
+    if _support == 0:
+        return "umbrella_information_provided"
+    if _support == 1:
         return "umbrella_coverage_present"
-
     return "adequately_supported"
 
 
@@ -2034,10 +2100,53 @@ _SCORED_FACT_KEYS: Tuple[str, ...] = (
 )
 
 
+# §6.1 item 3 — evidence-basis gating for ABSENT facts. A coverage-specific fact
+# that is absent reads as "not applicable" (not merely "not found") when its line
+# of business is not in the submission. The umbrella underlying-schedule /
+# follow-form and the loss-run years read as "requires supporting documentation"
+# when they are absent and the document that would substantiate them is needed but
+# not on file. Everything else stays "not found".
+_COVERAGE_GATED_FACT_FLAGS: Dict[str, str] = {
+    "gl_limits":                        "has_general_liability",
+    "gl_each_occurrence":               "has_general_liability",
+    "gl_aggregate":                     "has_general_liability",
+    "auto_liability_limit":             "has_auto_coverage",
+    "auto_covered_symbols":             "has_auto_coverage",
+    "auto_vin_schedule":                "has_auto_coverage",
+    "umbrella_limit":                   "has_umbrella",
+    "schedule_of_underlying_insurance": "has_umbrella",
+    "umbrella_follow_form":             "has_umbrella",
+    "employers_liability_limits":       "has_workers_comp",
+    "wc_xmod":                          "has_workers_comp",
+    "wc_class_codes":                   "has_workers_comp",
+    "wc_payroll":                       "has_workers_comp",
+    "wc_officer_exclusions":            "has_workers_comp",
+    "wc_payroll_period":                "has_workers_comp",
+    "property_building_value":          "has_property_coverage",
+    "property_bpp_value":               "has_property_coverage",
+    "occupancy_type":                   "has_property_coverage",
+    "construction_type":                "has_property_coverage",
+    "year_built":                       "has_property_coverage",
+    "roof_year":                        "has_property_coverage",
+    "sprinkler_system":                 "has_property_coverage",
+    "fire_protection_class":            "has_property_coverage",
+    "valuation_method":                 "has_property_coverage",
+    "distance_to_hydrant":              "has_property_coverage",
+    "fire_department_type":             "has_property_coverage",
+    "business_income_limit":            "has_property_coverage",
+}
+# Absent + the substantiating document is needed but not on file → requires_supporting_doc.
+_UMBRELLA_DOC_FACT_KEYS: frozenset = frozenset({
+    "schedule_of_underlying_insurance", "umbrella_follow_form",
+})
+_LOSS_DOC_FACT_KEYS: frozenset = frozenset({"loss_history_years"})
+
+
 def _derive_evidence_labels(
     facts: dict,
     cross_issues: Optional[List[dict]] = None,
     flags: Optional[dict] = None,
+    has_loss_run_doc: bool = False,
 ) -> Dict[str, str]:
     """Return per-fact evidence basis label for key scored facts (§6.1 item 3).
 
@@ -2045,13 +2154,45 @@ def _derive_evidence_labels(
     fact keys were contributed by narrative docs in flags['_narrative_fact_keys'].
     A fact that came from a narrative doc (and was not subsequently confirmed or
     overridden by another source) is labelled stated_in_narrative.
+
+    Absent facts are differentiated (§6.1 item 3): a coverage-specific fact whose
+    line of business is not present is 'not_applicable'; an umbrella underlying
+    schedule / follow-form, or loss-run years with no loss run on file and no
+    no-loss attestation, is 'requires_supporting_doc'; everything else 'not_found'.
     """
+    _flags = flags or {}
     conflicting = {
         i.get("field", "")
         for i in (cross_issues or [])
         if isinstance(i, dict) and i.get("field") and i.get("type") in ("hard_stop", "warning")
     }
-    narrative_keys: set = set((flags or {}).get("_narrative_fact_keys") or [])
+    narrative_keys: set = set(_flags.get("_narrative_fact_keys") or [])
+
+    # Loss-run years require a supporting document only when no loss run is on file
+    # AND the insured has not attested no-known-losses AND loss runs are not already
+    # flagged pending - otherwise the gap is covered by other evidence.
+    _no_loss_attested = (
+        bool(_flags.get("no_prior_losses"))
+        or bool(_flags.get("narrative_states_no_losses"))
+        or _attested_true(_fv(facts, "no_prior_losses"))
+        or _attested_true(_fv(facts, "loss_history_no_prior_losses_indicator"))
+    )
+    _loss_pending = (
+        bool(_flags.get("loss_run_pending"))
+        or str(_fv(facts, "loss_run_status") or "").lower() in ("pending", "requested")
+    )
+    _loss_needs_doc = not (has_loss_run_doc or _no_loss_attested or _loss_pending)
+
+    def _absent_label(key: str) -> str:
+        gate = _COVERAGE_GATED_FACT_FLAGS.get(key)
+        if gate and not _flags.get(gate):
+            return "not_applicable"
+        if key in _UMBRELLA_DOC_FACT_KEYS and _flags.get("has_umbrella"):
+            return "requires_supporting_doc"
+        if key in _LOSS_DOC_FACT_KEYS and _loss_needs_doc:
+            return "requires_supporting_doc"
+        return "not_found"
+
     labels: Dict[str, str] = {}
     for key in _SCORED_FACT_KEYS:
         if key in conflicting:
@@ -2059,7 +2200,7 @@ def _derive_evidence_labels(
             continue
         raw = facts.get(key)
         if raw is None:
-            labels[key] = "not_found"
+            labels[key] = _absent_label(key)
             continue
         if isinstance(raw, dict):
             conf   = raw.get("confidence")
@@ -2240,7 +2381,7 @@ def _check_loss_run_insured_match(docs: List[dict], applicant_name: Optional[str
 
 LOSS_HISTORY_STATE_LABELS: Dict[str, str] = {
     "no_information":                  "No loss information provided",
-    "user_states_no_losses":           "User states no prior losses",
+    "user_states_no_losses":           "User states No Known Losses",
     "narrative_states_no_losses":      "Narrative states no losses",
     "loss_runs_pending":               "Loss runs requested / pending",
     "loss_runs_uploaded":              "Loss runs uploaded - years not yet confirmed",
@@ -2556,6 +2697,15 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
     # (_get_umbrella_state) already returns "insufficient_information" here; this
     # keeps the headline number from contradicting that state by removing the
     # "complete" credit. Underlying adequacy is still scored below.
+    #
+    # IMPORTANT - this -25 is a DISPLAY-CONSISTENCY adjustment, NOT a client-listed
+    # underwriting deduction. It exists only so the headline score cannot read as
+    # near-ready (e.g. 85) while the evidence-state label simultaneously reports
+    # "insufficient_information" for the same submission - the two outputs would
+    # otherwise contradict each other on the same screen. It is intentionally
+    # retained by owner decision even though the client's approved deduction table
+    # does not enumerate it; do not remove without re-checking the state/score
+    # agreement in _get_umbrella_state.
     if not _fv(facts, "umbrella_limit"):
         score -= 25
 
@@ -3084,10 +3234,15 @@ def calculate_package_sqs(
     if _form_structs:
         p1 = int(tier1_score * 0.35 + tier2_score * 0.30 + int(sum(_form_structs) / len(_form_structs)) * 0.35)
     elif mapped_data:
+        # Spec 35/30/35: with no per-form structural score, the confidence fill rate
+        # IS the Form Fill Quality component, carried at the same 35% weight.
         conf_rate = confidence_fill_rate(mapped_data, confidence_dict or {})
-        p1 = int(tier1_score * 0.40 + tier2_score * 0.35 + conf_rate * 0.25)
+        p1 = int(tier1_score * 0.35 + tier2_score * 0.30 + conf_rate * 0.35)
     else:
-        p1 = int(tier1_score * 0.55 + tier2_score * 0.45)
+        # No Form Fill Quality signal at all (lite path, no mapped data): drop that
+        # 35% component and keep the remaining two in their spec 35:30 ratio
+        # (0.35/0.65 and 0.30/0.65) so the proportion stays client-approved.
+        p1 = int(tier1_score * 0.538 + tier2_score * 0.462)
 
     # P2 - Exposure Consistency
     _cross = list(cross_issues or [])
@@ -3274,7 +3429,7 @@ def calculate_package_sqs(
     _umbrella_state    = _get_umbrella_state(facts, flags)
     _loss_history_state = _get_loss_history_state(facts, flags, _has_loss_run, _loss_run_match)
     _follow_form       = _get_follow_form_status(facts)
-    _evidence_labels   = _derive_evidence_labels(facts, cross_issues=_cross, flags=flags)
+    _evidence_labels   = _derive_evidence_labels(facts, cross_issues=_cross, flags=flags, has_loss_run_doc=_has_loss_run)
     _positive_signals  = _compute_positive_signals(facts, flags, _has_narrative, _has_loss_run)
     # Extraction Confidence: AI fill quality reported separately from SQS (client spec).
     _conf_rate_breakdown = (
@@ -3337,7 +3492,7 @@ def calculate_package_sqs(
         "sqs_history":         history,
         "delta_this_session":  delta,
         "routing_decision": (
-            "auto_quote"      if raw >= 85 else
+            "auto_quote"      if raw > 85 else
             "priority_review" if raw >= 70 else
             "standard_review" if raw >= 50 else
             "hold"
@@ -3399,10 +3554,11 @@ def calculate_package_sqs_spec_compliant(
     tier1_ok, tier1_missing = check_tier1(facts, flags)
     tier2_score, tier2_missing = check_tier2(facts, flags)
     conf_rate = confidence_fill_rate(mapped_data or {}, confidence_dict or {})
+    # Spec 35/30/35: Core Application / Underwriting Profile / Form Fill Quality.
     p1 = int((
-        (100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)) * 0.4 +
-        tier2_score * 0.35 +
-        conf_rate * 0.25
+        (100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)) * 0.35 +
+        tier2_score * 0.30 +
+        conf_rate * 0.35
     ))
 
     # P2: Exposure Consistency (class codes, payroll alignment)
@@ -4288,17 +4444,11 @@ def calculate_sqs(
             "priority": 1,
         })
     elif flags.get("has_umbrella") and umbrella_score is not None and umbrella_score < 100:
-        _uw = []
-        _gl_v  = _to_int(_fv(facts, "gl_limits") or _fv(facts, "gl_each_occurrence"))
-        _gl_ag = _to_int(_fv(facts, "gl_aggregate"))
-        _au_v  = _to_int(_fv(facts, "auto_liability_limit"))
-        if _gl_v is not None and _gl_v < _UMB_GL_OCC_MIN:
-            _uw.append(f"Underlying GL limits may not meet umbrella requirements (${_gl_v:,} found, ${_UMB_GL_OCC_MIN:,}+ expected).")
-        if _gl_ag is not None and _gl_ag < _UMB_GL_AGG_MIN:
-            _uw.append(f"Underlying GL aggregate limit may not meet umbrella requirements (${_gl_ag:,} found, ${_UMB_GL_AGG_MIN:,}+ expected).")
-        if _au_v is not None and _au_v < _UMB_AUTO_CSL_MIN:
-            _uw.append(f"Underlying Auto limits may not meet umbrella requirements (${_au_v:,} found, ${_UMB_AUTO_CSL_MIN:,}+ expected).")
-        for w in _uw:
+        # Use the SAME shared builder as the package scorers so the per-form path
+        # can never drift from the package warning set. This adds the Employers
+        # Liability and missing-Schedule-of-Underlying warnings the inline block
+        # previously omitted (per-form/package parity fix).
+        for w in _build_umbrella_warnings(facts, flags, umbrella_score):
             issues.append(w)
     breakdown["umbrella_limit_adequacy"] = umbrella_score  # None for N/A
 
@@ -4383,9 +4533,9 @@ def calculate_sqs(
         ("Not Ready",        "red")
     )
     routing = (
-        "auto_quote" if raw_score > 85 else
-        "review"     if raw_score >= 65 else
-        "full_review" if raw_score >= 40 else
+        "auto_quote"      if raw_score > 85 else
+        "priority_review" if raw_score >= 70 else
+        "standard_review" if raw_score >= 50 else
         "hold"
     )
 
@@ -4397,19 +4547,26 @@ def calculate_sqs(
     risk_drivers = [
         {"component": k.replace("_", " ").title(), "score": v}
         for k, v in sorted(
-            {k: v for k, v in breakdown.items() if v is not None}.items(),
+            {k: v for k, v in breakdown.items() if v is not None and v < 90}.items(),
             key=lambda x: x[1]
         )[:3]
-        if v < 90
     ]
 
     # §6 enrichment (additive - never breaks existing callers)
     _umbrella_state = _get_umbrella_state(facts, flags)
     _loss_state     = _get_loss_history_state(facts, flags, has_loss_run_doc, loss_run_match)
     _follow_form    = _get_follow_form_status(facts)
-    _ev_labels      = _derive_evidence_labels(facts, cross_issues=cross_issues_full, flags=flags)
+    _ev_labels      = _derive_evidence_labels(facts, cross_issues=cross_issues_full, flags=flags, has_loss_run_doc=has_loss_run_doc)
     _pos_signals    = _compute_positive_signals(facts, flags, has_narrative_doc, has_loss_run_doc)
-    _cat_breakdown  = _compute_category_breakdown(facts, flags, cross_issues=cross_issues_full)
+    # Per-form breakdown is display-only and currently not rendered (the UI shows
+    # the package-level breakdown from calculate_package_sqs). Forward the one real
+    # scoring input this scope actually has (conf_rate) so the Supporting-Docs sub-row
+    # is accurate if ever surfaced. exposure_subscores/doc_types are deliberately NOT
+    # passed: the per-form scorer uses a form-type-specific structural/exposure model
+    # and never computes them, so those sub-rows remain facts-derived proxies here.
+    _cat_breakdown  = _compute_category_breakdown(
+        facts, flags, cross_issues=cross_issues_full, conf_rate=conf_rate,
+    )
     _cat_breakdown["loss_history_alignment"]["loss_history"]["score"]  = loss_score
     _cat_breakdown["loss_history_alignment"]["loss_history"]["status"] = (
         "ok" if loss_score >= 80 else ("partial" if loss_score >= 40 else "insufficient")

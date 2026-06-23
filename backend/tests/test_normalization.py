@@ -103,6 +103,28 @@ def test_address_genuinely_different_conflict():
     assert values_conflict("physical_address", ["4800 Dahlia St", "900 Elm St"])
 
 
+def test_address_directionals_equivalent():
+    # North/N, Southwest/SW, etc. standardize so "North Main" == "N Main".
+    assert normalize_address("100 North Main St") == normalize_address("100 N Main St")
+    assert normalize_address("250 Southwest 5th Ave") == normalize_address("250 SW 5th Ave")
+    assert not values_conflict("mailing_address", ["100 North Main St", "100 N Main St"])
+    # Distinct directions MUST stay distinct - never merge two different addresses.
+    assert normalize_address("100 N Main St") != normalize_address("100 S Main St")
+    assert values_conflict("physical_address", ["100 N Main St", "100 S Main St"])
+
+
+def test_fein_requires_exactly_nine_digits():
+    from services.normalization import normalize_fein
+    # Clean 9-digit FEIN (with or without hyphen) is preserved.
+    assert normalize_fein("12-3456789") == "123456789"
+    assert normalize_fein("123456789") == "123456789"
+    # Over-long OCR/extraction artifact -> '' (no signal) so it cannot manufacture
+    # a false cross-document FEIN conflict; matches submission_integrity's rule.
+    assert normalize_fein("1234567890") == ""
+    assert normalize_fein("12-345678") == ""   # too short
+    assert not values_conflict("fein", ["12-3456789", "1234567890"])
+
+
 # ── §5.2 Insurance Terminology Normalization ──────────────────────────────────
 
 def test_insurance_terms_equivalent():

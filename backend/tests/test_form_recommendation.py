@@ -117,14 +117,15 @@ def test_131_required_with_umbrella_flag_and_corroboration():
     assert _tier(recs, "ACORD_131") == TIER_REQUIRED
 
 
-def test_131_needs_confirmation_when_umbrella_flag_uncorroborated():
-    # Regression (umbrella drop bug): a CONFIRMED has_umbrella flag with NO umbrella
-    # facts and NO literal "umbrella"/"excess liability" wording previously produced
-    # NO ACORD 131 at all. It must now surface - never silently dropped - as Needs
-    # Confirmation (flag set, supporting limits not yet found).
+def test_131_required_when_umbrella_flag_confirmed_even_uncorroborated():
+    # Client Q1: "Umbrella confirmed = ACORD 131 Required." A confirmed has_umbrella
+    # flag makes ACORD 131 Required on the flag ALONE - exactly like the other four
+    # primary line forms (126/127/130/140) - even with NO umbrella facts and NO
+    # literal "umbrella"/"excess liability" wording to corroborate. The form is never
+    # silently dropped; corroboration only refines the reason shown, not the tier.
     recs = _recs(flags={"has_umbrella": True})
     assert "ACORD_131" in _ids(recs), "confirmed umbrella flag must never drop ACORD 131"
-    assert _tier(recs, "ACORD_131") == TIER_NEEDS_CONFIRMATION
+    assert _tier(recs, "ACORD_131") == TIER_REQUIRED
 
 
 def test_131_dec_line_only_needs_confirmation():
