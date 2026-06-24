@@ -29,8 +29,13 @@ export default function ProcessStageOverlay({ stages, advanceAfter = 3000, tagli
 
   const etaLabel = (s) => {
     if (s <= 6) return "Wrapping up…";
-    if (s >= 90) return `Approximately ${Math.ceil(s / 60)} minutes remaining`;
-    return `Approximately ${Math.ceil(s)} seconds remaining`;
+    if (s < 60) return `Approximately ${Math.ceil(s)} seconds remaining`;
+    const total = Math.ceil(s);
+    const mins = Math.floor(total / 60);
+    const secs = total % 60;
+    const minPart = `${mins} minute${mins === 1 ? "" : "s"}`;
+    if (secs === 0) return `Approximately ${minPart} remaining`;
+    return `Approximately ${minPart} ${secs} second${secs === 1 ? "" : "s"} remaining`;
   };
 
   // Workstream 6 9.3 - optional "window": show only N stages at once (the

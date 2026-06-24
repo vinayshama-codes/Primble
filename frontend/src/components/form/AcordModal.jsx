@@ -2489,13 +2489,32 @@ const AcordModal = forwardRef(function AcordModal({
             "Performing Quality Checks",
             "Preparing Download Package",
           ];
-          // ETA = per-form baseline + document-volume factor. Total MB of uploaded
-          // files is the best available proxy for OCR/LLM work (larger docs mean
-          // more text chunks and more tokens). Falls back to form-count-only when
-          // files is empty (session resume path), which is the correct behaviour.
+          // ETA for the GENERATION phase only — OCR + fact extraction already ran
+          // at form-select time, so this estimates the gap-fill work that remains.
+          // Two drivers, each a proxy for the number of LLM gap-fill calls:
+          //   • forms — each selected form ≈ 3-4 LLM calls (~17s each) once its
+          //     unmatched fields are batched; FILL_PER_FORM bakes in a ~15% buffer
+          //     for OpenAI TPM throttling when parallel chunks collide.
+          //   • document size — total MB of uploaded files is the best available
+          //     proxy for raw text volume; more text means more chunks per batch,
+          //     i.e. more LLM calls. ~8s/MB after de-duping the TPM cost already
+          //     in FILL_PER_FORM. Falls back to forms-only when files is empty
+          //     (session resume path), which is correct.
+          // Calibrated against a 2-form (ACORD 125+126, ~803 fields), 271-page run
+          // that took ~3.5 min: this estimates ~4.1 min — deliberately slightly
+          // high so we never bottom out and look stalled before the response lands.
+          const FILL_BASE     = 20;   // fixed setup overhead (seconds)
+          const FILL_PER_FORM = 65;   // per selected form
+          const TEXT_PER_MB   = 8;    // per MB of uploaded documents
           const _totalMB = files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024);
-          const _eta = Math.max(30, Math.max(1, checkedFormIds.size) * 20 + Math.round(_totalMB * 3));
-          const _adv = Math.min(9000, Math.max(2800, Math.round((_eta * 1000) / _stages.length)));
+          const _formCount = Math.max(1, checkedFormIds.size);
+          const _eta = Math.max(45, FILL_BASE + _formCount * FILL_PER_FORM + Math.round(_totalMB * TEXT_PER_MB));
+          // Spread the stages evenly across the WHOLE ETA so the final stage is
+          // reached near the end, not minutes early. Each stage takes an equal
+          // slice (_eta / stage count); a small floor keeps short jobs from
+          // flickering. No upper cap — a longer ETA simply lets each stage breathe
+          // longer, which is what keeps them in step with the countdown.
+          const _adv = Math.max(2000, Math.round((_eta * 1000) / _stages.length));
           return (
             <ProcessStageOverlay
               stages={_stages}
