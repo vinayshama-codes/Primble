@@ -56,6 +56,23 @@ def _cap_from(hard_count: int, soft_count: int) -> int:
     return 100
 
 
+def _credited_score(base: int, impact: int, cap: int) -> int:
+    """Apply a recommendation/ARQ point credit as a CEILING, never a floor.
+
+    The score rises by `impact` from its OWN current `base`, bounded at 100 and at
+    the active-stop ceiling `cap` (60 hard / 85 soft / 100 none). The cap only binds
+    when base+impact would EXCEED it:
+      * a score already below the cap keeps its own value - it is never raised to
+        the cap (e.g. 22 + 8 = 30 stays 30 under a hard stop, not 60);
+      * a score that crosses the cap is clamped to it (e.g. 56 + 8 = 64 -> 60);
+      * scores that do not each cross the cap stay distinct - they never collapse
+        onto a shared 60/85.
+    Each form and the package are credited independently with this same rule, so a
+    submission-wide hard stop no longer drags every score onto 60.
+    """
+    return min(min(100, base + impact), cap)
+
+
 async def _apply_dismiss_score_credit(
     session_id: str,
     rec_id: str,
@@ -150,7 +167,7 @@ async def _apply_dismiss_score_credit(
                 session_id,
             )
             pkg_base      = existing_pkg if existing_pkg is not None else score_at_action
-            new_pkg_score = min(min(100, pkg_base + score_impact), pkg_cap)
+            new_pkg_score = _credited_score(pkg_base, score_impact, pkg_cap)
             _, new_pkg_tier, _ = _grade_from_score(new_pkg_score)
 
             # Build per-form updates: bump each affected form independently.
@@ -160,7 +177,7 @@ async def _apply_dismiss_score_credit(
             for row in affected_rows:
                 fid        = row["form_id"]
                 base_score = row["score"] if row["score"] is not None else score_at_action
-                new_score  = min(min(100, base_score + score_impact), form_cap)
+                new_score  = _credited_score(base_score, score_impact, form_cap)
                 new_grade, new_tier, new_tier_color = _grade_from_score(new_score)
 
                 await conn.execute(

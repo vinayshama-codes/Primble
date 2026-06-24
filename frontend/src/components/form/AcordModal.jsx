@@ -1192,11 +1192,16 @@ const AcordModal = forwardRef(function AcordModal({
       if (!d?.success) return;
       const next = new Map();
       for (const rec of (d.dismissed_recommendations || [])) {
+        // "No reason provided" is the sentinel sent for a plain dismiss (no typed
+        // reason). The backend credits the score only when a real reason was given,
+        // so treat the sentinel as empty and suppress the +pts badge in that case -
+        // keeping this consistent with the optimistic local update on dismiss.
+        const hasReason = rec.override_reason && rec.override_reason !== "No reason provided";
         next.set(rec.rec_id, {
           message: rec.message,
-          reason:  rec.override_reason || "",
+          reason:  hasReason ? rec.override_reason : "",
           formId:  rec.form_id,
-          impact:  rec.score_impact,
+          impact:  hasReason ? rec.score_impact : 0,
         });
       }
       setDismissedRecs(new Set(next.keys()));
@@ -2160,10 +2165,24 @@ const AcordModal = forwardRef(function AcordModal({
     if (!id) return;
     // Capture form id now — user may switch forms before the await resolves
     const formIdAtDismiss = activeFormId;
-    // Remove from dismissedRecs set (for filter) and record details for the dismissed panel
+    const trimmedReason = reason.trim();
+    // Remove from dismissedRecs set (for filter) and record details for the dismissed
+    // panel so it appears immediately, without waiting on the backend refetch. The
+    // credit is only applied (and the +pts badge only shown) when a real reason was
+    // typed - matching the backend credit gate.
     setDismissedRecs(prev => {
       const next = new Set(prev);
       next.add(id);
+      return next;
+    });
+    setDismissedRecDetails(prev => {
+      const next = new Map(prev);
+      next.set(id, {
+        message: rec.message,
+        reason:  trimmedReason,
+        formId:  formIdAtDismiss,
+        impact:  trimmedReason ? (rec.score_impact || 0) : 0,
+      });
       return next;
     });
     // Also remove directly from generatedForms so rec doesn't reappear on re-render
