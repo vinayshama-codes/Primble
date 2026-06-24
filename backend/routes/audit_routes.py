@@ -41,16 +41,15 @@ def _grade_from_score(score: int) -> tuple:
     return "F", "Not Ready", "red"
 
 
-def _stop_cap(hard_count: int, hard_cross_count: int, soft_count: int) -> int:
-    """Return the max SQS score allowed given the session's active stops.
+def _cap_from(hard_count: int, soft_count: int) -> int:
+    """Max SQS allowed given active stop counts (mirrors the scorer cap gates).
 
-    Mirrors the cap logic in sqs_service.calculate_sqs exactly:
-      * any active hard stop (field-level OR cross-form) -> capped at 60
-      * else any active soft stop (warning)             -> capped at 85
-      * else no cap (100)
-    Hard stops take precedence when both are present.
+    Any active hard stop -> 60, else any active soft stop -> 85, else no cap (100).
+    Per the SQS design the per-form scorer is fed FIELD-LEVEL stops only while the
+    package scorer is fed field-level + cross-form stops, so callers pass the count
+    appropriate to the scope they are capping (see _apply_dismiss_score_credit).
     """
-    if hard_count > 0 or hard_cross_count > 0:
+    if hard_count > 0:
         return 60
     if soft_count > 0:
         return 85
@@ -75,31 +74,55 @@ async def _apply_dismiss_score_credit(
     - If no form contains this rec_id (package-level or cross-form issue), only
       the package is credited and all form scores are left untouched.
 
-    Capping: credited scores can never exceed the active-stop ceiling (hard → 60,
-    soft → 85) applied identically across all affected forms and the package.
+    Capping (mirrors the scorer cap gates - hard stop -> 60, soft stop -> 85):
+    the per-form ceiling and the package ceiling are computed from DIFFERENT stop
+    scopes, exactly like the scorers do, and that distinction is what keeps the two
+    scores independent:
+      * per-form cap uses FIELD-LEVEL stops only (calculate_sqs ignores cross-form
+        stops for individual forms);
+      * package cap uses field-level + cross-form stops (calculate_package_sqs).
+    Applying one combined cap to both - the prior bug - dragged every form down to
+    the package's cross-form ceiling (e.g. a cross-form hard stop pinned all forms
+    AND the package to 60), making them collapse to the same value. The session
+    stores COMBINED stops (field + cross) in hard_stops/soft_stops plus the cross
+    issues in cross_issues_last, so field-level counts are the combined counts minus
+    the cross counts.
     """
     try:
         async with get_pool().acquire() as conn:
-            # Active-stop cap (mirrors calculate_sqs cap logic exactly).
+            # Active-stop counts. hard_stops/soft_stops are COMBINED (field+cross);
+            # cross_issues_last carries the cross-form issues (type hard_stop /
+            # soft_warning). Field-level = combined - cross.
             stop_row = await conn.fetchrow(
                 """
                 SELECT
-                    COALESCE(jsonb_array_length(data->'hard_stops'), 0) AS hard_count,
-                    COALESCE(jsonb_array_length(data->'soft_stops'), 0) AS soft_count,
+                    COALESCE(jsonb_array_length(data->'hard_stops'), 0) AS hard_total,
+                    COALESCE(jsonb_array_length(data->'soft_stops'), 0) AS soft_total,
                     COALESCE((
-                        SELECT count(*)
-                        FROM jsonb_array_elements(COALESCE(data->'cross_issues_last', '[]'::jsonb)) e
+                        SELECT count(*) FROM jsonb_array_elements(
+                            COALESCE(data->'cross_issues_last', '[]'::jsonb)) e
                         WHERE e->>'type' = 'hard_stop'
-                    ), 0) AS hard_cross_count
+                    ), 0) AS hard_cross,
+                    COALESCE((
+                        SELECT count(*) FROM jsonb_array_elements(
+                            COALESCE(data->'cross_issues_last', '[]'::jsonb)) e
+                        WHERE e->>'type' = 'soft_warning'
+                    ), 0) AS soft_cross
                 FROM processing_sessions
                 WHERE id = $1
                 """,
                 session_id,
             )
-            hard_count       = (stop_row["hard_count"]       if stop_row else 0) or 0
-            soft_count       = (stop_row["soft_count"]       if stop_row else 0) or 0
-            hard_cross_count = (stop_row["hard_cross_count"] if stop_row else 0) or 0
-            cap = _stop_cap(hard_count, hard_cross_count, soft_count)
+            hard_total = (stop_row["hard_total"] if stop_row else 0) or 0
+            soft_total = (stop_row["soft_total"] if stop_row else 0) or 0
+            hard_cross = (stop_row["hard_cross"] if stop_row else 0) or 0
+            soft_cross = (stop_row["soft_cross"] if stop_row else 0) or 0
+
+            # Per-form ceiling: field-level stops only (exclude cross-form).
+            form_cap = _cap_from(max(0, hard_total - hard_cross),
+                                 max(0, soft_total - soft_cross))
+            # Package ceiling: field-level + cross-form (the combined totals).
+            pkg_cap  = _cap_from(hard_total, soft_total)
 
             # Find every form that has this rec_id in its recommendations list.
             affected_rows = await conn.fetch(
@@ -127,7 +150,7 @@ async def _apply_dismiss_score_credit(
                 session_id,
             )
             pkg_base      = existing_pkg if existing_pkg is not None else score_at_action
-            new_pkg_score = min(min(100, pkg_base + score_impact), cap)
+            new_pkg_score = min(min(100, pkg_base + score_impact), pkg_cap)
             _, new_pkg_tier, _ = _grade_from_score(new_pkg_score)
 
             # Build per-form updates: bump each affected form independently.
@@ -137,7 +160,7 @@ async def _apply_dismiss_score_credit(
             for row in affected_rows:
                 fid        = row["form_id"]
                 base_score = row["score"] if row["score"] is not None else score_at_action
-                new_score  = min(min(100, base_score + score_impact), cap)
+                new_score  = min(min(100, base_score + score_impact), form_cap)
                 new_grade, new_tier, new_tier_color = _grade_from_score(new_score)
 
                 await conn.execute(
@@ -194,8 +217,8 @@ async def _apply_dismiss_score_credit(
 
         logger.info(
             f"Dismiss credit applied: session={session_id} rec={rec_id} "
-            f"forms_credited={list(updated_forms.keys())} "
-            f"pkg({pkg_base}+{score_impact}->{new_pkg_score}) cap={cap}"
+            f"forms_credited={list(updated_forms.keys())} (form_cap={form_cap}) "
+            f"pkg({pkg_base}+{score_impact}->{new_pkg_score} pkg_cap={pkg_cap})"
         )
         return {
             "updated_forms":        updated_forms,
