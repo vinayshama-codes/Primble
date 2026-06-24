@@ -218,7 +218,16 @@ async def mark_recommendation_dismissed(
                     SET action='dismissed', action_at=EXCLUDED.action_at,
                         sqs_score_at_action=EXCLUDED.sqs_score_at_action,
                         override_reason=EXCLUDED.override_reason,
-                        form_id=COALESCE(sqs_recommendation_audit.form_id, EXCLUDED.form_id)
+                        -- Associate the dismissed rec with the form it was DISMISSED
+                        -- on (EXCLUDED), falling back to the presented form_id only
+                        -- when the dismiss carried none. Multi-form recs (e.g.
+                        -- rec_applicant_name) are presented once under whichever form
+                        -- was processed first (ON CONFLICT DO NOTHING at presentation),
+                        -- so keeping that original form_id hid the rec from the
+                        -- dismissed dropdown on the form the producer actually acted on
+                        -- (the dropdown filters by form). Preferring the dismiss form_id
+                        -- makes it appear where the producer dismissed it.
+                        form_id=COALESCE(EXCLUDED.form_id, sqs_recommendation_audit.form_id)
                     WHERE sqs_recommendation_audit.action IS NULL
                 """,
                 f"audit_{uuid.uuid4().hex}",

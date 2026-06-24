@@ -3990,23 +3990,26 @@ const AcordModal = forwardRef(function AcordModal({
                     )}
 
                     {/* ── Dismissed recommendations — collapsed by default ── */}
+                    {/* Session-wide: every answered/dismissed rec shows under every form,
+                        so a rec answered on one form is never hidden when viewing another
+                        (a multi-form rec relates to several forms). Keyed by rec_id, so
+                        each appears once. */}
                     {(() => {
-                      const formDismissed = Array.from(dismissedRecDetails.entries())
-                        .filter(([, d]) => d.formId === activeFormId);
-                      if (!formDismissed.length) return null;
+                      const allDismissed = Array.from(dismissedRecDetails.entries());
+                      if (!allDismissed.length) return null;
                       return (
                         <div style={{ marginTop: activeSqs.recommendations?.length > 0 ? 6 : 0 }}>
                           <button
                             onClick={() => setShowDismissedPanel(p => !p)}
                             style={{ display: "flex", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", padding: "2px 0", width: "100%" }}>
                             <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                              Dismissed ({formDismissed.length})
+                              Dismissed ({allDismissed.length})
                             </span>
                             <span style={{ fontSize: 9, color: "#94a3b8", marginLeft: "auto", transform: showDismissedPanel ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", display: "inline-block" }}>▼</span>
                           </button>
                           {showDismissedPanel && (
                             <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 5 }}>
-                              {formDismissed.map(([rid, d]) => (
+                              {allDismissed.map(([rid, d]) => (
                                 <div key={rid} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
                                   <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
                                     <span style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4, flex: 1, minWidth: 0, textDecoration: "line-through", textDecorationColor: "#cbd5e1" }}>{d.message}</span>
