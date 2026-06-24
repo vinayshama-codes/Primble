@@ -329,6 +329,30 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
 
 
 # ---------------------------------------------------------------------------
+# Plain-text files
+# ---------------------------------------------------------------------------
+
+def _read_text_file_sync(path: str) -> str:
+    """Read a .txt file as text. UTF-8 first, latin-1 fallback so no upload
+    is rejected over a stray byte. Decode never fails on the latin-1 path."""
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read()
+    except (UnicodeDecodeError, ValueError):
+        with open(path, "r", encoding="latin-1") as fh:
+            return fh.read()
+    except OSError as ex:
+        logger.error(f"_read_text_file: cannot read {path}: {ex}")
+        return ""
+
+
+async def _read_text_file(path: str) -> str:
+    """Async wrapper — reads off the event loop via the shared executor."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_OCR_EXECUTOR, _read_text_file_sync, path)
+
+
+# ---------------------------------------------------------------------------
 # Public file dispatcher
 # ---------------------------------------------------------------------------
 
@@ -341,6 +365,8 @@ async def extract_text(file_path: str) -> Tuple[str, List[str]]:
     ext = os.path.splitext(file_path.lower())[1]
     if ext == ".pdf":
         raw_text, low_conf = await extract_text_from_pdf(file_path)
+    elif ext == ".txt":
+        raw_text, low_conf = await _read_text_file(file_path), []
     elif ext in SUPPORTED_IMG:
         raw_text, low_conf = await ocr_image_file(file_path)
     else:

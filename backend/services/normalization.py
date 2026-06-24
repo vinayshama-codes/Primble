@@ -146,8 +146,6 @@ _ENTITY_TYPE_SYNONYMS = {
 # "BI" is ambiguous in commercial insurance (Bodily Injury / Business Interruption
 # / Building) but the client accepted global mapping as the report specifies.
 _INSURANCE_SYNONYMS = {
-    "bi": "bi",
-    "building": "bi",
     "combined single limit": "csl",
     "csl": "csl",
     "commercial general liability": "cgl",
@@ -229,6 +227,33 @@ _DIRECTIONALS = {
     "southeast": "se", "se": "se",
     "southwest": "sw", "sw": "sw",
 }
+
+# US state full names → 2-letter abbreviation for address comparison.
+# Multi-word states are listed first so regex replacement consumes the full
+# phrase before any single-word subterm can match (e.g. "West Virginia" before
+# "Virginia"). Applied as a phrase-level substitution in normalize_address
+# BEFORE tokenizing so "Colorado" and "CO" both reduce to "co".
+_US_STATE_NAME_PHRASES: List[tuple] = sorted([
+    ("district of columbia", "dc"), ("new hampshire", "nh"),
+    ("new jersey", "nj"), ("new mexico", "nm"), ("new york", "ny"),
+    ("north carolina", "nc"), ("north dakota", "nd"),
+    ("rhode island", "ri"), ("south carolina", "sc"),
+    ("south dakota", "sd"), ("west virginia", "wv"),
+    ("alabama", "al"), ("alaska", "ak"), ("arizona", "az"),
+    ("arkansas", "ar"), ("california", "ca"), ("colorado", "co"),
+    ("connecticut", "ct"), ("delaware", "de"), ("florida", "fl"),
+    ("georgia", "ga"), ("hawaii", "hi"), ("idaho", "id"),
+    ("illinois", "il"), ("indiana", "in"), ("iowa", "ia"),
+    ("kansas", "ks"), ("kentucky", "ky"), ("louisiana", "la"),
+    ("maine", "me"), ("maryland", "md"), ("massachusetts", "ma"),
+    ("michigan", "mi"), ("minnesota", "mn"), ("mississippi", "ms"),
+    ("missouri", "mo"), ("montana", "mt"), ("nebraska", "ne"),
+    ("nevada", "nv"), ("ohio", "oh"), ("oklahoma", "ok"),
+    ("oregon", "or"), ("pennsylvania", "pa"), ("tennessee", "tn"),
+    ("texas", "tx"), ("utah", "ut"), ("vermont", "vt"),
+    ("virginia", "va"), ("washington", "wa"), ("wisconsin", "wi"),
+    ("wyoming", "wy"),
+], key=lambda x: len(x[0]), reverse=True)
 
 
 # ── Carrier seed alias map (Beta Report §5.2 carrier handling) ────────────────
@@ -340,15 +365,22 @@ def normalize_entity_type(value: Any) -> str:
 def normalize_address(value: Any) -> str:
     """Street address for comparison.
 
-    Lowercases, treats '#' as a separator, drops punctuation, maps street-suffix
-    words to their abbreviation (Street->st, Avenue->ave, ...), standardizes
-    compass directionals (North->n, ...), and removes unit markers
-    (Suite/Ste/Unit/#) so "4800 DAHLIA ST #D13" and "4800 Dahlia Street D13" both
-    reduce to "4800 dahlia st d13".
+    Lowercases, treats '#' as a separator, expands/collapses full US state names
+    to their 2-letter abbreviation (Colorado->co, New York->ny, ...), drops
+    punctuation, maps street-suffix words to their abbreviation (Street->st,
+    Avenue->ave, ...), standardizes compass directionals (North->n, ...), and
+    removes unit markers (Suite/Ste/Unit/#) so "4800 DAHLIA ST #D13" and
+    "4800 Dahlia Street Suite D13, Denver, Colorado 80216" both reduce to
+    the same token string.
     """
     if value is None:
         return ""
     s = str(value).lower().replace("#", " ")
+    # Substitute full state names before stripping punctuation so multi-word
+    # names ("New York", "West Virginia") are caught as phrases. Longest phrases
+    # are applied first (see _US_STATE_NAME_PHRASES sort order).
+    for phrase, abbrev in _US_STATE_NAME_PHRASES:
+        s = re.sub(rf"\b{re.escape(phrase)}\b", abbrev, s)
     s = re.sub(r"[^a-z0-9\s]+", " ", s)
     tokens = s.split()
     out: List[str] = []

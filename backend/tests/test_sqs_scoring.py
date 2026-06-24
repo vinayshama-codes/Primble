@@ -705,19 +705,21 @@ def test_multi_form_package_pillars_computed_independently():
     assert p["property_integrity"] == sq._calculate_cope_score(_PARITY_FACTS, _PARITY_FLAGS)
     assert p["umbrella_limit_adequacy"] == sq._calculate_umbrella_adequacy(_PARITY_FACTS, _PARITY_FLAGS)
     # Structural pillar is the package's own blend: tier1*0.35 + tier2*0.30 +
-    # form-fill-avg*0.35 - reproduced here exactly to prove it is NOT a plain mean
-    # of the per-form structural scores.
+    # confidence_fill_rate_avg*0.35. The third component is the average
+    # confidence_fill_rate (% of ALL form fields filled) across generated forms —
+    # NOT the per-form structural_completeness checklist score. This ensures the
+    # package P1 uses a genuinely different signal from the form P1, preventing
+    # convergence when the structural checklist fields happen to all be present.
     tier1_ok, tier1_missing = sq.check_tier1(_PARITY_FACTS, _PARITY_FLAGS)
     tier2_score, _ = sq.check_tier2(_PARITY_FACTS, _PARITY_FLAGS)
     tier1_score = 100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)
-    form_struct_avg = int(
-        (f125["breakdown"]["structural_completeness"]
-         + f130["breakdown"]["structural_completeness"]) / 2
+    fill_rate_avg = int(
+        (f125["confidence_fill_rate"] + f130["confidence_fill_rate"]) / 2
     )
-    expected_p1 = int(tier1_score * 0.35 + tier2_score * 0.30 + form_struct_avg * 0.35)
+    expected_p1 = int(tier1_score * 0.35 + tier2_score * 0.30 + fill_rate_avg * 0.35)
     assert p["structural_completeness"] == expected_p1, (
-        f"package structural must be the tier1/tier2/form-fill blend {expected_p1}, "
-        f"got {p['structural_completeness']}"
+        f"package structural must be the tier1/tier2/confidence-fill-rate blend "
+        f"{expected_p1}, got {p['structural_completeness']}"
     )
 
 

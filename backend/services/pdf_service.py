@@ -2588,6 +2588,124 @@ def combined_gap_fill(
     return per_form
 
 
+# Legal-entity indicator types in mutual-exclusion priority order. When a row
+# has more than one entity-type box marked "Yes" (e.g. the LLM checked both
+# Corporation and LLC), only the highest-priority surviving box is kept. LLC is
+# first because the reported failure was exactly "Corporation AND LLC both
+# checked" for a Limited Liability Company.
+_LEGAL_ENTITY_INDICATOR_PRIORITY = (
+    "LimitedLiabilityCorporationIndicator",
+    "CorporationIndicator",
+    "SubchapterSCorporationIndicator",
+    "PartnershipIndicator",
+    "JointVentureIndicator",
+    "TrustIndicator",
+    "NotForProfitIndicator",
+    "IndividualIndicator",
+    "OtherIndicator",
+)
+
+_ENTITY_BASE_RE = re.compile(r"^(.*LegalEntity_)(\w+Indicator)_([A-N])$")
+
+
+def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict) -> None:
+    """Deterministic safety nets applied to `mapped` in place AFTER all fill
+    passes (Pass 1, alias, GPT). These do NOT depend on how a value was filled,
+    so they catch LLM mistakes the prompt could not guarantee against.
+
+    Guard 1 - Legal-entity mutual exclusion: an entity is exactly one legal
+              type. If multiple LegalEntity_*Indicator boxes in the same row
+              are "Yes", keep only the highest-priority one and blank the rest.
+
+    Guard 2 - Repeating-row de-duplication: non-schedule repeating rows
+              (NamedInsured_FullName_B, premises rows, etc.) must not echo the
+              row-A value. Schedule fields are exempt - two vehicles can share
+              a model year. Only collapses an exact duplicate of row A.
+    """
+    # ── Guard 1: legal-entity mutual exclusion ───────────────────────────────
+    # Group entity indicator fields present in this schema by their row letter.
+    rows: Dict[str, Dict[str, str]] = {}
+    for field in schema:
+        m = _ENTITY_BASE_RE.match(field)
+        if not m:
+            continue
+        _prefix, indicator_type, row = m.group(1), m.group(2), m.group(3)
+        if indicator_type in _LEGAL_ENTITY_INDICATOR_PRIORITY:
+            rows.setdefault(row, {})[indicator_type] = field
+
+    # Derive the ground-truth entity type from extracted facts once so each row
+    # can prefer the box that matches the fact over the hardcoded priority order.
+    _raw_entity = str(_fv(facts, "entity_type") or "").lower()
+    _fact_entity_indicator: Optional[str] = None
+    if _raw_entity:
+        for _llc_phrase in ("limited liability corporation", "limited liability company",
+                            "limited liability corp", "llc corp", "llc corporation", "llc"):
+            if _llc_phrase in _raw_entity:
+                _fact_entity_indicator = "LimitedLiabilityCorporationIndicator"
+                break
+        if _fact_entity_indicator is None:
+            for _ind, _phrases in (
+                ("SubchapterSCorporationIndicator", ("s-corp", "s corp", "subchapter s")),
+                ("CorporationIndicator",            ("corporation", "corp", "inc", "incorporated")),
+                ("PartnershipIndicator",            ("partnership", "llp", "lp")),
+                ("JointVentureIndicator",           ("joint venture",)),
+                ("TrustIndicator",                  ("trust",)),
+                ("NotForProfitIndicator",           ("non-profit", "nonprofit", "not for profit", "not-for-profit")),
+                ("IndividualIndicator",             ("individual", "sole prop")),
+            ):
+                if any(p in _raw_entity for p in _phrases):
+                    _fact_entity_indicator = _ind
+                    break
+
+    for row, type_to_field in rows.items():
+        marked = [
+            t for t, f in type_to_field.items()
+            if str(mapped.get(f) or "").strip().lower() in ("yes", "true", "1")
+        ]
+        if len(marked) <= 1:
+            continue
+        # Multiple boxes checked → prefer the one matching the extracted entity_type
+        # fact (ground truth); fall back to hardcoded priority order when no fact.
+        if _fact_entity_indicator and _fact_entity_indicator in marked:
+            keep = _fact_entity_indicator
+        else:
+            keep = next(
+                (t for t in _LEGAL_ENTITY_INDICATOR_PRIORITY if t in marked),
+                marked[0],
+            )
+        for t in marked:
+            if t != keep:
+                mapped[type_to_field[t]] = "No"
+        logger.info(
+            "post_fill_guard entity_exclusion row=%s kept=%s blanked=%s",
+            row, keep, [t for t in marked if t != keep],
+        )
+
+    # ── Guard 2: repeating-row de-duplication ────────────────────────────────
+    for field in schema:
+        m = _SCHED_ROW_RE.match(field)
+        if not m:
+            continue
+        base, letter = m.group(1), m.group(2)
+        if _ROW_LETTER_TO_IDX[letter] < 1:
+            continue  # row A is the canonical row — never blanked
+        if _is_schedule_field(field):
+            continue  # schedule rows may legitimately repeat values
+        # Checkbox/indicator rows legitimately share Yes/No across distinct entities
+        # (two LLCs both have LLC=Yes; two locations can both be "inside city limits").
+        # De-duplication must only collapse free-text VALUE rows (names, addresses).
+        val = mapped.get(field)
+        if val is None:
+            continue
+        if "Indicator" in field or str(val).strip().lower() in ("yes", "no", "true", "false"):
+            continue
+        row_a = f"{base}_A"
+        a_val = mapped.get(row_a)
+        if a_val is not None and str(val).strip() and str(val).strip() == str(a_val).strip():
+            mapped[field] = None
+            logger.info("post_fill_guard row_dedup blanked=%s (== %s)", field, row_a)
+
+
 def map_facts_to_form(
     facts: dict,
     schema: dict,
@@ -2737,6 +2855,12 @@ def map_facts_to_form(
             "map_facts GPT_DONE form=%s | gpt_filled=%d/%d raw_text_sourced=%d",
             form_id or "unknown", len(gpt_filled_set), len(unmatched), len(gpt_raw_fields),
         )
+
+    # ── Post-fill deterministic guards ───────────────────────────────────────
+    # Enforce invariants the gap-fill prompt can only request, not guarantee:
+    # legal-entity mutual exclusion and repeating-row de-duplication. Runs on the
+    # merged result so it corrects values from any source (Pass 1, alias, GPT).
+    _enforce_post_fill_guards(mapped, schema, facts)
 
     # ── Confidence / highlight assignment ────────────────────────────────────
     # A filled value is "confident" (no highlight) when it was either filled by

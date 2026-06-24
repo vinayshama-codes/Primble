@@ -134,15 +134,34 @@ _PRODUCER_PATTERNS = (
     "subproducer", "sub_producer",
     "agency",            # agency_customer_id, AgencyCustomerIdentifier
     "agent_",
-)
-
-# System identifiers / internal codes / form metadata. These are the report's
-# named offenders (NAIC, national identifier, internal coverage codes, policy
-# coverage code, system identifiers) plus generic plumbing.
-_INTERNAL_PATTERNS = (
+    # National identifier fields — client requirement "National identifier fields
+    # unless contextually necessary": never a default client question, but routed
+    # to the PRODUCER (who supplies them when the form context requires) instead of
+    # being hidden as internal. naics_code / sic_code remain client questions via
+    # _CLIENT_WHITELIST (they are industry classifications a business can provide).
     "naic",
     "nationalproducer", "national_producer", "nationalproducernumber",
     "national_identifier", "nationalid",
+)
+
+# Carrier / underwriter-review fields (client audience "Carrier/underwriter
+# review"). These identify the CARRIER's own underwriter or carry cancellation /
+# non-renewal underwriting conditions — never a client question and not generic
+# plumbing. Matched on precise tokens so contractor operations sections such as
+# `ContractorsUnderwriting_ResidentialWorkPercent` (genuinely client-answerable)
+# are NOT swept in.
+_CARRIER_PATTERNS = (
+    "insurer_underwriter",          # Insurer_Underwriter_FullName / _OfficeIdentifier
+    "cancelnonrenew_underwriting",  # cancellation / non-renewal underwriting conditions
+    "underwritingcondition", "underwriting_condition",
+    "underwritingindicator",
+)
+
+# System identifiers / internal codes / form metadata. These are the report's
+# named offenders (internal coverage codes, policy coverage code, system
+# identifiers) plus generic plumbing. National identifiers moved to the producer
+# audience above (contextually necessary → producer-side, not hidden).
+_INTERNAL_PATTERNS = (
     "customeridentifier", "customer_identifier", "customerid",
     "coveragecode", "coverage_code", "policycoverage", "coverageidentifier",
     "categorycode", "category_code",
@@ -152,6 +171,13 @@ _INTERNAL_PATTERNS = (
     "remark_code", "remarkcode",
     "_indicator_code", "lobcode", "lob_code", "linecode", "line_code",
     "recordtype", "record_type",
+    # System identifiers / internal codes (client examples: "System identifiers",
+    # "Internal coverage codes"). Precise tokens that never appear in a
+    # client-answerable business field.
+    "control_number", "controlnumber", "barcode", "checksum",
+    "systemidentifier", "system_identifier",
+    "uniqueidentifier", "globalidentifier",
+    "internalcode", "internal_code", "processingid", "processing_id",
 )
 
 # Canonical fields that ARE client-answerable but happen to contain a word that
@@ -160,6 +186,12 @@ _INTERNAL_PATTERNS = (
 _CLIENT_WHITELIST = {
     "naics_code", "sic_code", "policy_number", "prior_policy_number",
     "gl_class_codes", "gl_class_codes_by_location", "wc_class_codes",
+    # contact_name / contact_email are client-critical facts even when the raw
+    # ACORD field that surfaces them is in the Producer section of the form
+    # (Producer_ContactPerson_FullName / Producer_ContactPerson_Email). Without
+    # this the producer pattern fires on the raw field name and routes the
+    # question to the producer panel instead of the client questionnaire.
+    "contact_name", "contact_email",
 }
 
 # ── Narrative-supported answers (§6.3 item 2) — all 12 components evaluated ────
@@ -369,6 +401,11 @@ def classify_question(
         topic = TOPIC_PRODUCER
     elif not whitelisted and _matches_any(fn, _INTERNAL_PATTERNS):
         audience, priority = AUDIENCE_INTERNAL, PRIORITY_SUPPRESSED
+    elif not whitelisted and _matches_any(fn, _CARRIER_PATTERNS):
+        # Carrier / underwriter-review audience — visible in the producer review
+        # panel, never auto-sent to the client.
+        audience, priority = AUDIENCE_CARRIER, PRIORITY_INTERNAL
+        topic = TOPIC_PRODUCER
     elif is_cross_form:
         # Structural conflicts surfaced by cross-form validation are always
         # client-relevant; hard conflicts are critical.
@@ -393,6 +430,7 @@ def classify_question(
             AUDIENCE_DO_NOT_SEND: "not_suitable_for_client",
             AUDIENCE_PRODUCER:    "producer_side_item",
             AUDIENCE_INTERNAL:    "system_or_internal_field",
+            AUDIENCE_CARRIER:     "carrier_underwriter_review",
         }.get(audience, "internal")
 
     # ── Score impact (Beta Report §8.2 item 6) ────────────────────────────────

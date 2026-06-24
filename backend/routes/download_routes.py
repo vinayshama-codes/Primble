@@ -159,6 +159,10 @@ async def download_pdf(
     proc_session = await get_processing_session(session_id, include_pdf=True)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    # Submission Integrity gate (Beta Report §4.1): never serve a generated form for
+    # a package still pending multi-insured review. Explicit server-side enforcement,
+    # not just reliance on "forms can't have been generated while paused".
+    _enforce_integrity_gate(proc_session)
     generated      = proc_session.get("generated_forms", {})
     form_name      = generated.get(form_id, {}).get("form_name", form_id)
     user_signature = decrypt_field_soft(fresh.get("signature_data")) or None
@@ -290,6 +294,9 @@ async def download_all(
     proc_session = await get_processing_session(session_id, include_pdf=True)
     if proc_session.get("user_id") != current_user["id"]:
         raise HTTPException(403, "Access denied")
+    # Submission Integrity gate (Beta Report §4.1): never serve the package bundle
+    # for a flagged, unresolved multi-insured submission.
+    _enforce_integrity_gate(proc_session)
     generated = proc_session.get("generated_forms", {})
     if not generated:
         raise HTTPException(400, "No forms generated yet")

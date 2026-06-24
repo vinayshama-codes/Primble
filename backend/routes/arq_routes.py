@@ -7,8 +7,9 @@ from fastapi.responses import JSONResponse
 
 from config.database import get_pool
 from config.settings import FRONTEND_URL
-from repositories.session_repository import get_processing_session
+from repositories.session_repository import get_processing_session, upd_processing_session
 from services.arq_service import (
+    _backfill_and_resolve_present,
     apply_arq_answers_to_session,
     create_arq_notification,
     create_arq_session,
@@ -70,13 +71,28 @@ async def generate_questions(
     if not generated:
         raise HTTPException(400, "No forms generated yet — generate forms first")
 
+    _facts = proc_session.get("facts", {})
+    # Close the "known fact, blank box" mapping gap before generating questions:
+    # back-fill any known fact whose form box is still blank (deterministically,
+    # no LLM), and compute the form-aware set of facts that are genuinely present
+    # on the forms. A fact we know but could not stamp anywhere is intentionally
+    # left out so the client is still asked for it. Persist only when a box was
+    # actually stamped so the next PDF render shows the value.
+    present_on_form, _backfilled = _backfill_and_resolve_present(generated, _facts)
+    if _backfilled:
+        try:
+            await upd_processing_session(session_id, {"generated_forms": generated})
+        except Exception as _persist_ex:
+            logger.warning(f"ARQ generate: back-fill persist failed: {_persist_ex}")
+
     questions = await generate_arq_questions(
-        facts=proc_session.get("facts", {}),
+        facts=_facts,
         flags=proc_session.get("flags", {}),
         generated_forms=generated,
         hard_stops=proc_session.get("hard_stops", []),
         soft_stops=proc_session.get("soft_stops", []),
         session_docs=proc_session.get("docs", []),
+        present_fact_keys=present_on_form,
     )
 
     # Merge cross-form conflict questions — placed at the front so the client

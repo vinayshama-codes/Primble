@@ -500,7 +500,7 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
               {showInternal && (
                 <div style={{ padding: "0 14px 12px" }}>
                   <p style={{ fontSize: 11, color: "#94a3b8", margin: "0 0 10px" }}>
-                    These items are <strong>Producer-facing</strong> (e.g. agency info), <strong>Internal</strong> (e.g. coverage codes, NAIC), or for <strong>Carrier/underwriter review</strong> only. They are deselected by default and should not be sent to the client unless there is a specific reason.
+                    These items are <strong>Producer-facing</strong> (e.g. agency info, national identifiers), <strong>Internal</strong> (e.g. coverage codes, system identifiers), or for <strong>Carrier/underwriter review</strong> only. They are deselected by default and should not be sent to the client unless there is a specific reason.
                   </p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {internalQuestions.map((q, idx) => renderRow(q, idx, true, true))}
@@ -520,14 +520,14 @@ function ARQModal({ sessionId, token, questions, onClose, onSuccess }) {
                     Do not send
                     <span style={{ color: "#fca5a5", fontWeight: 400 }}> ({doNotSendQuestions.length})</span>
                   </span>
-                  <span style={{ fontSize: 10, color: "#fca5a5" }}>Fields never appropriate for a client questionnaire (§8.2 items 1 &amp; 4)</span>
+                  <span style={{ fontSize: 10, color: "#fca5a5" }}>Fields never appropriate for a client questionnaire</span>
                 </div>
                 <span style={{ fontSize: 12, color: "#dc2626", flexShrink: 0 }}>{showDoNotSend ? "Hide ▲" : "Show ▼"}</span>
               </button>
               {showDoNotSend && (
                 <div style={{ padding: "0 14px 12px" }}>
                   <p style={{ fontSize: 11, color: "#fca5a5", margin: "0 0 10px" }}>
-                    These items are flagged <strong>"Do not send"</strong> - examples: producer fax numbers, national identifiers, internal system codes. They are visible here for completeness but should never be included in a client questionnaire.
+                    These items are flagged <strong>"Do not send"</strong> - examples: producer fax numbers. They are visible here for completeness but should never be included in a client questionnaire.
                   </p>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {doNotSendQuestions.map((q, idx) => renderRow(q, idx, true, true))}
@@ -1180,7 +1180,7 @@ const AcordModal = forwardRef(function AcordModal({
   const handleDragLeave = () => setDragging(false);
   const handleDrop = e => {
     e.preventDefault(); setDragging(false);
-    const uploaded = Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".zip") || f.type.startsWith("image/"));
+    const uploaded = Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".zip") || f.name.toLowerCase().endsWith(".txt") || f.type.startsWith("image/"));
     setFiles(prev => [...prev, ...uploaded]);
   };
 
@@ -2203,26 +2203,28 @@ const AcordModal = forwardRef(function AcordModal({
         }),
       });
       const data = await res.json();
-      // When the backend credited the score_impact (producer provided a real
-      // override reason), reflect the new score + grade + tier in the UI immediately.
-      // grade/tier/tier_color come from the backend so frontend and DB always agree.
-      if (data.new_sqs_score != null && formIdAtDismiss) {
+      // Credit: update every form the backend identified as carrying this rec_id,
+      // plus the package. For a single-form rec only that form changes; for a
+      // multi-form rec all affected forms change; for a package-only rec
+      // updated_forms is empty and only the package score moves.
+      if (data.updated_forms && Object.keys(data.updated_forms).length > 0) {
         setGeneratedForms(prev => {
-          const form = prev[formIdAtDismiss];
-          if (!form?.sqs) return prev;
-          return {
-            ...prev,
-            [formIdAtDismiss]: {
+          const next = { ...prev };
+          for (const [fid, upd] of Object.entries(data.updated_forms)) {
+            const form = next[fid];
+            if (!form?.sqs) continue;
+            next[fid] = {
               ...form,
               sqs: {
                 ...form.sqs,
-                sqs_score:  data.new_sqs_score,
-                grade:      data.new_grade      ?? form.sqs.grade,
-                tier:       data.new_tier       ?? form.sqs.tier,
-                tier_color: data.new_tier_color ?? form.sqs.tier_color,
+                sqs_score:  upd.new_sqs_score,
+                grade:      upd.new_grade      ?? form.sqs.grade,
+                tier:       upd.new_tier       ?? form.sqs.tier,
+                tier_color: upd.new_tier_color ?? form.sqs.tier_color,
               },
-            },
-          };
+            };
+          }
+          return next;
         });
       }
       if (data.new_package_sqs_score != null) {
@@ -2487,9 +2489,12 @@ const AcordModal = forwardRef(function AcordModal({
             "Performing Quality Checks",
             "Preparing Download Package",
           ];
-          // ETA = ~avg seconds/form x forms selected (dynamic per submission, not a
-          // fixed value); the countdown + deceleration absorb real-world variance.
-          const _eta = Math.max(30, Math.max(1, checkedFormIds.size) * 20);
+          // ETA = per-form baseline + document-volume factor. Total MB of uploaded
+          // files is the best available proxy for OCR/LLM work (larger docs mean
+          // more text chunks and more tokens). Falls back to form-count-only when
+          // files is empty (session resume path), which is the correct behaviour.
+          const _totalMB = files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024);
+          const _eta = Math.max(30, Math.max(1, checkedFormIds.size) * 20 + Math.round(_totalMB * 3));
           const _adv = Math.min(9000, Math.max(2800, Math.round((_eta * 1000) / _stages.length)));
           return (
             <ProcessStageOverlay
@@ -2781,7 +2786,7 @@ const AcordModal = forwardRef(function AcordModal({
                 padding: "8px",
               }}>
                 {/* Drop target */}
-                <input ref={fileInputRef} type="file" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,application/pdf,application/zip,image/*" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }} />
+                <input ref={fileInputRef} type="file" accept=".pdf,.zip,.jpg,.jpeg,.png,.bmp,.tiff,.webp,.txt,application/pdf,application/zip,image/*,text/plain" multiple disabled={uploadBlocked} onChange={e => setFiles(prev => [...prev, ...Array.from(e.target.files)])} style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap" }} />
                 <label
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
@@ -3083,6 +3088,11 @@ const AcordModal = forwardRef(function AcordModal({
                   const excluded = !!d.excluded;
                   const supportingOnly = !!d.supporting_only;
                   const busy = reclassDocId && reclassDocId === d.doc_id;
+                  // Any in-flight reclassify re-runs _finalize_pipeline and persists
+                  // the whole session. Concurrent calls for different docs both load
+                  // the same snapshot before either persists → last-write-wins drops
+                  // the first change. Block other docs' controls while one is active.
+                  const anyReclassBusy = reclassDocId !== null;
                   const reviewBusy = reviewLoadingId === d.doc_id;
                   const confColor = conf === "high" ? "#16a34a" : conf === "medium" ? "#d97706" : "#dc2626";
                   return (
@@ -3103,24 +3113,32 @@ const AcordModal = forwardRef(function AcordModal({
 
                       {/* Manual correction (Beta Report §4.2): change type, exclude/include */}
                       {availableDocTypes.length > 0 && !excluded && (
-                        <select
-                          value={docType}
-                          disabled={busy}
-                          onChange={(e) => { if (e.target.value && e.target.value !== docType) handleReclassify(d.doc_id, "set_type", e.target.value, "type"); }}
-                          title="Correct the document type"
-                          style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", cursor: busy ? "wait" : "pointer" }}
-                        >
-                          {availableDocTypes.map((t) => (
-                            <option key={t.value} value={t.value}>{t.label}</option>
-                          ))}
-                        </select>
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                          <select
+                            value={docType}
+                            disabled={anyReclassBusy}
+                            onChange={(e) => { if (e.target.value && e.target.value !== docType) handleReclassify(d.doc_id, "set_type", e.target.value, "type"); }}
+                            title="Correct the document type"
+                            style={{ fontSize: 12, padding: "3px 6px", borderRadius: 6, border: `1px solid ${busy && reclassBusyBtn === "type" ? "#E61B84" : "#cbd5e1"}`, background: "#fff", color: "#334155", cursor: anyReclassBusy ? "wait" : "pointer", opacity: busy && reclassBusyBtn === "type" ? 0.7 : 1 }}
+                          >
+                            {availableDocTypes.map((t) => (
+                              <option key={t.value} value={t.value}>{t.label}</option>
+                            ))}
+                          </select>
+                          {busy && reclassBusyBtn === "type" && (
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "#E61B84", fontWeight: 600 }}>
+                              <span style={{ width: 10, height: 10, border: "2px solid rgba(230,27,132,0.25)", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite", flexShrink: 0 }} />
+                              Updating...
+                            </span>
+                          )}
+                        </div>
                       )}
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={anyReclassBusy}
                         onClick={() => handleReclassify(d.doc_id, excluded ? "include" : "exclude", null, "toggle")}
                         title={excluded ? "Include this document in scoring" : "Exclude this document from scoring"}
-                        style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#475569", cursor: busy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, minWidth: 58, justifyContent: "center" }}
+                        style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#475569", cursor: anyReclassBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, minWidth: 58, justifyContent: "center" }}
                       >
                         {busy && reclassBusyBtn === "toggle"
                           ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />{excluded ? "Include" : "Exclude"}</>
@@ -3130,10 +3148,10 @@ const AcordModal = forwardRef(function AcordModal({
                       {!excluded && (
                         <button
                           type="button"
-                          disabled={busy}
+                          disabled={anyReclassBusy}
                           onClick={() => handleReclassify(d.doc_id, supportingOnly ? "include" : "supporting_only", null, "supporting")}
                           title={supportingOnly ? "Use this document as a normal source again" : "Include facts but never treat as the primary source"}
-                          style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: `1px solid ${supportingOnly ? "#E61B84" : "#cbd5e1"}`, background: supportingOnly ? "rgba(230,27,132,0.06)" : "#fff", color: supportingOnly ? "#9d0f5a" : "#475569", cursor: busy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "center" }}
+                          style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6, border: `1px solid ${supportingOnly ? "#E61B84" : "#cbd5e1"}`, background: supportingOnly ? "rgba(230,27,132,0.06)" : "#fff", color: supportingOnly ? "#9d0f5a" : "#475569", cursor: anyReclassBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 4, justifyContent: "center" }}
                         >
                           {busy && reclassBusyBtn === "supporting"
                             ? <><span style={{ width: 10, height: 10, border: "2px solid #cbd5e1", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />{supportingOnly ? "Supporting only ✓" : "Supporting only"}</>
@@ -3171,11 +3189,22 @@ const AcordModal = forwardRef(function AcordModal({
             {underwriting?.fields?.some(f => f.status === "conflict" || f.status === "confirmed") && (
               <div className="doc-summary" style={{ marginTop: 12 }}>
                 <div className="doc-summary-title">DATA CONSISTENCY</div>
+                {underwritingBusy !== null && (
+                  <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
+                    Applying your confirmation and updating the forms - please confirm the next item once this finishes.
+                  </div>
+                )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {underwriting.fields.filter(f => f.status === "conflict" || f.status === "confirmed").map((f) => {
                     const isConflict = f.status === "conflict";
                     const isConfirmed = f.status === "confirmed";
                     const busy = underwritingBusy === f.fact_key;
+                    // Any in-flight confirm blocks every row's controls. Each
+                    // confirm re-runs the pipeline server-side and replaces the
+                    // whole underwriting object; letting a second row fire while
+                    // the first is still applying raced the responses and dropped
+                    // confirmations (the "click multiple, none applied" lag).
+                    const rowDisabled = busy || underwritingBusy !== null;
                     const picked = underwritingPicks[f.fact_key] ?? "";
                     const formsLabel = (f.forms || []).map(x => x.replace("ACORD_", "ACORD ")).join(", ");
                     return (
@@ -3202,7 +3231,7 @@ const AcordModal = forwardRef(function AcordModal({
                                     name={`uw-${f.fact_key}`}
                                     checked={picked === v.display}
                                     onChange={() => setUnderwritingPicks(p => ({ ...p, [f.fact_key]: v.display }))}
-                                    disabled={busy}
+                                    disabled={rowDisabled}
                                   />
                                 )}
                                 <span style={{ fontWeight: 600, color: "#0f172a" }}>{v.display}</span>
@@ -3221,16 +3250,16 @@ const AcordModal = forwardRef(function AcordModal({
                             <input
                               type="text"
                               value={picked}
-                              disabled={busy}
+                              disabled={rowDisabled}
                               placeholder="…or type a value"
                               onChange={(e) => setUnderwritingPicks(p => ({ ...p, [f.fact_key]: e.target.value }))}
                               style={{ fontSize: 12, padding: "4px 8px", borderRadius: 6, border: "1px solid #cbd5e1", width: 160 }}
                             />
                             <button
                               type="button"
-                              disabled={busy || !picked}
+                              disabled={rowDisabled || !picked}
                               onClick={() => handleConfirmUnderwriting(f.fact_key, picked)}
-                              style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 6, border: "none", background: picked && !busy ? "#2563eb" : "#cbd5e1", color: "#fff", cursor: picked && !busy ? "pointer" : "not-allowed" }}
+                              style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 6, border: "none", background: picked && !rowDisabled ? "#2563eb" : "#cbd5e1", color: "#fff", cursor: picked && !rowDisabled ? "pointer" : "not-allowed" }}
                             >
                               {busy ? "Applying…" : "Confirm & apply to forms"}
                             </button>

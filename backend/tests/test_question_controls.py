@@ -43,14 +43,16 @@ def test_producer_fax_is_do_not_send_and_suppressed():
     assert tax["topic_group"] == TOPIC_PRODUCER
 
 
-def test_national_identifier_is_internal_suppressed():
+def test_national_identifier_is_producer_not_client():
+    # "National identifier fields unless contextually necessary": routed to the
+    # producer audience (visible in the producer review panel, supplied by the
+    # producer when the form needs it) - never a default client question.
     tax = classify_question("Producer_NationalProducerNumber", ["ACORD_125"])
-    # producer-prefixed -> producer audience; still never a client default
-    assert tax["audience"] in (AUDIENCE_PRODUCER, AUDIENCE_INTERNAL)
+    assert tax["audience"] == AUDIENCE_PRODUCER
     assert tax["suppressed"] is True
 
     tax2 = classify_question("national_identifier", ["ACORD_125"])
-    assert tax2["audience"] == AUDIENCE_INTERNAL
+    assert tax2["audience"] == AUDIENCE_PRODUCER
     assert tax2["suppressed"] is True
 
 
@@ -60,10 +62,36 @@ def test_policy_coverage_code_is_internal():
     assert tax["suppressed"] is True
 
 
-def test_naic_is_internal():
+def test_naic_is_producer_not_client():
+    # NAIC is a national identifier: producer-side, never a client default.
     tax = classify_question("Insurer_NAICCode", ["ACORD_125"])
-    assert tax["audience"] == AUDIENCE_INTERNAL
+    assert tax["audience"] == AUDIENCE_PRODUCER
     assert tax["suppressed"] is True
+
+
+def test_insurer_underwriter_is_carrier_review():
+    # The carrier's own underwriter is "Carrier/underwriter review" - never a
+    # client question and not generic plumbing.
+    from services.question_classifier import AUDIENCE_CARRIER
+    tax = classify_question("Insurer_Underwriter_FullName_A", ["ACORD_125"])
+    assert tax["audience"] == AUDIENCE_CARRIER
+    assert tax["suppressed"] is True
+    assert tax["suppressed_reason"] == "carrier_underwriter_review"
+
+
+def test_contractor_operations_not_swept_into_carrier():
+    # A "ContractorsUnderwriting_*Percent" field is a client-answerable operations
+    # figure - it must NOT be mis-routed to carrier by the underwriting patterns.
+    from services.question_classifier import AUDIENCE_CARRIER
+    tax = classify_question("ContractorsUnderwriting_ResidentialWorkPercent_A", ["ACORD_186"])
+    assert tax["audience"] != AUDIENCE_CARRIER
+
+
+def test_naics_code_still_client_despite_naic_substring():
+    # The "naic" producer pattern is a substring of "naics_code"; the client
+    # whitelist must keep the industry classification a client question.
+    tax = classify_question("naics_code", ["ACORD_125"], is_curated_client=True)
+    assert tax["audience"] == AUDIENCE_CLIENT
 
 
 def test_business_location_mismatch_crossform_is_client_critical():

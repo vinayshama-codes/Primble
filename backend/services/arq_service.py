@@ -603,7 +603,18 @@ def filter_arq_questions_for_session(generated_forms: dict, questions: List[dict
             continue
 
         acord125 = generated_forms.get("ACORD_125", {})
-        allowed_125 = is_acord125_yellow_missing_field(acord125, field_name)
+        _125_schema = acord125.get("schema", {}) or {}
+        _125_conf   = acord125.get("confidence", {}) or {}
+        # A coverage-guarantee / canonical client question (e.g. keyed on
+        # `applicant_name`) is NOT a raw ACORD-125 schema field, so the yellow
+        # missing-required restriction does not apply to it - it is a curated
+        # client question that also happens to feed ACORD 125. Only RAW 125 schema
+        # fields are held to the yellow-field rule.
+        is_raw_125_field = field_name in _125_schema or field_name in _125_conf
+        if is_raw_125_field:
+            allowed_125 = is_acord125_yellow_missing_field(acord125, field_name)
+        else:
+            allowed_125 = True
         remaining_form_ids = [
             fid for fid in form_ids
             if fid != "ACORD_125" or allowed_125
@@ -705,13 +716,126 @@ def _is_curated_client_field(field_name: str) -> bool:
 
 
 def _present_fact_keys(facts: dict) -> set:
-    """Canonical fact keys already filled in the package (for §8.2.4 suppression)."""
+    """Canonical fact keys already filled in the package (for already-provided suppression)."""
     from services.sqs_service import _fact_is_filled
     present = set()
     for k, v in (facts or {}).items():
         if _fact_is_filled(v):
             present.add(k)
     return present
+
+
+def _merge_form_ids_into_question(questions: List[dict], canon: str, new_form_ids) -> None:
+    """Fold additional forms into the existing question for `canon`.
+
+    Each ACORD form names the same underlying fact with a different raw field, so
+    the same canonical fact can surface several times. Instead of dropping the
+    duplicates, we merge their forms into the first question so its label lists
+    every form the single answer satisfies. The answer still reaches all of them
+    because apply resolves the canonical fact and restamps it into each form
+    (see _restamp_canonical_into_forms).
+    """
+    for q in questions:
+        if q.get("_canonical_key") != canon:
+            continue
+        merged = set(q.get("form_ids") or []) | set(new_form_ids or [])
+        q["form_ids"] = sorted(merged)
+        nums = sorted({str(f).replace("ACORD_", "").replace("ACORD ", "") for f in merged})
+        q["forms"] = ", ".join(nums)
+        return
+
+
+def _backfill_and_resolve_present(generated: dict, facts: dict) -> Tuple[set, bool]:
+    """Close the "known fact, blank box" mapping gap before ARQ generation.
+
+    For every canonical fact already known (filled in `facts`), find the schema
+    fields across all generated forms that resolve to it:
+
+      * if at least one such box already carries a value, the fact is genuinely
+        present on the form -> add it to the present set (its question is
+        suppressed as already-provided);
+      * if every such box is blank, attempt a deterministic late-stamp
+        (`_deterministic_map` - the same engine Pass 1 used, no LLM) into each
+        blank box. If the value lands on at least one box, the fact is now present
+        (suppress). If nothing could be stamped, the fact is left OUT of the
+        present set so the client is still asked for it;
+      * if no schema field on any selected form resolves to the fact, keep prior
+        behaviour and treat it as present (there is no box to fill or ask about).
+
+    Late-stamped values are labelled `filled` (document-sourced) - they came from
+    the uploaded documents, not the client, so they are NOT labelled `client_arq`
+    and are NOT added to client_filled_fields. Only blank boxes are ever written;
+    an existing value is never overwritten.
+
+    Returns (present_on_form, changed). `changed` is True when any box was stamped,
+    so the caller can persist the updated forms.
+    """
+    from services.sqs_service import _fact_is_filled
+    try:
+        from services.pdf_service import _deterministic_map
+    except Exception as ex:  # pragma: no cover - defensive
+        logger.warning(f"_backfill_and_resolve_present: pdf_service import failed: {ex}")
+        _deterministic_map = None
+
+    generated = generated or {}
+    facts = facts or {}
+
+    # One pass over every form's schema: canonical fact key -> [(form_id, field)].
+    canon_fields: dict = {}
+    for fid, form_data in generated.items():
+        schema = (form_data or {}).get("schema", {}) or {}
+        for sf in schema.keys():
+            c = _canonical_key(sf)
+            if not c or c.startswith("_"):
+                continue
+            canon_fields.setdefault(c, []).append((fid, sf))
+
+    present: set = set()
+    changed = False
+
+    for canon, value in facts.items():
+        if not _fact_is_filled(value):
+            continue
+        fields = canon_fields.get(canon)
+        if not fields:
+            present.add(canon)          # no box anywhere - unchanged behaviour
+            continue
+
+        has_value = False
+        blanks: List[tuple] = []
+        for fid, sf in fields:
+            fs = generated[fid].get("field_state") or generated[fid].get("mapped", {})
+            if str(fs.get(sf) or "").strip() != "":
+                has_value = True
+            else:
+                blanks.append((fid, sf))
+
+        # Best-effort deterministic late-stamp into every blank box for this fact.
+        if _deterministic_map is not None:
+            for fid, sf in blanks:
+                form_data = generated[fid]
+                fs = form_data.get("field_state") or form_data.get("mapped", {})
+                try:
+                    mapped_val = _deterministic_map(sf, facts)
+                except Exception:
+                    mapped_val = None
+                if mapped_val is None or str(mapped_val).strip() == "":
+                    continue
+                fs[sf] = mapped_val
+                form_data["field_state"] = fs
+                conf = form_data.get("confidence") or {}
+                conf[sf] = "filled"
+                form_data["confidence"] = conf
+                form_data["_pdf_cache_hash"] = ""
+                form_data["pdf_bytes"] = None
+                has_value = True
+                changed = True
+
+        if has_value:
+            present.add(canon)
+        # else: no box carries it and none could be stamped -> ask the client.
+
+    return present, changed
 
 
 def _narrative_components_from_facts(
@@ -1118,7 +1242,12 @@ async def generate_arq_questions(
     hard_stops: list,
     soft_stops: list,
     session_docs: list = None,
+    present_fact_keys: Optional[set] = None,
 ) -> List[dict]:
+    # `present_fact_keys`, when supplied by the caller, is the form-aware set of
+    # facts to treat as already-provided (a fact counts as present only when it
+    # actually landed on a form box - see _backfill_and_resolve_present). When not
+    # supplied we fall back to the facts-only view for backward compatibility.
     facts = facts or {}
     missing_fields: dict = {}
     field_current_values: dict = {}
@@ -1218,6 +1347,12 @@ async def generate_arq_questions(
         # the same plain-English question would appear multiple times in the list.
         canon = _canonical_key(field_name)
         if canon and not canon.startswith("_") and canon in seen_canon_keys:
+            # Same underlying fact already produced a question under a different
+            # raw ACORD field name (each form names it differently). Merge this
+            # form into that question so its label lists every form the single
+            # answer fills; the answer reaches all of them on apply via the
+            # canonical restamp.
+            _merge_form_ids_into_question(questions, canon, form_ids)
             continue
         if canon and not canon.startswith("_"):
             seen_canon_keys.add(canon)
@@ -1279,37 +1414,45 @@ async def generate_arq_questions(
             "_canonical_key":     _canonical_key(field_name),
         })
 
-    # Coverage guarantee (Beta Report §8.2): ensure every curated, client-
-    # answerable fact each selected form actually needs is present as a clean
-    # canonical question - even when no raw ACORD field for it surfaced in the
-    # confidence scan, or its only raw field was un-curated and routed to the
-    # internal panel. Bounded to curated facts (plain-language) that are still
-    # missing and not already represented by canonical key. Left un-tagged to a
-    # form (like the tier-1 injection) so the ACORD-125 yellow-field send guard
-    # never strips them; answers flow back through canonical facts on apply.
+    # Coverage guarantee: ensure every curated, client-answerable fact each
+    # selected form actually needs is present as a clean canonical question - even
+    # when no raw ACORD field for it surfaced in the confidence scan, or its only
+    # raw field was un-curated and routed to the internal panel. Bounded to curated
+    # facts (plain-language) that are still missing and not already represented by
+    # canonical key. Each injected question is labelled with EVERY form whose
+    # inventory needs it (so the producer sees which forms the answer fills); the
+    # ACORD-125 yellow-field send guard exempts these canonical questions because
+    # they are curated client facts, not raw 125 schema fields.
     from services.sqs_service import FORM_FIELD_INVENTORY, _fact_is_filled
+    _inv_fact_forms: dict = {}
     for _fid in generated_forms:
         for _fact_key in FORM_FIELD_INVENTORY.get(_fid, []):
-            if _fact_key not in _FIELD_QUESTION_MAP:
-                continue
-            if _fact_key in seen_field_names or _fact_key in seen_canon_keys:
-                continue
-            if _fact_is_filled(facts.get(_fact_key)):
-                continue
-            seen_field_names.add(_fact_key)
-            seen_canon_keys.add(_fact_key)
-            questions.append({
-                "field_name":         _fact_key,
-                "question":           _resolve_question(_fact_key)[0],
-                "hint":               _FIELD_HINT_MAP.get(_fact_key, ""),
-                "forms":              "",
-                "form_ids":           [],
-                "field_type":         "text",
-                "current_value":      "",
-                "_group_label":       None,
-                "_is_curated_client": True,
-                "_canonical_key":     _fact_key,
-            })
+            _bucket = _inv_fact_forms.setdefault(_fact_key, [])
+            if _fid not in _bucket:
+                _bucket.append(_fid)
+    for _fact_key, _fact_forms in _inv_fact_forms.items():
+        if _fact_key not in _FIELD_QUESTION_MAP:
+            continue
+        if _fact_key in seen_field_names or _fact_key in seen_canon_keys:
+            continue
+        if _fact_is_filled(facts.get(_fact_key)):
+            continue
+        seen_field_names.add(_fact_key)
+        seen_canon_keys.add(_fact_key)
+        _ids  = sorted(set(_fact_forms))
+        _nums = sorted({fid.replace("ACORD_", "").replace("ACORD ", "") for fid in _ids})
+        questions.append({
+            "field_name":         _fact_key,
+            "question":           _resolve_question(_fact_key)[0],
+            "hint":               _FIELD_HINT_MAP.get(_fact_key, ""),
+            "forms":              ", ".join(_nums),
+            "form_ids":           _ids,
+            "field_type":         "text",
+            "current_value":      "",
+            "_group_label":       None,
+            "_is_curated_client": True,
+            "_canonical_key":     _fact_key,
+        })
 
     # §6.4: offer a "no prior losses" attestation when loss history is unestablished.
     _maybe_inject_no_loss_question(questions, facts, flags)
@@ -1334,7 +1477,8 @@ async def generate_arq_questions(
     hard_stop_text = " ".join(str(s) for s in (hard_stops or []))
     decorate_questions(
         questions,
-        present_fact_keys=_present_fact_keys(facts),
+        present_fact_keys=(present_fact_keys if present_fact_keys is not None
+                           else _present_fact_keys(facts)),
         narrative_components=_narrative_components_from_facts(facts, session_docs=session_docs, flags=flags),
         hard_stop_text=hard_stop_text,
     )
@@ -1862,6 +2006,73 @@ async def submit_arq_answers(
     return True, "Answers submitted successfully.", updated_fields
 
 
+def _restamp_canonical_into_forms(
+    generated: dict,
+    canon: str,
+    facts: dict,
+) -> List[str]:
+    """Stamp a client-confirmed canonical fact into every generated form that
+    carries it under an ACORD schema field name.
+
+    `canon` is a canonical fact key (e.g. `applicant_name`) already written into
+    `facts`. For each generated form we run the SAME deterministic rule engine
+    used by the initial fill (`_deterministic_map`) over the form's schema. Only
+    fields that resolve specifically to `canon` are touched, and only when the
+    deterministic map yields a non-empty value — so this never overwrites an
+    unrelated field or blanks one out. Each stamped field is labelled
+    `client_arq` and its PDF cache is busted so the next render shows the value.
+
+    Returns the list of form ids that received at least one stamped field.
+    """
+    try:
+        from services.pdf_service import _deterministic_map
+    except Exception as ex:
+        logger.warning(f"_restamp_canonical: pdf_service import failed: {ex}")
+        return []
+
+    touched_forms: List[str] = []
+    for fid, form_data in generated.items():
+        schema = form_data.get("schema", {}) or {}
+        if not schema:
+            continue
+        field_state = form_data.get("field_state") or form_data.get("mapped", {})
+        conf = form_data.get("confidence") or {}
+        cff = set(form_data.get("client_filled_fields", []))
+        form_touched = False
+
+        for schema_field in schema.keys():
+            # Only consider schema fields that map to THIS canonical fact. This
+            # keeps the re-stamp surgical: a question about `applicant_name`
+            # touches only the named-insured fields, nothing else.
+            if _canonical_key(schema_field) != canon:
+                continue
+            mapped_val = _deterministic_map(schema_field, facts)
+            if mapped_val is None or str(mapped_val).strip() == "":
+                continue
+            if str(field_state.get(schema_field) or "").strip() == str(mapped_val).strip():
+                # Already shows the confirmed value — still label as client-supplied
+                # but don't force a needless re-render.
+                if conf.get(schema_field) != "client_arq":
+                    conf[schema_field] = "client_arq"
+                cff.add(schema_field)
+                continue
+            field_state[schema_field] = mapped_val
+            conf[schema_field] = "client_arq"
+            cff.add(schema_field)
+            form_touched = True
+
+        if form_touched or cff != set(form_data.get("client_filled_fields", [])):
+            form_data["field_state"] = field_state
+            form_data["confidence"] = conf
+            form_data["client_filled_fields"] = list(cff)
+        if form_touched:
+            form_data["_pdf_cache_hash"] = ""
+            form_data["pdf_bytes"] = None
+            touched_forms.append(fid)
+
+    return touched_forms
+
+
 # ASYNC-SAFE
 async def apply_arq_answers_to_session(
     arq_id: str,
@@ -1928,6 +2139,22 @@ async def apply_arq_answers_to_session(
                 "confidence": "client_arq",
                 "source":     "client_arq",
             }
+            # Stamp this canonical answer into EVERY generated form whose schema
+            # carries it under a different (ACORD) field name. Curated client
+            # questions key on a canonical fact (e.g. `applicant_name`) that no
+            # ACORD schema names literally — without this the confirmed value
+            # reached SQS via facts above but never the PDFs, so the broker saw
+            # an empty Applicant Name on ACORD 125/130/… after the client
+            # answered it. We reuse the same deterministic rule engine that the
+            # initial fill used (_deterministic_map, no LLM), so the value lands
+            # in exactly the fields Pass 1 would have filled, across all forms.
+            if canon != field_name:
+                _stamped_forms = _restamp_canonical_into_forms(
+                    generated, canon, facts,
+                )
+                for _fid in _stamped_forms:
+                    if _fid not in updated:
+                        updated.append(_fid)
             # §6.4: an affirmative "no prior losses" attestation must also set the
             # flag (not just a facts string) so the loss-history pillar moves. A
             # "No" answer means the client HAS losses — do not set the flag.

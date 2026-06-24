@@ -675,7 +675,13 @@ def verify_stamped_consistency(
             continue
 
         for form_id, form_result in generated_forms.items():
-            mapped = (form_result or {}).get("mapped") or {}
+            # Prefer the CURRENT edited field_state (set by the post-generation
+            # field-edit path) over the original generation mapping, so a manual
+            # edit that diverges one form from the others is checked too. At
+            # generation time there is no field_state, so this falls back to
+            # mapped — identical to the original behaviour.
+            fr     = form_result or {}
+            mapped = fr.get("field_state") or fr.get("mapped") or {}
             for field in form_fields.get(form_id, ()):
                 val = mapped.get(field)
                 if val is None or str(val).strip() in ("", "null", "None"):

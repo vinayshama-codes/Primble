@@ -3226,13 +3226,21 @@ def calculate_package_sqs(
     tier1_ok, tier1_missing = check_tier1(facts, flags)
     tier2_score, tier2_missing = check_tier2(facts, flags)
     tier1_score = 100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)
-    _form_structs = [
-        r.get("breakdown", {}).get("structural_completeness")
+    # "Form Fill Quality" = average confidence_fill_rate across generated forms.
+    # confidence_fill_rate is the % of ALL ACORD form fields that received a value
+    # (weighted by AI confidence), which is a genuinely different signal from the
+    # per-form structural_completeness checklist (which only tests 4-6 key binary
+    # fields). Using structural_completeness here caused package P1 to shadow the
+    # form P1 whenever those checklist fields were all present, driving convergence
+    # of package and form headline scores for single-form submissions.
+    _form_fill_rates = [
+        r.get("confidence_fill_rate")
         for r in (form_results or [])
-        if isinstance(r, dict) and isinstance(r.get("breakdown", {}).get("structural_completeness"), (int, float))
+        if isinstance(r, dict) and isinstance(r.get("confidence_fill_rate"), (int, float))
     ]
-    if _form_structs:
-        p1 = int(tier1_score * 0.35 + tier2_score * 0.30 + int(sum(_form_structs) / len(_form_structs)) * 0.35)
+    if _form_fill_rates:
+        _fill_avg = int(sum(_form_fill_rates) / len(_form_fill_rates))
+        p1 = int(tier1_score * 0.35 + tier2_score * 0.30 + _fill_avg * 0.35)
     elif mapped_data:
         # Spec 35/30/35: with no per-form structural score, the confidence fill rate
         # IS the Form Fill Quality component, carried at the same 35% weight.
@@ -3433,7 +3441,7 @@ def calculate_package_sqs(
     _positive_signals  = _compute_positive_signals(facts, flags, _has_narrative, _has_loss_run)
     # Extraction Confidence: AI fill quality reported separately from SQS (client spec).
     _conf_rate_breakdown = (
-        int(sum(_form_structs) / len(_form_structs)) if _form_structs
+        int(sum(_form_fill_rates) / len(_form_fill_rates)) if _form_fill_rates
         else (confidence_fill_rate(mapped_data, confidence_dict or {}) if mapped_data else None)
     )
     _extraction_confidence = _conf_rate_breakdown

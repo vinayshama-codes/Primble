@@ -19,8 +19,12 @@ _MAGIC: dict = {
     ".webp": [(0, b"RIFF"), (8, b"WEBP")],
 }
 
+# Plain-text extensions have no reliable magic signature. They are allowed
+# without a byte-header check; content is validated as decodable text below.
+_TEXT_EXTENSIONS = {".txt"}
+
 # Extensions we unconditionally allow without strict magic checks
-_ALLOWED_EXTENSIONS = set(_MAGIC.keys())
+_ALLOWED_EXTENSIONS = set(_MAGIC.keys()) | _TEXT_EXTENSIONS
 
 
 def validate_file_mime(content: bytes, ext: str) -> Tuple[bool, str]:
@@ -30,10 +34,30 @@ def validate_file_mime(content: bytes, ext: str) -> Tuple[bool, str]:
     """
     ext = ext.lower()
     if ext not in _ALLOWED_EXTENSIONS:
-        return False, f"File type '{ext}' is not supported. Allowed: PDF, ZIP, JPG, PNG, BMP, TIFF, WEBP."
+        return False, f"File type '{ext}' is not supported. Allowed: PDF, ZIP, JPG, PNG, BMP, TIFF, WEBP, TXT."
 
     if not content:
         return False, "File is empty."
+
+    # Plain text has no magic header. Accept it if the bytes decode as text and
+    # contain no NUL byte (a strong signal of a binary file renamed to .txt).
+    if ext in _TEXT_EXTENSIONS:
+        if b"\x00" in content[:8192]:
+            return False, (
+                f"File content does not match the declared type '{ext}'. "
+                "The file may be binary, corrupted, or renamed to bypass validation."
+            )
+        try:
+            content[:8192].decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                content[:8192].decode("latin-1")
+            except UnicodeDecodeError:
+                return False, (
+                    f"File content does not match the declared type '{ext}'. "
+                    "The file is not readable text."
+                )
+        return True, ""
 
     magic_rules = _MAGIC.get(ext)
     if not magic_rules:

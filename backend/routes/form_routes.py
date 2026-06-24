@@ -126,6 +126,14 @@ async def _bg_lite_generate(session_id: str) -> None:
     """Background task: generate the top recommended form for essentials users and store SQS in session."""
     try:
         session = await get_processing_session(session_id)
+        # Submission Integrity gate (Beta Report §4.1, defense-in-depth): never
+        # auto-generate on a package still pending multi-insured review. The caller
+        # already suppresses this; guarding internally means the helper can never be
+        # repurposed without protection. Background task → skip silently (no raise).
+        _integrity = session.get("integrity") or {}
+        if _integrity.get("review_required") and not _integrity.get("overridden"):
+            logger.info("bg_lite: session=%s integrity review pending — skipping", session_id)
+            return
         recommendations = session.get("recommendations", [])
         form_ids = [r["form_id"] for r in recommendations][:1]
         if not form_ids:
@@ -264,7 +272,7 @@ async def upload_declaration(
                             all_paths.append(inner_path)
                 except zipfile.BadZipFile:
                     raise HTTPException(400, f"File '{f.filename}' is not a valid ZIP archive.")
-            elif ext == ".pdf" or ext in SUPPORTED_IMG:
+            elif ext == ".pdf" or ext == ".txt" or ext in SUPPORTED_IMG:
                 all_paths.append(path)
 
         # Release the in-memory upload buffer now that every file is on disk.
@@ -1107,6 +1115,11 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
     session = await get_processing_session(session_id)
     if session.get("user_id") != str(current_user["id"]):
         raise HTTPException(403, "Access denied")
+    # Submission Integrity gate (Beta Report §4.1): never generate/score forms on a
+    # package still pending multi-insured review. Previously this path was only
+    # protected by the side effect that recommendations are empty while paused;
+    # this makes the §4.1 guarantee explicit so a future refactor cannot bypass it.
+    enforce_integrity_gate(session)
     check_payment_access(current_user.get("payment_status", "ok"), "form")
     recommendations = session.get("recommendations", [])
     form_ids = [r["form_id"] for r in recommendations][:1]  # essentials: top form only
@@ -1511,6 +1524,29 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             if _m and _m not in _seen_cf_msgs:
                 _seen_cf_msgs.add(_m)
                 _cf_deduped.append(_iss)
+
+        # §4.3 item 2: re-run the cross-form stamped-value check after a manual
+        # field edit so a money field edited on one form (Gross Sales / Building
+        # Value / payroll / employees) that now diverges from the others is
+        # re-flagged - and the advisory is PRESERVED rather than wiped. Reads each
+        # form's current field_state. Display only: the pure _cf_deduped still
+        # feeds package scoring below, so the readiness score stays clean.
+        _stamp_check  = {"ok": True, "checked": 0, "mismatches": []}
+        _stamp_issues = []
+        try:
+            from services.underwriting_consistency import (
+                verify_stamped_consistency, stamp_mismatch_issues,
+            )
+            _stamp_check = verify_stamped_consistency(
+                generated,
+                merged_facts=updated_facts,
+                confirmations=session.get("underwriting_confirmations") or {},
+            )
+            _stamp_issues = stamp_mismatch_issues(_stamp_check)
+        except Exception as _vex:
+            logger.warning("update_pdf: stamped-consistency check skipped: %s", _vex)
+
+        _display_cross = _cf_deduped + _stamp_issues
         try:
             pkg_sqs = calculate_package_sqs(
                 facts=updated_facts,
@@ -1535,10 +1571,12 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             "hard_stops": fresh_hard_stops,
             "soft_stops": fresh_soft_stops,
             "package_sqs": pkg_sqs,
-            "cross_issues_last": _cf_deduped,
+            "cross_issues_last": _display_cross,
+            "underwriting_stamp_consistency": _stamp_check,
         })
         return JSONResponse({"success": True, "sqs": sqs, "confidence": confidence,
-                             "package_sqs": pkg_sqs, "cross_issues": _cf_deduped})
+                             "package_sqs": pkg_sqs, "cross_issues": _display_cross,
+                             "stamp_consistency": _stamp_check})
     except HTTPException:
         raise
     except Exception as ex:

@@ -15,6 +15,22 @@ US_STATES = {
     "VA","WA","WV","WI","WY","DC","PR","VI","GU","MP","AS",
 }
 
+# Full US state names accepted by validate_address so addresses written with
+# the full state name ("Denver, Colorado 80216") pass the same as those using
+# the abbreviation ("Denver, CO 80216"). Multi-word states use a space so the
+# substring check in validate_address catches them correctly.
+_US_STATE_FULL_NAMES = frozenset({
+    "alabama","alaska","arizona","arkansas","california","colorado","connecticut",
+    "delaware","florida","georgia","hawaii","idaho","illinois","indiana","iowa",
+    "kansas","kentucky","louisiana","maine","maryland","massachusetts","michigan",
+    "minnesota","mississippi","missouri","montana","nebraska","nevada",
+    "new hampshire","new jersey","new mexico","new york","north carolina",
+    "north dakota","ohio","oklahoma","oregon","pennsylvania","rhode island",
+    "south carolina","south dakota","tennessee","texas","utah","vermont",
+    "virginia","washington","west virginia","wisconsin","wyoming",
+    "district of columbia",
+})
+
 MONOPOLISTIC_WC_STATES = {"ND", "OH", "WA", "WY"}
 
 # Kept for _parse_date / validate_date_range which need datetime objects.
@@ -40,11 +56,20 @@ def validate_password(password: str) -> Tuple[bool, str]:
 
 
 def validate_address(addr: str) -> Tuple[bool, str]:
-    """Soft-validate a US mailing address for state code and ZIP presence."""
+    """Soft-validate a US mailing address for state code and ZIP presence.
+
+    Accepts both 2-letter abbreviations ("CO") and full state names
+    ("Colorado", "West Virginia") so addresses OCR'd or typed with the full
+    name do not produce a spurious soft-stop.
+    """
     if not addr:
         return True, ""
     parts       = addr.upper().split()
-    state_found = any(p.strip(",.") in US_STATES for p in parts)
+    addr_lower  = addr.lower()
+    state_found = (
+        any(p.strip(",.") in US_STATES for p in parts)
+        or any(name in addr_lower for name in _US_STATE_FULL_NAMES)
+    )
     zip_found   = bool(re.search(r"\b\d{5}(-\d{4})?\b", addr))
     if not state_found:
         return False, f"Address missing valid US state: '{addr}'"

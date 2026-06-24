@@ -59,27 +59,28 @@ def _stop_cap(hard_count: int, hard_cross_count: int, soft_count: int) -> int:
 
 async def _apply_dismiss_score_credit(
     session_id: str,
-    form_id: str,
+    rec_id: str,
     score_at_action: int,
     score_impact: int,
 ) -> dict:
-    """Bump the per-form SQS score after a producer override, then recompute the
-    package SQS score as the average of all per-form scores.
+    """Credit +score_impact to every form that carries rec_id plus the package.
 
-    The credited score is capped by the session's active stops (hard stop -> 60,
-    warning -> 85) so a producer override can never push a form past the same
-    ceiling the scorer enforces while those stops are unresolved.  Dismissing a
-    recommendation is an acknowledgment, not a fix — the underlying stop remains
-    until the field is actually filled (which triggers a full recalculation that
-    lifts the cap).  Persists score, grade, tier, tier_color (per-form) and the
-    package score + tier so a page reload always shows the correct values.
+    Scope rules:
+    - Forms affected: all generated forms whose SQS recommendations list contains
+      this rec_id. A recommendation that appears in two forms (same field gap,
+      e.g. applicant_name missing in both ACORD 125 and ACORD 130) credits both.
+      A recommendation that appears in only one form credits only that form.
+    - Package: always credited with the same +score_impact, starting from its own
+      independently-computed baseline (not an average of the form scores).
+    - If no form contains this rec_id (package-level or cross-form issue), only
+      the package is credited and all form scores are left untouched.
+
+    Capping: credited scores can never exceed the active-stop ceiling (hard → 60,
+    soft → 85) applied identically across all affected forms and the package.
     """
-    new_score = min(100, (score_at_action or 0) + score_impact)
     try:
         async with get_pool().acquire() as conn:
-            # Active-stop counts drive the cap. cross_issues_last carries cross-form
-            # hard stops that aren't in the flat hard_stops list — count both, exactly
-            # like calculate_sqs does (hard_stops OR hard_cross -> 60).
+            # Active-stop cap (mirrors calculate_sqs cap logic exactly).
             stop_row = await conn.fetchrow(
                 """
                 SELECT
@@ -100,86 +101,110 @@ async def _apply_dismiss_score_credit(
             hard_cross_count = (stop_row["hard_cross_count"] if stop_row else 0) or 0
             cap = _stop_cap(hard_count, hard_cross_count, soft_count)
 
-            # Cap the credited form, then derive its grade/tier from the capped score.
-            new_score = min(new_score, cap)
-            new_grade, new_tier, new_tier_color = _grade_from_score(new_score)
-
-            # Recompute the package as the average of all per-form scores (each of
-            # which is already capped by its own calculate_sqs), then cap the
-            # package too so it can never exceed the active-stop ceiling.
-            rows = await conn.fetch(
+            # Find every form that has this rec_id in its recommendations list.
+            affected_rows = await conn.fetch(
                 """
                 SELECT ge.key AS form_id,
                        (ge.value->'sqs'->>'sqs_score')::int AS score
                 FROM processing_sessions ps,
                      jsonb_each(COALESCE(ps.data->'generated_forms', '{}'::jsonb)) AS ge
                 WHERE ps.id = $1
+                  AND EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements(
+                               COALESCE(ge.value->'sqs'->'recommendations', '[]'::jsonb)
+                           ) AS r
+                      WHERE r->>'rec_id' = $2
+                  )
                 """,
+                session_id, rec_id,
+            )
+
+            # Credit package from its own independent baseline.
+            existing_pkg = await conn.fetchval(
+                "SELECT (data->'package_sqs'->>'package_sqs_score')::int "
+                "FROM processing_sessions WHERE id = $1",
                 session_id,
             )
-            scores = {r["form_id"]: r["score"] for r in rows if r["score"] is not None}
-            scores[form_id] = new_score
-            new_pkg_score = int(round(sum(scores.values()) / len(scores))) if scores else new_score
-            new_pkg_score = min(new_pkg_score, cap)
+            pkg_base      = existing_pkg if existing_pkg is not None else score_at_action
+            new_pkg_score = min(min(100, pkg_base + score_impact), cap)
             _, new_pkg_tier, _ = _grade_from_score(new_pkg_score)
 
+            # Build per-form updates: bump each affected form independently.
+            updated_forms: dict = {}
+            now_ts = datetime.now(timezone.utc).isoformat()
+
+            for row in affected_rows:
+                fid        = row["form_id"]
+                base_score = row["score"] if row["score"] is not None else score_at_action
+                new_score  = min(min(100, base_score + score_impact), cap)
+                new_grade, new_tier, new_tier_color = _grade_from_score(new_score)
+
+                await conn.execute(
+                    """
+                    UPDATE processing_sessions
+                    SET data = jsonb_set(
+                        jsonb_set(
+                            jsonb_set(
+                                jsonb_set(
+                                    data,
+                                    ARRAY['generated_forms', $1, 'sqs', 'sqs_score'],
+                                    to_jsonb($2::int), false
+                                ),
+                                ARRAY['generated_forms', $1, 'sqs', 'grade'],
+                                to_jsonb($3::text), false
+                            ),
+                            ARRAY['generated_forms', $1, 'sqs', 'tier'],
+                            to_jsonb($4::text), false
+                        ),
+                        ARRAY['generated_forms', $1, 'sqs', 'tier_color'],
+                        to_jsonb($5::text), false
+                    ),
+                    updated_at = $6
+                    WHERE id = $7
+                    """,
+                    fid, new_score, new_grade, new_tier, new_tier_color,
+                    now_ts, session_id,
+                )
+                updated_forms[fid] = {
+                    "new_sqs_score":  new_score,
+                    "new_grade":      new_grade,
+                    "new_tier":       new_tier,
+                    "new_tier_color": new_tier_color,
+                }
+
+            # Always update the package score.
             await conn.execute(
                 """
                 UPDATE processing_sessions
                 SET data = jsonb_set(
                     jsonb_set(
-                        jsonb_set(
-                            jsonb_set(
-                                jsonb_set(
-                                    jsonb_set(
-                                        data,
-                                        ARRAY['generated_forms', $1, 'sqs', 'sqs_score'],
-                                        to_jsonb($2::int), false
-                                    ),
-                                    ARRAY['generated_forms', $1, 'sqs', 'grade'],
-                                    to_jsonb($6::text), false
-                                ),
-                                ARRAY['generated_forms', $1, 'sqs', 'tier'],
-                                to_jsonb($7::text), false
-                            ),
-                            ARRAY['generated_forms', $1, 'sqs', 'tier_color'],
-                            to_jsonb($8::text), false
-                        ),
+                        data,
                         ARRAY['package_sqs', 'package_sqs_score'],
-                        to_jsonb($3::int), false
+                        to_jsonb($1::int), false
                     ),
                     ARRAY['package_sqs', 'tier'],
-                    to_jsonb($9::text), false
+                    to_jsonb($2::text), false
                 ),
-                updated_at = $4
-                WHERE id = $5
+                updated_at = $3
+                WHERE id = $4
                 """,
-                form_id,
-                new_score,
-                new_pkg_score,
-                datetime.now(timezone.utc).isoformat(),
-                session_id,
-                new_grade,
-                new_tier,
-                new_tier_color,
-                new_pkg_tier,
+                new_pkg_score, new_pkg_tier, now_ts, session_id,
             )
+
         logger.info(
-            f"Dismiss credit applied: session={session_id} form={form_id} "
-            f"{score_at_action}+{score_impact}->{new_score} (cap={cap}) "
-            f"grade={new_grade} pkg(avg)={new_pkg_score}"
+            f"Dismiss credit applied: session={session_id} rec={rec_id} "
+            f"forms_credited={list(updated_forms.keys())} "
+            f"pkg({pkg_base}+{score_impact}->{new_pkg_score}) cap={cap}"
         )
         return {
-            "new_sqs_score": new_score,
+            "updated_forms":        updated_forms,
             "new_package_sqs_score": new_pkg_score,
-            "new_grade": new_grade,
-            "new_tier": new_tier,
-            "new_tier_color": new_tier_color,
-            "new_package_tier": new_pkg_tier,
+            "new_package_tier":      new_pkg_tier,
         }
     except Exception as ex:
         logger.error(f"Failed to apply dismiss score credit: {ex}")
-        return {"new_sqs_score": None, "new_package_sqs_score": None}
+        return {"updated_forms": {}, "new_package_sqs_score": None}
 
 
 async def _verify_session_owner(session_id: str, current_user: dict) -> None:
@@ -223,23 +248,19 @@ async def dismiss_recommendation(
         and req.override_reason != "No reason provided"
         and req.score_impact is not None
         and req.score_impact > 0
-        and req.form_id
     ):
         credit = await _apply_dismiss_score_credit(
             session_id=req.session_id,
-            form_id=req.form_id,
+            rec_id=req.rec_id,
             score_at_action=req.sqs_score_at_action,
             score_impact=req.score_impact,
         )
 
     return JSONResponse({
-        "success": success,
-        "new_sqs_score": credit.get("new_sqs_score"),
+        "success":               success,
+        "updated_forms":         credit.get("updated_forms", {}),
         "new_package_sqs_score": credit.get("new_package_sqs_score"),
-        "new_grade": credit.get("new_grade"),
-        "new_tier": credit.get("new_tier"),
-        "new_tier_color": credit.get("new_tier_color"),
-        "new_package_tier": credit.get("new_package_tier"),
+        "new_package_tier":      credit.get("new_package_tier"),
     })
 
 
