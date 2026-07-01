@@ -3548,23 +3548,24 @@ const AcordModal = forwardRef(function AcordModal({
           <div className={`editor-layout editor-layout-fullpage${!sidebarOpen ? " sidebar-closed" : ""}`}>
             <div className="editor-sidebar" style={{ background: "#fff", borderRight: "1px solid #e2e8f0", padding: 0, gap: 0 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderBottom: "1px solid #f1f5f9", background: "#fafbfc" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 26, height: 26, borderRadius: 7, background: "rgba(230,27,132,0.1)" }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                  <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 9, background: "rgba(230,27,132,0.1)", flexShrink: 0 }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E61B84" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
                     </svg>
                   </span>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", letterSpacing: "0.01em" }}>SQS &amp; Actions</span>
+                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", letterSpacing: "0.01em" }}>SQS &amp; Actions</span>
+                    {/* Workstream 6 9.1 - next-step status, dynamic: flips to "Ready to
+                        Send Submission" (green) at package SQS 90+, else "Ready to Download". */}
+                    <span style={{ fontSize: 11, fontWeight: 600, lineHeight: 1.3, color: (packageSqs?.package_sqs_score ?? 0) >= 90 ? "#059669" : "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {(packageSqs?.package_sqs_score ?? 0) >= 90 ? "Ready to Send Submission" : "Ready to Download Forms"}
+                    </span>
+                  </div>
                 </div>
                 <button className="sidebar-close-btn" onClick={() => setSidebarOpen(false)} title="Hide panel">✕</button>
               </div>
               <div style={{ padding: "14px 14px 12px" }}>
-                {/* Workstream 6 9.1 - next-step guidance, driven by the live package
-                    SQS: flips to "Ready to Send Submission" at 90 or above, and re-renders
-                    whenever edits or questionnaire answers change the package score. */}
-                <div style={{ marginBottom: 12 }}>
-                  <NextStepBanner text={(packageSqs?.package_sqs_score ?? 0) >= 90 ? "Ready to Send Submission" : "Ready to Download Forms"} />
-                </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Generated Forms</span>
                   <span style={{ fontSize: 11, fontWeight: 700, color: "#E61B84", background: "rgba(230,0,122,0.08)", padding: "1px 7px", borderRadius: 20 }}>{formIdList.length}</span>
@@ -3600,6 +3601,12 @@ const AcordModal = forwardRef(function AcordModal({
                   <div style={{ height: 1, background: "#f1f5f9", margin: "0 14px" }} />
                   <div style={{ padding: "14px 14px 12px" }}>
 
+                    {/* ── Pinned summary: FORM SQS SCORE / FORM COMPLETION / Quality Fill
+                        Rate stay pinned to the top of the panel as it scrolls. position:sticky
+                        anchors to .editor-sidebar (the scroll container) - works in the mobile
+                        fixed-drawer too, and on iOS Safari (sticky supported, no prefix needed). ── */}
+                    <div style={{ position: "sticky", top: 0, zIndex: 5, background: "#fff", paddingBottom: 6, marginBottom: 2, borderBottom: "1px solid #f1f5f9", boxShadow: "0 6px 6px -6px rgba(15,23,42,0.08)" }}>
+
                     {/* ── Score header ── */}
                     <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
                       <div style={{ width: 36, height: 36, borderRadius: "50%", background: gradeColor(activeSqs.grade), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{activeSqs.grade}</div>
@@ -3622,7 +3629,7 @@ const AcordModal = forwardRef(function AcordModal({
 
                     {/* ── Confidence fill rate ── */}
                     {activeSqs.confidence_fill_rate != null && (
-                      <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "7px 10px", marginBottom: 10, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
+                      <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 7, padding: "7px 10px", marginBottom: 10 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                           <span style={{ fontSize: 10, fontWeight: 700, color: "#000" }}>Quality Fill Rate</span>
                           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -3638,6 +3645,8 @@ const AcordModal = forwardRef(function AcordModal({
                         <div style={{ fontSize: 9, color: "#94a3b8", marginTop: 3 }}>Producer edits = 100% · AI high = 85% · AI low = 50%</div>
                       </div>
                     )}
+                    </div>
+                    {/* ── /Pinned summary ── */}
 
                     {/* ── Session delta ── */}
                     {packageSqs && packageSqs.sqs_history?.length > 1 && (() => {
@@ -3910,6 +3919,17 @@ const AcordModal = forwardRef(function AcordModal({
                       </div>
                     )}
 
+                    {/* ── RECOMMENDATIONS master heading: groups Top Recommendations,
+                        Issues, the structured recommendations and the Dismissed list under
+                        one section title. Guarded so it never renders without content. ── */}
+                    {(packageSqs?.top_recommendations?.length > 0
+                      || activeSqs.risk_drivers?.length > 0
+                      || activeSqs.issues?.length > 0
+                      || activeSqs.recommendations?.length > 0
+                      || dismissedRecDetails.size > 0) && (
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>Recommendations</div>
+                    )}
+
                     {/* ── Top package recommendations with actionable steps ──
                         Spec L538: SQS outputs must include "top 3 risk drivers
                         AND actionable steps". Backend supplies these on the
@@ -3969,10 +3989,10 @@ const AcordModal = forwardRef(function AcordModal({
                       </div>
                     )}
 
-                    {/* ── Structured recommendations with score_impact + dismiss ── */}
+                    {/* ── Structured recommendations with score_impact + dismiss ──
+                        (title omitted: the RECOMMENDATIONS master heading above covers it) */}
                     {activeSqs.recommendations?.length > 0 && (
                       <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Recommendations</div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                           {activeSqs.recommendations
                             .filter(r => !dismissedRecs.has(typeof r === "string" ? r : r.rec_id))
@@ -4039,9 +4059,26 @@ const AcordModal = forwardRef(function AcordModal({
                 <>
                   <div style={{ height: 1, background: "#f1f5f9", margin: "0 14px" }} />
                   <div style={{ padding: "12px 14px" }}>
+                    {/* Title lifted out of the box to match the grey RECOMMENDATIONS heading. */}
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>Cross-Form Validation</div>
                     <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 8, padding: "8px 10px", boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: "#000", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8 }}>Cross-Form Validation</div>
-                      {crossIssues.map((iss, i) => <div key={i} style={{ fontSize: 12, padding: "3px 0", color: "#000" }}>{iss.message}</div>)}
+                      {/* Each validation rendered as its own numbered row with the form
+                          chip(s) it affects, so they no longer read as one paragraph. */}
+                      {crossIssues.map((iss, i) => (
+                        <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "5px 0", borderBottom: i < crossIssues.length - 1 ? "1px solid #f9a8d4" : "none" }}>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16, flexShrink: 0, lineHeight: 1.5 }}>{i + 1}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            {Array.isArray(iss.forms) && iss.forms.length > 0 && (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 3 }}>
+                                {iss.forms.map((f, fi) => (
+                                  <span key={fi} style={{ fontSize: 9, fontWeight: 700, color: "#9d174d", background: "#fce7f3", border: "1px solid #f9a8d4", borderRadius: 10, padding: "0 6px", whiteSpace: "nowrap" }}>{String(f).replace(/_/g, " ")}</span>
+                                ))}
+                              </div>
+                            )}
+                            <div style={{ fontSize: 12, color: "#000", lineHeight: 1.4 }}>{iss.message}</div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </>

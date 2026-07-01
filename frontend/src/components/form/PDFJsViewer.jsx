@@ -549,7 +549,7 @@ export default function PDFJsViewer({
       {/* Toolbar */}
       <div className="pdfviewer-toolbar-top" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", background: "#1e2436", borderBottom: "1px solid #2a3047", flexShrink: 0, gap: 8, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
-          <span style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 170 }}>{formName}</span>
+          <span title={formName} style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, maxWidth: 420 }}>{formName}</span>
           {fieldsLoaded && (
             <>
               {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.yellow} Required</span>}
