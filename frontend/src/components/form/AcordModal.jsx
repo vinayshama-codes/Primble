@@ -219,35 +219,49 @@ function NextStepBanner({ text }) {
 function InfoTip({ text }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0, width: 220 });
+  // Laptops/desktops (a hover-capable, fine pointer) show on hover; phones/tablets
+  // keep tap-to-toggle. Computed once - hover capability doesn't change mid-session.
+  const [canHover] = useState(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      && window.matchMedia("(hover: hover) and (pointer: fine)").matches
+  );
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
-  const toggle = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (!open) {
-      const r = e.currentTarget.getBoundingClientRect();
-      const width = Math.min(220, window.innerWidth - 16);
-      let left = r.left + r.width / 2 - width / 2;
-      left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
-      setPos({ top: r.bottom + 6, left, width });
-    }
-    setOpen(o => !o);
+  const place = (target) => {
+    const r = target.getBoundingClientRect();
+    const width = Math.min(220, window.innerWidth - 16);
+    let left = r.left + r.width / 2 - width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+    setPos({ top: r.bottom + 6, left, width });
   };
+  const doToggle = (target) => { if (!open) place(target); setOpen(o => !o); };
+  // Click: on touch this toggles; on hover devices hover controls visibility, so the
+  // click is a no-op here - but we still stop propagation so a parent section header
+  // (which the icon may sit inside) is never toggled by tapping the icon.
+  const onClick = (e) => { e.stopPropagation(); e.preventDefault(); if (!canHover) doToggle(e.currentTarget); };
+  const onKeyDown = (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); e.preventDefault(); doToggle(e.currentTarget); }
+    else if (e.key === "Escape") setOpen(false);
+  };
+  const hoverProps = canHover ? {
+    onMouseEnter: (e) => { place(e.currentTarget); setOpen(true); },
+    onMouseLeave: () => setOpen(false),
+  } : {};
   return (
     <>
       <span role="button" tabIndex={0} aria-label="More information"
-        onClick={toggle}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") toggle(e); }}
+        onClick={onClick} onKeyDown={onKeyDown} {...hoverProps}
         style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 13, height: 13, borderRadius: "50%", border: "1px solid #cbd5e1", color: "#94a3b8", fontSize: 9, fontWeight: 700, lineHeight: 1, cursor: "pointer", flexShrink: 0, fontStyle: "normal", textTransform: "none", userSelect: "none" }}>
         i
       </span>
       {open && (
         <>
-          <div onClick={(e) => { e.stopPropagation(); setOpen(false); }} style={{ position: "fixed", inset: 0, zIndex: 100000 }} />
+          {/* Outside-tap catcher only needed in tap mode; on hover devices mouseleave closes it. */}
+          {!canHover && <div onClick={(e) => { e.stopPropagation(); setOpen(false); }} style={{ position: "fixed", inset: 0, zIndex: 100000 }} />}
           <div role="tooltip" style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 100001, background: "#1e293b", color: "#fff", fontSize: 11, fontWeight: 500, lineHeight: 1.45, letterSpacing: 0, textTransform: "none", padding: "7px 10px", borderRadius: 8, boxShadow: "0 8px 24px rgba(15,23,42,0.28)" }}>
             {text}
           </div>
@@ -3958,7 +3972,7 @@ const AcordModal = forwardRef(function AcordModal({
                                   ? <span style={{ fontWeight: 700, color: "#94a3b8", fontSize: 10 }}>N/A</span>
                                   : <span style={{ fontWeight: 700, color: barColor(val) }}>{val}%</span>}
                               </div>
-                              <div style={{ height: 5, background: "#f1f5f9", borderRadius: 3, overflow: "hidden" }}>
+                              <div style={{ height: 5, background: "#e2e8f0", borderRadius: 3, overflow: "hidden" }}>
                                 {!isNA && <div style={{ height: "100%", width: `${val}%`, background: barColor(val), borderRadius: 3, transition: "width 0.6s ease" }} />}
                               </div>
                             </div>
