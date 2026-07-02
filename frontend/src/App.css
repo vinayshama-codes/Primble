@@ -113,10 +113,13 @@ body {
 }
 .header-dashboard-btn:hover { color: #C0157A; }
 
-/* hide label text on very small screens, keep dot+count */
+/* Downloads pill: on mobile, move from the header into the avatar dropdown
+   (a bare pill with no label was showing as an empty bubble in the header) */
+.udrop-downloads-mobile { display: none; }
 @media (max-width: 480px) {
-  .dl-pill__label { display: none; }
-  .dl-pill { padding: 5px 9px; }
+  .dl-pill--header { display: none; }
+  .udrop-downloads-mobile { display: block; }
+  .udrop-downloads-mobile .dl-pill--dropdown { width: 100%; justify-content: center; }
 }
 
 /* ── User Dropdown ── */

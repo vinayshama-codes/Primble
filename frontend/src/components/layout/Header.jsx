@@ -25,13 +25,13 @@ const SignOutIcon = () => (
   </svg>
 );
 
-function DownloadsPill({ count, onUpgradeClick }) {
+function DownloadsPill({ count, onUpgradeClick, className = "" }) {
   const n = count ?? 0;
   const variant = n === 0 ? "gone" : n <= 1 ? "warn" : "ok";
   const label   = n === 0 ? "No free downloads left" : n === 1 ? "1 free download left" : `${n} free downloads left`;
   return (
     <button
-      className={`dl-pill dl-pill--${variant}`} 
+      className={`dl-pill dl-pill--${variant} ${className}`}
       onClick={onUpgradeClick}
       title={n === 0 ? "Upgrade to get more downloads" : `${n} free downloads remaining`}
     >
@@ -291,6 +291,13 @@ function UserDropdown({
             </div>
           </div>
 
+          {/* Downloads count: mobile-only home (desktop shows the pill in the header) */}
+          {user.subscription_tier === "free" && (
+            <div className="udrop-section udrop-downloads-mobile">
+              <DownloadsPill count={user.downloads_remaining} onUpgradeClick={onUpgradeClick} className="dl-pill--dropdown" />
+            </div>
+          )}
+
           {statusBadge && <div className="udrop-section">{statusBadge}</div>}
 
           <div className="udrop-divider" />
@@ -463,7 +470,7 @@ export default function Header({
       {user ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {user.subscription_tier === "free" && (
-            <DownloadsPill count={user.downloads_remaining} onUpgradeClick={onUpgradeClick} />
+            <DownloadsPill count={user.downloads_remaining} onUpgradeClick={onUpgradeClick} className="dl-pill--header" />
           )}
           {onDashboard && (
             <button className="header-dashboard-btn" onClick={onDashboard}>
