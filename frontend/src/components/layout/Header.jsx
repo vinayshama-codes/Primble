@@ -168,7 +168,6 @@ function UserDropdown({
   setUser,
   onAccountSettings,
   onContactPrimble,
-  onDashboard,
 }) {
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -195,7 +194,13 @@ function UserDropdown({
     onLogout();
   };
 
-  const initials = user.email ? user.email[0].toUpperCase() : "U";
+  const initials = (() => {
+    const name = user.full_name?.trim();
+    if (name) return name[0].toUpperCase();
+    const emailLocal = user.email?.split("@")[0];
+    const letter = emailLocal?.match(/[a-zA-Z]/)?.[0];
+    return letter ? letter.toUpperCase() : "U";
+  })();
 
   const billingPortalLoading = false;
   const BillingSpinner = () => (
@@ -293,17 +298,7 @@ function UserDropdown({
           {/* ── Actions ── */}
           <div className="udrop-section udrop-actions">
 
-            {/* 1. Dashboard */}
-            {onDashboard && (
-              <button
-                className="udrop-item"
-                onClick={() => { setOpen(false); onDashboard(); }}
-              >
-                <span className="udrop-item-label">Dashboard</span>
-              </button>
-            )}
-
-            {/* 2. Account Settings */}
+            {/* 1. Account Settings */}
             <button
               className="udrop-item"
               onClick={() => { setOpen(false); onAccountSettings(); }}
@@ -470,6 +465,11 @@ export default function Header({
           {user.subscription_tier === "free" && (
             <DownloadsPill count={user.downloads_remaining} onUpgradeClick={onUpgradeClick} />
           )}
+          {onDashboard && (
+            <button className="header-dashboard-btn" onClick={onDashboard}>
+              Dashboard
+            </button>
+          )}
           <UserDropdown
             user={user}
             token={token}
@@ -485,7 +485,6 @@ export default function Header({
             setUser={setUser}
             onAccountSettings={onAccountSettings}
             onContactPrimble={onContactPrimble}
-            onDashboard={onDashboard}
           />
         </div>
       ) : (

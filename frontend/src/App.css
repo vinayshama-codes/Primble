@@ -80,7 +80,7 @@ body {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  border: none;
+  border: 1px solid rgba(230, 27, 132, 0.35);
   background: none;
   white-space: nowrap;
   transition: opacity 0.15s;
@@ -89,9 +89,29 @@ body {
 }
 .dl-pill:hover { opacity: 0.78; }
 .dl-pill--ok   { color: var(--primary); background: rgba(230, 27, 132, 0.08); }
-.dl-pill--warn { color: #b45309; background: #fef3c7; }
-.dl-pill--gone { color: #dc2626; background: #fee2e2; }
+.dl-pill--warn { color: #b45309; background: #fef3c7; border-color: rgba(180, 83, 9, 0.35); }
+.dl-pill--gone { color: #dc2626; background: #fee2e2; border-color: rgba(220, 38, 38, 0.35); }
 .dl-pill__dot  { display: none; }
+
+/* Dashboard nav link */
+.header-dashboard-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(230, 27, 132, 0.35);
+  cursor: pointer;
+  background: rgba(230, 27, 132, 0.08);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  line-height: 1;
+  transition: color 0.2s;
+}
+.header-dashboard-btn:hover { color: #C0157A; }
 
 /* hide label text on very small screens, keep dot+count */
 @media (max-width: 480px) {
