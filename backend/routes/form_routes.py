@@ -5,7 +5,7 @@ import uuid
 import zipfile
 from fastapi import Request
 
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, File, Response
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, File, Response, Query
 from fastapi.responses import JSONResponse, Response
 from typing import List
 
@@ -1064,6 +1064,17 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         except Exception as _persist_ex:
             logger.warning(f"persist package_sqs failed: {_persist_ex}")
 
+        # Usage counting (client 2026-07-01): the free tier consumes one of its 3
+        # credits when it GENERATES forms/SQS, not only on download - otherwise a
+        # user could regenerate forms to read the extracted data without ever
+        # downloading. Paid tiers are counted earlier (professional/business at
+        # the recommendations screen, essentials at SQS generation), so for them
+        # this is already a no-op. Guarded per-session by package_counted_at, so
+        # re-generating within the same session never re-counts.
+        if (current_user.get("subscription_tier") or "free") == "free":
+            from services.usage_service import count_session_usage
+            await count_session_usage(str(current_user["id"]), req.session_id)
+
         for fid, r in results.items():
             sqs_data = r.get("sqs")
             if sqs_data and sqs_data.get("recommendations"):
@@ -1162,6 +1173,15 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         "active_form_id": form_ids[0] if form_ids else None,
         "cross_issues_last": cross_issues_deduped,
     })
+
+    # Usage counting (client 2026-07-01): essentials consumes one package the
+    # moment the SQS is generated here - we no longer wait for the cover-sheet
+    # download. Deduped per session via package_counted_at, so re-opening the
+    # same submission (this endpoint runs again on every visit to the SQS view)
+    # never re-counts. The later cover-sheet download becomes a no-op.
+    if (current_user.get("subscription_tier") or "") == "essentials":
+        from services.usage_service import count_session_usage
+        await count_session_usage(str(current_user["id"]), session_id)
 
     sqs_list  = [r["sqs"] for r in results.values() if r.get("sqs")]
     avg_score = round(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
@@ -1747,13 +1767,57 @@ async def session_stats(current_user: dict = Depends(get_current_user)):
     })
 
 
+@router.post("/api/session/{session_id}/count-usage")
+async def count_session_usage_endpoint(session_id: str, current_user: dict = Depends(get_current_user)):
+    """Count one package usage when the form-recommendations screen is shown to a
+    professional/business user (client 2026-07-01: count when a submission is
+    analysed and an SQS is produced, not only on download).
+
+    Idempotent per session and safe to call on every render of the screen: it is
+    a no-op for any other tier, for a session already counted (e.g. later at
+    download), or while a Submission Integrity review is still pending. Counting
+    failures never surface to the UI.
+    """
+    proc_session = await get_processing_session(session_id)
+    if proc_session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+
+    sub = current_user.get("subscription_tier", "free") or "free"
+    if sub not in ("professional", "business"):
+        return JSONResponse({"success": True, "counted": False, "reason": "tier_not_counted_here"})
+
+    # Never count a package still pending a multi-insured review (§4.1). The
+    # recommendations screen is only reached once the review clears, but guard
+    # here too so counting can never precede resolution.
+    integrity = proc_session.get("integrity") or {}
+    if integrity.get("review_required") and not integrity.get("overridden"):
+        return JSONResponse({"success": True, "counted": False, "reason": "integrity_pending"})
+
+    from services.usage_service import count_session_usage
+    result = await count_session_usage(str(current_user["id"]), session_id)
+    return JSONResponse({"success": True, "counted": bool(result.get("counted"))})
+
+
 @router.get("/api/sessions")
-async def list_sessions(current_user: dict = Depends(get_current_user)):
+async def list_sessions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=50),
+    current_user: dict = Depends(get_current_user),
+):
     if (current_user.get("payment_status") or "ok") == "archived":
         raise HTTPException(403, "Account archived due to non-payment. Contact support@primble.ai to reactivate.")
-    from repositories.session_repository import list_sessions_for_user
-    sessions = await list_sessions_for_user(str(current_user["id"]))
-    return JSONResponse({"success": True, "sessions": sessions})
+    from repositories.session_repository import list_sessions_for_user, count_sessions_for_user
+    uid      = str(current_user["id"])
+    offset   = (page - 1) * page_size
+    sessions = await list_sessions_for_user(uid, limit=page_size, offset=offset)
+    total    = await count_sessions_for_user(uid)
+    return JSONResponse({
+        "success":   True,
+        "sessions":  sessions,
+        "total":     total,
+        "page":      page,
+        "page_size": page_size,
+    })
 
 
 # ASYNC-SAFE

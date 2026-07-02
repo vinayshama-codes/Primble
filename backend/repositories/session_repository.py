@@ -312,11 +312,27 @@ def _mask_facts_for_summary(facts: dict) -> dict:
 
 
 def compute_session_status(data: dict) -> str:
+    # A questionnaire still out to the client is the most actionable state, so it
+    # takes precedence over the download / progress lifecycle.
+    if data.get("arq_pending"):
+        return "AWAITING_CLIENT"
     if data.get("last_downloaded_at"):
         return "COMPLETED"
     if data.get("generated_forms") or data.get("clarity_result"):
         return "IN_PROGRESS"
     return "NOT_STARTED"
+
+
+# ASYNC-SAFE
+async def count_sessions_for_user(user_id: str) -> int:
+    """Total number of processing sessions for a user - drives dashboard paging.
+    Matches the COUNT(*) used by /api/sessions/stats total_packages."""
+    async with get_pool().acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*)::int AS n FROM processing_sessions WHERE user_id = $1",
+            user_id,
+        )
+    return int(row["n"]) if row and row["n"] is not None else 0
 
 
 # ASYNC-SAFE
@@ -341,7 +357,12 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0)
                                                                      AS sqs_scores,
                 (SELECT jsonb_agg(key)
                    FROM jsonb_each(COALESCE(data->'generated_forms', '{}'::jsonb)))
-                                                                     AS form_ids
+                                                                     AS form_ids,
+                EXISTS (
+                    SELECT 1 FROM arq_sessions a
+                    WHERE a.session_id = processing_sessions.id
+                      AND a.status = 'pending'
+                )                                                    AS arq_pending
             FROM processing_sessions
             WHERE user_id = $1
             ORDER BY updated_at DESC
@@ -384,6 +405,7 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0)
             "form_ids":           form_ids,
             "sqs":                sqs_scores,
             "status":             compute_session_status({
+                                      "arq_pending":        bool(row.get("arq_pending")),
                                       "last_downloaded_at": row["last_downloaded_at"],
                                       "generated_forms":    {k: {} for k in form_ids},
                                       "clarity_result":     {"sqs_combined": row["clarity_sqs"]} if row["clarity_sqs"] else {},
