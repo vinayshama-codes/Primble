@@ -3867,7 +3867,7 @@ const AcordModal = forwardRef(function AcordModal({
                         scrolling under blends into the side gutters; the pink card sits inside.
                         Works in the mobile drawer and on iOS Safari (sticky, no prefix). ── */}
                     <div style={{ position: "sticky", top: 0, zIndex: 5, background: "#fff", paddingTop: 6, paddingBottom: 8, marginBottom: 10, borderBottom: "1px solid #f1f5f9", boxShadow: "0 6px 6px -6px rgba(15,23,42,0.08)" }}>
-                      <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 8, padding: "10px 12px" }}>
+                      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <div style={{ width: 44, height: 44, borderRadius: "50%", background: gradeColor(activeSqs.grade), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{activeSqs.grade}</div>
                           <div style={{ flex: 1, minWidth: 0 }}>
@@ -3884,7 +3884,7 @@ const AcordModal = forwardRef(function AcordModal({
 
                     {/* ── Form Completion (current-form, pink; bold black %, right-justified) ── */}
                     {activeSqs.match_score != null && (
-                      <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "7px 10px", marginBottom: 10 }}>
+                      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, padding: "7px 10px", marginBottom: 10 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                           <span style={{ fontSize: 11, fontWeight: 700, color: "#000", display: "inline-flex", alignItems: "center", gap: 3 }}>Form Completion<InfoTip text="Share of this form's fields filled from your documents." /></span>
                           <span style={{ fontSize: 12, fontWeight: 800, color: "#000" }}>{activeSqs.match_score}%</span>
@@ -3894,7 +3894,7 @@ const AcordModal = forwardRef(function AcordModal({
 
                     {/* ── Quality Fill Rate (current-form, pink; bar + % black, hint in tooltip) ── */}
                     {activeSqs.confidence_fill_rate != null && (
-                      <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "7px 10px", marginBottom: 10 }}>
+                      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, padding: "7px 10px", marginBottom: 10 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                           <span style={{ fontSize: 11, fontWeight: 700, color: "#000", display: "inline-flex", alignItems: "center", gap: 3 }}>Quality Fill Rate<InfoTip text="Filled fields weighted by confidence. Producer edits = 100%, AI high = 85%, AI low = 50%." /></span>
                           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -3923,7 +3923,7 @@ const AcordModal = forwardRef(function AcordModal({
                       const fillAfter  = arqEntry?.avg_fill_rate;
                       const fillDelta  = (fillBefore != null && fillAfter != null) ? fillAfter - fillBefore : null;
                       return (
-                        <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 7, padding: "6px 10px", marginBottom: 10, boxShadow: "0 2px 8px rgba(230,0,122,0.07)" }}>
+                        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, padding: "6px 10px", marginBottom: 10 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span style={{ fontSize: 14 }}></span>
                             <div>
@@ -3937,7 +3937,7 @@ const AcordModal = forwardRef(function AcordModal({
                           </div>
                           {/* §6.2 / Req 4: form completion delta after ARQ remediation */}
                           {fillDelta != null && (
-                            <div style={{ marginTop: 5, paddingTop: 5, borderTop: "1px solid #f9a8d4", display: "flex", alignItems: "center", gap: 4 }}>
+                            <div style={{ marginTop: 5, paddingTop: 5, borderTop: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 4 }}>
                               <span style={{ width: 9, height: 9, background: "rgb(187,247,208)", border: "1px solid #86efac", borderRadius: 2, display: "inline-block", flexShrink: 0 }} />
                               <span style={{ fontSize: 10, color: "#047857", fontWeight: 600 }}>
                                 Quality Fill Rate: {fillBefore}% → {fillAfter}%
@@ -3954,7 +3954,7 @@ const AcordModal = forwardRef(function AcordModal({
                     {(() => {
                       const docSourced = new Set(["property_integrity", "loss_history_alignment", "narrative_quality"]);
                       return (
-                        <div style={{ background: "#fdf2f8", border: "1px solid #f9a8d4", borderRadius: 8, padding: "10px 12px", marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px", marginBottom: 10, display: "flex", flexDirection: "column", gap: 8 }}>
                           {Object.entries(activeSqs.breakdown || {}).map(([key, val]) => {
                             // umbrella_limit_adequacy is null when no umbrella is in the
                             // submission (§6.5 - N/A, not a perfect score).
@@ -4015,7 +4015,7 @@ const AcordModal = forwardRef(function AcordModal({
                             Labels show how complete each category is based on available information. The overall pillar score may also include data quality, conflicts, and validation rules.
                           </div>
                         </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 18 }}>
                           {Object.entries(packageSqs.pillars || {}).map(([key, val]) => {
                             // umbrella_limit_adequacy is null when not applicable (§6.5).
                             const isNA = val === null || val === undefined;
@@ -4285,6 +4285,14 @@ const AcordModal = forwardRef(function AcordModal({
                       </CollapsibleSection>
                     )}
 
+                    {/* SENT QUESTIONNAIRES - moved under Reviewed so Send to Client and More
+                        Actions sit together in the actions area below. Hidden when none. */}
+                    {arqSessions?.length > 0 && (
+                      <CollapsibleSection resetKey={activeFormId} title="Sent Questionnaires" tooltip="Client questionnaires you've sent and their responses.">
+                        <ARQStatusPanel hideTitle arqSessions={arqSessions} token={token} onRefresh={refreshArqData} scoreImprovement={(() => { const _base = packageSqs?.sqs_history?.find(h => h?.stage === "initial_extract") || packageSqs?.sqs_history?.[0]; const _arq = packageSqs?.sqs_history?.find(h => h?.stage === "arq_remediated"); return (_base?.score != null && _arq?.score != null) ? _arq.score - _base.score : null; })()} />
+                      </CollapsibleSection>
+                    )}
+
                   </div>
                 </>
               )}
@@ -4302,11 +4310,6 @@ const AcordModal = forwardRef(function AcordModal({
                     : <>Send to Client{arqNotifCount > 0 && <span style={{ background: "#fff", color: "#E61B84", borderRadius: 10, fontSize: 10, padding: "2px 7px", fontWeight: 800, marginLeft: 2 }}>{arqNotifCount}</span>}</>
                   }
                 </button>
-                {arqSessions?.length > 0 && (
-                  <CollapsibleSection resetKey={activeFormId} title="Sent Questionnaires" tooltip="Client questionnaires you've sent and their responses.">
-                    <ARQStatusPanel hideTitle arqSessions={arqSessions} token={token} onRefresh={refreshArqData} scoreImprovement={(() => { const _base = packageSqs?.sqs_history?.find(h => h?.stage === "initial_extract") || packageSqs?.sqs_history?.[0]; const _arq = packageSqs?.sqs_history?.find(h => h?.stage === "arq_remediated"); return (_base?.score != null && _arq?.score != null) ? _arq.score - _base.score : null; })()} />
-                  </CollapsibleSection>
-                )}
 
                 {/* Collapsible secondary actions */}
                 <div style={{ borderRadius: 14, overflow: "hidden", border: actionsOpen ? "1.5px solid #f9a8d4" : "1.5px solid #fce7f3", boxShadow: actionsOpen ? "0 8px 28px rgba(230,0,122,0.18)" : "0 2px 8px rgba(230,0,122,0.08)", transition: "box-shadow 0.25s, border-color 0.25s" }}>
