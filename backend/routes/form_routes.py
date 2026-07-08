@@ -1,13 +1,14 @@
 import asyncio
 import logging
 import os
+import time
 import uuid
 import zipfile
 from fastapi import Request
 
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, File, Response, Query
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, File, Response, Query, Form
 from fastapi.responses import JSONResponse, Response
-from typing import List
+from typing import List, Optional
 
 from config.database import get_pool
 from config.settings import TEMPLATE_DIR, UPLOAD_DIR, SUPPORTED_IMG, MAX_UPLOAD_SIZE_BYTES, MAX_FILES_PER_UPLOAD, ENABLE_ASYNC_PROCESSING, ENABLE_COMBINED_GAP_FILL
@@ -48,6 +49,7 @@ from services.sqs_service import (
     check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION, classify_stops,
     _check_loss_run_insured_match, _extract_narrative_doc_text,
 )
+from services.issue_registry import build_grouped_view, make_issue
 from services.audit_service import (
     log_recommendations_presented,
     log_field_change,
@@ -187,6 +189,7 @@ async def _bg_lite_generate(session_id: str) -> None:
 @router.post("/api/upload-declaration")
 async def upload_declaration(
     files: List[UploadFile] = File(...),
+    progress_token: Optional[str] = Form(None),
     current_user: dict = Depends(get_current_user),
 ):
     await check_upload_rate_limit(current_user["id"])
@@ -305,7 +308,9 @@ async def upload_declaration(
         await _queue.update_status(_job_id, STATUS_PROCESSING, progress_message="Extracting text from documents...")
 
         try:
-            pipeline_result = await run_extraction_pipeline(all_paths, current_user["id"])
+            pipeline_result = await run_extraction_pipeline(
+                all_paths, current_user["id"], progress_token=progress_token,
+            )
         except ValueError:
             raise HTTPException(400, "No readable text found in uploaded files")
         except ProcessingIntegrityError:
@@ -329,13 +334,23 @@ async def upload_declaration(
         unique_low_conf    = pipeline_result["unique_low_conf"]
         integrity          = pipeline_result.get("integrity") or {}
         sid                = pipeline_result["session_id"]
+        structured_issues  = list(pipeline_result.get("structured_issues") or [])
 
         # NOTE: Tier-1 / ACORD 125 baseline is no longer a hard gate.
         # When required fields are missing, we surface them as soft warnings
         # on the recommendations / SQS screens and let the broker continue.
         if not tier1_ok and tier1_missing:
-            _tier1_warnings = [f"ACORD 125 minimum field missing: {m}" for m in tier1_missing]
+            # No document has this value (that is the gap being reported) - the
+            # form is already named in the message itself; remediation is the
+            # only honest addition, no fabricated document source.
+            _tier1_warnings = [
+                f"ACORD 125 minimum field missing: {m} "
+                "(Fix: Provide this value manually, or upload a document that states it.)"
+                for m in tier1_missing
+            ]
             soft_stops = list(soft_stops) + _tier1_warnings
+            for _m, _w in zip(tier1_missing, _tier1_warnings):
+                structured_issues.append(make_issue(f"tier1_missing_{_m}", "soft_warning", _w))
 
         # Record the Submission Integrity verdict (Beta Report §4.1). Best-effort:
         # captures whether a multi-insured warning was raised so a later override
@@ -359,6 +374,8 @@ async def upload_declaration(
         ]
 
         _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
+        _final_soft_stops = soft_stops + _downgraded
+        _grouped_issues = build_grouped_view(structured_issues, _remaining_hard, _final_soft_stops)
 
         return JSONResponse({
             "success": True, "session_id": sid,
@@ -373,9 +390,12 @@ async def upload_declaration(
             "tier2_score": None if integrity.get("review_required") else tier2_score,
             "tier2_missing": [] if integrity.get("review_required") else tier2_missing,
             "hard_stops": _remaining_hard,
-            "soft_stops": soft_stops + _downgraded,
+            "soft_stops": _final_soft_stops,
             "can_proceed_with_warning": _can_proceed_warn,
             "warning_stops": _downgraded,
+            # Figures 4/5: clustered + tiered view of the same hard_stops/soft_stops
+            # above. Additive only - does not affect SQS capping.
+            "grouped_issues": _grouped_issues,
             "doc_conflicts": doc_conflicts,
             "normalized_differences": normalized_differences,
             "recommendations": recommendations,
@@ -481,6 +501,27 @@ def enforce_building_value_gate(session: dict) -> None:
         )
 
 
+@router.get("/api/upload-progress/{token}")
+async def upload_progress(token: str, current_user: dict = Depends(get_current_user)):
+    """Live per-file upload progress (Figure 1).
+
+    Reads the Redis side-channel the extraction pipeline writes as it processes
+    each file. Lightweight and safe to poll: it never touches the database.
+    Returns ``{found: False}`` when the token is unknown/expired so the frontend
+    can fall back to its generic overlay.
+    """
+    from utils.progress_tracker import read_progress
+    state = await read_progress(token)
+    if not state:
+        return JSONResponse({"found": False})
+    # Ownership guard: a progress record is only readable by the user who started
+    # the upload. The token is already unguessable; this makes a cross-user read
+    # impossible even so (the data describes a sensitive submission in flight).
+    if str(state.get("user_id")) != str(current_user["id"]):
+        return JSONResponse({"found": False}, status_code=404)
+    return JSONResponse({"found": True, **state})
+
+
 @router.post("/api/submission-integrity/resolve")
 async def submission_integrity_resolve(
     req: SubmissionIntegrityResolveRequest,
@@ -542,6 +583,10 @@ async def submission_integrity_resolve(
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(
         result.get("hard_stops") or [], result.get("mflags") or {}
     )
+    _final_soft_stops = (result.get("soft_stops") or []) + _downgraded
+    _grouped_issues = build_grouped_view(
+        result.get("structured_issues") or [], _remaining_hard, _final_soft_stops
+    )
     return JSONResponse({
         "success": True,
         "session_id": result["session_id"],
@@ -552,8 +597,9 @@ async def submission_integrity_resolve(
         "account_profile": result.get("account_profile") or {},
         "all_available_forms": result.get("extra_forms_scored") or [],
         "hard_stops": _remaining_hard,
-        "soft_stops": (result.get("soft_stops") or []) + _downgraded,
+        "soft_stops": _final_soft_stops,
         "can_proceed_with_warning": _can_proceed_warn,
+        "grouped_issues": _grouped_issues,
         "doc_conflicts": result.get("doc_conflicts") or [],
         "normalized_differences": result.get("normalized_differences") or [],
         # Restore the readiness number once the review clears (it was withheld on
@@ -628,6 +674,10 @@ async def document_reclassify(
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(
         result.get("hard_stops") or [], result.get("mflags") or {}
     )
+    _final_soft_stops = (result.get("soft_stops") or []) + _downgraded
+    _grouped_issues = build_grouped_view(
+        result.get("structured_issues") or [], _remaining_hard, _final_soft_stops
+    )
 
     # §4.2 item #5: recompute the Submission Readiness (SQS) from the corrected,
     # re-scored session so the readiness score reflects the reclassification
@@ -687,9 +737,10 @@ async def document_reclassify(
         "all_available_forms": result.get("extra_forms_scored") or [],
         "flags": result.get("mflags") or {},
         "hard_stops": _remaining_hard,
-        "soft_stops": (result.get("soft_stops") or []) + _downgraded,
+        "soft_stops": _final_soft_stops,
         "can_proceed_with_warning": _can_proceed_warn,
         "warning_stops": _downgraded,
+        "grouped_issues": _grouped_issues,
         "doc_conflicts": result.get("doc_conflicts") or [],
         "normalized_differences": result.get("normalized_differences") or [],
         "tier2_score": result.get("tier2_score"),
@@ -734,6 +785,8 @@ async def session_marketing_reason(
     except ValueError as ve:
         if str(ve) == "marketing_invalid_reason":
             raise HTTPException(400, "Unsupported marketing reason.")
+        if str(ve) == "marketing_reason_locked":
+            raise HTTPException(409, "Forms have already been generated for this submission; this answer can no longer be changed.")
         logger.error(f"session_marketing_reason invalid request [trace={get_trace_id()}]: {ve}")
         raise HTTPException(400, "Could not apply the marketing reason.")
     except Exception as ex:
@@ -811,6 +864,10 @@ async def underwriting_confirm_value(
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(
         result.get("hard_stops") or [], result.get("mflags") or {}
     )
+    _final_soft_stops = (result.get("soft_stops") or []) + _downgraded
+    _grouped_issues = build_grouped_view(
+        result.get("structured_issues") or [], _remaining_hard, _final_soft_stops
+    )
     return JSONResponse({
         "success": True,
         "session_id": result["session_id"],
@@ -821,9 +878,10 @@ async def underwriting_confirm_value(
         "all_available_forms": result.get("extra_forms_scored") or [],
         "flags": result.get("mflags") or {},
         "hard_stops": _remaining_hard,
-        "soft_stops": (result.get("soft_stops") or []) + _downgraded,
+        "soft_stops": _final_soft_stops,
         "can_proceed_with_warning": _can_proceed_warn,
         "warning_stops": _downgraded,
+        "grouped_issues": _grouped_issues,
         "tier2_score": result.get("tier2_score"),
         "tier2_missing": result.get("tier2_missing") or [],
         "normalized_differences": result.get("normalized_differences") or [],
@@ -876,6 +934,21 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
     }
     _job_id = await _queue.enqueue(JOB_TYPE_FORM_GENERATION, _fg_payload, str(current_user["id"]), session_id=req.session_id)
     await _queue.update_status(_job_id, STATUS_PROCESSING, progress_message="Generating ACORD forms...")
+
+    # Beta Report Fig 8: persist a durable "generation in progress" marker so a
+    # producer who closes the tab and reopens the session mid-run sees the same
+    # progress overlay with the time remaining (recomputed from started_at)
+    # instead of dropping back to the recommendations screen. Set before the
+    # sync/async branch so both paths leave a resumable marker; cleared when the
+    # generated forms are persisted below.
+    try:
+        await upd_processing_session(req.session_id, {
+            "generation_job_id":     _job_id,
+            "generation_started_at": time.time(),
+            "generation_form_count": len(req.form_ids),
+        })
+    except Exception as _mark_ex:
+        logger.warning(f"select_forms_bulk: could not persist generation marker: {_mark_ex}")
 
     if ENABLE_ASYNC_PROCESSING:
         return JSONResponse(
@@ -990,6 +1063,12 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
 
         if not results:
             await _queue.update_status(_job_id, STATUS_FAILED, error="No forms could be generated")
+            # Fig 8: clear the in-progress marker so a reopen restores the
+            # recommendations screen instead of polling this dead job.
+            try:
+                await upd_processing_session(req.session_id, {"generation_job_id": None})
+            except Exception:
+                pass
             raise HTTPException(400, "No forms could be generated")
 
         # ── §4.3 item 2: post-generation cross-form consistency assertion ────
@@ -1031,6 +1110,9 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             "active_form_id": combined_ids[0] if combined_ids else None,
             "cross_issues_last": _display_cross,
             "underwriting_stamp_consistency": _stamp_check,
+            # Fig 8: generation finished - clear the in-progress marker so a
+            # reopen loads the editor directly rather than the resume overlay.
+            "generation_job_id": None,
         })
 
         summary = {}
@@ -1063,6 +1145,24 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             await upd_processing_session(req.session_id, {"package_sqs": package_sqs})
         except Exception as _persist_ex:
             logger.warning(f"persist package_sqs failed: {_persist_ex}")
+
+        # Package activity log (best-effort; never blocks generation): record the
+        # "forms generated" and "SQS scored" events for the navbar Activity Log.
+        try:
+            from services.activity_service import (
+                record_event, derive_package_label,
+                EVENT_FORMS_GENERATED, EVENT_SQS_SCORED,
+            )
+            _label = derive_package_label(session.get("facts"))
+            _uid   = str(current_user["id"])
+            await record_event(_uid, req.session_id, EVENT_FORMS_GENERATED,
+                               {"form_count": len(combined_ids), "form_ids": combined_ids}, _label)
+            if package_sqs:
+                await record_event(_uid, req.session_id, EVENT_SQS_SCORED,
+                                   {"score": package_sqs.get("package_sqs_score"),
+                                    "tier": package_sqs.get("tier")}, _label)
+        except Exception as _act_ex:
+            logger.warning(f"activity log (forms/sqs) failed: {_act_ex}")
 
         # Usage counting (client 2026-07-01): the free tier consumes one of its 3
         # credits when it GENERATES forms/SQS, not only on download - otherwise a
@@ -1620,7 +1720,13 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
                         "sqs": r.get("sqs", {})} for fid, r in generated.items()}
     return JSONResponse({"session_id": session_id, "generated_forms": summary,
                          "cross_issues": proc_session.get("cross_issues_last", []),
-                         "package_sqs": proc_session.get("package_sqs")})
+                         "package_sqs": proc_session.get("package_sqs"),
+                         # Fig 8: present only while a generation is still running
+                         # (cleared once forms are stored). Lets a reopened session
+                         # resume the progress overlay with the remaining time.
+                         "generation_job_id": proc_session.get("generation_job_id"),
+                         "generation_started_at": proc_session.get("generation_started_at"),
+                         "generation_form_count": proc_session.get("generation_form_count")})
 
 
 @router.get("/api/session/{session_id}/extraction-result")
@@ -1647,6 +1753,10 @@ async def get_extraction_result(
     mflags     = proc_session.get("flags", {})
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
     integrity  = proc_session.get("integrity") or {}
+    _final_soft_stops = proc_session.get("soft_stops", []) + _downgraded
+    _grouped_issues = build_grouped_view(
+        proc_session.get("structured_issues") or [], _remaining_hard, _final_soft_stops
+    )
 
     return JSONResponse({
         "success":               True,
@@ -1656,9 +1766,10 @@ async def get_extraction_result(
         "primary_doc":           primary_doc,
         "flags":                 mflags,
         "hard_stops":            _remaining_hard,
-        "soft_stops":            proc_session.get("soft_stops", []) + _downgraded,
+        "soft_stops":            _final_soft_stops,
         "can_proceed_with_warning": _can_proceed_warn,
         "warning_stops":         _downgraded,
+        "grouped_issues":        _grouped_issues,
         # Submission Integrity (§4.1): same withholding as the upload response - a
         # paused session reloaded (e.g. browser refresh on the review screen) must
         # not re-transmit the readiness number derived from a possibly-mixed package.
@@ -1802,6 +1913,7 @@ async def count_session_usage_endpoint(session_id: str, current_user: dict = Dep
 async def list_sessions(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
+    search: str = Query(None, max_length=100),
     current_user: dict = Depends(get_current_user),
 ):
     if (current_user.get("payment_status") or "ok") == "archived":
@@ -1809,8 +1921,9 @@ async def list_sessions(
     from repositories.session_repository import list_sessions_for_user, count_sessions_for_user
     uid      = str(current_user["id"])
     offset   = (page - 1) * page_size
-    sessions = await list_sessions_for_user(uid, limit=page_size, offset=offset)
-    total    = await count_sessions_for_user(uid)
+    kw       = (search or "").strip() or None
+    sessions = await list_sessions_for_user(uid, limit=page_size, offset=offset, search=kw)
+    total    = await count_sessions_for_user(uid, search=kw)
     return JSONResponse({
         "success":   True,
         "sessions":  sessions,

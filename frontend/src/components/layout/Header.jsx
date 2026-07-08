@@ -1,5 +1,6 @@
 import { API_BASE } from "../../config/constants";
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import AdminNavDropdown from "./AdminNavDropdown";
 
 const ChevronDown = ({ rotated }) => (
   <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
@@ -168,6 +169,7 @@ function UserDropdown({
   setUser,
   onAccountSettings,
   onContactPrimble,
+  onActivityLog,
 }) {
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -357,6 +359,16 @@ function UserDropdown({
               <span className="udrop-item-label">Contact Primble</span>
             </button>
 
+            {/* 5. Activity Log */}
+            {onActivityLog && (
+              <button
+                className="udrop-item"
+                onClick={() => { setOpen(false); onActivityLog(); }}
+              >
+                <span className="udrop-item-label">Activity Log</span>
+              </button>
+            )}
+
           </div>
 
           <div className="udrop-divider" />
@@ -395,7 +407,8 @@ export default function Header({
   onSignatureClick, onUpgradeClick, onLogout, onHome, onSignUp, onLogIn,
   openBillingPortal, upgradeChecking, upgradeFailed,
   setUpgradeFailed, setUpgradeChecking, setUser,
-  onNavigate, onAccountSettings, onContactPrimble, onDashboard,
+  onNavigate, onAccountSettings, onContactPrimble, onActivityLog, onDashboard,
+  isAdmin, onResetLicense, onAuditExport, onManageAdmins,
 }) {
   const [hidden, setHidden] = useState(false);
   const [collapse, setCollapse] = useState(false);
@@ -477,6 +490,13 @@ export default function Header({
               Dashboard
             </button>
           )}
+          {isAdmin && (
+            <AdminNavDropdown
+              onResetLicense={onResetLicense}
+              onAuditExport={onAuditExport}
+              onManageAdmins={onManageAdmins}
+            />
+          )}
           <UserDropdown
             user={user}
             token={token}
@@ -492,6 +512,7 @@ export default function Header({
             setUser={setUser}
             onAccountSettings={onAccountSettings}
             onContactPrimble={onContactPrimble}
+            onActivityLog={onActivityLog}
           />
         </div>
       ) : (

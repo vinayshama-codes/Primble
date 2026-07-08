@@ -9,7 +9,8 @@ from config.database import get_pool
 from models.schemas import (
     SQS_RECOMMENDATION_AUDIT_STATEMENTS, FIELD_SOURCE_AUDIT_STATEMENTS,
     DOWNLOAD_AUDIT_STATEMENTS, SUBMISSION_INTEGRITY_AUDIT_STATEMENTS,
-    UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS,
+    UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS, MARKETING_REASON_AUDIT_STATEMENTS,
+    SUBMISSION_ISSUE_STATUS_STATEMENTS,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,8 @@ async def init_audit_tables() -> None:
             + DOWNLOAD_AUDIT_STATEMENTS
             + SUBMISSION_INTEGRITY_AUDIT_STATEMENTS
             + UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS
+            + MARKETING_REASON_AUDIT_STATEMENTS
+            + SUBMISSION_ISSUE_STATUS_STATEMENTS
         ):
             try:
                 await conn.execute(stmt)
@@ -260,8 +263,136 @@ async def get_dismissed_recommendations(session_id: str) -> List[dict]:
         return []
 
 
+# ── Issue-rail resolution status ───────────────────────────────────────────────
+# Pure work-tracking for the issue rail. Writing a status here NEVER touches SQS
+# scoring or dismiss-credit - it only records that a broker marked an issue
+# open / resolved / dismissed on this submission. Keyed by the durable issue_id.
+
+# ASYNC-SAFE
+async def set_issue_status(
+    session_id: str,
+    issue_id: str,
+    status: str,
+    reason: Optional[str] = None,
+    user_id: Optional[str] = None,
+    form_id: Optional[str] = None,
+    field: Optional[str] = None,
+    rule_code: Optional[str] = None,
+    source_fact: Optional[str] = None,
+    message: Optional[str] = None,
+) -> bool:
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO submission_issue_status (
+                    id, session_id, user_id, issue_id, form_id, field,
+                    rule_code, source_fact, message, status, reason, updated_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                ON CONFLICT (session_id, issue_id) DO UPDATE
+                    SET status=EXCLUDED.status,
+                        reason=EXCLUDED.reason,
+                        updated_at=EXCLUDED.updated_at,
+                        form_id=COALESCE(EXCLUDED.form_id, submission_issue_status.form_id),
+                        field=COALESCE(EXCLUDED.field, submission_issue_status.field),
+                        rule_code=COALESCE(EXCLUDED.rule_code, submission_issue_status.rule_code),
+                        source_fact=COALESCE(EXCLUDED.source_fact, submission_issue_status.source_fact),
+                        message=COALESCE(EXCLUDED.message, submission_issue_status.message)
+                """,
+                f"iss_status_{uuid.uuid4().hex}",
+                session_id, user_id, issue_id, form_id, field,
+                rule_code, source_fact, message, status, reason, now,
+            )
+        logger.info(f"Issue {issue_id} status={status} (session {session_id})")
+        return True
+    except Exception as ex:
+        logger.error(f"Failed to set issue status: {ex}")
+        return False
+
+
+# ASYNC-SAFE
+async def get_issue_statuses(session_id: str) -> List[dict]:
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT issue_id, status, reason, form_id, field, rule_code,
+                          source_fact, message, updated_at
+                   FROM submission_issue_status
+                   WHERE session_id=$1
+                   ORDER BY updated_at ASC""",
+                session_id,
+            )
+        return [dict(r) for r in rows]
+    except Exception as ex:
+        logger.error(f"Failed to get issue statuses: {ex}")
+        return []
+
+
+# ASYNC-SAFE
+async def upsert_marketing_reason(
+    session_id: str,
+    user_id: str,
+    reason_code: str,
+    reason_note: Optional[str],
+    is_adverse: bool,
+) -> bool:
+    """Persist the Figure 6 "Why are you marketing this account?" answer,
+    split into a controlled reason_code + free-text reason_note, durably
+    (independent of the processing_sessions JSON blob so it survives the
+    facts-retention job and is fetchable by an underwriter during an audit).
+
+    Latest answer wins - one row per session_id, upserted in place - matching
+    the product decision that this is a current-value field, not history.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO marketing_reason_audit (
+                    id, session_id, user_id, reason_code, reason_note, is_adverse, updated_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7)
+                ON CONFLICT (session_id) DO UPDATE
+                    SET reason_code = EXCLUDED.reason_code,
+                        reason_note = EXCLUDED.reason_note,
+                        is_adverse  = EXCLUDED.is_adverse,
+                        updated_at  = EXCLUDED.updated_at
+                """,
+                f"mktreason_{uuid.uuid4().hex}", session_id, user_id,
+                reason_code, reason_note, is_adverse, now,
+            )
+        return True
+    except Exception as ex:
+        logger.error(f"Failed to upsert marketing reason: {ex}")
+        return False
+
+
+# ASYNC-SAFE
+async def get_marketing_reason(session_id: str) -> Optional[dict]:
+    try:
+        async with get_pool().acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT session_id, user_id, reason_code, reason_note, is_adverse, updated_at
+                   FROM marketing_reason_audit WHERE session_id=$1""",
+                session_id,
+            )
+        return dict(row) if row else None
+    except Exception as ex:
+        logger.error(f"Failed to get marketing reason: {ex}")
+        return None
+
+
 # ASYNC-SAFE
 async def get_open_recommendations(session_id: str) -> List[dict]:
+    """'Never reviewed' recommendations only (action IS NULL).
+
+    Used exclusively to decide whether the pre-download SQS Review modal needs to
+    show again. Once a producer has seen an item and clicked "Download Anyway", it
+    is marked 'downloaded_anyway' and this function correctly stops returning it -
+    otherwise every repeat download of the same package would re-trigger the gate.
+    Do NOT reuse this for audit/reporting purposes - see get_unresolved_recommendations.
+    """
     try:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
@@ -274,6 +405,34 @@ async def get_open_recommendations(session_id: str) -> List[dict]:
         return [dict(r) for r in rows]
     except Exception as ex:
         logger.error(f"Failed to get open recommendations: {ex}")
+        return []
+
+
+# ASYNC-SAFE
+async def get_unresolved_recommendations(session_id: str) -> List[dict]:
+    """Recommendations that are still substantively unresolved: never reviewed
+    (action IS NULL) OR acknowledged-but-not-fixed via the pre-download override
+    ('downloaded_anyway'). Excludes only 'resolved' (data was actually fixed) and
+    'dismissed' (producer marked it not applicable).
+
+    This is the correct source for download audit records and cover-page Red Flags
+    - clicking "Download Anyway" acknowledges an issue, it doesn't fix it, so it must
+    still appear in the download's audit trail (that's the whole point of pairing it
+    with the override note for an E&O record).
+    """
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT rec_id, field, recommendation_type, message, score_impact, action
+                   FROM sqs_recommendation_audit
+                   WHERE session_id=$1 AND action IS DISTINCT FROM 'resolved'
+                                       AND action IS DISTINCT FROM 'dismissed'
+                   ORDER BY score_impact DESC NULLS LAST""",
+                session_id,
+            )
+        return [dict(r) for r in rows]
+    except Exception as ex:
+        logger.error(f"Failed to get unresolved recommendations: {ex}")
         return []
 
 

@@ -78,6 +78,20 @@ def run_migration():
             # draft_answers — server-side draft persistence for ARQ (cross-browser/incognito safe)
             ("ALTER TABLE arq_sessions ADD COLUMN IF NOT EXISTS draft_answers JSONB DEFAULT '{}'",
              "arq_sessions.draft_answers"),
+            # activity_events — durable package activity log (user-level event feed)
+            ("""
+                CREATE TABLE IF NOT EXISTS activity_events (
+                    id            TEXT PRIMARY KEY,
+                    user_id       TEXT NOT NULL,
+                    session_id    TEXT,
+                    package_label TEXT DEFAULT '',
+                    event_type    TEXT NOT NULL,
+                    event_data    JSONB DEFAULT '{}',
+                    created_at    TEXT NOT NULL
+                )
+            """, "table activity_events"),
+            ("CREATE INDEX IF NOT EXISTS idx_activity_user_created ON activity_events(user_id, created_at DESC)",
+             "idx_activity_user_created"),
         ]
 
         for sql, label in migrations:

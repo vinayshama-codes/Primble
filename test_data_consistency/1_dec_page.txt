@@ -1,0 +1,21 @@
+2526 PACKAGE POLICY - COMPLETE COPY
+DECLARATIONS PAGE
+
+Named Insured: ORBIN CONTRACTING LLC
+Entity Type: LLC
+Mailing Address: 4800 DAHLIA ST # D13, DENVER CO 80216-3121
+Physical Address: 4800 DAHLIA ST # D13, DENVER CO 80216-3121
+
+Policy Number: PKG-2526-0091
+Effective Date: 07/15/2025
+Expiration Date: 07/15/2026
+
+Insurance Carrier: Travelers Insurance Company
+FEIN: 84-1234567
+
+Gross Sales: $2,450,000
+Total Payroll: $610,000
+Employee Count: 12
+
+Description of Operations: General contracting, residential remodeling,
+carpentry, and framing services within the state of Colorado.

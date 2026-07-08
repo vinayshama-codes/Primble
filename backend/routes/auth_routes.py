@@ -19,6 +19,7 @@ from models.schemas import (
 from services.auth_service import (
     hash_password, verify_password, create_session_token, get_current_user,
     revoke_token, rotate_session, revoke_all_sessions,
+    is_acord_license_current,
     _auth_redis,
 )
 from services.email_service import send_verification_email, _send_generic_email
@@ -634,7 +635,7 @@ async def google_auth(req: GoogleAuthRequest, request: Request):
                 "full_name": user.get("full_name", ""),
                 "organization_name": org_name, "subscription_tier": sub,
                 "downloads_remaining": 3 - used if sub == "free" else -1,
-                "acord_license_confirmed": bool(int(user.get("acord_license_confirmed", 0) or 0)),
+                "acord_license_confirmed": is_acord_license_current(user),
                 "acord_disclaimer_accepted": bool(disclaimer),
             },
         })
@@ -788,7 +789,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
         "packages_soft_buffer": soft_buffer,
         "overage_packages_pending": int(current_user.get("overage_packages_pending", 0) or 0),
         "email_verified": bool(int(current_user.get("email_verified", 0) or 0)),
-        "acord_license_confirmed": bool(int(current_user.get("acord_license_confirmed", 0) or 0)),
+        "acord_license_confirmed": is_acord_license_current(current_user),
         "acord_disclaimer_accepted": bool(int(current_user.get("acord_disclaimer_accepted", 0) or 0)),
         "payment_status": current_user.get("payment_status", "ok") or "ok",
         "payment_failed_at": current_user.get("payment_failed_at"),

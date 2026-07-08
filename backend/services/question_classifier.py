@@ -43,6 +43,38 @@ AUDIENCE_INTERNAL     = "internal"      # system identifiers / form plumbing
 AUDIENCE_CARRIER      = "carrier"       # carrier / underwriter review
 AUDIENCE_DO_NOT_SEND  = "do_not_send"   # never appropriate for a client (fax…)
 
+# ── Bucket taxonomy (client clarification 2026-07) ────────────────────────────
+# The producer UI groups questions into exactly THREE actionable buckets plus a
+# non-selectable "Never send" row. Buckets are DERIVED from the finer-grained
+# audience above (kept for routing precision), so nothing that works today
+# regresses — the buckets are just a coarse view on top of the existing routing:
+#   client      -> Client        (the insured can reasonably answer)
+#   producer    -> Agency        (producer / CSR / account manager answers)
+#   carrier     -> Underwriting  (carrier's OWN underwriter / uw conditions)
+#   internal    -> Underwriting  (cross-form flags, system / internal review)
+#   do_not_send -> Never send    (fax etc. — never appropriate to send)
+BUCKET_CLIENT       = "client"
+BUCKET_AGENCY       = "agency"
+BUCKET_UNDERWRITING = "underwriting"
+BUCKET_DO_NOT_SEND  = "do_not_send"
+
+_AUDIENCE_TO_BUCKET = {
+    AUDIENCE_CLIENT:      BUCKET_CLIENT,
+    AUDIENCE_PRODUCER:    BUCKET_AGENCY,
+    AUDIENCE_CARRIER:     BUCKET_UNDERWRITING,
+    AUDIENCE_INTERNAL:    BUCKET_UNDERWRITING,
+    AUDIENCE_DO_NOT_SEND: BUCKET_DO_NOT_SEND,
+}
+
+BUCKET_LABELS = {
+    BUCKET_CLIENT:       "Client",
+    BUCKET_AGENCY:       "Agency",
+    BUCKET_UNDERWRITING: "Underwriting / Internal Review",
+    BUCKET_DO_NOT_SEND:  "Never send",
+}
+
+BUCKET_ORDER = [BUCKET_CLIENT, BUCKET_AGENCY, BUCKET_UNDERWRITING, BUCKET_DO_NOT_SEND]
+
 # ── Priority taxonomy (Beta Report §8.2 item 2) ───────────────────────────────
 PRIORITY_CRITICAL   = "critical"
 PRIORITY_IMPORTANT  = "important"
@@ -180,11 +212,40 @@ _INTERNAL_PATTERNS = (
     "internalcode", "internal_code", "processingid", "processing_id",
 )
 
+# Carrier INFORMATION the AGENCY supplies (client clarification: "Carrier
+# information, Policy numbers, Prior carrier information, ACORD form edition,
+# Submission goal, Market selection, Coverage intent" are AGENCY questions — the
+# producer / CSR / account manager answers them, never a default client question).
+# This is DISTINCT from _CARRIER_PATTERNS below (the carrier's OWN underwriter /
+# underwriting conditions, which stay Underwriting review). Matched AFTER the
+# carrier patterns so `insurer_underwriter*` still routes to carrier review, and
+# BEFORE the critical/important/curated client branches so these never fall
+# through to the client. "Coverage intent" here means producer STRATEGY (which
+# markets, submission goal, why marketing) — the insured's desired coverage LIMITS
+# (gl_limits, umbrella_limit, property values) are deliberately NOT in this list;
+# they stay Client and keep driving SQS.
+_AGENCY_PATTERNS = (
+    "prior_carrier", "priorcarrier",
+    "prior_policy", "priorpolicy",
+    "policy_number", "policynumber", "policy_no",
+    "insurer",                       # insurer name / policy / phone / address
+    "carrier_marketing", "carriermarketing",
+    "submission_urgency", "submission_goal",
+    "market_selection", "coverage_intent",
+    "acord_edition", "form_edition", "formedition", "edition_",
+    # Umbrella underlying-schedule / follow-form evidence — the producer supplies
+    # these (they know what is in the submission). Kept out of the default client
+    # set per the client's "underlying umbrella support" -> internal/agency note.
+    "schedule_of_underlying", "underlying_insurance",
+    "follow_form", "followform",
+)
+
 # Canonical fields that ARE client-answerable but happen to contain a word that
-# could trip a pattern — protect them explicitly. (e.g. prior_policy_number maps
-# from *_PolicyNumberIdentifier; the client can provide it.)
+# could trip a pattern — protect them explicitly. (policy_number / prior policy
+# numbers were removed here: the client re-classified all policy numbers as an
+# AGENCY question, so they must NOT be whitelisted back to the client.)
 _CLIENT_WHITELIST = {
-    "naics_code", "sic_code", "policy_number", "prior_policy_number",
+    "naics_code", "sic_code",
     "gl_class_codes", "gl_class_codes_by_location", "wc_class_codes",
     # contact_name / contact_email are client-critical facts even when the raw
     # ACORD field that surfaces them is in the Producer section of the form
@@ -406,10 +467,19 @@ def classify_question(
         # panel, never auto-sent to the client.
         audience, priority = AUDIENCE_CARRIER, PRIORITY_INTERNAL
         topic = TOPIC_PRODUCER
+    elif not whitelisted and _matches_any(fn, _AGENCY_PATTERNS):
+        # Agency bucket: producer / CSR / account manager answers these (carrier
+        # info, policy numbers, prior carrier, submission strategy, ACORD edition,
+        # umbrella underlying evidence). Never a default client question, but the
+        # producer can manually add them to the send list.
+        audience, priority = AUDIENCE_PRODUCER, PRIORITY_INTERNAL
     elif is_cross_form:
-        # Structural conflicts surfaced by cross-form validation are always
-        # client-relevant; hard conflicts are critical.
-        audience = AUDIENCE_CLIENT
+        # Client clarification (2026-07): cross-form conflicts are Underwriting /
+        # Internal Review flags by DEFAULT — never auto-sent to the client. We keep
+        # generating the resolution question (priority still reflects severity) so
+        # the producer can one-click escalate the ones whose fix is a clean
+        # client-answerable fact (see `escalatable_to_client` below).
+        audience = AUDIENCE_INTERNAL
         priority = PRIORITY_CRITICAL if severity == "hard_stop" else PRIORITY_IMPORTANT
     elif identity_keys & CRITICAL_FIELDS:
         audience, priority = AUDIENCE_CLIENT, PRIORITY_CRITICAL
@@ -459,14 +529,38 @@ def classify_question(
         labels.append("Form completion")
     score_impact["labels"] = labels
 
+    # ── Coarse bucket for the 3-bucket producer UI (client clarification) ─────
+    bucket = _AUDIENCE_TO_BUCKET.get(audience, BUCKET_UNDERWRITING)
+
+    # A cross-form conflict is escalatable to the client only when its fix is a
+    # clean client-answerable fact (payroll, EL limits, locations, operations,
+    # retro date, SIR, period of restoration, lines of business …). Judgment-only
+    # conflicts (ACV/RCV, conflicting insureds/addresses) have no client-answerable
+    # field and are never escalatable — they stay pure internal flags.
+    escalatable_to_client = bool(
+        is_cross_form
+        and not _matches_any(fn, _DO_NOT_SEND_PATTERNS)
+        and not _matches_any(fn, _PRODUCER_PATTERNS)
+        and not _matches_any(fn, _AGENCY_PATTERNS)
+        and not _matches_any(fn, _CARRIER_PATTERNS)
+        and (
+            bool(identity_keys & (CRITICAL_FIELDS | IMPORTANT_FIELDS))
+            or is_curated_client
+            or whitelisted
+        )
+    )
+
     return {
-        "audience":          audience,
-        "priority":          priority,
-        "topic_group":       topic,
-        "topic_label":       TOPIC_LABELS.get(topic, "Other"),
-        "score_impact":      score_impact,
-        "suppressed":        suppressed,
-        "suppressed_reason": suppressed_reason,
+        "audience":              audience,
+        "priority":              priority,
+        "bucket":                bucket,
+        "bucket_label":          BUCKET_LABELS.get(bucket, "Underwriting / Internal Review"),
+        "escalatable_to_client": escalatable_to_client,
+        "topic_group":           topic,
+        "topic_label":           TOPIC_LABELS.get(topic, "Other"),
+        "score_impact":          score_impact,
+        "suppressed":            suppressed,
+        "suppressed_reason":     suppressed_reason,
     }
 
 
@@ -554,6 +648,10 @@ def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP
     counts = {
         "total": len(questions),
         "client": 0, "producer": 0, "internal": 0, "do_not_send": 0, "carrier": 0,
+        # Coarse 3-bucket counts for the client's ARQ metric (Client / Agency /
+        # Underwriting counts). `bucket_do_not_send` is the "Never send" row.
+        "bucket_client": 0, "bucket_agency": 0,
+        "bucket_underwriting": 0, "bucket_do_not_send": 0,
         "critical": 0, "important": 0, "optional": 0,
         "default_selected": 0, "suggested": 0, "suppressed": 0,
     }
@@ -564,6 +662,8 @@ def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP
         suppressed = bool(q.get("suppressed"))
 
         counts[audience] = counts.get(audience, 0) + 1
+        bucket = q.get("bucket") or _AUDIENCE_TO_BUCKET.get(audience, BUCKET_UNDERWRITING)
+        counts[f"bucket_{bucket}"] = counts.get(f"bucket_{bucket}", 0) + 1
         if priority in ("critical", "important", "optional"):
             counts[priority] += 1
         if suppressed:

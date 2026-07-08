@@ -15,6 +15,119 @@ from utils.validators import US_STATES, run_field_validations
 logger = logging.getLogger(__name__)
 
 
+# ── "Why this form" evidence facts (Beta Report Fig 7) ──────────────────────
+# The concrete, already-extracted value that corroborates each form's trigger,
+# surfaced next to the recommendation so a producer can validate the detection.
+# This is DISPLAY/AUDIT enrichment only - it reads facts that were already
+# extracted and NEVER changes which forms are triggered. Each entry:
+#   form_id -> ordered list of (fact_key, short_label)
+# Each entry: form_id -> {"combine": bool, "facts": [(fact_key, short_label), ...]}.
+#   combine=True  → the listed facts are a related SET; when 2+ are present show
+#                   them together as "limits a / b" (GL occurrence + aggregate -
+#                   the paired-limit presentation the client asked for).
+#   combine=False → the listed facts are ALTERNATIVE sources for one value; show
+#                   the first one that is present (e.g. WC payroll may live under
+#                   total_payroll OR wc_payroll depending on the document).
+# Either way, EVERY present fact is recorded in `trigger_facts` for the audit
+# trail. All 17 supported forms are covered. When a form has no dedicated value
+# fact, the closest real registry fact is used as a proxy (noted inline). Any form
+# whose facts are all absent for a given submission falls back to its existing
+# generic message unchanged - the merge is never forced.
+_FORM_EVIDENCE_FACTS: Dict[str, dict] = {
+    # ── Master application - headline underwriting figure ────────────────────
+    "ACORD_125": {"combine": False, "facts": [("total_revenue", "Annual revenue"),
+                                              ("total_payroll", "Total payroll")]},
+    # ── Certificate of Liability - the liability limit being certified ───────
+    "ACORD_25":  {"combine": False, "facts": [("gl_each_occurrence", "GL per-occurrence"),
+                                              ("auto_liability_limit", "Auto liability limit"),
+                                              ("umbrella_limit", "Umbrella limit")]},
+    # ── General Liability - paired occurrence + aggregate limits ─────────────
+    "ACORD_126": {"combine": True,  "facts": [("gl_each_occurrence", "GL per-occurrence"),
+                                              ("gl_aggregate", "GL aggregate"),
+                                              ("gl_limits", "GL limits")]},
+    # ── Business Auto ────────────────────────────────────────────────────────
+    "ACORD_127": {"combine": False, "facts": [("auto_liability_limit", "Auto liability limit")]},
+    # ── Workers Comp - payroll (total_payroll OR wc_payroll, per document) ────
+    "ACORD_130": {"combine": False, "facts": [("total_payroll", "Total payroll"),
+                                              ("wc_payroll", "WC payroll")]},
+    # ── Umbrella / Excess ────────────────────────────────────────────────────
+    "ACORD_131": {"combine": False, "facts": [("umbrella_limit", "Umbrella limit")]},
+    # ── Property - building value, else business personal property value ─────
+    "ACORD_140": {"combine": False, "facts": [("property_building_value", "Building value"),
+                                              ("property_bpp_value", "Business property value")]},
+    # ── Inland Marine - total scheduled value ────────────────────────────────
+    "ACORD_141": {"combine": False, "facts": [("inland_marine_total_value", "Inland marine value")]},
+    # ── Additional Remarks - loss count when losses drove the narrative ──────
+    "ACORD_101": {"combine": False, "facts": [("num_claims", "Prior claims")]},
+    # ── Builders Risk - project cost ─────────────────────────────────────────
+    "ACORD_133": {"combine": False, "facts": [("builders_risk_project_cost", "Project cost")]},
+    # ── Cyber - coverage limit ───────────────────────────────────────────────
+    "ACORD_160": {"combine": False, "facts": [("cyber_limit", "Cyber limit")]},
+    # ── Contractors Supplemental - subcontracting exposure ───────────────────
+    "ACORD_186": {"combine": False, "facts": [("percent_subcontracted", "% subcontracted")]},
+    # ── Evidence of Property - the property value being evidenced ────────────
+    "ACORD_28":  {"combine": False, "facts": [("property_building_value", "Building value"),
+                                              ("property_bpp_value", "Business property value")]},
+    # ── Contractors (state variants) - contractor profile ────────────────────
+    "ACORD_137_CA": {"combine": False, "facts": [("contractor_type", "Contractor type"),
+                                                 ("percent_subcontracted", "% subcontracted")]},
+    "ACORD_137_CO": {"combine": False, "facts": [("contractor_type", "Contractor type"),
+                                                 ("percent_subcontracted", "% subcontracted")]},
+    # ── Contractors Equipment (state variants) - equipment/contents value ────
+    # Proxy: no dedicated equipment-schedule fact exists, so use business
+    # personal-property value, then inland-marine scheduled value.
+    "ACORD_138_CA": {"combine": False, "facts": [("property_bpp_value", "Equipment value"),
+                                                 ("inland_marine_total_value", "Scheduled value")]},
+    "ACORD_138_CO": {"combine": False, "facts": [("property_bpp_value", "Equipment value"),
+                                                 ("inland_marine_total_value", "Scheduled value")]},
+}
+
+
+def _build_trigger_facts(form_id: str, facts: dict) -> Tuple[List[dict], Optional[str]]:
+    """Return (trigger_facts, evidence_suffix) for one recommendation.
+
+    trigger_facts : [{code, label, value}] for every corroborating fact that is
+                    actually present (empty list when none) - persisted as-is for
+                    the audit trail.
+    evidence_suffix : a short human string ("limits $1M / $2M" or "Total payroll:
+                    $2,500,000") for merging into the display reason, or None when
+                    no evidence fact was extracted so the caller falls back to the
+                    existing generic message unchanged.
+    """
+    spec = _FORM_EVIDENCE_FACTS.get(form_id)
+    if not spec:
+        return [], None
+    present: List[dict] = []
+    for key, label in spec["facts"]:
+        val = _fv(facts, key)
+        if _is_empty(val):
+            continue
+        sval = str(val).strip()
+        if not sval:
+            continue
+        # A numerically-zero value ("0", "$0", "0%") is not useful evidence and
+        # can mislead (e.g. "Prior claims: 0" on a narrative triggered by a
+        # coverage conflict rather than losses). Skip it so the form falls back
+        # to its generic message. Non-numeric values (e.g. "General Contractor")
+        # are unaffected.
+        _digits = re.sub(r"[^\d.]", "", sval)
+        try:
+            if _digits and float(_digits) == 0:
+                continue
+        except ValueError:
+            pass
+        present.append({"code": key, "label": label, "value": sval})
+    if not present:
+        return [], None
+    if spec.get("combine") and len(present) >= 2:
+        # Paired limits (GL occurrence + aggregate) read as "limits a / b".
+        suffix = "limits " + " / ".join(tf["value"] for tf in present[:2])
+    else:
+        # Single value, or the first available of several alternative sources.
+        suffix = f"{present[0]['label']}: {present[0]['value']}"
+    return present, suffix
+
+
 # ── State detection for ACORD 137/138 variants ──────────────────────────────
 
 _STATE_NAME_TO_CODE = {
@@ -880,6 +993,18 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
             "tier":           tier,
             "reason_label":   reason_label or trigger_reason,
         }
+        # ── Beta Report Fig 7: "why this form" evidence ─────────────────────
+        # Merge the concrete extracted value into the display reason (keeping the
+        # current message) and record the structured trigger facts for audit.
+        # Reads already-extracted facts only - triggering is unchanged. Falls
+        # back to the existing message when no evidence value was extracted, and
+        # is skipped for uploaded source docs (their message is about a clean
+        # copy, not coverage evidence).
+        _trigger_facts, _evidence = _build_trigger_facts(form_id, facts)
+        if _trigger_facts:
+            entry["trigger_facts"] = _trigger_facts
+            if _evidence and not is_source_document:
+                entry["reason_label"] = f"{entry['reason_label']} - {_evidence}"
         # Expose raw counts so the frontend can render "12 of 18 fields"
         _, filled, total = _score_field_coverage(form_id, facts)
         entry["fields_filled"] = filled

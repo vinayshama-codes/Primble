@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "re
 import { API_BASE } from "../../config/constants";
 import { gradeColor, barColor, sqsGradeFromScore } from "../../utils/formatters";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
+import UploadProgressOverlay from "../overlays/UploadProgressOverlay";
 import PDFJsViewer from "./PDFJsViewer";
 
 const SQS_LABELS = {
@@ -27,6 +28,8 @@ const PACKAGE_PILLAR_LABELS = {
   loss_history_alignment:  "Loss History",
   umbrella_limit_adequacy: "Umbrella Adequacy",
   narrative_quality:       "Narrative Quality",
+  // Figure 11: producer-friendly label for the synthetic hard-stops row (client wording).
+  hard_stops_present:      "Hard stops need attention",
   // Legacy keys (older session payloads) kept for backward-compat display.
   data_integrity: "Data Integrity",
   exposure_cope:  "Exposure & COPE",
@@ -74,6 +77,161 @@ const EVIDENCE_LABEL_COLOR = {
   requires_supporting_doc: { bg: "#fffbeb", fg: "#b45309" },
   inferred:                { bg: "#f5f3ff", fg: "#6d28d9" },
 };
+
+// ── Figure 10 score provenance ───────────────────────────────────────────────
+// Click a credited positive signal to see WHY it helped the score. Option (a):
+// Source + Confidence + Rule, no "how to strengthen" line. `sourceFact` (when set)
+// is a scored fact key used to look up the fact's confidence in evidence_labels;
+// it is only set where the signal is driven by exactly that one fact, so the
+// confidence can never contradict the signal. Display-only; no scoring impact.
+const SIGNAL_PROVENANCE = {
+  narrative_attached:      { source: "A narrative document is attached", rule: "A narrative gives underwriters account context and lifts Narrative Quality." },
+  operations_description:  { sourceFact: "operations_description", source: "Operations description provided", rule: "A clear operations description supports exposure and classification." },
+  no_losses_stated:        { source: "No known losses stated", rule: "A no-loss statement lifts Loss History. Corroborate with loss runs or a signed no-known-loss letter for full credit." },
+  loss_runs_attached:      { source: "Loss runs uploaded", rule: "Uploaded loss runs corroborate loss history - stronger than a narrative statement." },
+  years_in_business:       { sourceFact: "years_in_business", source: "Years in business stated", rule: "Time in business is a positive underwriting signal." },
+  prior_carrier:           { sourceFact: "prior_carrier", source: "Prior carrier identified", rule: "A named prior carrier strengthens the underwriting picture." },
+  coverage_limits:         { source: "Coverage limits identified", rule: "Identified limits support exposure and umbrella checks." },
+  locations_identified:    { sourceFact: "locations", source: "Locations identified", rule: "Location detail supports property and exposure scoring." },
+  emod_xmod:               { sourceFact: "wc_xmod", source: "EMOD / XMOD provided", rule: "The experience modifier is a key Workers Comp underwriting input." },
+  wc_payroll_breakdown:    { sourceFact: "total_payroll", source: "Payroll by WC class code provided", rule: "Payroll by class code supports Workers Comp rating." },
+  contractor_coverages:    { source: "Contractor-specific coverages discussed", rule: "Contractor coverage detail improves exposure completeness." },
+  existing_program:        { sourceFact: "prior_carrier", source: "Existing insurance program described", rule: "An existing program gives renewal context." },
+  submission_urgency:      { source: "Deadline / urgency provided", rule: "Timing context helps prioritize the submission." },
+  experienced_management:  { source: "Experienced management (from narrative)", rule: "Management experience is a positive narrative signal." },
+  risk_controls_described: { source: "Risk controls described (from narrative)", rule: "Documented risk controls lift Narrative Quality." },
+  safety_manual:           { source: "Employer handbook / safety manual (from narrative)", rule: "Safety documentation is a positive risk signal." },
+};
+// Evidence-basis chip → rule + how-to-improve, keyed by the backend evidence label.
+const EVIDENCE_PROV = {
+  confirmed_by_user:       { rule: "Confirmed by the user via the questionnaire - the strongest provenance." },
+  stated_in_narrative:     { rule: "Asserted in the narrative - a statement, not a corroborated document.", remediation: "Attach a document (loss runs, policy, or schedule) to raise confidence." },
+  requires_supporting_doc: { rule: "Not yet corroborated by a document.", remediation: "Attach the supporting document (loss runs, policy, or schedule) to credit this." },
+  conflicting:             { rule: "Documents disagree on this value.", remediation: "Resolve the conflict between the source documents before submission." },
+  inferred:                { rule: "Inferred by AI from the business class - not read directly from a document.", remediation: "Confirm the value, or upload a document that states it." },
+};
+// Loss-history state → rule + how-to-improve, keyed by the backend loss_history_state.
+const LOSS_STATE_PROV = {
+  no_information:                  { direction: "reduced", rule: "No loss-run evidence or attestation on file - Loss History cannot be credited.", remediation: "Request loss runs, or have the client confirm No Known Losses (a signed no-known-loss letter corroborates it)." },
+  user_states_no_losses:          { direction: "info",     rule: "The insured attests No Known Losses - credited, but not yet corroborated by a document.", remediation: "Attach loss runs or a signed no-known-loss letter to fully confirm." },
+  narrative_states_no_losses:     { direction: "info",     rule: "No losses are stated in the narrative - an assertion, weaker than an attestation.", remediation: "Confirm with the insured, or attach loss runs / a signed no-known-loss letter to corroborate." },
+  loss_runs_pending:              { direction: "info",     rule: "Loss runs are requested / pending - the score updates when they arrive.", remediation: "Upload the loss runs once received." },
+  loss_runs_uploaded:             { direction: "info",     rule: "Loss runs uploaded - claim years not yet confirmed.", remediation: "Confirm claim years and the valuation date to finalize." },
+  loss_runs_parsed:               { direction: "increased", rule: "Loss runs parsed - claim years extracted from the documents." },
+  loss_runs_match_insured:        { direction: "increased", rule: "Loss runs match the insured - corroborated evidence." },
+  loss_runs_do_not_match:         { direction: "reduced",  rule: "Loss runs do not match the insured - not creditable for this submission.", remediation: "Verify the runs belong to this insured (name + FEIN / policy number)." },
+  loss_data_reconciled:           { direction: "increased", rule: "Loss data reconciled - the strongest loss-history evidence." },
+  loss_history_conflicting:       { direction: "reduced",  rule: "A no-loss statement is contradicted by actual loss-run claims.", remediation: "Reconcile the attestation with the loss runs before submission." },
+  loss_history_pending_validation:{ direction: "info",     rule: "Loss runs parsed but ownership not fully verified.", remediation: "Confirm ownership with a FEIN or policy number." },
+};
+// Umbrella state → rule + how-to-improve, keyed by the backend umbrella_state.
+const UMBRELLA_STATE_PROV = {
+  unknown:                        { direction: "reduced",  rule: "Underlying limits not found - umbrella adequacy cannot be confirmed.", remediation: "Provide underlying GL / Auto / EL limits and a schedule of underlying insurance." },
+  insufficient_information:       { direction: "reduced",  rule: "Not enough information to confirm umbrella adequacy.", remediation: "Provide underlying limits and the schedule of underlying insurance." },
+  umbrella_coverage_present:      { direction: "info",     rule: "Umbrella coverage present - adequacy partially supported." },
+  umbrella_coverage_needs_review: { direction: "reduced",  rule: "Umbrella needs review - underlying limits or schedule may be short.", remediation: "Confirm underlying limits meet umbrella attachment, and attach the schedule of underlying insurance." },
+  adequately_supported:           { direction: "increased", rule: "Umbrella adequately supported by the underlying limits." },
+};
+
+// Build the provenance card data for one clicked score component. Pure; returns
+// null when the component has nothing to show. Referenced label maps are declared
+// below and resolved at call time (render), never at module init.
+function buildProvenance(group, key, pkg) {
+  if (!pkg) return null;
+  if (group === "signal") {
+    const sig = (pkg.positive_signals || []).find(s => s.key === key);
+    if (!sig) return null;
+    const meta = SIGNAL_PROVENANCE[key] || {};
+    let confidence = null;
+    if (meta.sourceFact) {
+      const lbl = pkg.evidence_labels?.[meta.sourceFact];
+      if (lbl && lbl !== "not_found" && lbl !== "not_applicable") confidence = EVIDENCE_LABEL_DISPLAY[lbl] || null;
+    }
+    return { title: sig.label || key, direction: "increased", source: meta.source || sig.label || key, confidence, rule: meta.rule };
+  }
+  if (group === "narrative") {
+    if (!(key in (pkg.narrative_components || {}))) return null;
+    const present = pkg.narrative_components[key];
+    const label = NARRATIVE_COMPONENT_LABELS[key] || key;
+    return present
+      ? { title: label, direction: "increased", source: "Covered in the narrative", rule: "Found in the submitted narrative - credits Narrative Quality." }
+      : { title: label, direction: "reduced", rule: "Not found in the narrative - reduces Narrative Quality.", remediation: `Add ${label} to the narrative, or request it from the client via the questionnaire.` };
+  }
+  if (group === "evidence") {
+    const lbl = pkg.evidence_labels?.[key];
+    if (!lbl) return null;
+    const p = EVIDENCE_PROV[lbl] || {};
+    return { title: key.replace(/_/g, " "), direction: lbl === "confirmed_by_user" ? "increased" : "reduced", source: key.replace(/_/g, " "), confidence: EVIDENCE_LABEL_DISPLAY[lbl] || lbl, rule: p.rule, remediation: p.remediation };
+  }
+  if (group === "loss_history") {
+    const st = pkg.loss_history_state;
+    if (!st) return null;
+    const p = LOSS_STATE_PROV[st] || {};
+    return { title: "Loss History", direction: p.direction || "info", confidence: LOSS_HISTORY_STATE_LABEL[st] || st, rule: p.rule, remediation: p.remediation };
+  }
+  if (group === "umbrella") {
+    const st = pkg.umbrella_state;
+    if (!st) return null;
+    const p = UMBRELLA_STATE_PROV[st] || {};
+    return { title: "Umbrella", direction: p.direction || "info", confidence: UMBRELLA_STATE_LABEL[st] || st, rule: p.rule, remediation: p.remediation };
+  }
+  return null;
+}
+
+// Fixed-position provenance popover. Mirrors InfoTip: computed from the trigger's
+// rect so it is never clipped by the sidebar's overflow, and works identically on
+// iOS / Android / desktop. Closes on the "X", on Escape, on scroll/resize, and on
+// any pointer-down outside the popover AND outside a provenance trigger (so a click
+// on another chip switches straight to that chip's card instead of just closing).
+function ProvenancePopover({ data, pos, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    const onScroll = () => onClose();
+    const onDown = (e) => {
+      const t = e.target;
+      if (t && t.closest && (t.closest("[data-provpop]") || t.closest("[data-provtrigger]"))) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    window.addEventListener("pointerdown", onDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("pointerdown", onDown, true);
+    };
+  }, [onClose]);
+  if (!data) return null;
+  const accent = data.direction === "increased" ? "#10b981" : data.direction === "reduced" ? "#f59e0b" : "#94a3b8";
+  const rows = [
+    ["Source", data.source],
+    ["Confidence", data.confidence],
+    ["Rule", data.rule],
+    ["To improve", data.remediation],
+  ].filter(([, v]) => v);
+  return (
+    <div data-provpop="1" role="dialog" style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width, zIndex: 100001, background: "#fff", border: "1px solid #e2e8f0", borderLeft: `3px solid ${accent}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(15,23,42,0.18)", padding: "8px 10px" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: rows.length ? 5 : 0 }}>
+        <span style={{ flex: 1, fontSize: 10, fontWeight: 700, color: "#0f172a", lineHeight: 1.3 }}>{data.title}</span>
+        <span role="button" tabIndex={0} aria-label="Close"
+          onClick={onClose}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClose(); } }}
+          style={{ cursor: "pointer", color: "#94a3b8", fontSize: 14, fontWeight: 700, lineHeight: 1, flexShrink: 0, padding: "0 2px", userSelect: "none" }}>×</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {rows.map(([label, val]) => (
+          <div key={label} style={{ display: "flex", gap: 6, fontSize: 9, lineHeight: 1.45 }}>
+            <span style={{ fontWeight: 700, color: "#64748b", minWidth: 62, flexShrink: 0 }}>{label}</span>
+            <span style={{ color: "#334155" }}>{val}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const UMBRELLA_STATE_LABEL = {
   not_applicable:                 "Not applicable - no umbrella in submission",
   unknown:                        "Unknown - underlying limits not found",
@@ -119,6 +277,60 @@ const REC_TYPE_STYLE = {
   soft_warning: { bg: "#fff", border: "#e2e8f0", color: "#000" },
   missing_field:{ bg: "#fff", border: "#e2e8f0", color: "#000" },
   suggestion:   { bg: "#fff", border: "#e2e8f0", color: "#000" },
+};
+
+// ── Single severity model (Figure 2 feedback) ───────────────────────────────
+// No MEDIUM/HIGH/LOW token anywhere. Submission Integrity's status maps onto:
+//   low    -> hard_stop    (high risk - only reached on the separate review
+//                           screen; this banner never shows LOW, see below)
+//   medium -> warning      (medium risk - review recommended, non-blocking)
+//   high, with resolved formatting differences present -> resolved_formatting_difference
+//   high, nothing at all to note -> no chip. A fully clean submission is
+//                           no-risk, not "low risk" - there is nothing left
+//                           to advise about, so "Advisory" never renders here.
+const INTEGRITY_SEVERITY_META = {
+  hard_stop:                    { label: "Hard stop",                    color: "#9d0f5a", bg: "rgba(230,27,132,0.12)", border: "rgba(230,27,132,0.4)" },
+  warning:                      { label: "Warning",                      color: "#92400e", bg: "#fffbeb",               border: "#fcd34d" },
+  resolved_formatting_difference: { label: "Resolved formatting difference", color: "#0369a1", bg: "#f0f9ff",           border: "#bae6fd" },
+};
+
+function IntegritySeverityChip({ severity }) {
+  const m = INTEGRITY_SEVERITY_META[severity];
+  if (!m) return null;
+  return (
+    <span style={{ display: "inline-block", fontSize: 10, fontWeight: 800, letterSpacing: 0.3, textTransform: "uppercase", color: m.color, background: m.bg, border: `1px solid ${m.border}`, borderRadius: 6, padding: "1px 7px", flexShrink: 0 }}>
+      {m.label}
+    </span>
+  );
+}
+
+// Fields tracked by BOTH the Submission Integrity soft-divergence check and the
+// Data Consistency picker (underwriting_consistency.RECONCILABLE_FIELDS). When
+// the SAME field is already an open conflict in Data Consistency, its Submission
+// Integrity reason is redundant (Data Consistency shows it with source,
+// confidence, suggested value, and apply-to-all) - suppressed here, display-only,
+// so the underlying data/scoring is untouched. The exact phrase match is safe
+// because these are fixed constant strings, never interpolated with values.
+const INTEGRITY_REASON_TO_FACT_KEY = {
+  "DBA / trade name differs across documents": "dba_name",
+  "Entity type differs across documents":      "entity_type",
+  "Mailing address differs across documents":  "mailing_address",
+  "Location address differs across documents": "physical_address",
+  "Effective dates differ across documents":   "effective_date",
+  "Multiple carriers referenced across documents": "carrier_name",
+  // Policy number / operations / account description are NOT tracked by Data
+  // Consistency at all - always shown here, no dedup possible or needed.
+};
+
+// ── Suggested-value confidence (Figure 3 feedback) ──────────────────────────
+// Discrete High / Medium / Low, ALWAYS rendered with the "Confidence:" prefix so
+// it is never confused with the other high/medium/low signals on screen (document
+// classification match, submission integrity). A numeric % is deliberately avoided
+// - it would imply precision the heuristic can't honestly back.
+const CONFIDENCE_META = {
+  high:   { label: "High",   color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0" },
+  medium: { label: "Medium", color: "#b45309", bg: "#fffbeb", border: "#fde68a" },
+  low:    { label: "Low",    color: "#64748b", bg: "#f1f5f9", border: "#e2e8f0" },
 };
 
 const FALLBACK_CHAT_REPLY = "I'm not sure about that. Please contact your agent or broker for assistance.";
@@ -288,6 +500,69 @@ function CollapsibleSection({ title, tooltip, titleRight, defaultOpen = false, r
         {titleRight != null && <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0 }}>{titleRight}</span>}
       </button>
       {open && <div style={{ marginTop: 6 }}>{children}</div>}
+    </div>
+  );
+}
+
+// ── One hard-stop/warning line: bullet point, with any trailing "Fix: ..."
+// remediation hint broken onto its own line and bolded so it stands out from
+// the descriptive part of the message. Messages without a "Fix: " segment
+// (e.g. raw cross-document conflict text) render as a plain bulleted line. ─
+const _issueBullet = <span style={{ fontWeight: 700, fontSize: "1.3em", lineHeight: 0, position: "relative", top: "1px" }}>•</span>;
+
+function IssueLine({ message, className }) {
+  const fixIdx = message.indexOf("Fix: ");
+  if (fixIdx === -1) {
+    return <div className={className}>{_issueBullet} {message}</div>;
+  }
+  const before = message.slice(0, fixIdx).trimEnd();
+  const afterLabel = message.slice(fixIdx + "Fix: ".length);
+  return (
+    <div className={className}>
+      {_issueBullet} {before}
+      <br />
+      <strong>Fix:</strong> {afterLabel}
+    </div>
+  );
+}
+
+// ── Durable issue-id fallback (only used when the backend didn't stamp one, e.g.
+//    alias-stamp cross issues). Read + write both go through issueIdOf, so the
+//    id stays consistent within the client even without a backend id. ──────────
+function _fallbackIssueId(message, forms) {
+  const base = (message || "").trim() + "|" +
+    (Array.isArray(forms) ? [...forms].sort().join(",") : "");
+  let h = 0;
+  for (let i = 0; i < base.length; i++) h = (Math.imul(h, 31) + base.charCodeAt(i)) | 0;
+  return "issf_" + (h >>> 0).toString(16);
+}
+function issueIdOf(iss) {
+  return (iss && iss.issue_id) || _fallbackIssueId(iss && iss.message, iss && iss.forms);
+}
+
+// ── Issue-rail resolution status control (Open / Resolved / Dismissed) ────────
+// Compact and wraps on small screens. Purely a work-tracking marker: setting a
+// status never changes the SQS score (its endpoint is isolated from scoring).
+const _ISSUE_STATUS_BADGE = {
+  open:      { t: "Open",      bg: "#f1f5f9", fg: "#475569", bd: "#e2e8f0" },
+  resolved:  { t: "Resolved",  bg: "#dcfce7", fg: "#166534", bd: "#86efac" },
+  dismissed: { t: "Dismissed", bg: "#fef3c7", fg: "#92400e", bd: "#fde68a" },
+};
+function IssueStatusControl({ issueId, meta, status, onSet }) {
+  const st = status || "open";
+  const badge = _ISSUE_STATUS_BADGE[st] || _ISSUE_STATUS_BADGE.open;
+  const btn = { fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 5, cursor: "pointer", border: "1px solid #e2e8f0", background: "#fff", color: "#475569", whiteSpace: "nowrap", fontFamily: "inherit" };
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5, marginTop: 5 }}>
+      <span style={{ fontSize: 9.5, fontWeight: 700, padding: "1px 7px", borderRadius: 10, background: badge.bg, color: badge.fg, border: `1px solid ${badge.bd}`, whiteSpace: "nowrap" }}>{badge.t}</span>
+      {st === "open" ? (
+        <>
+          <button type="button" onMouseDown={e => { e.preventDefault(); onSet(issueId, "resolved", meta); }} style={btn}>Resolve</button>
+          <button type="button" onMouseDown={e => { e.preventDefault(); onSet(issueId, "dismissed", meta); }} style={btn}>Dismiss</button>
+        </>
+      ) : (
+        <button type="button" onMouseDown={e => { e.preventDefault(); onSet(issueId, "open", meta); }} style={{ ...btn, color: "#94a3b8" }}>Reopen</button>
+      )}
     </div>
   );
 }
@@ -755,10 +1030,16 @@ function ARQStatusPanel({ arqSessions, token, onRefresh, scoreImprovement, hideT
                 </div>
               )}
               {arq.status === "pending" && !isExpired && (
-                <button onClick={() => handleRemind(arq.id)} disabled={reminding === arq.id}
-                  style={{ marginTop: 5, fontSize: 10, fontWeight: 600, color: "#4f7cff", background: "rgba(79,124,255,0.06)", border: "1px solid rgba(79,124,255,0.2)", borderRadius: 5, padding: "2px 8px", cursor: reminding === arq.id ? "wait" : "pointer", opacity: reminding === arq.id ? 0.6 : 1 }}>
-                  {reminding === arq.id ? "Sending…" : "Remind"}{arq.reminder_count > 0 && ` (${arq.reminder_count})`}
-                </button>
+                <div style={{ marginTop: 5, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <button onClick={() => handleRemind(arq.id)} disabled={reminding === arq.id}
+                    style={{ fontSize: 10, fontWeight: 600, color: "#4f7cff", background: "rgba(79,124,255,0.06)", border: "1px solid rgba(79,124,255,0.2)", borderRadius: 5, padding: "2px 8px", cursor: reminding === arq.id ? "wait" : "pointer", opacity: reminding === arq.id ? 0.6 : 1 }}>
+                    {reminding === arq.id ? "Sending…" : "Remind"}{arq.reminder_count > 0 && ` (${arq.reminder_count})`}
+                  </button>
+                  {/* Compact status chip: where the client is in the questionnaire */}
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#4f7cff", background: "rgba(79,124,255,0.1)", borderRadius: 20, padding: "2px 8px", whiteSpace: "nowrap" }}>
+                    {arq.has_draft ? "In progress" : arq.viewed_at ? "Opened" : "Not opened"}
+                  </span>
+                </div>
               )}
             </div>
           );
@@ -768,17 +1049,54 @@ function ARQStatusPanel({ arqSessions, token, onRefresh, scoreImprovement, hideT
   );
 }
 
+// ── Producer-answer outcome label (Fig 13): plain-language before/after + status.
+// House style: no em-dashes; the → arrow is already used elsewhere in the UI.
+function answerResultLabel(r) {
+  if (!r) return "Answer recorded.";
+  const before = r.score_before, after = r.score_after, delta = r.delta;
+  const arrow = (before != null && after != null) ? ` SQS ${before} → ${after}` : "";
+  const d = (typeof delta === "number" && delta !== 0) ? ` (${delta > 0 ? "+" : ""}${delta})` : "";
+  switch (r.status) {
+    case "resolved":
+    case "improved":                     return `Updated -${arrow}${d}`;
+    case "pending_validation":           return `Recorded - pending review${arrow}${d}`;
+    case "requires_supporting_document": return "Recorded - attach a supporting document to fully credit";
+    case "conflicting_evidence_remains": return "Recorded - conflicts remain, review needed";
+    case "user_provided_only":           return `Saved to the package${arrow}`;
+    case "still_missing":                return "Recorded";
+    default:                             return `Answer recorded${arrow}${d}`;
+  }
+}
+
 // ── Side panel recommendation row - own local state avoids shared-state race ──
-function SidePanelRec({ rec, index, sqsScore, onDismiss }) {
+function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer }) {
   const [reason, setReason] = useState("");
+  const [busy, setBusy]     = useState(false);
+  const [result, setResult] = useState(null);
+  const [errMsg, setErrMsg] = useState("");
   const isObj  = typeof rec === "object" && rec !== null;
   const msg    = isObj ? rec.message : rec;
   const impact = isObj ? rec.score_impact : null;
   const recId  = isObj ? rec.rec_id : `legacy_${index}`;
   const recType = isObj ? rec.type : "suggestion";
   const st = REC_TYPE_STYLE[recType] || REC_TYPE_STYLE.suggestion;
+  // Answerable = the recommendation resolves to a fillable field. Only these route
+  // "Submit" to the producer-answer flow; every other rec keeps the exact prior
+  // dismiss-with-reason (waiver) behavior, so nothing regresses.
+  const answerable = isObj && !!rec.field && typeof onAnswer === "function";
 
-  const submit = () => onDismiss(rec, sqsScore, reason);
+  const submitAnswer = async () => {
+    if (busy) return;
+    setErrMsg(""); setBusy(true);
+    let out;
+    try { out = await onAnswer(rec, reason); }
+    catch (_) { out = { ok: false }; }
+    finally { setBusy(false); }
+    if (out?.ok) setResult(out.impact || { status: "user_provided_only" });
+    else setErrMsg(out?.error || "Could not apply answer.");
+  };
+  // Submit: answer the gap (answerable) or the legacy waiver-with-reason otherwise.
+  const submit  = answerable ? submitAnswer : (() => onDismiss(rec, sqsScore, reason));
   const dismiss = () => onDismiss(rec, sqsScore, "");
 
   return (
@@ -786,31 +1104,43 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss }) {
       <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{msg}</div>
-          {impact > 0 && <div style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>+{impact} pts if fixed</div>}
+          {impact > 0 && <div style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>up to +{impact} pts</div>}
         </div>
+        <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: "1px 7px", borderRadius: 10, whiteSpace: "nowrap", ...(result ? { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }) }}>{result ? "Resolved" : "Open"}</span>
       </div>
-      {isObj && (
-        <div style={{ marginTop: 7, display: "flex", gap: 5, alignItems: "center" }}>
-          <input
-            placeholder="Add a reason (optional)…"
-            value={reason}
-            onChange={e => setReason(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") submit(); }}
-            style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
-          />
-          {reason.trim() && (
-            <button
-              onMouseDown={e => { e.preventDefault(); submit(); }}
-              style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #6366f1", background: "#6366f1", fontSize: 10, fontWeight: 600, color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>
-              Submit
-            </button>
-          )}
-          <button
-            onMouseDown={e => { e.preventDefault(); dismiss(); }}
-            style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, color: "#64748b", cursor: "pointer", whiteSpace: "nowrap" }}>
-            Dismiss
-          </button>
+      {result ? (
+        <div style={{ marginTop: 7, fontSize: 10, fontWeight: 700, color: "#065f46", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 5, padding: "4px 7px" }}>
+          {answerResultLabel(result)}
         </div>
+      ) : isObj && (
+        <>
+          <div style={{ marginTop: 7, display: "flex", gap: 5, alignItems: "center" }}>
+            <input
+              placeholder={answerable ? "Type your answer…" : "Add a reason (optional)…"}
+              value={reason}
+              onChange={e => { setReason(e.target.value); if (errMsg) setErrMsg(""); }}
+              onKeyDown={e => { if (e.key === "Enter") submit(); }}
+              disabled={busy}
+              style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
+            />
+            {reason.trim() && (
+              <button
+                disabled={busy}
+                onMouseDown={e => { e.preventDefault(); submit(); }}
+                style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #6366f1", background: "#6366f1", fontSize: 10, fontWeight: 600, color: "#fff", cursor: busy ? "default" : "pointer", whiteSpace: "nowrap", opacity: busy ? 0.7 : 1 }}>
+                {busy ? "…" : "Submit"}
+              </button>
+            )}
+            <button
+              onMouseDown={e => { e.preventDefault(); dismiss(); }}
+              style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 10, fontWeight: 600, color: "#64748b", cursor: "pointer", whiteSpace: "nowrap" }}>
+              Dismiss
+            </button>
+          </div>
+          {errMsg && (
+            <div style={{ marginTop: 5, fontSize: 10, fontWeight: 600, color: "#b91c1c" }}>{errMsg}</div>
+          )}
+        </>
       )}
     </div>
   );
@@ -842,7 +1172,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>Open Recommendations ({softRecs.length})</div>
               {softRecs.map((r, i) => (
-                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0" }}>• {r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> (+{r.score_impact} pts if fixed)</span> : ""}</div>
+                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0" }}>• {r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> (up to +{r.score_impact} pts)</span> : ""}</div>
               ))}
             </div>
           )}
@@ -885,6 +1215,77 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
   );
 }
 
+// ── Dashboard Assistant (in-app chatbot, mirrors the ARQ client chat) ────────
+function DashboardAssistant() {
+  const FALLBACK = "Sorry, I couldn't process that just now. Please try again in a moment.";
+  const [messages, setMessages] = useState([
+    { role: "assistant", content: "Hi! I'm Primble Assistant. Ask me anything about preparing your submission." },
+  ]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy]   = useState(false);
+  const bottomRef         = useRef(null);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
+
+  const send = async () => {
+    const msg = input.trim();
+    if (!msg || busy) return;
+    // Basic sanitization - strip tags, cap length (matches ARQ client chat).
+    const sanitized = msg.replace(/<[^>]*>/g, "").slice(0, 800);
+    const history   = messages.filter(m => m.role !== "system");
+    setMessages(prev => [...prev, { role: "user", content: sanitized }]);
+    setInput("");
+    setBusy(true);
+    try {
+      const res   = await fetch(`${API_BASE}/api/assistant/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ message: sanitized, history }),
+      });
+      const data  = res.ok ? await res.json() : null;
+      const reply = (data?.reply || "").trim() || FALLBACK;
+      setMessages(prev => [...prev, { role: "assistant", content: reply }]);
+    } catch {
+      setMessages(prev => [...prev, { role: "assistant", content: FALLBACK }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="db-sidebar-card db-assistant-card">
+      <div className="db-sidebar-card-title">Primble Assistant</div>
+      <div className="db-assistant-messages">
+        {messages.map((m, i) => (
+          <div key={i} className={`db-assistant-row ${m.role === "user" ? "is-user" : "is-bot"}`}>
+            <div className="db-assistant-bubble">{m.content}</div>
+          </div>
+        ))}
+        {busy && (
+          <div className="db-assistant-row is-bot">
+            <div className="db-assistant-bubble db-assistant-typing"><span /><span /><span /></div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+      <div className="db-assistant-input-row">
+        <input
+          className="db-assistant-input"
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          placeholder="What can I help you with?"
+          maxLength={800}
+          aria-label="Message Primble Assistant"
+        />
+        <button className="db-assistant-send" onClick={send} disabled={busy || !input.trim()} aria-label="Send message">↑</button>
+      </div>
+    </div>
+  );
+}
+
 // ── Dashboard Step ─────────────────────────────────────────────────────────
 function DashboardStep({ token, onResume, onNewPackage }) {
   const [sessions, setSessions] = useState([]);
@@ -896,6 +1297,11 @@ function DashboardStep({ token, onResume, onNewPackage }) {
   const PAGE_SIZE = 10;
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [statsLoaded, setStatsLoaded] = useState(false);
+  // Keyword search (server-side, debounced) - coexists with pagination.
+  const [search, setSearch]       = useState("");
+  const [query, setQuery]         = useState("");
+  const [searching, setSearching] = useState(false);
 
   const fetchStats = async () => {
     try {
@@ -903,25 +1309,44 @@ function DashboardStep({ token, onResume, onNewPackage }) {
       const statsData = res.ok ? await res.json() : null;
       if (statsData) setStats({ total_packages: statsData.total_packages ?? 0, total_forms: statsData.total_forms ?? 0, avg_sqs_score: statsData.avg_sqs_score ?? null });
     } catch { /* stats are non-critical - leave prior values */ }
+    finally { setStatsLoaded(true); }
   };
 
-  const fetchSessions = async (pg) => {
-    setLoading(true);
+  // overlay=true drives the full-screen loader (initial load + pagination,
+  // unchanged). overlay=false is the quiet path used by keyword search so it
+  // doesn't flash the whole screen on each keystroke.
+  const fetchSessions = async (pg, { overlay = true } = {}) => {
+    if (overlay) setLoading(true); else setSearching(true);
     setLoadError(null);
     try {
-      const res  = await fetch(`${API_BASE}/api/sessions?page=${pg}&page_size=${PAGE_SIZE}`, { credentials: "include" });
+      const qs   = query ? `&search=${encodeURIComponent(query)}` : "";
+      const res  = await fetch(`${API_BASE}/api/sessions?page=${pg}&page_size=${PAGE_SIZE}${qs}`, { credentials: "include" });
       const data = res.ok ? await res.json() : null;
       if (data?.success) { setSessions(data.sessions || []); setTotal(data.total ?? 0); }
       else setLoadError("Could not load your sessions. Please refresh.");
     } catch {
       setLoadError("Network error loading sessions. Please refresh.");
     } finally {
-      setLoading(false);
+      if (overlay) setLoading(false); else setSearching(false);
     }
   };
 
   useEffect(() => { fetchStats(); }, []);
+  // Initial load + pagination: full-screen loader (unchanged behavior).
   useEffect(() => { fetchSessions(page); }, [page]); // eslint-disable-line
+  // Debounce the search box into the query that fetchSessions actually sends.
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(search.trim()), 350);
+    return () => clearTimeout(t);
+  }, [search]);
+  // On a new query: reset to page 1 (the [page] effect refetches) or, if already
+  // on page 1, do a quiet in-place fetch so search doesn't flash the full overlay.
+  const firstQueryRun = useRef(true);
+  useEffect(() => {
+    if (firstQueryRun.current) { firstQueryRun.current = false; return; }
+    if (page !== 1) setPage(1);
+    else fetchSessions(1, { overlay: false });
+  }, [query]); // eslint-disable-line
 
   const handleDelete = async sid => {
     setDeleteTarget(null);
@@ -1029,7 +1454,48 @@ function DashboardStep({ token, onResume, onNewPackage }) {
 
         {/* ── Main: package list ── */}
         <div className="dashboard-main">
+
+          {/* ── Stat band (relocated from the sidebar Overview card) ── */}
+          <div className="db-statband">
+            {[
+              { label: "Total Packages",  value: statsLoaded ? stats.total_packages : "-" },
+              { label: "Forms Generated", value: statsLoaded ? totalForms : "-" },
+              { label: "Average Score",   value: statsLoaded ? (globalAvg != null ? `${globalAvg}%` : "-") : "-" },
+            ].map((item, i) => (
+              <div key={i} className="db-stat">
+                <div className="db-stat-label">{item.label}</div>
+                <div className="db-stat-value">{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Keyword search (server-side, coexists with pagination) ── */}
+          {(sessions.length > 0 || query) && (
+            <div className="db-search-wrap">
+              <svg className="db-search-icon" width="17" height="17" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2"/><path d="M21 21l-4.3-4.3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+              <input
+                className="db-search-input"
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search by Keyword"
+                maxLength={100}
+                aria-label="Search packages by keyword"
+              />
+              {searching && <span className="db-search-spinner" />}
+              {search && (
+                <button className="db-search-clear" onClick={() => setSearch("")} aria-label="Clear search">✕</button>
+              )}
+            </div>
+          )}
+
           {loading ? null : sessions.length === 0 ? (
+            query ? (
+              <div className="db-no-results">
+                <p className="db-no-results-title">No packages match "{query}"</p>
+                <button className="db-no-results-btn" onClick={() => setSearch("")}>Clear search</button>
+              </div>
+            ) : (
             <div className="db-empty-state">
               <div className="db-empty-topbar" />
               <p className="db-empty-title">No packages yet</p>
@@ -1046,6 +1512,7 @@ function DashboardStep({ token, onResume, onNewPackage }) {
                 Start First Package
               </button>
             </div>
+            )
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
               <div className="db-list-count">
@@ -1171,23 +1638,6 @@ function DashboardStep({ token, onResume, onNewPackage }) {
         {/* ── Right sidebar ── */}
         <aside className="dashboard-sidebar">
 
-          {/* Key metrics card */}
-          <div className="db-sidebar-card">
-            <div className="db-sidebar-card-title">Overview</div>
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              {[
-                { label: "Total Packages", value: loading ? "-" : stats.total_packages, border: true },
-                { label: "Forms Generated", value: loading ? "-" : totalForms, border: true },
-                { label: "Avg SQS Score",   value: loading ? "-" : (globalAvg != null ? `${globalAvg} / 100` : "-"), border: false },
-              ].map((item, i) => (
-                <div key={i} className="db-metric-row" style={{ borderBottom: item.border ? "1px solid #f0f0f0" : "none" }}>
-                  <span className="db-metric-label">{item.label}</span>
-                  <span className="db-metric-value" style={{ color: "#E61B84" }}>{item.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
           {/* Tips card */}
           <div className="db-sidebar-card">
             <div className="db-sidebar-card-title">Tips</div>
@@ -1197,6 +1647,9 @@ function DashboardStep({ token, onResume, onNewPackage }) {
               ))}
             </ol>
           </div>
+
+          {/* Primble Assistant chatbot */}
+          <DashboardAssistant />
 
         </aside>
       </div>
@@ -1219,6 +1672,9 @@ const AcordModal = forwardRef(function AcordModal({
   const [processingStage, setProcessingStage] = useState("");
   const [step, setStep] = useState(resumeSessionId ? "resuming" : "dashboard");
   const [showUploadOverlay, setShowUploadOverlay] = useState(false);
+  // Figure 1: token that keys the live per-file upload progress side-channel.
+  const [uploadProgressToken, setUploadProgressToken] = useState(null);
+  const [resumingUpload, setResumingUpload] = useState(false);
   const [showSlowUploadMsg, setShowSlowUploadMsg] = useState(false);
   const [jobToasts, setJobToasts] = useState([]);
 
@@ -1246,6 +1702,9 @@ const AcordModal = forwardRef(function AcordModal({
   const [canProceedWithWarning, setCanProceedWithWarning] = useState(false);
   const [warningStops, setWarningStops] = useState([]);
   const [softStops, setSoftStops] = useState([]);
+  // Figures 4/5: clustered + tiered view of hardStops/softStops (grouped_issues
+  // from the backend). Purely presentational - never affects SQS capping.
+  const [groupedIssues, setGroupedIssues] = useState(null);
   const [tier2Score, setTier2Score] = useState(null);
   const [tier2Missing, setTier2Missing] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
@@ -1272,16 +1731,46 @@ const AcordModal = forwardRef(function AcordModal({
   const [underwriting, setUnderwriting] = useState(null);
   const [underwritingBusy, setUnderwritingBusy] = useState(null); // fact_key currently confirming
   const [underwritingPicks, setUnderwritingPicks] = useState({});  // {fact_key: chosen/typed value}
+
+  // Figure 3: pre-select the suggested value for HIGH-confidence, non-hard-stop
+  // conflicts (the backend sets f.preselect). Only seeds a field the user has NOT
+  // already picked/typed, so a re-fetch (e.g. after confirming another field)
+  // never clobbers an in-progress choice, and hard-stop identity fields (name,
+  // FEIN, dates) are never auto-checked.
+  useEffect(() => {
+    const fields = underwriting?.fields;
+    if (!Array.isArray(fields)) return;
+    setUnderwritingPicks(prev => {
+      let next = prev;
+      for (const f of fields) {
+        if (f.status === "conflict" && f.preselect && f.suggested_value != null
+            && (prev[f.fact_key] === undefined || prev[f.fact_key] === "")) {
+          if (next === prev) next = { ...prev };
+          next[f.fact_key] = f.suggested_value;
+        }
+      }
+      return next;
+    });
+  }, [underwriting]);
   const [checkedFormIds, setCheckedFormIds] = useState(new Set());
   const [showAddForms, setShowAddForms] = useState(false);
   const [generatedForms, setGeneratedForms] = useState({});
   const [activeFormId, setActiveFormId] = useState(null);
+  // Figure 10: close any open provenance popover when the active form changes.
+  useEffect(() => { setProvCard(null); }, [activeFormId]);
   const [crossIssues, setCrossIssues] = useState([]);
+  // Durable-issue-id -> { status, reason } for the rail's resolution status.
+  // Work-tracking only; never affects the SQS score.
+  const [issueStatuses, setIssueStatuses] = useState(new Map());
   const [pdfLoading, setPdfLoading] = useState({});
   const [pkgStatusMsg, setPkgStatusMsg] = useState("");
   const [pkgStatusType, setPkgStatusType] = useState("");
   const [signedForms, setSignedForms] = useState(new Set());
   const [showGenerateOverlay, setShowGenerateOverlay] = useState(false);
+  // Fig 8: when a session is reopened mid-generation, this holds the remaining
+  // seconds (recomputed from the server's start time) so the same progress
+  // overlay resumes its countdown instead of restarting from a full estimate.
+  const [resumeGenEta, setResumeGenEta] = useState(null);
   const [showDownloadOverlay, setShowDownloadOverlay] = useState(false);
   const [showAcordModal, setShowAcordModal] = useState(false);
   const [acordModalAction, setAcordModalAction] = useState(null);
@@ -1313,6 +1802,18 @@ const AcordModal = forwardRef(function AcordModal({
   const [packageSqs, setPackageSqs] = useState(null);
   // §6.1: which package pillars are expanded to show their 15-category detail.
   const [expandedPillars, setExpandedPillars] = useState(() => new Set());
+  // Figure 10: which score component's provenance popover is open, and where.
+  // { group, key, pos } or null. Clicking the same trigger again closes it.
+  const [provCard, setProvCard] = useState(null);
+  const openProv = (group, key, target) => {
+    const r = target.getBoundingClientRect();
+    const width = Math.min(240, window.innerWidth - 16);
+    let left = r.left + r.width / 2 - width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+    const pos = { top: r.bottom + 6, left, width };
+    setProvCard(p => (p && p.group === group && p.key === key) ? null : { group, key, pos });
+  };
+  const closeProv = () => setProvCard(null);
   const [dismissedRecs, setDismissedRecs] = useState(new Set());
   const [dismissedRecDetails, setDismissedRecDetails] = useState(new Map());
   const [showDownloadPreflight, setShowDownloadPreflight] = useState(false);
@@ -1372,6 +1873,7 @@ const AcordModal = forwardRef(function AcordModal({
       setDocSummary(data.doc_summary || []); setFlags(data.flags || {});
       setAvailableDocTypes(data.available_doc_types || []);
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
+      setGroupedIssues(data.grouped_issues || null);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
       setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
@@ -1392,6 +1894,41 @@ const AcordModal = forwardRef(function AcordModal({
     }
   };
 
+  // ── Figure 1 resume ──────────────────────────────────────────────────────
+  // If the tab was refreshed OR closed mid-upload, a progress token is still in
+  // localStorage (durable across tab close, unlike sessionStorage). Re-attach the
+  // overlay to the in-flight run (the server keeps processing regardless of the
+  // client) and reload the finished submission when the poll reports done - or, if
+  // the user reopens too soon, keep showing the loader until it finishes. Skipped
+  // when an explicit resumeSessionId is opening.
+  const handleUploadResumeDone = async (data) => {
+    const sid = data?.session_id;
+    const ok = sid ? await _restoreFromExtraction(sid) : false;
+    if (!ok) setError("We couldn't reopen your previous upload automatically. Please check your submissions or try again.");
+    setResumingUpload(false); setShowUploadOverlay(false); setLoading(false);
+    setUploadProgressToken(null);
+    try { localStorage.removeItem("primble_upload_token"); } catch { /* private mode */ }
+  };
+
+  const handleUploadResumeMissing = () => {
+    // Token expired / run not found → drop the overlay quietly; the user can
+    // reopen a finished submission from history or re-upload.
+    setResumingUpload(false); setShowUploadOverlay(false); setLoading(false);
+    setUploadProgressToken(null);
+    try { localStorage.removeItem("primble_upload_token"); } catch { /* private mode */ }
+  };
+
+  useEffect(() => {
+    if (resumeSessionId) return;   // explicit session resume takes precedence
+    let token = null;
+    try { token = localStorage.getItem("primble_upload_token"); } catch { /* private mode */ }
+    if (!token) return;
+    setUploadProgressToken(token);
+    setResumingUpload(true);
+    setShowUploadOverlay(true);
+    setLoading(true);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!resumeSessionId) return;
     setLoading(true); setProcessingStage("Restoring your session...");
@@ -1409,6 +1946,16 @@ const AcordModal = forwardRef(function AcordModal({
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
           setPdfLoading(readyMap); setStep("editor");
+        } else if (!isEssentials && data && data.generation_job_id) {
+          // Reopened mid-generation (forms not persisted yet): resume the same
+          // progress overlay with the remaining time and poll until the server
+          // finishes (Fig 8). Fall back to the recommendations restore if the
+          // run already failed while we were away.
+          const done = await _resumeGeneration(resumeSessionId, data);
+          if (!done) {
+            const ok = await _restoreFromExtraction(resumeSessionId, ctrl.signal);
+            if (!ok) { setStep("dashboard"); setSessionId(null); }
+          }
         } else if (!isEssentials && data) {
           // In-progress submission (no forms yet) → land on the integrity review
           // or the recommendations/SQS step rather than dropping to the dashboard.
@@ -1453,10 +2000,62 @@ const AcordModal = forwardRef(function AcordModal({
     } catch { /* non-fatal */ }
   };
 
+  // Load per-issue resolution statuses for the session's issue rail.
+  const loadIssueStatuses = async (sid) => {
+    if (!sid) return;
+    try {
+      const r = await fetch(`${API_BASE}/api/issues/status/${sid}`, { credentials: "include" });
+      const d = r.ok ? await r.json() : null;
+      if (!d?.success) return;
+      const next = new Map();
+      for (const s of (d.issue_statuses || [])) next.set(s.issue_id, { status: s.status, reason: s.reason });
+      setIssueStatuses(next);
+    } catch { /* non-fatal */ }
+  };
+
+  // Optimistically set an issue's status, then persist. On failure we keep the
+  // optimistic value (non-fatal) - a reload re-syncs from the DB.
+  const setIssueStatus = async (issueId, status, meta = {}) => {
+    if (!issueId || !sessionId) return;
+    setIssueStatuses(prev => { const n = new Map(prev); n.set(issueId, { status, reason: "" }); return n; });
+    try {
+      await fetch(`${API_BASE}/api/issues/status`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          issue_id: issueId,
+          status,
+          form_id:     meta.form_id     ?? null,
+          field:       meta.field       ?? null,
+          rule_code:   meta.rule_code   ?? null,
+          source_fact: meta.source_fact ?? null,
+          message:     meta.message     ?? null,
+        }),
+      });
+    } catch { /* keep optimistic value; non-fatal */ }
+  };
+
+  // One compact status control for a grouped-issue cluster (banner hard-stops /
+  // warnings). Cluster carries a durable issue_id from the backend.
+  const clusterStatusControl = (c) => {
+    const iid = c.issue_id || _fallbackIssueId(c.primary_message, c.forms);
+    return (
+      <IssueStatusControl
+        issueId={iid}
+        status={issueStatuses.get(iid)?.status}
+        meta={{ form_id: Array.isArray(c.forms) ? c.forms[0] : null, rule_code: c.items?.[0]?.code, message: c.primary_message }}
+        onSet={setIssueStatus}
+      />
+    );
+  };
+
   useEffect(() => {
     if ((step !== "editor" && step !== "lite") || !sessionId) return;
     refreshArqData();
     loadDismissedRecs(sessionId);
+    loadIssueStatuses(sessionId);
   }, [step, sessionId]); // eslint-disable-line
 
   const refreshArqData = async () => {
@@ -1519,11 +2118,11 @@ const AcordModal = forwardRef(function AcordModal({
 
   const resetToUpload = () => {
     setFiles([]); setSessionId(null); setStep("upload"); setError(null);
-    setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]);
+    setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]); setGroupedIssues(null);
     setCanProceedWithWarning(false); setWarningStops([]);
     setTier2Score(null); setTier2Missing([]); setRecommendations([]); setAccountProfile(null);
     setAllAvailableForms([]); setCheckedFormIds(new Set());
-    setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]);
+    setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setIssueStatuses(new Map());
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
     setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0);
@@ -1532,10 +2131,10 @@ const AcordModal = forwardRef(function AcordModal({
 
   const goToDashboard = () => {
     setFiles([]); setSessionId(null); setStep("dashboard"); setError(null);
-    setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]);
+    setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]); setGroupedIssues(null);
     setTier2Score(null); setTier2Missing([]); setRecommendations([]); setAccountProfile(null);
     setAllAvailableForms([]); setCheckedFormIds(new Set());
-    setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]);
+    setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setIssueStatuses(new Map());
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
     setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0);
@@ -1560,6 +2159,16 @@ const AcordModal = forwardRef(function AcordModal({
           setPdfLoading(readyMap); setStep("editor");
         } else if (isEssentials && data?.session_id) {
           setSessionId(sid); setStep("lite");
+        } else if (!isEssentials && data && data.generation_job_id) {
+          // Reopened mid-generation (forms not persisted yet): resume the same
+          // progress overlay with the remaining time and poll until the server
+          // finishes (Fig 8). Fall back to the recommendations restore if the
+          // run already failed while we were away.
+          const done = await _resumeGeneration(sid, data);
+          if (!done) {
+            const ok = await _restoreFromExtraction(sid, ctrl.signal);
+            if (!ok) { setStep("upload"); setSessionId(null); }
+          }
         } else if (!isEssentials && data) {
           // In-progress submission (no forms yet) → land on the integrity review
           // or the recommendations/SQS step rather than dropping to upload.
@@ -1953,6 +2562,42 @@ const AcordModal = forwardRef(function AcordModal({
     throw new Error("Processing timed out. Please try again.");
   };
 
+  // Fig 8: reopened a session whose forms are still generating on the server.
+  // Show the same progress overlay with the REMAINING time (recomputed from the
+  // server's start timestamp), poll the job to completion, then load the forms.
+  // Returns true when the editor was reached; false → caller restores the
+  // recommendations screen (e.g. the run failed while we were away).
+  // Constants mirror the generation-overlay estimate below; files are unknown on
+  // resume so the forms-only fallback the overlay already documents is used.
+  const _GEN_FILL_BASE = 20;
+  const _GEN_FILL_PER_FORM = 65;
+  const _resumeGeneration = async (sid, data) => {
+    const formCount = Math.max(1, Number(data.generation_form_count) || 1);
+    const startedAt = Number(data.generation_started_at) || 0;  // epoch seconds
+    const totalEta  = _GEN_FILL_BASE + formCount * _GEN_FILL_PER_FORM;
+    const elapsed   = startedAt ? Math.max(0, (Date.now() / 1000) - startedAt) : 0;
+    setResumeGenEta(Math.max(30, Math.round(totalEta - elapsed)));
+    setShowGenerateOverlay(true);
+    try {
+      if (data.generation_job_id) await _pollJobStatus(data.generation_job_id);
+      const r = await fetch(`${API_BASE}/api/session/${sid}`, { credentials: "include" });
+      const d = r.ok ? await r.json() : null;
+      if (d && d.generated_forms && Object.keys(d.generated_forms).length > 0) {
+        setGeneratedForms(d.generated_forms); setCrossIssues(d.cross_issues || []);
+        if (d.package_sqs) setPackageSqs(d.package_sqs);
+        const firstId = Object.keys(d.generated_forms)[0]; setActiveFormId(firstId);
+        const readyMap = {}; Object.keys(d.generated_forms).forEach(fid => { readyMap[fid] = false; });
+        setPdfLoading(readyMap); setStep("editor");
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      setShowGenerateOverlay(false); setResumeGenEta(null);
+    }
+  };
+
   // Resume polling for an active job left in localStorage after a page reload.
   // Silent: doesn't show overlays - when the job finishes we notify via browser
   // notification + tab-title badge so the user knows to come back.
@@ -1985,8 +2630,16 @@ const AcordModal = forwardRef(function AcordModal({
     if (!files.length) { setError("Select at least one file"); return; }
     await _requestNotificationPermission();
     _markJobStart();
+    // Figure 1: a client-generated token keys the live progress side-channel. The
+    // backend writes each file's phase under it; the overlay polls it. Persisted in
+    // localStorage so a mid-upload tab refresh OR close-and-reopen can re-attach to
+    // the in-flight run (see resume effect). Cleared once the upload settles below.
+    const _progressToken = (crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try { localStorage.setItem("primble_upload_token", _progressToken); } catch { /* private mode */ }
+    setUploadProgressToken(_progressToken);
     setLoading(true); setError(null); setShowUploadOverlay(true);
     const fd = new FormData(); files.forEach(f => fd.append("files", f));
+    fd.append("progress_token", _progressToken);
     try {
       const res = await fetch(`${API_BASE}/api/upload-declaration`, { method: "POST", credentials: "include", body: fd });
       if (res.status === 401) { setError("Session expired. Please sign in again."); setTimeout(() => { try { localStorage.removeItem("acordly_tk"); sessionStorage.removeItem("acordly_tk"); } catch {} window.location.reload(); }, 2000); return; }
@@ -2030,6 +2683,7 @@ const AcordModal = forwardRef(function AcordModal({
       setSessionId(data.session_id); setDocSummary(data.doc_summary || []); setFlags(data.flags || {});
       setAvailableDocTypes(data.available_doc_types || []);
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
+      setGroupedIssues(data.grouped_issues || null);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
       setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
@@ -2053,7 +2707,12 @@ const AcordModal = forwardRef(function AcordModal({
         setError("Upload failed: " + e.message);
       }
     }
-    finally { setLoading(false); setShowUploadOverlay(false); }
+    finally {
+      setLoading(false); setShowUploadOverlay(false);
+      // Upload settled (success or failure) → tear down the progress channel.
+      setUploadProgressToken(null);
+      try { localStorage.removeItem("primble_upload_token"); } catch { /* private mode */ }
+    }
   };
 
   // Submission Integrity Validation (Beta Report §4.1) - resolve a pending review.
@@ -2081,6 +2740,7 @@ const AcordModal = forwardRef(function AcordModal({
       }
       setIntegrity(data.integrity || null);
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
+      setGroupedIssues(data.grouped_issues || null);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setDocSummary(data.doc_summary || docSummary);
       if (data.available_doc_types) setAvailableDocTypes(data.available_doc_types);
@@ -2145,6 +2805,7 @@ const AcordModal = forwardRef(function AcordModal({
       setRecommendations(data.recommendations || []);
       if (data.account_profile) setAccountProfile(data.account_profile);
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
+      setGroupedIssues(data.grouped_issues || null);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
       setFlags(data.flags || flags);
@@ -2219,8 +2880,20 @@ const AcordModal = forwardRef(function AcordModal({
   const renderIntegrityStatus = () => {
     const st = integrity?.status;
     if (!st) return null;
-    const reasons = integrity?.reasons || [];
+    const rawReasons = integrity?.reasons || [];
     const entities = integrity?.detected_entities || [];
+
+    // Dedup: drop any reason whose field is already an open conflict in Data
+    // Consistency (shown there with source/confidence/suggestion/apply-to-all -
+    // repeating it here as a bare sentence would be pure duplication).
+    const openConsistencyFields = new Set(
+      (underwriting?.fields || []).filter(f => f.status === "conflict").map(f => f.fact_key)
+    );
+    const reasons = rawReasons.filter(r => {
+      const fk = INTEGRITY_REASON_TO_FACT_KEY[r];
+      return !(fk && openConsistencyFields.has(fk));
+    });
+
     const title = { high: "Documents verified", medium: "Review recommended", low: "Possible multiple submissions" }[st];
     if (!title) return null;
     const desc = st === "high"
@@ -2228,10 +2901,22 @@ const AcordModal = forwardRef(function AcordModal({
       : st === "low"
         ? "These documents may belong to different insureds. You can continue, or separate them into individual submissions."
         : "Some submission details differ across the uploaded documents. You can continue, but a quick review is recommended.";
+
+    // Single severity model: LOW -> hard stop, MEDIUM -> warning, HIGH with
+    // resolved formatting differences -> that label, HIGH with nothing at all
+    // to note -> no label. A fully clean submission isn't "low risk" (Advisory),
+    // it's no-risk - there is nothing left to advise about, so no chip renders.
+    const severity = st === "low" ? "hard_stop"
+      : st === "medium" ? "warning"
+        : normalizedDiffs.length > 0 ? "resolved_formatting_difference"
+          : null;
+
     return (
       <div style={{ marginBottom: 14, background: "rgba(230,27,132,0.07)", border: "1.5px solid rgba(230,27,132,0.25)", borderRadius: 12, padding: "14px 18px" }}>
-        <div style={{ fontWeight: 700, color: "#9d0f5a", fontSize: 13.5 }}>
-          Submission integrity: {st.toUpperCase()} - {title}
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#9d0f5a", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Submission integrity</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <IntegritySeverityChip severity={severity} />
+          <span style={{ fontWeight: 700, color: "#9d0f5a", fontSize: 13.5 }}>{title}</span>
         </div>
         <div style={{ fontSize: 12.5, color: "#b01868", lineHeight: 1.5, marginTop: 4 }}>{desc}</div>
         {entities.length > 0 && (
@@ -2251,7 +2936,7 @@ const AcordModal = forwardRef(function AcordModal({
         {normalizedDiffs.length > 0 && (
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(230,27,132,0.2)" }}>
             <div style={{ fontWeight: 700, fontSize: 12, color: "#1e293b", marginBottom: 4 }}>
-              Formatting Differences - Automatically Resolved
+              Resolved formatting difference
             </div>
             <div style={{ fontSize: 12, color: "#1e293b", marginBottom: 5 }}>
               These values appeared in different formats across your documents but refer to the same thing. No action needed.
@@ -2293,6 +2978,7 @@ const AcordModal = forwardRef(function AcordModal({
       if (data.account_profile) setAccountProfile(data.account_profile);
       setAllAvailableForms(data.all_available_forms || allAvailableForms);
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
+      setGroupedIssues(data.grouped_issues || null);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
       setTier2Score(data.tier2_score ?? tier2Score); setTier2Missing(data.tier2_missing || tier2Missing);
@@ -2408,6 +3094,75 @@ const AcordModal = forwardRef(function AcordModal({
     <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite", marginRight: 4 }} />
   );
 
+  // Producer answers a recommendation (Fig 13): send the typed value to the
+  // answer endpoint, which writes it as a producer-provenance fact, re-runs the
+  // rules, and returns the before/after impact. Updates the per-form + package
+  // SQS in place (same shape as dismiss) and hands the impact back to the card
+  // for its inline result. Returns { ok, impact } / { ok:false, error }.
+  const handleAnswerRec = async (rec, answerText) => {
+    const id = rec?.rec_id;
+    if (!id) return { ok: false, error: "Missing recommendation id." };
+    const field = rec?.field;
+    if (!field) return { ok: false, error: "This item can't be answered directly." };
+    const trimmed = (answerText || "").trim();
+    if (!trimmed) return { ok: false, error: "Please enter an answer." };
+    const formIdAtAnswer = activeFormId;
+    const scoreAtAction = (formIdAtAnswer && generatedForms[formIdAtAnswer]?.sqs?.sqs_score) ?? 0;
+    try {
+      const res = await fetch(`${API_BASE}/api/audit/answer`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          rec_id: id,
+          field,
+          answer: trimmed,
+          sqs_score_at_action: scoreAtAction,
+          form_id: formIdAtAnswer ?? null,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        return { ok: false, error: data.validation_error || data.message || "Could not apply answer." };
+      }
+      // Update per-form SQS from the recomputed scores (same shape as dismiss credit).
+      if (data.updated_forms && Object.keys(data.updated_forms).length > 0) {
+        setGeneratedForms(prev => {
+          const next = { ...prev };
+          for (const [fid, upd] of Object.entries(data.updated_forms)) {
+            const form = next[fid];
+            if (!form?.sqs) continue;
+            next[fid] = {
+              ...form,
+              sqs: {
+                ...form.sqs,
+                sqs_score:  upd.new_sqs_score,
+                grade:      upd.new_grade      ?? form.sqs.grade,
+                tier:       upd.new_tier       ?? form.sqs.tier,
+                tier_color: upd.new_tier_color ?? form.sqs.tier_color,
+              },
+            };
+          }
+          return next;
+        });
+      }
+      if (data.new_package_sqs_score != null) {
+        setPackageSqs(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            package_sqs_score: data.new_package_sqs_score,
+            tier: data.new_package_tier ?? prev.tier,
+          };
+        });
+      }
+      return { ok: true, impact: data.impact || null };
+    } catch (e) {
+      return { ok: false, error: "Network error. Please try again." };
+    }
+  };
+
   const handleDismissRec = async (rec, currentScore, reason = "") => {
     const id = rec?.rec_id;
     if (!id) return;
@@ -2520,8 +3275,10 @@ const AcordModal = forwardRef(function AcordModal({
       const openRecs = recsData?.open_recommendations || [];
       const narrativeData = narrativeRes.status === "fulfilled" && narrativeRes.value.ok ? await narrativeRes.value.json() : null;
       if (narrativeData?.narrative) setSqsNarrative(narrativeData.narrative);
-      if (openRecs.length === 0) { downloadFn(); return; }
+      // Keep the post-download checklist in sync with the current package, even when
+      // nothing is flagged, so a previously-flagged package can't leave stale items behind.
       setPreflightRecs(openRecs);
+      if (openRecs.length === 0) { downloadFn(); return; }
       setPreflightOverrideReason("");
       setPreflightCallback(() => downloadFn);
       setShowDownloadPreflight(true);
@@ -2710,6 +3467,7 @@ const AcordModal = forwardRef(function AcordModal({
             <div className="acord-license-body">
               <p>ACORD® Forms are copyrighted material owned by ACORD Corporation and are licensed, not sold. By continuing, you confirm that you or your organization maintain a valid ACORD license permitting the use of these forms.</p>
               <p>If your organization does not currently have an ACORD license, you can obtain one{" "}<a href="https://www.acord.org/forms-pages/forms-participation-programs/forms-end-user-licenses" target="_blank" rel="noopener noreferrer" className="acord-license-link">HERE</a>.</p>
+              <p className="acord-license-note"><strong>Note:</strong> Primble does not sell, grant, or provide ACORD licenses. Confirming here only attests that your organization already holds a valid license obtained directly from ACORD.</p>
             </div>
             <label className="acord-confirm-checkbox-label" style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
               <input type="checkbox" checked={acordLicenseChecked} onChange={e => setAcordLicenseChecked(e.target.checked)} className="acord-confirm-checkbox" style={{ flexShrink: 0, width: 16, height: 16, marginTop: 0, cursor: "pointer" }} />
@@ -2735,12 +3493,23 @@ const AcordModal = forwardRef(function AcordModal({
     return (
       <>
         {showUploadOverlay && (
-          <ProcessStageOverlay
-            stages={["Reading your documents…", "Extracting facts…"]}
-            advanceAfter={3500}
-            tagline={<><span style={{ color: "#e61b84" }}>Quality takes a little time.</span><br />Doing this manually would take a lot more.</>}
-            note={<>You can leave this page during processing, but do <strong>not</strong> close it. Enable<br />your browser notifications, and we'll let you know as soon as it's ready.</>}
-          />
+          uploadProgressToken ? (
+            <UploadProgressOverlay
+              token={uploadProgressToken}
+              apiBase={API_BASE}
+              onDone={resumingUpload ? handleUploadResumeDone : undefined}
+              onMissing={resumingUpload ? handleUploadResumeMissing : undefined}
+              tagline={<><span style={{ color: "#e61b84" }}>Quality takes a little time.</span><br />Doing this manually would take a lot more.</>}
+              note={<>You can leave this page during processing, but do <strong>not</strong> close it. Enable<br />your browser notifications, and we'll let you know as soon as it's ready.</>}
+            />
+          ) : (
+            <ProcessStageOverlay
+              stages={["Reading your documents…", "Extracting facts…"]}
+              advanceAfter={3500}
+              tagline={<><span style={{ color: "#e61b84" }}>Quality takes a little time.</span><br />Doing this manually would take a lot more.</>}
+              note={<>You can leave this page during processing, but do <strong>not</strong> close it. Enable<br />your browser notifications, and we'll let you know as soon as it's ready.</>}
+            />
+          )
         )}
         {showGenerateOverlay && (() => {
           // Workstream 6 §9.3 - generalized, client-approved progress stages plus a
@@ -2775,7 +3544,11 @@ const AcordModal = forwardRef(function AcordModal({
           const TEXT_PER_MB   = 8;    // per MB of uploaded documents
           const _totalMB = files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024);
           const _formCount = Math.max(1, checkedFormIds.size);
-          const _eta = Math.max(45, FILL_BASE + _formCount * FILL_PER_FORM + Math.round(_totalMB * TEXT_PER_MB));
+          // Fig 8: on a mid-generation resume, use the remaining time carried over
+          // from the server's start timestamp instead of a fresh full estimate.
+          const _eta = resumeGenEta != null
+            ? resumeGenEta
+            : Math.max(45, FILL_BASE + _formCount * FILL_PER_FORM + Math.round(_totalMB * TEXT_PER_MB));
           // Spread the stages evenly across the WHOLE ETA so the final stage is
           // reached near the end, not minutes early. Each stage takes an equal
           // slice (_eta / stage count); a small floor keeps short jobs from
@@ -3223,8 +3996,9 @@ const AcordModal = forwardRef(function AcordModal({
               <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#9d0f5a" }}>
                 Submission Integrity Review Needed
               </h2>
-              <div style={{ margin: "8px 0 0", fontWeight: 700, fontSize: 13.5, color: "#9d0f5a" }}>
-                Submission integrity: {(integrity.status || "low").toUpperCase()} - Possible multiple submissions
+              <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0 0" }}>
+                <IntegritySeverityChip severity="hard_stop" />
+                <span style={{ fontWeight: 700, fontSize: 13.5, color: "#9d0f5a" }}>Possible multiple submissions</span>
               </div>
               <p style={{ margin: "6px 0 0", fontSize: 13.5, color: "#b01868", lineHeight: 1.55 }}>
                 These documents may belong to different insureds. You can continue, or separate them into individual submissions.
@@ -3381,6 +4155,11 @@ const AcordModal = forwardRef(function AcordModal({
                   const anyReclassBusy = reclassDocId !== null;
                   const reviewBusy = reviewLoadingId === d.doc_id;
                   const confColor = conf === "high" ? "#16a34a" : conf === "medium" ? "#d97706" : "#dc2626";
+                  // Figure 3 relabel: this pill answers "how sure are we about the
+                  // document TYPE" - a different question from issue severity or
+                  // suggested-value confidence. Give it its own words so a bare
+                  // "HIGH/MEDIUM/LOW" can never be mistaken for one of those.
+                  const confLabel = conf === "high" ? "Strong match" : conf === "medium" ? "Likely match" : "Needs review";
                   return (
                     <div key={d.doc_id || i} style={{
                       display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
@@ -3392,7 +4171,7 @@ const AcordModal = forwardRef(function AcordModal({
                       <span className="doc-type-badge" style={{ textTransform: "capitalize" }}>{label}</span>
                       {d.doc_type_overridden
                         ? <span title="You set this type" style={{ fontSize: 10, color: "#2563eb", fontWeight: 600 }}>you set this</span>
-                        : conf && <span title={`Classification confidence: ${conf}`} style={{ fontSize: 10, color: confColor, fontWeight: 600, textTransform: "uppercase" }}>{conf}</span>}
+                        : conf && <span title={`How confident Primble is about this document's type: ${confLabel}`} style={{ fontSize: 10, color: confColor, fontWeight: 700 }}>{confLabel}</span>}
                       <span className="doc-filename" style={{ flex: 1, minWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.filename}</span>
                       {excluded && <span style={{ fontSize: 10, color: "#64748b", fontStyle: "italic" }}>excluded from scoring</span>}
                       {supportingOnly && !excluded && <span title="Facts contribute, but this document is never treated as the primary source" style={{ fontSize: 10, color: "#64748b", fontStyle: "italic" }}>supporting only</span>}
@@ -3502,6 +4281,11 @@ const AcordModal = forwardRef(function AcordModal({
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
                           {isConflict && <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", textTransform: "uppercase" }}>Values differ - confirm</span>}
+                          {isConflict && f.confidence && CONFIDENCE_META[f.confidence] && (
+                            <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3, color: CONFIDENCE_META[f.confidence].color, background: CONFIDENCE_META[f.confidence].bg, border: `1px solid ${CONFIDENCE_META[f.confidence].border}`, borderRadius: 6, padding: "1px 7px" }}>
+                              Confidence: {CONFIDENCE_META[f.confidence].label}
+                            </span>
+                          )}
                           {isConfirmed && <span style={{ fontSize: 11, fontWeight: 600, color: "#16a34a" }}>Confirmed: {f.confirmed_value}{formsLabel ? ` - applied to ${formsLabel}` : ""}</span>}
                           {f.status === "consistent" && <span style={{ fontSize: 11, color: "#16a34a" }}>Consistent: {f.values?.[0]?.display}</span>}
                         </div>
@@ -3525,8 +4309,21 @@ const AcordModal = forwardRef(function AcordModal({
                                 <span style={{ color: "#334155" }}>
                                   {v.sources.map(s => s.filename).join(", ")}
                                 </span>
+                                {isConflict && f.suggested_value != null && v.display === f.suggested_value && (
+                                  <span style={{ fontSize: 9.5, fontWeight: 700, color: "#0369a1", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, padding: "1px 7px" }}>Suggested</span>
+                                )}
                               </div>
                             ))}
+                          </div>
+                        )}
+
+                        {/* Figure 3 "apply to all": another field shows the exact same
+                            disagreement from the exact same documents - confirming
+                            here resolves it there too, so the producer only has to
+                            answer once instead of repeating the same address/value. */}
+                        {isConflict && f.linked_fields?.length > 0 && (
+                          <div style={{ marginTop: 6, fontSize: 11, color: "#0369a1", fontStyle: "italic" }}>
+                            Also applies to: {f.linked_fields.map(l => l.label).join(", ")}
                           </div>
                         )}
 
@@ -3562,14 +4359,90 @@ const AcordModal = forwardRef(function AcordModal({
               <div className="stops-row">
                 {hardStops.length > 0 && (
                   <div className="stops-banner stops-hard">
-                    <div className="stops-title">Hard Stops - Caps Your SQS at 60</div>
-                    {hardStops.map((s, i) => <div key={i} className="stop-item stop-item-hard">- {s}</div>)}
+                    <div className="stops-title">Hard Stops - Required Before Submission - Caps Your SQS at 60</div>
+                    {groupedIssues?.hard_stops?.length > 0 ? (
+                      groupedIssues.hard_stops.map((c, i) => (
+                        c.count > 1 ? (
+                          // Cluster header - same size/color as a Warnings cluster
+                          // header (10.5px, muted), since a cluster is a cluster
+                          // regardless of which banner it sits under.
+                          <div key={i}>
+                            <CollapsibleSection title={`${c.cluster} (${c.count})`} defaultOpen titleSize={10.5} headerColor="#64748b">
+                              {c.items.map((it, j) => <IssueLine key={j} message={it.message} className="stop-item stop-item-hard" />)}
+                            </CollapsibleSection>
+                            {clusterStatusControl(c)}
+                          </div>
+                        ) : (
+                          <div key={i}>
+                            <IssueLine message={c.primary_message} className="stop-item stop-item-hard" />
+                            {clusterStatusControl(c)}
+                          </div>
+                        )
+                      ))
+                    ) : (
+                      hardStops.map((s, i) => <IssueLine key={i} message={s} className="stop-item stop-item-hard" />)
+                    )}
                   </div>
                 )}
                 {softStops.length > 0 && (
                   <div className="stops-banner stops-soft">
                     <div className="stops-title">Warnings - Caps Your SQS at 85</div>
-                    {softStops.map((s, i) => <div key={i} className="stop-item stop-item-soft">- {s}</div>)}
+                    {groupedIssues?.important?.length > 0 && (
+                      <div className="warning-tier-section warning-important-section">
+                        <div className="warning-important-label">Important</div>
+                        {groupedIssues.important.map((c, i) => (
+                          <IssueLine
+                            key={i}
+                            message={c.count > 1 ? `${c.primary_message} (+${c.count - 1} related)` : c.primary_message}
+                            className="stop-item stop-item-soft"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {groupedIssues?.warnings ? (
+                      ["required", "recommended", "binder_followup"].map((tier) => {
+                        const clusters = groupedIssues.warnings[tier] || [];
+                        if (!clusters.length) return null;
+                        const totalCount = clusters.reduce((n, c) => n + c.count, 0);
+                        return (
+                          <div key={tier} className="warning-tier-section">
+                            {/* Level 2: tier header - the most prominent label inside the
+                                Warnings banner (12px), clearly smaller than the 13px
+                                banner title above it, but clearly bigger than the
+                                cluster headers nested inside it. */}
+                            <CollapsibleSection
+                              title={`${groupedIssues.tier_labels[tier]} (${totalCount})`}
+                              defaultOpen={tier === "required"}
+                              titleSize={12}
+                              headerColor="#0f172a"
+                            >
+                              {clusters.map((c, i) => (
+                                c.count > 1 ? (
+                                  // Level 3: cluster header - the short category name
+                                  // (e.g. "Financial figure conflicts"), never the raw
+                                  // issue sentence, so it stays a compact label instead
+                                  // of a wall of upper-cased text. Sized clearly below
+                                  // the 12px tier header above it.
+                                  <div key={i}>
+                                    <CollapsibleSection title={`${c.cluster} (${c.count})`} titleSize={10.5} headerColor="#64748b">
+                                      {c.items.map((it, j) => <IssueLine key={j} message={it.message} className="stop-item stop-item-soft" />)}
+                                    </CollapsibleSection>
+                                    {clusterStatusControl(c)}
+                                  </div>
+                                ) : (
+                                  <div key={i}>
+                                    <IssueLine message={c.primary_message} className="stop-item stop-item-soft" />
+                                    {clusterStatusControl(c)}
+                                  </div>
+                                )
+                              ))}
+                            </CollapsibleSection>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      softStops.map((s, i) => <IssueLine key={i} message={s} className="stop-item stop-item-soft" />)
+                    )}
                   </div>
                 )}
               </div>
@@ -4070,9 +4943,15 @@ const AcordModal = forwardRef(function AcordModal({
                         {packageSqs.positive_signals?.length > 0 && (
                           <CollapsibleSection resetKey={activeFormId} titleSize={9} title="Positive Signals" tooltip="Strengths detected that support underwriting readiness.">
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                              {packageSqs.positive_signals.map((s, i) => (
-                                <span key={i} style={{ fontSize: 9.5, fontWeight: 600, color: "#047857", background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 10, padding: "1px 7px" }}>{s.label || s.key}</span>
-                              ))}
+                              {packageSqs.positive_signals.map((s, i) => {
+                                const active = provCard?.group === "signal" && provCard.key === s.key;
+                                return (
+                                  <span key={i} role="button" tabIndex={0} data-provtrigger="1"
+                                    onClick={(e) => openProv("signal", s.key, e.currentTarget)}
+                                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProv("signal", s.key, e.currentTarget); } }}
+                                    style={{ fontSize: 9.5, fontWeight: 600, color: "#047857", background: "#ecfdf5", border: `1px solid ${active ? "#047857" : "#a7f3d0"}`, borderRadius: 10, padding: "1px 7px", cursor: "pointer" }}>{s.label || s.key}</span>
+                                );
+                              })}
                             </div>
                           </CollapsibleSection>
                         )}
@@ -4081,16 +4960,22 @@ const AcordModal = forwardRef(function AcordModal({
                         {packageSqs.narrative_components && Object.keys(packageSqs.narrative_components).length > 0 && (
                           <CollapsibleSection resetKey={activeFormId} titleSize={9} title="Narrative Components" tooltip="Narrative elements detected as present or missing in the submission.">
                             <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                              {Object.entries(packageSqs.narrative_components).map(([ck, present]) => (
-                                <span key={ck} style={{
-                                  fontSize: 9, fontWeight: 600, borderRadius: 10, padding: "1px 7px",
-                                  color: present ? "#047857" : "#64748b",
-                                  background: present ? "#ecfdf5" : "#ffffff",
-                                  border: `1px solid ${present ? "#a7f3d0" : "#cbd5e1"}`,
-                                }}>
-                                  {NARRATIVE_COMPONENT_LABELS[ck] || ck}
-                                </span>
-                              ))}
+                              {Object.entries(packageSqs.narrative_components).map(([ck, present]) => {
+                                const active = provCard?.group === "narrative" && provCard.key === ck;
+                                return (
+                                  <span key={ck} role="button" tabIndex={0} data-provtrigger="1"
+                                    onClick={(e) => openProv("narrative", ck, e.currentTarget)}
+                                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProv("narrative", ck, e.currentTarget); } }}
+                                    style={{
+                                      fontSize: 9, fontWeight: 600, borderRadius: 10, padding: "1px 7px", cursor: "pointer",
+                                      color: present ? "#047857" : "#64748b",
+                                      background: present ? "#ecfdf5" : "#ffffff",
+                                      border: `1px solid ${active ? (present ? "#047857" : "#64748b") : (present ? "#a7f3d0" : "#cbd5e1")}`,
+                                    }}>
+                                    {NARRATIVE_COMPONENT_LABELS[ck] || ck}
+                                  </span>
+                                );
+                              })}
                             </div>
                           </CollapsibleSection>
                         )}
@@ -4098,7 +4983,10 @@ const AcordModal = forwardRef(function AcordModal({
                         {/* §6.5 - umbrella state, follow-form, underlying-limit warnings (collapsible) */}
                         {packageSqs.umbrella_state && packageSqs.umbrella_state !== "not_applicable" && (
                           <CollapsibleSection resetKey={activeFormId} titleSize={9} title="Umbrella" tooltip="Umbrella/excess status, follow-form and underlying-limit notes.">
-                            <div style={{ fontSize: 9.5, fontWeight: 600, color: "#334155", marginBottom: 3 }}>{UMBRELLA_STATE_LABEL[packageSqs.umbrella_state] || packageSqs.umbrella_state}</div>
+                            <div role="button" tabIndex={0} data-provtrigger="1"
+                              onClick={(e) => openProv("umbrella", "state", e.currentTarget)}
+                              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProv("umbrella", "state", e.currentTarget); } }}
+                              style={{ fontSize: 9.5, fontWeight: 600, color: "#334155", marginBottom: 3, cursor: "pointer", textDecoration: provCard?.group === "umbrella" ? "underline" : "none", width: "fit-content" }}>{UMBRELLA_STATE_LABEL[packageSqs.umbrella_state] || packageSqs.umbrella_state}</div>
                             {/* §6.5 item 4: follow-form status - green when confirmed, amber when unknown. */}
                             {packageSqs.follow_form?.message && (
                               packageSqs.follow_form.status === "follow_form_confirmed" ? (
@@ -4120,7 +5008,10 @@ const AcordModal = forwardRef(function AcordModal({
                         {/* §6.4 - loss-history evidence state (collapsible; state + note on expand) */}
                         {packageSqs.loss_history_state && (
                           <CollapsibleSection resetKey={activeFormId} titleSize={9} title="Loss History" tooltip="Loss-run evidence state for this submission.">
-                            <div style={{ fontSize: 9.5, fontWeight: 600, color: packageSqs.loss_history_state === "loss_history_conflicting" || packageSqs.loss_history_state === "loss_runs_do_not_match" ? "#dc2626" : (packageSqs.loss_history_state === "no_information" ? "#b45309" : "#334155") }}>{LOSS_HISTORY_STATE_LABEL[packageSqs.loss_history_state] || packageSqs.loss_history_state}</div>
+                            <div role="button" tabIndex={0} data-provtrigger="1"
+                              onClick={(e) => openProv("loss_history", "state", e.currentTarget)}
+                              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProv("loss_history", "state", e.currentTarget); } }}
+                              style={{ fontSize: 9.5, fontWeight: 600, cursor: "pointer", width: "fit-content", textDecoration: provCard?.group === "loss_history" ? "underline" : "none", color: packageSqs.loss_history_state === "loss_history_conflicting" || packageSqs.loss_history_state === "loss_runs_do_not_match" ? "#dc2626" : (packageSqs.loss_history_state === "no_information" ? "#b45309" : "#334155") }}>{LOSS_HISTORY_STATE_LABEL[packageSqs.loss_history_state] || packageSqs.loss_history_state}</div>
                             {packageSqs.loss_history_state === "no_information" && (
                               <div style={{ fontSize: 9.5, color: "#64748b", marginTop: 3, lineHeight: 1.4 }}>Request loss runs or have the client confirm via the questionnaire.</div>
                             )}
@@ -4136,8 +5027,12 @@ const AcordModal = forwardRef(function AcordModal({
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                                 {notable.map(([fk, lbl]) => {
                                   const c = EVIDENCE_LABEL_COLOR[lbl];
+                                  const active = provCard?.group === "evidence" && provCard.key === fk;
                                   return (
-                                    <span key={fk} style={{ fontSize: 9, fontWeight: 600, color: c.fg, background: c.bg, borderRadius: 10, padding: "1px 7px" }}>
+                                    <span key={fk} role="button" tabIndex={0} data-provtrigger="1"
+                                      onClick={(e) => openProv("evidence", fk, e.currentTarget)}
+                                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProv("evidence", fk, e.currentTarget); } }}
+                                      style={{ fontSize: 9, fontWeight: 600, color: c.fg, background: c.bg, boxShadow: active ? `inset 0 0 0 1px ${c.fg}` : "none", borderRadius: 10, padding: "1px 7px", cursor: "pointer" }}>
                                       {fk.replace(/_/g, " ")}: {EVIDENCE_LABEL_DISPLAY[lbl] || lbl}
                                     </span>
                                   );
@@ -4152,6 +5047,13 @@ const AcordModal = forwardRef(function AcordModal({
                             {packageSqs.tier}
                           </div>
                         )}
+                        {/* Figure 10: one fixed-position provenance popover for whichever
+                            score component was clicked. Renders nothing when there is no
+                            data to show. Escapes the sidebar overflow (position: fixed). */}
+                        {provCard && (() => {
+                          const data = buildProvenance(provCard.group, provCard.key, packageSqs);
+                          return data ? <ProvenancePopover data={data} pos={provCard.pos} onClose={closeProv} /> : null;
+                        })()}
                       </CollapsibleSection>
                     )}
 
@@ -4186,14 +5088,14 @@ const AcordModal = forwardRef(function AcordModal({
                                   </div>
                                 );
                               }
-                              // Humanize any unmapped key (e.g. "hard_stops_present" -> "Hard Stops Present").
+                              // Humanize any unmapped key. Mapped keys (incl. hard_stops_present) use PACKAGE_PILLAR_LABELS.
                               const pillarLabel = PACKAGE_PILLAR_LABELS[r.pillar] || (r.pillar ? String(r.pillar).replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "");
                               return (
                                 <div key={i} style={{ padding: "4px 0", borderBottom: i < packageSqs.top_recommendations.length - 1 ? "1px solid #f1f5f9" : "none" }}>
                                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                     <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16 }}>{i + 1}</span>
                                     <span style={{ flex: 1, fontSize: 11, fontWeight: 700, color: "#000" }}>{pillarLabel}</span>
-                                    {typeof r.score === "number" && (
+                                    {typeof r.score === "number" && r.pillar !== "hard_stops_present" && (
                                       <span style={{ fontSize: 11, fontWeight: 700, color: barColor(r.score) }}>{r.score}%</span>
                                     )}
                                   </div>
@@ -4232,6 +5134,7 @@ const AcordModal = forwardRef(function AcordModal({
                                   index={i}
                                   sqsScore={activeSqs.sqs_score}
                                   onDismiss={handleDismissRec}
+                                  onAnswer={handleAnswerRec}
                                 />
                               ))}
                           </div>
@@ -4255,6 +5158,14 @@ const AcordModal = forwardRef(function AcordModal({
                                 </div>
                               )}
                               <div style={{ fontSize: 12, color: "#000", lineHeight: 1.4 }}>{iss.message}</div>
+                              {(() => { const iid = issueIdOf(iss); return (
+                                <IssueStatusControl
+                                  issueId={iid}
+                                  status={issueStatuses.get(iid)?.status}
+                                  meta={{ form_id: Array.isArray(iss.forms) ? iss.forms[0] : null, rule_code: iss.code, message: iss.message }}
+                                  onSet={setIssueStatus}
+                                />
+                              ); })()}
                             </div>
                           </div>
                         ))}
@@ -4484,6 +5395,63 @@ const AcordModal = forwardRef(function AcordModal({
                 ← Back to Form
               </button>
             </div>
+
+            {/* Post-download checklist: a successful download does not mean the package
+                is clean. Surface unresolved issues + next actions so nothing is assumed. */}
+            {(() => {
+              const recs     = preflightRecs || [];
+              const hardRecs = recs.filter(r => r.recommendation_type === "hard_stop");
+              const softRecs = recs.filter(r => r.recommendation_type !== "hard_stop");
+              const hasIssues = recs.length > 0;
+              const score = packageSqs?.package_sqs_score;
+              const nextAction = (sqsNarrative || "").replace(/\n+/g, " ").trim();
+              return (
+                <div style={{ marginTop: 30, textAlign: "left", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "18px 20px", boxShadow: "0 2px 10px rgba(15,23,42,0.05)" }}>
+                  <div style={{ background: hasIssues ? "#fffbeb" : "#f0fdf4", border: `1px solid ${hasIssues ? "#fde68a" : "#bbf7d0"}`, borderLeft: `3px solid ${hasIssues ? "#f59e0b" : "#22c55e"}`, borderRadius: 8, padding: "10px 12px", marginBottom: hasIssues || score != null ? 14 : 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: hasIssues ? "#92400e" : "#166534" }}>
+                      {hasIssues ? "Downloaded does not mean fully reviewed" : "No unresolved issues"}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: hasIssues ? "#78350f" : "#15803d", marginTop: 3, lineHeight: 1.5 }}>
+                      {hasIssues
+                        ? "Your file downloaded, but the items below are still open. Resolve them before sending this package to a carrier."
+                        : "This package downloaded with no open recommendations. It is ready to send."}
+                    </div>
+                  </div>
+
+                  {score != null && (
+                    <div style={{ fontSize: 12, color: "#475569", marginBottom: hasIssues ? 14 : 0 }}>
+                      Score at download: <strong style={{ color: "#0f172a" }}>{score}/100</strong>
+                    </div>
+                  )}
+
+                  {hasIssues && (
+                    <>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+                        Unresolved items ({recs.length})
+                      </div>
+                      {hardRecs.map((r, i) => (
+                        <div key={`h${i}`} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#7f1d1d", padding: "4px 0", lineHeight: 1.5 }}>
+                          <span style={{ color: "#dc2626", fontWeight: 700 }}>☐</span>
+                          <span>{r.message}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (-{r.score_impact} pts)</span> : ""}</span>
+                        </div>
+                      ))}
+                      {softRecs.map((r, i) => (
+                        <div key={`s${i}`} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#334155", padding: "4px 0", lineHeight: 1.5 }}>
+                          <span style={{ color: "#94a3b8", fontWeight: 700 }}>☐</span>
+                          <span>{r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> (up to +{r.score_impact} pts)</span> : ""}</span>
+                        </div>
+                      ))}
+                      {nextAction && (
+                        <div style={{ marginTop: 14, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px" }}>
+                          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Recommended next action</div>
+                          <div style={{ fontSize: 12, color: "#334155", lineHeight: 1.6 }}>{nextAction}</div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </>

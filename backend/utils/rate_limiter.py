@@ -10,6 +10,7 @@ _MAX_PER_WINDOW         = int(os.getenv("RATE_LIMIT_UPLOADS_PER_WINDOW", "10"))
 _ARQ_PUBLIC_MAX_WINDOW  = int(os.getenv("RATE_LIMIT_ARQ_PUBLIC_PER_WINDOW", "30"))
 _ARQ_SUBMIT_MAX_WINDOW  = int(os.getenv("RATE_LIMIT_ARQ_SUBMIT_PER_WINDOW", "5"))
 _ARQ_CHAT_MAX_WINDOW    = int(os.getenv("RATE_LIMIT_ARQ_CHAT_PER_WINDOW", "20"))
+_ASSISTANT_CHAT_MAX_WINDOW = int(os.getenv("RATE_LIMIT_ASSISTANT_CHAT_PER_WINDOW", "20"))
 _AUTH_MAX_WINDOW        = int(os.getenv("RATE_LIMIT_AUTH_PER_WINDOW", "10"))
 _DOWNLOAD_MAX_WINDOW    = int(os.getenv("RATE_LIMIT_DOWNLOADS_PER_WINDOW", "20"))
 _VERIFY_UPGRADE_MAX     = int(os.getenv("RATE_LIMIT_VERIFY_UPGRADE_PER_WINDOW", "5"))
@@ -159,6 +160,11 @@ async def check_arq_submit_rate_limit(ip: str) -> None:
 async def check_arq_chat_rate_limit(ip: str) -> None:
     """Rate limit public ARQ chat (LLM) requests by IP address."""
     await _check_rate_limit_by_key("arq_chat", ip, _ARQ_CHAT_MAX_WINDOW)
+
+
+async def check_assistant_chat_rate_limit(user_id: str) -> None:
+    """Rate limit authenticated in-app assistant chat (LLM) requests by user ID."""
+    await _check_rate_limit_by_key("assistant_chat", user_id, _ASSISTANT_CHAT_MAX_WINDOW)
 
 
 async def check_auth_rate_limit(identifier: str) -> None:

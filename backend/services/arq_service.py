@@ -111,6 +111,11 @@ _FIELD_QUESTION_MAP = {
     "umbrella_follow_form":     "Do the submitted documents explicitly state the umbrella follows form over the underlying coverages? Leave blank if it is not explicitly stated.",
     # Miscellaneous
     "percent_subcontracted":    "What percentage of your total work is done by outside contractors rather than your own employees?",
+    # Subcontractor usage broken out by class code (client example) - captured as a
+    # free-text remark alongside the single overall percentage above.
+    "subcontractor_pct_by_class_code": "If you use subcontractors, what percentage of work is subcontracted for each type of work (class code)? For example: 'Roofing - 40%; Framing - 20%'.",
+    # Vehicle garaging / return-to-yard (client example) - context for the auto rater.
+    "vehicles_return_to_premises": "At the end of the workday, do your vehicles return to your place of business or yard, or are they kept somewhere else? Please describe.",
     "num_claims":               "How many insurance claims has your business filed in the last 3 to 5 years?",
     "loss_history_years":       "How many years of past insurance claims history are you able to provide?",
     # §6.4: lets the client attest "no prior losses" so the loss-history score can move.
@@ -186,6 +191,8 @@ _FIELD_HINT_MAP = {
     "schedule_of_underlying_insurance": "Answer 'Yes' if the submission includes a Schedule of Underlying Insurance, or briefly list the underlying policies, e.g. 'GL $1M/$2M, Auto $1M CSL, EL $1M'. Leave blank if not provided.",
     "umbrella_follow_form":     "Enter 'Follows form' only if a document explicitly says so. Coverage is never assumed - leave blank if it is not stated and an underwriter will review.",
     "percent_subcontracted":    "Enter what percentage of your work is performed by subcontractors rather than your own employees, e.g. '30%'.",
+    "subcontractor_pct_by_class_code": "For each trade or class code, give the share of that work done by subcontractors, e.g. 'Roofing 5551 - 40%; Framing 5645 - 20%'. Leave blank if you use no subcontractors.",
+    "vehicles_return_to_premises": "Tell us where your vehicles are parked overnight, e.g. 'All vehicles return to our main yard at 123 Industrial Rd' or 'Drivers take vehicles home'.",
     "num_claims":               "Enter the total number of insurance claims your business has filed in the past 3–5 years, e.g. '2'. Enter '0' if none.",
     "loss_history_years":       "Enter how many years of claims history you can provide documentation for, e.g. '5'.",
     "loss_history_no_prior_losses_indicator": "Answer 'Yes' only if there have been no insurance claims or losses. If you have had any claims, answer 'No' and provide your loss runs or claim count instead.",
@@ -1230,6 +1237,59 @@ def _maybe_inject_umbrella_evidence_questions(questions: List[dict], facts: dict
         questions.append(_q)
 
 
+# Client examples (2026-07): two curated client questions that previously had no
+# field. Both are OPTIONAL client questions (shown in the Client panel, not
+# pre-selected) and both become canonical facts via _canonical_fact_keys(), so an
+# answer flows into `facts` and is captured for the underwriter even when no ACORD
+# box maps to it (the "single % + remarks" / "context" capture the client chose).
+SUBCONTRACTOR_BY_CLASS_FIELD = "subcontractor_pct_by_class_code"
+VEHICLES_RETURN_FIELD        = "vehicles_return_to_premises"
+
+
+def _maybe_inject_generic_client_questions(questions: List[dict], facts: dict, flags: dict) -> None:
+    """Add the client-example questions that lacked a curated field (subcontractor
+    % per class code; vehicles return to yard). Additive, in-place, and gated on
+    the relevant coverage so non-contractor / non-auto submissions are untouched.
+    """
+    facts = facts or {}
+    flags = flags or {}
+
+    def _val(key):
+        v = facts.get(key)
+        if isinstance(v, dict):
+            v = v.get("value")
+        return v
+
+    existing = {q.get("field_name") for q in questions}
+
+    def _append(field_name):
+        questions.append({
+            "field_name":         field_name,
+            "question":           _FIELD_QUESTION_MAP[field_name],
+            "hint":               _FIELD_HINT_MAP.get(field_name, ""),
+            "forms":              "",
+            "form_ids":           [],
+            "field_type":         "text",
+            "current_value":      "",
+            "_group_label":       None,
+            "_is_curated_client": True,
+            "_canonical_key":     field_name,
+        })
+
+    # Subcontractor % per class code — relevant where there is GL exposure (the
+    # line where subcontractor use matters). Optional; producer can add it.
+    if (flags.get("has_general_liability")
+            and SUBCONTRACTOR_BY_CLASS_FIELD not in existing
+            and not _val(SUBCONTRACTOR_BY_CLASS_FIELD)):
+        _append(SUBCONTRACTOR_BY_CLASS_FIELD)
+
+    # Vehicles return to premises / yard — relevant when auto coverage is present.
+    if (flags.get("has_auto_coverage")
+            and VEHICLES_RETURN_FIELD not in existing
+            and not _val(VEHICLES_RETURN_FIELD)):
+        _append(VEHICLES_RETURN_FIELD)
+
+
 # ---------------------------------------------------------------------------
 # Question generation
 # ---------------------------------------------------------------------------
@@ -1243,11 +1303,14 @@ async def generate_arq_questions(
     soft_stops: list,
     session_docs: list = None,
     present_fact_keys: Optional[set] = None,
+    stats: Optional[dict] = None,
 ) -> List[dict]:
     # `present_fact_keys`, when supplied by the caller, is the form-aware set of
     # facts to treat as already-provided (a fact counts as present only when it
     # actually landed on a form box - see _backfill_and_resolve_present). When not
     # supplied we fall back to the facts-only view for backward compatibility.
+    # `stats`, when supplied, is an out-param the caller reads for the ARQ metric
+    # "Duplicate / Merged Questions Removed" (stats["merged_removed"]).
     facts = facts or {}
     missing_fields: dict = {}
     field_current_values: dict = {}
@@ -1353,6 +1416,8 @@ async def generate_arq_questions(
             # answer fills; the answer reaches all of them on apply via the
             # canonical restamp.
             _merge_form_ids_into_question(questions, canon, form_ids)
+            if stats is not None:
+                stats["merged_removed"] = stats.get("merged_removed", 0) + 1
             continue
         if canon and not canon.startswith("_"):
             seen_canon_keys.add(canon)
@@ -1471,6 +1536,9 @@ async def generate_arq_questions(
     # §6.3 item 2: ask the client for each narrative-quality topic the narrative
     # lacks (and stay silent on the ones it already covers).
     _maybe_inject_narrative_enrichment_questions(questions, facts, flags, session_docs)
+    # Client examples (2026-07): subcontractor % per class code + vehicles-return-
+    # to-yard, gated on GL / auto coverage. Optional client questions (opt-in).
+    _maybe_inject_generic_client_questions(questions, facts, flags)
 
     # Curation layer (Beta Report §8): tag audience/priority/topic/score-impact,
     # then apply the curated default-selection policy.
@@ -1586,6 +1654,9 @@ def generate_arq_questions_from_facts(
     _maybe_inject_umbrella_evidence_questions(questions, facts, flags)
     # §6.3 item 2: ask the client for each narrative-quality topic the narrative lacks.
     _maybe_inject_narrative_enrichment_questions(questions, facts, flags)
+    # Client examples (2026-07): subcontractor % per class code + vehicles-return-
+    # to-yard, gated on GL / auto coverage. Optional client questions (opt-in).
+    _maybe_inject_generic_client_questions(questions, facts, flags)
 
     hard_stop_text = " ".join(str(s) for s in (hard_stops or []))
     decorate_questions(
@@ -2191,6 +2262,99 @@ async def apply_arq_answers_to_session(
 
 
 # ASYNC-SAFE
+async def apply_producer_answer_to_session(
+    processing_session_id: str,
+    field_name: str,
+    value: str,
+) -> Tuple[bool, List[str]]:
+    """Apply a single producer-entered recommendation answer to the session.
+
+    Fig 13 producer-answer flow. Writes the typed value into the session facts as
+    a producer-provenance fact (source="producer", confidence="filled" - scores
+    1.00 in SQS, exactly like a producer field edit, and distinct in the audit
+    trail from a client_arq answer), stamps it into every generated form that
+    carries the canonical fact, and mirrors the same loss-history / carrier flag
+    derivation apply_arq_answers_to_session uses so the facts-driven scorers move.
+    The caller re-runs recalculate_session_scores afterwards to recompute stops
+    and SQS and to auto-resolve any recommendation the answer cleared.
+
+    Returns (ok, updated_ids). ok=False (with empty list) means the recommendation
+    does not resolve to a fillable canonical fact - the caller should route the
+    producer to attach a supporting document or dismiss with a note instead.
+    """
+    from repositories.session_repository import (
+        get_processing_session, upd_processing_session,
+    )
+
+    canon = _canonical_key(field_name)
+    if not canon or canon.startswith("_"):
+        return False, []
+
+    new_val = str(value).strip()
+    if not new_val:
+        return False, []
+
+    try:
+        proc_session = await get_processing_session(processing_session_id)
+    except Exception as ex:
+        logger.error(f"apply_producer_answer: cannot load session {processing_session_id}: {ex}")
+        return False, []
+
+    from services.sqs_service import _attested_true
+
+    generated = proc_session.get("generated_forms", {}) or {}
+    facts     = dict(proc_session.get("facts", {}) or {})
+    flags     = dict(proc_session.get("flags", {}) or {})
+    flags_changed = False
+    updated: List[str] = []
+
+    # Producer-provenance fact. Distinct source from client_arq; same 1.00 weight.
+    facts[canon] = {
+        "value":      new_val,
+        "confidence": "filled",
+        "source":     "producer",
+    }
+
+    # Stamp the confirmed value into every generated form whose schema carries it
+    # (same deterministic engine used by the initial fill and the ARQ apply path).
+    _stamped = _restamp_canonical_into_forms(generated, canon, facts)
+    for _fid in _stamped:
+        if _fid not in updated:
+            updated.append(_fid)
+
+    # Mirror apply_arq_answers_to_session's flag derivation so loss-history /
+    # carrier-marketing answers actually move their pillars (not just a facts str).
+    if canon == NO_LOSS_INDICATOR_FIELD:
+        if _attested_true(new_val):
+            flags["no_prior_losses"] = True
+            flags_changed = True
+        elif flags.get("no_prior_losses"):
+            flags["no_prior_losses"] = False
+            flags_changed = True
+    elif canon == CARRIER_MARKETING_FIELD:
+        _val_lower = new_val.lower()
+        if _val_lower.startswith("other:"):
+            _is_adverse = await _classify_other_reason_adverse(new_val[6:].strip())
+        else:
+            _is_adverse = _val_lower in _ADVERSE_CARRIER_REASONS
+        flags["prior_carrier_adverse_action"] = _is_adverse
+        flags_changed = True
+
+    if field_name not in updated:
+        updated.append(field_name)
+
+    _update_payload = {"generated_forms": generated, "facts": facts}
+    if flags_changed:
+        _update_payload["flags"] = flags
+    await upd_processing_session(processing_session_id, _update_payload)
+    logger.info(
+        f"Producer answer applied: session={processing_session_id} "
+        f"field={field_name} canon={canon} forms={_stamped}"
+    )
+    return True, updated
+
+
+# ASYNC-SAFE
 async def recalculate_session_scores(processing_session_id: str) -> dict:
     """Re-run scoring after ARQ answers are applied (Beta Report §6.2 / §8.2.7).
 
@@ -2390,7 +2554,8 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         _user_provided_fields = [
             k for k, v in facts.items()
             if isinstance(v, dict)
-            and (v.get("source") == "client_arq" or v.get("confidence") == "client_arq")
+            and (v.get("source") in ("client_arq", "producer")
+                 or v.get("confidence") == "client_arq")
         ]
 
     _has_conflicts = any(

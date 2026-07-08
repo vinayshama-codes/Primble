@@ -25,6 +25,11 @@ import ClientQuestionnaire    from "./components/arq/ClientQuestionnaire";
 import ErrorBoundary          from "./components/layout/ErrorBoundary";
 import AccountSettingsModal   from "./components/account/AccountSettingsModal";
 import ContactModal           from "./components/account/ContactModal";
+import ActivityLogModal       from "./components/account/ActivityLogModal";
+import AdminResetLicenseModal from "./components/account/AdminResetLicenseModal";
+import AdminAuditExportModal  from "./components/account/AdminAuditExportModal";
+import AdminManageAdminsModal from "./components/account/AdminManageAdminsModal";
+import { checkAdmin }         from "./api/adminApi";
 
 export default function App() {
   const path = window.location.pathname;
@@ -106,6 +111,11 @@ function AppContent() {
   const [showSignatureModal,  setShowSignatureModal]  = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
   const [showContactModal,    setShowContactModal]    = useState(false);
+  const [showActivityLog,     setShowActivityLog]     = useState(false);
+  const [showResetLicense,    setShowResetLicense]    = useState(false);
+  const [showAuditExport,     setShowAuditExport]     = useState(false);
+  const [showManageAdmins,    setShowManageAdmins]    = useState(false);
+  const [isAdmin,             setIsAdmin]             = useState(false);
   const [signingIn,           setSigningIn]           = useState(false);
   const [headerError,         setHeaderError]         = useState("");
   const [resumeSessionId,     setResumeSessionId]     = useState(null);
@@ -115,6 +125,15 @@ function AppContent() {
   const [marketingPage,       setMarketingPage]       = useState(null);
   const [portalRedirecting,   setPortalRedirecting]   = useState(false);
   const acordModalRef = useRef(null);
+
+  // Detect platform-admin (email in ADMIN_EMAILS) to gate admin-only UI.
+  // Server-side _require_admin is the real gate; this only shows/hides controls.
+  useEffect(() => {
+    if (!user) { setIsAdmin(false); return; }
+    let alive = true;
+    checkAdmin().then((ok) => { if (alive) setIsAdmin(ok); });
+    return () => { alive = false; };
+  }, [user?.id]);
 
   // Parse Stripe redirect params once at mount; clear them from the URL immediately
   // so the hook is driven by confirmed Stripe redirects only, not arbitrary URL visits.
@@ -290,6 +309,11 @@ function AppContent() {
         onHome={() => { setMarketingPage(null); setShowModal(false); }}
         onAccountSettings={() => setShowAccountSettings(true)}
         onContactPrimble={() => setShowContactModal(true)}
+        onActivityLog={() => setShowActivityLog(true)}
+        isAdmin={isAdmin}
+        onResetLicense={() => setShowResetLicense(true)}
+        onAuditExport={() => setShowAuditExport(true)}
+        onManageAdmins={() => setShowManageAdmins(true)}
         onDashboard={user ? () => {
           if (acordModalRef.current) {
             acordModalRef.current.goToDashboard();
@@ -398,6 +422,30 @@ function AppContent() {
         <ContactModal
           user={user}
           onClose={() => setShowContactModal(false)}
+        />
+      )}
+
+      {showActivityLog && user && (
+        <ActivityLogModal
+          onClose={() => setShowActivityLog(false)}
+        />
+      )}
+
+      {showResetLicense && user && isAdmin && (
+        <AdminResetLicenseModal
+          onClose={() => setShowResetLicense(false)}
+        />
+      )}
+
+      {showAuditExport && user && isAdmin && (
+        <AdminAuditExportModal
+          onClose={() => setShowAuditExport(false)}
+        />
+      )}
+
+      {showManageAdmins && user && isAdmin && (
+        <AdminManageAdminsModal
+          onClose={() => setShowManageAdmins(false)}
         />
       )}
     </div>

@@ -140,10 +140,11 @@ def test_umbrella_state_machine():
     assert sq._get_umbrella_state({"umbrella_limit": "5000000"}, {"has_umbrella": True}) == "unknown"
     low = {"umbrella_limit": "5000000", "gl_limits": "500000"}
     assert sq._get_umbrella_state(low, {"has_umbrella": True}) == "umbrella_coverage_needs_review"
-    # Limits meet thresholds but NO supporting evidence (no schedule, no follow-form)
-    # → information is provided yet coverage is not corroborated (§6.5 7th state).
+    # Limits meet thresholds; zero supporting documents (no schedule, no follow-form).
+    # §6.5 retired "umbrella_information_provided" - once limits meet thresholds this
+    # reads as Coverage Present even with both supporting docs missing.
     ok = {"umbrella_limit": "5000000", "gl_limits": "1000000", "auto_liability_limit": "1000000"}
-    assert sq._get_umbrella_state(ok, {"has_umbrella": True}) == "umbrella_information_provided"
+    assert sq._get_umbrella_state(ok, {"has_umbrella": True}) == "umbrella_coverage_present"
     # One supporting document present (schedule OR follow-form) → coverage present.
     ok_partial = {**ok, "schedule_of_underlying_insurance": "GL $1M/$2M; Auto $1M CSL"}
     assert sq._get_umbrella_state(ok_partial, {"has_umbrella": True}) == "umbrella_coverage_present"
@@ -174,10 +175,11 @@ def test_umbrella_state_demotes_when_flagged_coverage_limit_missing():
         gl_missing, {"has_umbrella": True, "has_general_liability": True}
     ) == "umbrella_coverage_needs_review"
     # No coverage flag set → absent underlying limit is NOT demoted to needs_review;
-    # with no supporting evidence it reads as information provided (§6.5 7th state).
+    # with limits meeting thresholds it reads as coverage present (§6.5: "information
+    # provided" state retired, zero/one supporting doc both -> coverage present).
     assert sq._get_umbrella_state(
         {"umbrella_limit": "5000000", "gl_limits": "1000000"}, {"has_umbrella": True}
-    ) == "umbrella_information_provided"
+    ) == "umbrella_coverage_present"
 
 
 # ── Follow-form Option B (Q4) ─────────────────────────────────────────────────
@@ -284,15 +286,23 @@ def test_loss_run_doc_match_tiers():
 
 
 def test_loss_run_doc_carrier_adjustment():
-    # Client: prior carrier +10 / -10 applies on the loss-run-uploaded path too
-    # ("commonly found on loss runs and prior policy documents").
+    # Client Clarification 2 (§6.4): a strong (name + FEIN/policy) match with no
+    # claim years is pinned at 60 - the prior-carrier +/-10 no longer moves it.
     fresh = {"loss_run_age_days": "30"}
-    with_c, _ = sq.calculate_p4_loss_history(
+    strong_with_c, _ = sq.calculate_p4_loss_history(
         {**fresh, "prior_carrier": "Travelers"}, {}, has_loss_run_doc=True, loss_run_match="strong")
-    without_c, _ = sq.calculate_p4_loss_history(
+    strong_without_c, _ = sq.calculate_p4_loss_history(
         fresh, {}, has_loss_run_doc=True, loss_run_match="strong")
-    assert with_c == 60     # 50 + 10
-    assert without_c == 40  # 50 - 10
+    assert strong_with_c == 60      # pinned
+    assert strong_without_c == 60   # pinned - carrier adjustment skipped for this state
+    # The prior-carrier +10 / -10 still applies to the non-pinned match tiers
+    # ("commonly found on loss runs and prior policy documents").
+    poss_with_c, _ = sq.calculate_p4_loss_history(
+        {**fresh, "prior_carrier": "Travelers"}, {}, has_loss_run_doc=True, loss_run_match="possible")
+    poss_without_c, _ = sq.calculate_p4_loss_history(
+        fresh, {}, has_loss_run_doc=True, loss_run_match="possible")
+    assert poss_with_c == 45        # 35 + 10
+    assert poss_without_c == 25     # 35 - 10
 
 
 def test_no_match_loss_runs_capped_even_with_full_years():
@@ -424,12 +434,13 @@ def test_moderate_match_maps_to_pending_validation():
 
 
 def test_no_loss_evidence_quality_scoring():
-    # sqs-pillars spec: "Insured attests no prior losses = 60" treats all no-loss
-    # attestations (user or narrative) as a single unified bucket at 60.
+    # §6.4 (client clarification): the two no-loss evidence sources score differently -
+    # a user attestation is an affirmative statement (60); a passing mention in the
+    # narrative is weaker (45). Both sit above no-information (25).
     user, _ = sq.calculate_p4_loss_history({}, {"no_prior_losses": True})
     narrative, _ = sq.calculate_p4_loss_history({}, {"narrative_states_no_losses": True})
     assert user == 60
-    assert narrative == 60
+    assert narrative == 45
 
 
 # ── Narrative quality (§6.3 tuple + components) ───────────────────────────────

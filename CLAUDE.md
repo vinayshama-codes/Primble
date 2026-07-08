@@ -301,6 +301,34 @@ Expected result after fix: 17 minutes → 3–4 minutes.
   Any change touching facts, form output, or signatures needs a security review.
 - **Ask Brent** about compliance requirements before any data-handling changes.
 
+## Database Schema Conventions
+
+**Single source of truth: `backend/config/database.py::init_db()`.** It runs
+automatically on every app startup (`main.py`'s `@app.on_event("startup")` calls
+`await init_db()`) and is fully idempotent — safe to run against an empty database
+or one that already has the tables/columns.
+
+When adding a new table or column, edit `init_db()` only, using this exact pattern:
+
+1. **New table:** add a `CREATE TABLE IF NOT EXISTS ...` block with the complete
+   column list (as if creating it fresh).
+2. **New column on an existing table:** add it to the `CREATE TABLE IF NOT EXISTS`
+   block above (so a brand-new database gets it immediately) **AND** add a matching
+   `ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...` statement (so an existing database
+   picks it up on next restart, no manual migration step). See the `users` table's
+   `for col, definition in [...]` loop and the `acord_audit_log` entries in the
+   `for stmt in [...]` list near the bottom of `init_db()` for the established style.
+
+This is what makes the schema **portable**: point `DATABASE_URL` at any empty
+Postgres instance and start the app — `init_db()` builds the entire schema with no
+separate migration command required. Never require a manual step to stand up a new
+environment.
+
+**Do not use `backend/migrate.py` or `backend/alembic/` for new schema changes.**
+Both exist in the repo but neither runs automatically at startup (confirmed: only
+`init_db()` is called from `main.py`) — they are legacy/inactive paths. Adding a
+column there will not reach a real deployment.
+
 ## UI / Copy Rules
 
 - **No em-dashes (`—`) in UI text.** Use a plain hyphen-minus (`-`) instead. This applies to all labels, titles, banners, tooltips, and inline copy throughout the frontend.

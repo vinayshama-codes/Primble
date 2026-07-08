@@ -100,12 +100,29 @@ ENABLE_ALIAS_STAMPING: bool = os.getenv("ENABLE_ALIAS_STAMPING", "false").lower(
 # per form. Default off → behavior identical to the prior pipeline.
 ENABLE_COMBINED_GAP_FILL: bool = os.getenv("ENABLE_COMBINED_GAP_FILL", "false").lower() == "true"
 
+# Producer-entered answers on the recommendation cards (Fig 13). When true, the
+# "Submit" action on a recommendation writes the typed value into the session as
+# a producer-provenance fact and re-runs the SQS / cross-form rules, instead of
+# only dismissing the card. Server-side kill switch; the "Dismiss" waiver path is
+# unaffected either way. Default on (requested behaviour, no client-side flag
+# plumbing); set ENABLE_PRODUCER_ANSWERS=false to fall back to dismiss-only.
+ENABLE_PRODUCER_ANSWERS: bool = os.getenv("ENABLE_PRODUCER_ANSWERS", "true").lower() == "true"
+
 
 ADMIN_EMAILS: set = {
     e.strip().lower()
     for e in os.getenv("ADMIN_EMAILS", "").split(",")
     if e.strip()
 }
+
+# ACORD license confirmation wording version (Figure 25 requirement).
+# Bump this whenever the legal text in the AcordModal license-confirmation
+# copy changes. Users who confirmed under an older version are treated as
+# unconfirmed (see is_acord_license_current below) and are re-prompted on
+# their next download. The value is never shown to users or typed by them -
+# it is a developer-set label for the exact wording, like a document
+# revision number.
+ACORD_LICENSE_VERSION = os.getenv("ACORD_LICENSE_VERSION", "2026-07-v1")
 
 DEV_ROUTES_ENABLED: bool = os.getenv("DEV_ROUTES_ENABLED", "false").lower() == "true"
 

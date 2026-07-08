@@ -30,12 +30,21 @@ from services.arq_service import (
 from services.arq_service import recalculate_session_scores
 from services.question_classifier import (
     AUDIENCE_CLIENT,
+    AUDIENCE_DO_NOT_SEND,
+    BUCKET_DO_NOT_SEND,
+    BUCKET_LABELS,
+    BUCKET_ORDER,
     DEFAULT_SELECT_CAP,
     TOPIC_LABELS,
     TOPIC_ORDER,
     apply_default_selection,
 )
 from services.auth_service import get_current_user
+from services.activity_service import (
+    record_event,
+    EVENT_ARQ_SENT, EVENT_ARQ_OPENED, EVENT_ARQ_IN_PROGRESS,
+    EVENT_ARQ_SUBMITTED, EVENT_ANSWERS_APPLIED, EVENT_REMINDER_SENT,
+)
 from services.email_service import send_arq_email, send_arq_submitted_notification
 from utils.rate_limiter import check_arq_public_rate_limit, check_arq_submit_rate_limit, check_arq_chat_rate_limit, get_client_ip
 from utils.helpers import check_payment_access
@@ -85,6 +94,9 @@ async def generate_questions(
         except Exception as _persist_ex:
             logger.warning(f"ARQ generate: back-fill persist failed: {_persist_ex}")
 
+    # `_gen_stats` collects the "Duplicate / Merged Questions Removed" metric the
+    # client asked for (canonical-fact merges folded during generation).
+    _gen_stats: dict = {"merged_removed": 0}
     questions = await generate_arq_questions(
         facts=_facts,
         flags=proc_session.get("flags", {}),
@@ -93,10 +105,12 @@ async def generate_questions(
         soft_stops=proc_session.get("soft_stops", []),
         session_docs=proc_session.get("docs", []),
         present_fact_keys=present_on_form,
+        stats=_gen_stats,
     )
 
-    # Merge cross-form conflict questions — placed at the front so the client
-    # resolves structural conflicts before answering form-level missing fields.
+    # Merge cross-form conflict questions — placed at the front so the producer
+    # sees structural conflict flags before the form-level missing fields.
+    cf_merged = 0
     cross_form_issues = proc_session.get("cross_form_issues", [])
     if cross_form_issues:
         cf_questions = generate_cross_form_arq_questions(
@@ -107,12 +121,16 @@ async def generate_questions(
         # Deduplicate by field_name against per-form questions already in the list
         existing_fields = {q["field_name"] for q in questions}
         new_cf = [q for q in cf_questions if q["field_name"] not in existing_fields]
+        cf_merged = len(cf_questions) - len(new_cf)
         questions = new_cf + questions
 
     # Re-apply the curated default-selection policy across the FULL merged list so
     # the soft cap on pre-selected questions is global, not per-generator
     # (Beta Report §8.2 item 3 + §11 #20).
     selection_summary = apply_default_selection(questions)
+    # Surface the merged-duplicate count (generation merges + route-level cross-form
+    # dedup) so the UI can show "N duplicates merged" per the client's ARQ metric.
+    selection_summary["merged_removed"] = _gen_stats.get("merged_removed", 0) + cf_merged
 
     producer_full_name  = current_user.get("full_name", "") or current_user.get("email", "")
     producer_first_name = producer_full_name.split()[0] if producer_full_name else ""
@@ -125,6 +143,8 @@ async def generate_questions(
         "default_select_cap":  DEFAULT_SELECT_CAP,
         "topic_order":         TOPIC_ORDER,
         "topic_labels":        TOPIC_LABELS,
+        "bucket_order":        BUCKET_ORDER,
+        "bucket_labels":       BUCKET_LABELS,
         "producer_full_name":  producer_full_name,
         "producer_first_name": producer_first_name,
     })
@@ -171,6 +191,11 @@ async def send_arq(
 
     clean_questions = []
     for q in guarded_questions:
+        # Defense in depth: "Never send" items (producer fax etc.) are never
+        # selectable in the UI, but hard-drop them here too so a crafted payload
+        # can never email a do-not-send field to the insured.
+        if q.get("bucket") == BUCKET_DO_NOT_SEND or q.get("audience") == AUDIENCE_DO_NOT_SEND:
+            continue
         si = q.get("score_impact") if isinstance(q.get("score_impact"), dict) else {}
         q_entry = {
             "field_name":    _sanitize_str(q.get("field_name", ""), 128),
@@ -181,9 +206,12 @@ async def send_arq(
             "field_type":    _sanitize_str(q.get("field_type", "text"), 32),
             "current_value": "",
             # Carry the curation taxonomy so the stored ARQ keeps its grouping /
-            # audience / score-impact context (Beta Report §8).
+            # audience / bucket / score-impact context (Beta Report §8 + 3-bucket).
             "audience":      _sanitize_str(q.get("audience", AUDIENCE_CLIENT), 32),
             "priority":      _sanitize_str(q.get("priority", "optional"), 32),
+            "bucket":        _sanitize_str(q.get("bucket", "client"), 32),
+            "bucket_label":  _sanitize_str(q.get("bucket_label", "Client"), 64),
+            "escalatable_to_client": bool(q.get("escalatable_to_client")),
             "topic_group":   _sanitize_str(q.get("topic_group", "other"), 48),
             "topic_label":   _sanitize_str(q.get("topic_label", "Other"), 64),
             "score_impact":  {
@@ -198,6 +226,9 @@ async def send_arq(
         if isinstance(raw_opts, list) and raw_opts:
             q_entry["options"] = [_sanitize_str(str(o), 200) for o in raw_opts]
         clean_questions.append(q_entry)
+
+    if not clean_questions:
+        raise HTTPException(400, "At least one valid question is required")
 
     arq_data = await create_arq_session(
         processing_session_id=session_id,
@@ -220,6 +251,14 @@ async def send_arq(
     )
 
     logger.info(f"ARQ sent: arq_id={arq_data['arq_id']} to={client_email} email_ok={email_sent}")
+
+    # Package activity log (best-effort). Store only the client FIRST name, never
+    # the email, so the log table holds no fresh PII.
+    _client_first = (client_name or "").split()[0] if client_name else ""
+    await record_event(
+        current_user["id"], session_id, EVENT_ARQ_SENT,
+        {"client_first": _client_first, "question_count": len(clean_questions)},
+    )
 
     return JSONResponse({
         "success":    True,
@@ -252,6 +291,13 @@ async def client_view(token: str, request: Request):
     if arq["status"] == "submitted":
         return JSONResponse({"success": False, "error": "already_submitted", "message": "Already submitted."}, status_code=409)
 
+    # Log the first open only (viewed_at is set once, on first view).
+    if not arq.get("viewed_at"):
+        _cf = (arq.get("client_name") or "").split()[0] if arq.get("client_name") else ""
+        await record_event(
+            arq["user_id"], arq.get("session_id"), EVENT_ARQ_OPENED,
+            {"client_first": _cf},
+        )
     await mark_arq_viewed(token)
 
     producer_email = ""
@@ -333,7 +379,26 @@ async def save_draft(token: str, request: Request):
         for k, v in raw_answers.items()
     }
 
+    # Detect first-draft transition (arq snapshot is pre-save) so the activity
+    # log records "in progress" once, not on every autosave. draft_answers comes
+    # back as a JSONB dict OR a JSON string (see client_view above), so handle both
+    # forms - otherwise the guard never sees a prior draft and re-logs every save.
+    _prev_draft = arq.get("draft_answers")
+    if isinstance(_prev_draft, dict):
+        _had_draft = len(_prev_draft) > 0
+    elif isinstance(_prev_draft, str):
+        _had_draft = _prev_draft.strip() not in ("", "{}", "null")
+    else:
+        _had_draft = False
+
     await save_arq_draft(token, sanitized)
+
+    if not _had_draft and sanitized:
+        _cf = (arq.get("client_name") or "").split()[0] if arq.get("client_name") else ""
+        await record_event(
+            arq["user_id"], arq.get("session_id"), EVENT_ARQ_IN_PROGRESS,
+            {"client_first": _cf},
+        )
     return JSONResponse({"success": True})
 
 
@@ -426,6 +491,19 @@ async def submit_arq(token: str, request: Request):
         logger.error(f"ARQ submit: notification email failed: {ex}")
 
     logger.info(f"ARQ submitted: arq_id={arq['id']} applied_fields={len(applied_fields)}")
+
+    # Package activity log: the client's submit, then the system apply + re-score.
+    _cf = (arq.get("client_name") or "").split()[0] if arq.get("client_name") else ""
+    await record_event(
+        arq["user_id"], arq.get("session_id"), EVENT_ARQ_SUBMITTED,
+        {"client_first": _cf, "fields": len(sanitized_answers)},
+    )
+    if apply_ok:
+        await record_event(
+            arq["user_id"], arq.get("session_id"), EVENT_ANSWERS_APPLIED,
+            {"client_first": _cf, "fields_updated": len(applied_fields),
+             "scores_updated": bool(score_update.get("ok"))},
+        )
 
     return JSONResponse({
         "success":        True,
@@ -545,8 +623,9 @@ async def list_arqs(
     check_payment_access(current_user.get("payment_status", "ok"), "form")
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, status, email, client_name, created_at, submitted_at, expires_at, "
-            "reminder_count, remediation_status, fields_answered_count "
+            "SELECT id, status, email, client_name, created_at, submitted_at, viewed_at, expires_at, "
+            "reminder_count, remediation_status, fields_answered_count, "
+            "(draft_answers IS NOT NULL AND draft_answers::text <> '{}') AS has_draft "
             "FROM arq_sessions WHERE session_id=$1 AND user_id=$2 ORDER BY created_at DESC",
             session_id, current_user["id"],
         )
@@ -568,6 +647,12 @@ async def send_reminder(
         raise HTTPException(400, "Client has already submitted this questionnaire")
 
     ok = await send_arq_reminder(arq_id, current_user)
+    if ok:
+        _cf = (arq.get("client_name") or "").split()[0] if arq.get("client_name") else ""
+        await record_event(
+            arq["user_id"], arq.get("session_id"), EVENT_REMINDER_SENT,
+            {"client_first": _cf, "reminder_count": (arq.get("reminder_count", 0) or 0) + 1},
+        )
     return JSONResponse({"success": ok, "message": "Reminder sent." if ok else "Failed to send reminder."})
 
 

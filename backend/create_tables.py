@@ -56,6 +56,21 @@ def create_tables():
             """)
             print("  ✅ arq_notifications")
 
+            # ── activity_events — durable package activity log ──
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS activity_events (
+                    id            TEXT PRIMARY KEY,
+                    user_id       TEXT NOT NULL,
+                    session_id    TEXT,
+                    package_label TEXT DEFAULT '',
+                    event_type    TEXT NOT NULL,
+                    event_data    JSONB DEFAULT '{}',
+                    created_at    TEXT NOT NULL
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_activity_user_created ON activity_events(user_id, created_at DESC)")
+            print("  ✅ activity_events")
+
             # Safe ALTER for existing DBs that already have arq_sessions without newer cols
             extras = [
                 "ALTER TABLE arq_sessions ADD COLUMN IF NOT EXISTS client_name TEXT DEFAULT ''",

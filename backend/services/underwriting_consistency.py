@@ -122,7 +122,39 @@ _TEXT_SCAN_PATTERNS: Dict[str, List[str]] = {
         r"\b(?:insurance\s+carrier|carrier\s+name|current\s+carrier|carrier|insurer)\s*[:\-]\s*"
         r"([A-Za-z][A-Za-z0-9 .,'&/\-]{2,60}?)\s*(?:\r?\n|$)",
     ],
+    # Applicant / Named Insured — label-anchored so we never mistake an
+    # unrelated proper noun (e.g. a carrier or contact name) for the insured.
+    "applicant_name": [
+        r"\b(?:named\s+insured|applicant\s+name|applicant|insured\s+name|insured)\s*[:\-]\s*"
+        r"([A-Za-z0-9][A-Za-z0-9 .,'&/\-]{1,80}?)\s*(?:\r?\n|$)",
+    ],
+    "dba_name": [
+        r"\b(?:d\s*/\s*b\s*/\s*a|dba|doing\s+business\s+as|trade\s+name)\s*[:\-]?\s*"
+        r"([A-Za-z0-9][A-Za-z0-9 .,'&/\-]{1,80}?)\s*(?:\r?\n|$)",
+    ],
+    # Addresses — same label-anchoring approach as the other identity fields.
+    # Mailing is checked before Physical in the value; both patterns require
+    # the label so a bare street line elsewhere in the doc is never captured.
+    "mailing_address": [
+        r"\b(?:mailing\s+address|mailing)\s*[:\-]?\s*"
+        r"([A-Za-z0-9][A-Za-z0-9 .,'#/\-]{4,90}?)\s*(?:\r?\n|$)",
+    ],
+    "physical_address": [
+        r"\b(?:physical\s+address|premises\s+address|location\s+address|property\s+address)\s*[:\-]?\s*"
+        r"([A-Za-z0-9][A-Za-z0-9 .,'#/\-]{4,90}?)\s*(?:\r?\n|$)",
+    ],
 }
+
+# Fields with NO bespoke pattern above still get a text-scan safety net via this
+# generic fallback: <field label words> optionally followed by ":"/"-", then a
+# captured value up to end of line. This is what makes the safety net apply to
+# EVERY reconcilable field (current and future — adding a new entry to
+# RECONCILABLE_FIELDS is enough), not just the fields the client happened to
+# name as examples. Deliberately conservative (requires a colon/dash after the
+# label) so it only fires on an explicitly labelled line, never a stray mention.
+def _generic_label_pattern(label: str) -> str:
+    words = re.escape(label.strip()).replace(r"\ ", r"\s+")
+    return rf"\b{words}\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9 .,'#/\-]{{1,90}}?)\s*(?:\r?\n|$)"
 
 # Minimum amount (as int after stripping formatting) to be a plausible business
 # revenue figure — filters out stray small numbers like zip codes or page refs.
@@ -146,10 +178,16 @@ def _text_scan_values(text: str, fact_key: str) -> List[str]:
     false conflict. Every value is validated/deduplicated through the field's
     Workstream-2 normalizer, so formatting-only differences never leak through.
     """
+    cfg = RECONCILABLE_FIELDS.get(fact_key, {})
     patterns = _TEXT_SCAN_PATTERNS.get(fact_key)
+    if not patterns and cfg.get("kind") in ("identity", "currency", "integer") and cfg.get("label"):
+        # Generic safety net for any reconcilable field without a bespoke
+        # pattern — keeps this module a "reusable engine" (see module docstring)
+        # instead of only covering the fields called out by name.
+        patterns = [_generic_label_pattern(cfg["label"])]
     if not patterns or not text:
         return []
-    is_currency = RECONCILABLE_FIELDS.get(fact_key, {}).get("kind") == "currency"
+    is_currency = cfg.get("kind") == "currency"
     found: Dict[str, str] = {}   # normalized -> first raw match (insertion order)
     for pattern in patterns:
         for m in re.finditer(pattern, text, re.IGNORECASE):
@@ -380,6 +418,104 @@ def _forms_for_field(fact_key: str, cfg: dict) -> List[str]:
         return static
 
 
+# ── Suggested value + confidence (Beta Report §4.3 / Figure 3 feedback) ───────
+# When documents disagree, recommend the value that looks the most complete /
+# correct — NOT the value from a particular document type. Confidence is HIGH
+# only when one value is CLEARLY more complete; a genuine tie is LOW. Pre-selection
+# (frontend) is reserved for HIGH confidence on non-hard-stop fields, so a wrong
+# default can never be silently rubber-stamped onto a legally significant field
+# (named insured / FEIN / policy dates).
+
+# A completeness lead of this much (roughly one full structural component such as
+# a ZIP+4 or a state) is treated as a CLEAR winner → HIGH confidence.
+_COMPLETENESS_MARGIN = 1.0
+
+
+def _group_doc_count(group: dict) -> int:
+    """Number of DISTINCT source documents backing a value group (the tiebreak)."""
+    return len({s.get("doc_id") for s in group.get("sources", []) if s.get("doc_id")})
+
+
+def _value_completeness(fact_key: str, kind: str, value: Any) -> float:
+    """Structural completeness score for a candidate value.
+
+    ADDRESS and FEIN carry a specific, hard-to-fake completeness signal (ZIP /
+    ZIP+4 / state / street number for addresses; a full 9-digit FEIN) and are
+    scored precisely. Every other IDENTITY field (name / entity type / carrier /
+    date) falls back to a generic proxy: a longer, more descriptive raw string
+    usually carries MORE information than a shorter one representing the same
+    normalized value ("Limited Liability Company" vs "LLC", "EMC Property and
+    Casualty Company" vs "EMC", "Orbin Contracting LLC" vs "Orbin Contracting") -
+    so it is preferred both as the merged display value and as the suggestion.
+    CURRENCY/INTEGER/TEXT fields are excluded from the length fallback: their raw
+    formatting is arbitrary ("$2,500,000" vs "2500000" say the same thing at the
+    same length-of-information), so length is not a genuine completeness signal
+    there and scoring them would invent a preference with no basis - they stay at
+    0.0, keeping their existing frequency-only tiebreak unchanged.
+    """
+    s = str(value or "").strip()
+    if not s:
+        return 0.0
+    if fact_key in ("mailing_address", "physical_address"):
+        score = len(re.findall(r"\w+", s)) * 0.1          # mild fullness preference
+        if re.search(r"\b\d{5}-\d{4}\b", s):
+            score += 3.0                                  # ZIP+4 (most complete)
+        elif re.search(r"\b\d{5}\b", s):
+            score += 2.0                                  # 5-digit ZIP
+        if re.search(r"[A-Za-z]{2}\.?\s+\d{5}", s) or re.search(r",\s*[A-Za-z]{2}\b", s):
+            score += 1.0                                  # state present ("CO 80216")
+        if re.match(r"\s*\d+\b", s):
+            score += 0.5                                  # leading street number
+        return score
+    if fact_key == "fein":
+        return 1.0 if len(re.sub(r"\D", "", s)) == 9 else 0.0
+    if kind == "identity":
+        return len(s) * 0.01                              # generic: longer = more descriptive
+    return 0.0
+
+
+def _suggest_for_field(fact_key: str, kind: str, values: List[dict]) -> Optional[dict]:
+    """Recommend the most complete/correct value for a conflicting field.
+
+    Ranks candidate value groups by completeness (primary) then document
+    frequency (tiebreak). Returns ``{value, normalized, confidence, preselect}``,
+    or None when there is nothing to suggest.
+    """
+    if not values or len(values) < 2:
+        return None
+    ranked = sorted(
+        values,
+        key=lambda g: (_value_completeness(fact_key, kind, g.get("display")), _group_doc_count(g)),
+        reverse=True,
+    )
+    top, second = ranked[0], ranked[1]
+    top_c = _value_completeness(fact_key, kind, top.get("display"))
+    sec_c = _value_completeness(fact_key, kind, second.get("display"))
+
+    if top_c - sec_c >= _COMPLETENESS_MARGIN:
+        confidence = "high"                               # clearly more complete
+    elif top_c > sec_c:
+        confidence = "medium"                             # somewhat more complete
+    elif _group_doc_count(top) > _group_doc_count(second):
+        confidence = "medium"                             # equally complete, more docs agree
+    else:
+        confidence = "low"                                # genuine tie — no clear winner
+
+    # A value found ONLY by the raw-text safety net (never LLM-extracted) is less
+    # certain: never let text-scan-only evidence reach an auto-preselect HIGH.
+    top_sources = top.get("sources") or []
+    if confidence == "high" and top_sources and all(s.get("source_method") == "text_scan" for s in top_sources):
+        confidence = "medium"
+
+    preselect = (confidence == "high") and (fact_key not in HARD_STOP_RECONCILABLE_KEYS)
+    return {
+        "value":      top.get("display"),
+        "normalized": top.get("normalized"),
+        "confidence": confidence,
+        "preselect":  preselect,
+    }
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def assess_underwriting_consistency(
@@ -477,6 +613,12 @@ def assess_underwriting_consistency(
                     }
                     g = groups.setdefault(llm_norm, {"normalized": llm_norm, "display": str(raw), "sources": []})
                     g["sources"].append(src)
+                    # Two raw strings collapsing to the SAME normalized value (e.g. a
+                    # ZIP+4 address vs its ZIP5 form) are the same real-world fact -
+                    # keep whichever raw string is more complete/descriptive as the
+                    # display, not just whichever document happened to come first.
+                    if _value_completeness(fact_key, kind, str(raw)) > _value_completeness(fact_key, kind, g["display"]):
+                        g["display"] = str(raw)
 
             # Pass 2: text-scan of raw OCR.
             # Only add a text-scan value if it is DIFFERENT from the LLM value,
@@ -499,6 +641,8 @@ def assess_underwriting_consistency(
                     already = any(s["doc_id"] == doc_id and s["source_method"] == "text_scan" for s in g["sources"])
                     if not already:
                         g["sources"].append(src)
+                    if _value_completeness(fact_key, kind, scanned_raw) > _value_completeness(fact_key, kind, g["display"]):
+                        g["display"] = scanned_raw
 
         confirmed_raw = confirmations.get(fact_key)
         confirmed_value = str(confirmed_raw) if confirmed_raw is not None else None
@@ -524,6 +668,12 @@ def assess_underwriting_consistency(
             status = "confirmed"   # confirmed-only handled above; unreachable
             review_required = False
 
+        # Figure 3: recommend the most complete/correct value + a confidence level.
+        # Only computed for an OPEN conflict — a confirmed/consistent field needs
+        # no suggestion. ``preselect`` is True only for HIGH confidence on a
+        # non-hard-stop field (the frontend pre-checks that radio).
+        suggestion = _suggest_for_field(fact_key, kind, values) if status == "conflict" else None
+
         fields_out.append({
             "fact_key":        fact_key,
             "label":           label,
@@ -534,7 +684,42 @@ def assess_underwriting_consistency(
             "merged_value":    _display(_fv(merged_facts, fact_key)),
             "confirmed_value": confirmed_value,
             "values":          values,
+            "suggested_value":      suggestion["value"]      if suggestion else None,
+            "suggested_normalized": suggestion["normalized"] if suggestion else None,
+            "confidence":           suggestion["confidence"] if suggestion else None,
+            "preselect":            bool(suggestion["preselect"]) if suggestion else False,
         })
+
+    # ── Cross-field linking (Figure 3: "apply to all" across related fields) ──
+    # Two OPEN conflicts are LINKED when they show the exact same set of
+    # normalized values from the exact same set of source documents - the
+    # strongest available signal that they are the same real-world fact entered
+    # into two different form fields (e.g. mailing vs. physical address both
+    # disagreeing between the identical two addresses from the identical two
+    # documents). Matching on BOTH the value set AND the document set - not the
+    # value set alone - is what makes this safe to apply generically to every
+    # field pair instead of a hand-picked list: two unrelated fields (revenue vs.
+    # payroll) would need to coincidentally disagree with the IDENTICAL numbers
+    # from the IDENTICAL documents to false-link, which does not happen in
+    # practice. Confirming a linked field auto-applies the same value to its
+    # partner(s) too (see confirm_underwriting_value) instead of forcing the
+    # producer to resolve the same conflict a second time.
+    def _signature(f: dict):
+        docs = frozenset(s["doc_id"] for v in f["values"] for s in v.get("sources", []))
+        vals = frozenset(v["normalized"] for v in f["values"])
+        return (vals, docs)
+
+    conflict_fields = [f for f in fields_out if f["status"] == "conflict"]
+    for f in fields_out:
+        if f["status"] != "conflict":
+            f["linked_fields"] = []
+            continue
+        sig = _signature(f)
+        f["linked_fields"] = [
+            {"fact_key": g["fact_key"], "label": g["label"]}
+            for g in conflict_fields
+            if g is not f and _signature(g) == sig
+        ]
 
     return {
         "fields":          fields_out,

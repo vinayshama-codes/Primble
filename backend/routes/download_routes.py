@@ -10,13 +10,15 @@ from fastapi.responses import JSONResponse, Response
 from datetime import datetime, timezone
 
 from config.database import get_pool
+from config.settings import ACORD_LICENSE_VERSION
 from repositories.session_repository import get_processing_session, upd_processing_session
 from repositories.audit_repository import write_audit_log
-from services.auth_service import get_current_user
+from services.auth_service import get_current_user, is_acord_license_current
 from services.cover_service import generate_ai_cover_narrative, build_cover_page_pdf
 from services.pdf_service import regenerate_pdf_for_form
 from services.stripe_service import evaluate_package_limit, create_overage_invoice_item
 from services.sqs_service import calculate_sqs
+from services.audit_service import get_unresolved_recommendations
 from utils.crypto import decrypt_field, decrypt_field_soft
 from utils.rate_limiter import check_download_rate_limit
 from utils.helpers import check_payment_access
@@ -56,23 +58,29 @@ async def confirm_acord_license(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ):
-    # Idempotent: if already confirmed, skip the write and return success.
-    # This prevents spurious 500s when the client retries after a dropped connection.
-    if current_user.get("acord_license_confirmed"):
-        return {"success": True, "acord_license_confirmed": True}
+    # Idempotent: if already confirmed under the CURRENT wording, skip the write
+    # and return success. This prevents spurious 500s when the client retries
+    # after a dropped connection. A confirmation recorded under an older
+    # ACORD_LICENSE_VERSION does NOT short-circuit here — it falls through and
+    # re-confirms under the current wording (forces re-acceptance after a
+    # legal-text change).
+    if is_acord_license_current(current_user):
+        return {"success": True, "acord_license_confirmed": True, "acord_license_version": ACORD_LICENSE_VERSION}
 
     now = datetime.now(timezone.utc).isoformat()
     async with get_pool().acquire() as conn:
         await conn.execute(
-            "UPDATE users SET acord_license_confirmed=1, acord_license_confirmed_at=$1 WHERE id=$2",
-            now, current_user["id"],
+            "UPDATE users SET acord_license_confirmed=1, acord_license_confirmed_at=$1, "
+            "acord_license_version=$2 WHERE id=$3",
+            now, ACORD_LICENSE_VERSION, current_user["id"],
         )
     await write_audit_log(
         user={**current_user, "acord_license_confirmed": 1},
         action="license_confirmed",
         ip_address=request.client.host if request.client else None,
+        license_version=ACORD_LICENSE_VERSION,
     )
-    return {"success": True, "acord_license_confirmed": True}
+    return {"success": True, "acord_license_confirmed": True, "acord_license_version": ACORD_LICENSE_VERSION}
 
 from cachetools import TTLCache
 _COVER_CACHE = TTLCache(maxsize=256, ttl=3600)
@@ -123,6 +131,37 @@ def _cover_cache_key(facts: dict, form_ids: list, sqs_results: dict, flags: dict
     return hashlib.md5(raw.encode()).hexdigest()
 
 
+def _compute_manifest(pdf_map: dict) -> tuple:
+    """Return (manifest, package_checksum) for a {filename: bytes} map.
+
+    manifest is a list of {filename, sha256} sorted by filename; package_checksum is
+    a SHA-256 roll-up over the per-file digests (stable, reproducible, and independent
+    of the surrounding zip, which cannot be hashed from inside the cover it contains).
+    """
+    manifest = [
+        {"filename": fname, "sha256": hashlib.sha256(pdf_map[fname]).hexdigest()}
+        for fname in sorted(pdf_map)
+    ]
+    rollup = hashlib.sha256("".join(m["sha256"] for m in manifest).encode()).hexdigest()
+    return manifest, rollup
+
+
+def _split_open_recs(open_recs: list) -> tuple:
+    """Split open (unresolved) recommendations into hard-stop and soft-warning strings
+    for the cover page's Red Flags & Warnings section."""
+    hard, soft = [], []
+    for r in open_recs or []:
+        msg = (r.get("message") or "").strip()
+        if not msg:
+            continue
+        imp = r.get("score_impact")
+        if r.get("recommendation_type") == "hard_stop":
+            hard.append(f"{msg} (-{imp} pts)" if imp else msg)
+        else:
+            soft.append(f"{msg} (up to +{imp} pts)" if imp else msg)
+    return hard, soft
+
+
 # ASYNC-SAFE
 async def _refresh_user(user_id: str) -> dict:
     async with get_pool().acquire() as conn:
@@ -171,6 +210,12 @@ async def download_pdf(
     org_name    = fresh.get("organization_name") or fresh.get("full_name") or "Primble User"
     sqs_results = {form_id: generated[form_id].get("sqs", {})} if form_id in generated else {}
 
+    # Substantively unresolved recommendations: never reviewed OR acknowledged via
+    # "Download Anyway" but not actually fixed. Deliberately broader than the
+    # pre-download gate's own query (which stops re-prompting once overridden) -
+    # here we want the override to still show up in the audit trail.
+    unresolved_recs = await get_unresolved_recommendations(session_id)
+
     _ck = _cover_cache_key(facts, [form_id], sqs_results, flags)
     _loop = asyncio.get_event_loop()
 
@@ -191,10 +236,13 @@ async def download_pdf(
             _COVER_CACHE[_ck] = ai_content
             logger.debug(f"cover narrative cached for key {_ck[:8]}")
 
+        file_manifest, package_checksum = _compute_manifest({f"{form_id}_FILLED.pdf": pdf_bytes})
+        hard_stops, soft_stops = _split_open_recs(unresolved_recs)
         cover_pdf = await _loop.run_in_executor(
             None, build_cover_page_pdf,
             facts, flags, sqs_results, [form_id], org_name,
             ai_content["narrative"], ai_content["ai_block"], ai_content.get("sqs_reasoning", ""), fresh,
+            hard_stops, soft_stops, file_manifest, package_checksum,
         )
 
         def _build_zip():
@@ -207,6 +255,7 @@ async def download_pdf(
     else:
         # No cover — just the filled form PDF
         pdf_bytes = await _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature)
+        file_manifest, package_checksum = _compute_manifest({f"{form_id}_FILLED.pdf": pdf_bytes})
 
         def _build_zip():
             buf = io.BytesIO()
@@ -247,14 +296,27 @@ async def download_pdf(
     else:
         logger.info("download_pdf: already counted — skipping for user=%s session=%s form=%s", fresh["id"], session_id, form_id)
 
+    _score_at_dl = (sqs_results.get(form_id) or {}).get("sqs_score")
     await write_audit_log(
         user=fresh, action="download", form_id=form_id, form_name=form_name,
         session_id=session_id, ip_address=request.client.host if request.client else None,
+        sqs_score=_score_at_dl, unresolved_issues=unresolved_recs, file_checksum=package_checksum,
     )
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
     })
+
+    # Package activity log (best-effort).
+    try:
+        from services.activity_service import record_event, derive_package_label, EVENT_DOWNLOAD
+        await record_event(
+            fresh["id"], session_id, EVENT_DOWNLOAD,
+            {"kind": "single", "form_id": form_id, "form_name": form_name},
+            derive_package_label(proc_session.get("facts")),
+        )
+    except Exception as _act_ex:
+        logger.warning(f"activity log (download) failed: {_act_ex}")
 
     extra_headers = {"Cache-Control": "no-cache"}
     if pkg_eval:
@@ -314,6 +376,15 @@ async def download_all(
     flags    = proc_session.get("flags", {})
     org_name = fresh.get("organization_name") or fresh.get("full_name") or "Primble User"
 
+    # Substantively unresolved recommendations (never reviewed OR overridden via
+    # "Download Anyway" without a fix) + per-file integrity manifest, for the cover
+    # and the download audit record.
+    unresolved_recs = await get_unresolved_recommendations(session_id)
+    hard_stops, soft_stops = _split_open_recs(unresolved_recs)
+    file_manifest, package_checksum = _compute_manifest(
+        {f"{fid}_FILLED.pdf": pb for fid, pb in acord_pdfs.items()}
+    )
+
     _ck = _cover_cache_key(facts, list(generated.keys()), sqs_results, flags)
     ai_content = _COVER_CACHE.get(_ck)
     if ai_content is None:
@@ -322,7 +393,7 @@ async def download_all(
         logger.debug(f"cover narrative cached for key {_ck[:8]}")
     else:
         logger.debug(f"cover narrative cache hit {_ck[:8]}")
-    cover_pdf = build_cover_page_pdf(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, narrative=ai_content["narrative"], ai_block=ai_content["ai_block"], sqs_reasoning=ai_content.get("sqs_reasoning", ""), user=fresh)
+    cover_pdf = build_cover_page_pdf(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, narrative=ai_content["narrative"], ai_block=ai_content["ai_block"], sqs_reasoning=ai_content.get("sqs_reasoning", ""), user=fresh, hard_stops=hard_stops, soft_stops=soft_stops, file_manifest=file_manifest, package_checksum=package_checksum)
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -361,16 +432,31 @@ async def download_all(
     else:
         logger.info("download_all: already counted — skipping for user=%s session=%s", fresh["id"], session_id)
 
+    _scores = [(v or {}).get("sqs_score") for v in sqs_results.values()]
+    _scores = [s for s in _scores if s is not None]
+    _avg_score = round(sum(_scores) / len(_scores), 1) if _scores else None
     await write_audit_log(
         user=fresh, action="download_zip",
         form_id=", ".join(generated.keys()),
         form_name=f"ZIP Bundle ({len(generated)} forms + cover page)",
         session_id=session_id, ip_address=request.client.host if request.client else None,
+        sqs_score=_avg_score, unresolved_issues=unresolved_recs, file_checksum=package_checksum,
     )
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
     })
+
+    # Package activity log (best-effort).
+    try:
+        from services.activity_service import record_event, derive_package_label, EVENT_DOWNLOAD
+        await record_event(
+            fresh["id"], session_id, EVENT_DOWNLOAD,
+            {"kind": "all", "form_count": len(generated)},
+            derive_package_label(proc_session.get("facts")),
+        )
+    except Exception as _act_ex:
+        logger.warning(f"activity log (download_all) failed: {_act_ex}")
 
     extra_headers = {"Cache-Control": "no-cache"}
     if pkg_eval:
@@ -420,7 +506,7 @@ async def lite_analyze(session_id: str, current_user: dict = Depends(get_current
 
 
 @router.get("/api/lite/cover-sheet/{session_id}")
-async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_current_user)):
+async def lite_cover_sheet(session_id: str, request: Request, current_user: dict = Depends(get_current_user)):
     if current_user.get("subscription_tier") == "free":
         raise HTTPException(403, "Upgrade required to access cover sheet generation.")
     check_payment_access(current_user.get("payment_status", "ok"), "form")
@@ -465,6 +551,11 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
         )
     sqs_results = {"Pre-Submission Analysis": sqs}
 
+    # Same "still unresolved" definition used on the real ACORD-package cover, so an
+    # Essentials-tier producer sees the same open items whether they get a Lite
+    # cover sheet or a full package.
+    unresolved_recs = await get_unresolved_recommendations(session_id)
+
     from services.cover_service import generate_lite_cover_narrative
     ai_content = await generate_lite_cover_narrative(
         facts=facts, flags=flags, sqs=sqs,
@@ -479,6 +570,13 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
         user=fresh,
         hard_stops=hard_stops, soft_stops=soft_stops,
     )
+
+    # The cover sheet IS the delivered file for this tier - there is no separate
+    # filled-form PDF to hash, and it cannot contain a hash of its own final bytes
+    # (embedding the digest would change the digest). So this checksum is computed
+    # over the finished PDF and recorded only in the audit DB row below, not printed
+    # on the page itself - it still lets us prove exactly which bytes were delivered.
+    cover_checksum = hashlib.sha256(cover_pdf).hexdigest()
 
     # Essentials billing: cover sheet is the downloadable artifact for this tier.
     # Count once per session (permanent flag), with rapid-double-click guard on top.
@@ -510,6 +608,14 @@ async def lite_cover_sheet(session_id: str, current_user: dict = Depends(get_cur
                             )
         else:
             logger.info("lite_cover_sheet: already counted — skipping for user=%s session=%s", fresh["id"], session_id)
+
+    await write_audit_log(
+        user=fresh, action="download_lite_cover", form_id=None,
+        form_name="Pre-Submission SQS Analysis (Lite)",
+        session_id=session_id, ip_address=request.client.host if request.client else None,
+        sqs_score=sqs.get("sqs_score"), unresolved_issues=unresolved_recs,
+        file_checksum=cover_checksum,
+    )
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()

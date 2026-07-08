@@ -1,17 +1,32 @@
 import { useState, useEffect } from "react";
 
-export default function ProcessStageOverlay({ stages, advanceAfter = 3000, tagline, note, etaSeconds = 0, windowSize = 0 }) {
+// How long the displayed index dwells on each stage while easing toward a real
+// (controlled) target. Long enough for the 0.4s CSS transition to play and the
+// "pop then settle" to register, short enough to keep up with real progress.
+const _CONTROLLED_STEP_MS = 700;
+
+export default function ProcessStageOverlay({ stages, advanceAfter = 3000, tagline, note, etaSeconds = 0, windowSize = 0, controlledIndex }) {
   const [activeIdx, setActiveIdx] = useState(0);
   const [eta, setEta] = useState(etaSeconds);
 
+  // Uncontrolled (timer) mode advances one stage every `advanceAfter`. Controlled
+  // (real-progress) mode does NOT jump straight to the reported index - it EASES
+  // the displayed index toward it one step at a time, so every intermediate stage
+  // still gets its own visible beat and the same two-frame "pop then settle into
+  // done" the timer path produces. It never overshoots the real target, so it
+  // stays truthful; if it lags, it simply catches up on the next tick.
   useEffect(() => {
-    if (activeIdx >= stages.length - 1) return;
-    const t = setTimeout(
-      () => setActiveIdx((i) => Math.min(i + 1, stages.length - 1)),
-      advanceAfter
-    );
+    const target = controlledIndex != null
+      ? Math.min(controlledIndex, stages.length - 1)
+      : stages.length - 1;
+    // Never render ahead of real progress (e.g. the stage list shrank / a resume
+    // reported an earlier index) - snap back down.
+    if (activeIdx > target) { setActiveIdx(target); return; }
+    if (activeIdx >= target) return;
+    const step = controlledIndex != null ? _CONTROLLED_STEP_MS : advanceAfter;
+    const t = setTimeout(() => setActiveIdx((i) => Math.min(i + 1, target)), step);
     return () => clearTimeout(t);
-  }, [activeIdx, stages.length, advanceAfter]);
+  }, [activeIdx, stages.length, advanceAfter, controlledIndex]);
 
   // Workstream 6 9.3 - rough "estimated time remaining". LLM latency varies, so
   // this is a reassurance signal, not a precise clock: it counts down one second
@@ -38,9 +53,17 @@ export default function ProcessStageOverlay({ stages, advanceAfter = 3000, tagli
     return `Approximately ${minPart} ${secs} second${secs === 1 ? "" : "s"} remaining`;
   };
 
-  // Workstream 6 9.3 - optional "window": show only N stages at once (the
-  // generation overlay shows 2 at a time, advancing through the list in pages).
-  const _start = windowSize > 0 ? Math.floor(activeIdx / windowSize) * windowSize : 0;
+  // Both modes render the eased `activeIdx` (controlled mode walks it toward the
+  // real target in the effect above), so the paged-window "merge" rhythm is
+  // identical whether driven by a timer or by real progress.
+  const idx = Math.min(activeIdx, stages.length - 1);
+
+  // Workstream 6 9.3 - optional "window": show only N stages at once, paged in
+  // fixed groups (the generation overlay's "pop" feel: within a pair, the
+  // first stage is active while the second sits grey below it; on the next
+  // tick the SAME pair stays on screen but the second stage pops active/bold
+  // and the first settles into "done" - only then does the pair change).
+  const _start = windowSize > 0 ? Math.floor(idx / windowSize) * windowSize : 0;
   const _visible = windowSize > 0 ? stages.slice(_start, _start + windowSize) : stages;
 
   return (
@@ -64,7 +87,7 @@ export default function ProcessStageOverlay({ stages, advanceAfter = 3000, tagli
           return (
             <div
               key={s}
-              className={`upgrade-stage-step ${i === activeIdx ? "active" : i < activeIdx ? "done" : ""}`}
+              className={`upgrade-stage-step ${i === idx ? "active" : i < idx ? "done" : ""}`}
             >
               <div className="upgrade-stage-dot" />
               {s}

@@ -132,6 +132,55 @@ UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_uw_confirm_user    ON underwriting_confirmation_audit(user_id)",
 ]
 
+# Figure 6: "Why are you marketing this account?" answer, split into a
+# controlled reason_code (for reporting) and a free-text reason_note (the
+# "Other: ..." detail), persisted independently of the processing_sessions
+# JSON blob so it survives the facts-retention job and is fetchable by an
+# underwriter/reviewer during an audit. One row per session - latest answer
+# wins (UNIQUE session_id + ON CONFLICT upsert in audit_service.py), matching
+# the product decision that this is a current-value field, not an append-only
+# history.
+MARKETING_REASON_AUDIT_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS marketing_reason_audit (
+        id            TEXT PRIMARY KEY,
+        session_id    TEXT NOT NULL UNIQUE,
+        user_id       TEXT NOT NULL,
+        reason_code   TEXT NOT NULL,
+        reason_note   TEXT,
+        is_adverse    BOOLEAN DEFAULT FALSE,
+        updated_at    TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_marketing_reason_user ON marketing_reason_audit(user_id)",
+]
+
+# Per-issue resolution status for the issue rail (Recommendations / Cross-form /
+# hard-stop Issues). Deliberately separate from sqs_recommendation_audit so this
+# is a pure work-tracking marker: writing here never runs any SQS scoring /
+# dismiss-credit logic. Keyed by the durable issue_id (issue_registry.issue_id_for)
+# scoped to one session, so a status re-attaches to the same issue across re-runs.
+SUBMISSION_ISSUE_STATUS_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS submission_issue_status (
+        id            TEXT PRIMARY KEY,
+        session_id    TEXT NOT NULL,
+        user_id       TEXT,
+        issue_id      TEXT NOT NULL,
+        form_id       TEXT,
+        field         TEXT,
+        rule_code     TEXT,
+        source_fact   TEXT,
+        message       TEXT,
+        status        TEXT CHECK(status IN ('open','resolved','dismissed')),
+        reason        TEXT,
+        updated_at    TEXT NOT NULL,
+        UNIQUE(session_id, issue_id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_issue_status_session ON submission_issue_status(session_id)",
+]
+
 JOBS_STATEMENTS = [
     """
     CREATE TABLE IF NOT EXISTS jobs (
@@ -317,6 +366,31 @@ class ResolveRecommendationRequest(BaseModel):
     session_id: str
     rec_id: str
     sqs_score_at_action: int
+
+
+class IssueStatusRequest(BaseModel):
+    # Set the resolution status of one issue in the rail. Pure work-tracking:
+    # never affects SQS scoring. `status` is validated in the route.
+    session_id: str
+    issue_id: str
+    status: str
+    reason: Optional[str] = None
+    form_id: Optional[str] = None
+    field: Optional[str] = None
+    rule_code: Optional[str] = None
+    source_fact: Optional[str] = None
+    message: Optional[str] = None
+
+
+class AnswerRecommendationRequest(BaseModel):
+    # Producer-entered answer to a recommendation card (Fig 13). `field` is the
+    # recommendation's canonical fact key; `answer` is the producer's typed value.
+    session_id: str
+    rec_id: str
+    field: str
+    answer: str
+    sqs_score_at_action: Optional[int] = None
+    form_id: Optional[str] = None
 
 
 class DownloadAnywayRequest(BaseModel):

@@ -353,8 +353,19 @@ def normalize_date(value: Any) -> Optional[str]:
 
 
 def normalize_entity_type(value: Any) -> str:
-    """Entity-type to a canonical token. "LLC" == "Limited Liability Company"."""
-    s = _basic(value)
+    """Entity-type to a canonical token. "LLC" == "Limited Liability Company".
+
+    Extraction sometimes returns a concatenated PascalCase value with no spaces
+    ("LimitedLiabilityCompany" - seen from schema-driven form fields such as
+    ACORD's own entity-type enum). The synonym match below is word-boundary
+    based, so it would silently miss that form and treat it as a different
+    entity type than "Limited Liability Company" / "LLC". Splitting camelCase
+    into words FIRST (before lowercasing) recovers the word boundaries so all
+    three forms collapse to the same canonical token.
+    """
+    raw = "" if value is None else str(value)
+    raw = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", raw)
+    s = _basic(raw)
     if not s:
         return ""
     for variant, canon in _ENTITY_TYPE_SYNONYMS_SORTED:
@@ -366,16 +377,23 @@ def normalize_address(value: Any) -> str:
     """Street address for comparison.
 
     Lowercases, treats '#' as a separator, expands/collapses full US state names
-    to their 2-letter abbreviation (Colorado->co, New York->ny, ...), drops
-    punctuation, maps street-suffix words to their abbreviation (Street->st,
-    Avenue->ave, ...), standardizes compass directionals (North->n, ...), and
-    removes unit markers (Suite/Ste/Unit/#) so "4800 DAHLIA ST #D13" and
-    "4800 Dahlia Street Suite D13, Denver, Colorado 80216" both reduce to
-    the same token string.
+    to their 2-letter abbreviation (Colorado->co, New York->ny, ...), truncates a
+    ZIP+4 to its 5-digit ZIP (80216-3121 == 80216 - the first 5 digits ARE the
+    ZIP5, so a ZIP+4 is strictly more precision on the SAME delivery point, not a
+    different one - collapsing it here is what lets the picker treat them as one
+    address instead of an unresolved conflict), drops punctuation, maps
+    street-suffix words to their abbreviation (Street->st, Avenue->ave, ...),
+    standardizes compass directionals (North->n, ...), and removes unit markers
+    (Suite/Ste/Unit/#) so "4800 DAHLIA ST #D13" and "4800 Dahlia Street Suite
+    D13, Denver, Colorado 80216-3121" both reduce to the same token string.
     """
     if value is None:
         return ""
     s = str(value).lower().replace("#", " ")
+    # ZIP+4 -> ZIP5, BEFORE punctuation stripping turns the hyphen into a bare
+    # space (which would otherwise leave the extra 4 digits as an unmatched
+    # trailing token and manufacture a false conflict against a ZIP5-only value).
+    s = re.sub(r"\b(\d{5})-\d{4}\b", r"\1", s)
     # Substitute full state names before stripping punctuation so multi-word
     # names ("New York", "West Virginia") are caught as phrases. Longest phrases
     # are applied first (see _US_STATE_NAME_PHRASES sort order).

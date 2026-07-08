@@ -75,7 +75,14 @@ def _dates_differ(a: Any, b: Any) -> bool:
 
 
 def _issue(issue_type: str, code: str, message: str, forms: List[str]) -> dict:
-    return {"type": issue_type, "code": code, "message": message, "forms": forms}
+    # `issue_id` is a durable, content-derived barcode used only by the display /
+    # resolution-status layer (issue_registry.issue_id_for). It never affects the
+    # cross-form gating below, which continues to key off `code`/`message`.
+    from services.issue_registry import issue_id_for
+    return {
+        "type": issue_type, "code": code, "message": message, "forms": forms,
+        "issue_id": issue_id_for(message, forms),
+    }
 
 
 def _umbrella_in_scope(flags: dict) -> bool:
@@ -1931,6 +1938,18 @@ def split_cross_form_issues(
     for issue in issues:
         itype = issue.get("type", "advisory")
         msg   = issue.get("message", "")
+        forms = issue.get("forms") or []
+        # Attribution bracket (client feedback: "which form it might affect and
+        # how to fix it"). ``forms`` is already computed by every rule in this
+        # module - it was being discarded here on the way to a plain string.
+        # No per-document source is added: these rules read the already-merged
+        # facts/flags across the whole package, not one specific document, so
+        # naming a document would be a guess, not a fact. The remediation is
+        # intentionally generic (these are coverage/limit rules, not identity
+        # conflicts with a dedicated picker like check_doc_consistency's).
+        if forms:
+            pretty = ", ".join(f.replace("ACORD_", "ACORD ") for f in forms)
+            msg = f"{msg} (Affects: {pretty}. Fix: Review the coverage/limit details for the affected form(s).)"
         if itype == "hard_stop":
             hard_stops.append(msg)
         elif itype == "soft_warning":

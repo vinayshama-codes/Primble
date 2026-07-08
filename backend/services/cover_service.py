@@ -210,6 +210,8 @@ def build_cover_page_pdf(
     user: dict = None,
     hard_stops: list = None,
     soft_stops: list = None,
+    file_manifest: list = None,
+    package_checksum: str = None,
 ) -> bytes:
     generated_at = datetime.now(timezone.utc).strftime("%B %d, %Y at %H:%M UTC")
 
@@ -411,7 +413,7 @@ def build_cover_page_pdf(
             story.append(Spacer(1, 0.06*inch))
             if hard_stops:
                 flag_rows = [[
-                    Paragraph("<b>CRITICAL — Hard Stops</b>",
+                    Paragraph("<b>CRITICAL - Hard Stops</b>",
                               S("FlagHdr", fontSize=8, textColor=WHITE, fontName="Helvetica-Bold")),
                 ]]
                 for stop in hard_stops:
@@ -430,7 +432,7 @@ def build_cover_page_pdf(
                 story.append(Spacer(1, 0.07*inch))
             if soft_stops:
                 warn_rows = [[
-                    Paragraph("<b>WARNINGS — Soft Stops</b>",
+                    Paragraph("<b>WARNINGS - Soft Stops</b>",
                               S("WarnHdr", fontSize=8, textColor=WHITE, fontName="Helvetica-Bold")),
                 ]]
                 for stop in soft_stops:
@@ -466,6 +468,50 @@ def build_cover_page_pdf(
                 story.append(Paragraph(para_text, body_style))
                 story.append(Spacer(1, 0.04*inch))
         story.append(Spacer(1, 0.10*inch))
+
+        # ── PACKAGE INTEGRITY (file checksums) ───────────────────────────────
+        # SHA-256 fingerprint of each generated form so a recipient can confirm the
+        # file was not altered after Primble produced it. The cover cannot hash the
+        # zip it lives inside, so the checksums cover the filled form PDFs only.
+        if file_manifest:
+            hash_style = S("Hash", fontSize=6.5, textColor=TEXT_MAIN, fontName="Courier", leading=9)
+            story.append(Paragraph("Package Integrity", h2_style))
+            story.append(HRFlowable(width="100%", thickness=0.5, color=BORDER))
+            story.append(Spacer(1, 0.05*inch))
+            story.append(Paragraph(
+                "SHA-256 fingerprint of each generated file. Recompute the hash of a file "
+                "to verify it has not been altered since generation.",
+                small_s,
+            ))
+            story.append(Spacer(1, 0.05*inch))
+            integ_rows = [[
+                Paragraph("<b>File</b>",    S("IH", fontSize=8, textColor=WHITE, fontName="Helvetica-Bold")),
+                Paragraph("<b>SHA-256</b>", S("IH", fontSize=8, textColor=WHITE, fontName="Helvetica-Bold")),
+            ]]
+            for item in file_manifest:
+                integ_rows.append([
+                    Paragraph(str(item.get("filename", "")), S("IFile", fontSize=7.5, fontName="Helvetica")),
+                    Paragraph(str(item.get("sha256", "")),   hash_style),
+                ])
+            integ_tbl = Table(integ_rows, colWidths=[2.2*inch, 4.8*inch])
+            integ_tbl.setStyle(TableStyle([
+                ("BACKGROUND",    (0,0), (-1,0),  NAVY),
+                ("ROWBACKGROUNDS",(0,1), (-1,-1), [WHITE, LIGHTER]),
+                ("LEFTPADDING",   (0,0), (-1,-1), 7),
+                ("RIGHTPADDING",  (0,0), (-1,-1), 7),
+                ("TOPPADDING",    (0,0), (-1,-1), 4),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+                ("VALIGN",        (0,0), (-1,-1), "MIDDLE"),
+                ("GRID",          (0,0), (-1,-1), 0.25, BORDER),
+            ]))
+            story.append(integ_tbl)
+            if package_checksum:
+                story.append(Spacer(1, 0.04*inch))
+                story.append(Paragraph(
+                    f'<b>Package checksum (SHA-256):</b> <font face="Courier">{package_checksum}</font>',
+                    small_s,
+                ))
+            story.append(Spacer(1, 0.10*inch))
 
         # ── A2A DISCLAIMER ───────────────────────────────────────────────────
         # Plain text only — no emoji, safe for all ReportLab font encodings

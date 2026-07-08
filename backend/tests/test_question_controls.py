@@ -24,6 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.question_classifier import (  # noqa: E402
     AUDIENCE_CLIENT, AUDIENCE_PRODUCER, AUDIENCE_INTERNAL, AUDIENCE_DO_NOT_SEND,
+    AUDIENCE_CARRIER,
+    BUCKET_CLIENT, BUCKET_AGENCY, BUCKET_UNDERWRITING, BUCKET_DO_NOT_SEND,
     PRIORITY_CRITICAL, PRIORITY_IMPORTANT, PRIORITY_OPTIONAL,
     TOPIC_APPLICANT, TOPIC_GL, TOPIC_WC, TOPIC_UMBRELLA, TOPIC_PROPERTY,
     TOPIC_PRODUCER, TOPIC_LOSS, DEFAULT_SELECT_CAP,
@@ -94,15 +96,30 @@ def test_naics_code_still_client_despite_naic_substring():
     assert tax["audience"] == AUDIENCE_CLIENT
 
 
-def test_business_location_mismatch_crossform_is_client_critical():
-    # "Business location mismatch" came from the location_count_mismatch
-    # cross-form rule (field `locations`). A hard cross-form conflict is a
-    # critical, client-facing, hard-stop-resolving question.
+def test_crossform_conflict_is_internal_flag_by_default():
+    # Client clarification (2026-07): a cross-form conflict is an Underwriting /
+    # Internal Review flag by DEFAULT - it is NEVER auto-sent to the client. The
+    # location_count_mismatch fix (`locations`) is a client-answerable fact, so it
+    # stays escalatable ("Add to client") and keeps its severity + hard-stop signal.
     tax = classify_question("locations", ["ACORD_125", "ACORD_140"],
-                            is_cross_form=True, severity="hard_stop")
-    assert tax["audience"] == AUDIENCE_CLIENT
+                            is_cross_form=True, severity="hard_stop",
+                            is_curated_client=True, canonical_key="locations")
+    assert tax["audience"] == AUDIENCE_INTERNAL
+    assert tax["bucket"] == BUCKET_UNDERWRITING
     assert tax["priority"] == PRIORITY_CRITICAL
+    assert tax["suppressed"] is True
+    assert tax["escalatable_to_client"] is True
     assert tax["score_impact"]["hard_stop_resolution"] is True
+
+
+def test_crossform_judgment_conflict_is_not_escalatable():
+    # A cross-form conflict with no client-answerable fix (raw reconciliation
+    # field, no canonical fact) is a pure internal flag - not escalatable.
+    tax = classify_question("SomeReconciliation_InternalField", ["ACORD_125"],
+                            is_cross_form=True, severity="soft_warning")
+    assert tax["audience"] == AUDIENCE_INTERNAL
+    assert tax["bucket"] == BUCKET_UNDERWRITING
+    assert tax["escalatable_to_client"] is False
 
 
 # ── §8.2 item 2 — priority classification ─────────────────────────────────────
@@ -303,6 +320,75 @@ def test_present_fact_keys_unwraps_envelopes():
     assert "total_revenue" in present     # envelope unwrapped + non-empty
     assert "fein" not in present          # empty
     assert "naics_code" not in present    # None
+
+
+# ── 3-bucket model (client clarification 2026-07) ─────────────────────────────
+
+def test_bucket_derivation():
+    # Client fact -> Client bucket.
+    assert classify_question("applicant_name", ["ACORD_125"],
+                             is_curated_client=True)["bucket"] == BUCKET_CLIENT
+    # Fax -> Never send row.
+    assert classify_question("Producer_FaxNumber", ["ACORD_125"])["bucket"] == BUCKET_DO_NOT_SEND
+    # Obscure raw plumbing (Rule 7) -> Underwriting / Internal.
+    assert classify_question("GeneralLiability_Obscure_Field_7",
+                             ["ACORD_126"])["bucket"] == BUCKET_UNDERWRITING
+
+
+def test_prior_carrier_and_policy_numbers_are_agency():
+    # The client re-classified prior carrier + all policy numbers as AGENCY items
+    # (producer / CSR answers them), NOT client questions.
+    for f, canon in (("prior_carrier", "prior_carrier"),
+                     ("policy_number", None),
+                     ("prior_policy_number", None)):
+        tax = classify_question(f, ["ACORD_125"], is_curated_client=True, canonical_key=canon)
+        assert tax["audience"] == AUDIENCE_PRODUCER, f
+        assert tax["bucket"] == BUCKET_AGENCY, f
+        assert tax["suppressed"] is True, f
+
+
+def test_insurer_info_is_agency_but_underwriter_stays_carrier():
+    # Carrier INFORMATION (insurer name/policy/phone) -> Agency; the carrier's OWN
+    # underwriter -> Carrier review (Underwriting bucket), never conflated.
+    info = classify_question("Insurer_FullName", ["ACORD_125"])
+    assert info["bucket"] == BUCKET_AGENCY
+    uw = classify_question("Insurer_Underwriter_FullName_A", ["ACORD_125"])
+    assert uw["audience"] == AUDIENCE_CARRIER
+    assert uw["bucket"] == BUCKET_UNDERWRITING
+
+
+def test_submission_strategy_is_agency():
+    # "Submission goal / market selection / coverage intent" == producer strategy.
+    for f in ("carrier_marketing_reason", "submission_urgency"):
+        tax = classify_question(f, ["ACORD_125"], is_curated_client=True)
+        assert tax["bucket"] == BUCKET_AGENCY, f
+
+
+def test_desired_limits_stay_client_not_agency():
+    # "Coverage intent" -> Agency does NOT drag the insured's desired LIMITS out of
+    # the Client bucket - they stay Client and keep driving SQS.
+    for f in ("gl_limits", "umbrella_limit", "auto_liability_limit",
+              "property_building_value"):
+        tax = classify_question(f, ["ACORD_126"], is_curated_client=True)
+        assert tax["bucket"] == BUCKET_CLIENT, f
+        assert tax["audience"] == AUDIENCE_CLIENT, f
+
+
+def test_apply_default_selection_reports_bucket_counts():
+    qs = [
+        _mk("applicant_name", AUDIENCE_CLIENT, PRIORITY_CRITICAL),
+        _mk("prior_carrier", AUDIENCE_PRODUCER, "internal", suppressed=True),
+        _mk("xconflict", AUDIENCE_INTERNAL, PRIORITY_CRITICAL, suppressed=True),
+        _mk("Producer_FaxNumber", AUDIENCE_DO_NOT_SEND, "suppressed", suppressed=True),
+    ]
+    # bucket is derived from audience inside apply_default_selection when absent.
+    summary = apply_default_selection(qs)
+    assert summary["bucket_client"] == 1
+    assert summary["bucket_agency"] == 1
+    assert summary["bucket_underwriting"] == 1
+    assert summary["bucket_do_not_send"] == 1
+    # Only the critical client question is pre-selected.
+    assert summary["default_selected"] == 1
 
 
 if __name__ == "__main__":

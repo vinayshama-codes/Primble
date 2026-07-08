@@ -48,6 +48,7 @@ from services.sqs_service import (
     _has_explicit_follow_form,
 )
 from services.cross_form_validator import run_cross_form_validation, split_cross_form_issues
+from services.issue_registry import make_issue, classify_legacy_message
 from services.submission_integrity import assess_submission_integrity
 from services.underwriting_consistency import (
     assess_underwriting_consistency, apply_confirmations, validate_confirmation,
@@ -63,6 +64,70 @@ def _unwrap_scalar(v: Any) -> Any:
     if isinstance(v, dict) and "value" in v:
         return v.get("value")
     return v
+
+
+# ── Attribution brackets for evaluate_stops() output (client feedback: "which
+# document created the issue... and how to fix it") ──────────────────────────
+# evaluate_stops() only ever sees the already-MERGED facts/flags (it has three
+# call sites - here, arq_service.py, and the field-edit path in form_routes.py -
+# none currently thread the source documents through), so it cannot attribute a
+# stop to a document itself. These are narrow, POST-PROCESSING enrichments for
+# the specific messages where an honest attribution is actually derivable from
+# active_docs, applied only here (the fresh-upload path) where active_docs is
+# already in scope. Anything not matched is left untouched rather than guessed.
+_ADDRESS_FORMAT_PREFIXES = ("Address missing valid US state:", "Address missing ZIP code:")
+
+
+def _enrich_stops_with_source(stops: list[str], active_docs: list) -> list[str]:
+    out = []
+    for msg in stops:
+        if msg.startswith(_ADDRESS_FORMAT_PREFIXES):
+            m = re.search(r": '(.+)'$", msg)
+            quoted = m.group(1).strip().lower() if m else None
+            srcs = list(dict.fromkeys(
+                d.get("filename") for d in active_docs
+                if quoted and str(_unwrap_scalar((d.get("facts") or {}).get("mailing_address")) or "").strip().lower() == quoted
+            ))
+            src_txt = ", ".join(s for s in srcs if s) or "the uploaded documents"
+            out.append(
+                f"{msg} (Source: {src_txt}. "
+                "Fix: Correct the mailing address in the source document, or edit the address field directly.)"
+            )
+        elif msg == "Workers Comp detected but payroll is missing":
+            # No document HAS this value (that is the whole issue) - honest
+            # remediation only, no fabricated source.
+            out.append(f"{msg} (Fix: Provide WC or total payroll - not present in any uploaded document.)")
+        else:
+            out.append(msg)
+    return out
+
+
+def _ensure_fix_hint(messages: list[str]) -> list[str]:
+    """Guarantee every evaluate_stops()/run_field_validations() message carries
+    a "Fix: ..." remediation line, matching the other stop sources (which all
+    already include one - check_doc_consistency via its own _bracket() helper,
+    cross_form_validator via split_cross_form_issues(), detect_source_conflicts
+    and the underwriting reconciler directly). This is the one source with no
+    built-in remediation text for most of its messages, which is what produced
+    the "some warnings have a Fix line, most don't" inconsistency - so every
+    message lacking one gets the same generic line appended, never overwriting
+    a message that already has its own (e.g. the two _enrich_stops_with_source
+    cases, which run before this and are left untouched)."""
+    out = []
+    for msg in messages:
+        if "Fix: " in msg:
+            out.append(msg)
+        else:
+            out.append(f"{msg} Fix: Review and correct this before proceeding.")
+    return out
+
+
+def _display_name_from_path(path: str) -> str:
+    """Original filename for display: strip the UUID storage prefix added in
+    form_routes.py (``<32-hex>_originalname.pdf`` → ``originalname.pdf``)."""
+    raw = os.path.basename(path)
+    parts = raw.split("_", 1)
+    return parts[1] if len(parts) == 2 and len(parts[0]) == 32 and parts[0].isalnum() else raw
 
 
 class ProcessingIntegrityError(RuntimeError):
@@ -141,18 +206,40 @@ def _format_tables_as_text(tables: list) -> str:
     return "\n".join(lines)
 
 
-async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
+async def run_extraction_pipeline(
+    file_paths: list[str],
+    user_id: Any,
+    *,
+    progress_token: Optional[str] = None,
+) -> dict:
     """Run OCR, extraction, validation, and form-matching for *file_paths*.
 
     Raises ``ValueError`` when no readable text is found (callers translate
     this into an appropriate error response or job failure).
+
+    ``progress_token`` (optional) enables the live per-file progress overlay
+    (Figure 1): each phase transition is written to a Redis side-channel the
+    frontend polls. It is best-effort and never affects extraction. Callers that
+    do not supply one (worker path, integrity/reclassify re-runs) get a no-op
+    reporter, so their behaviour is unchanged.
     """
+    from utils.progress_tracker import make_reporter
+
     processed_docs: list[dict] = []
     all_low_conf:   list       = []
 
-    for path in file_paths:
+    filenames = [_display_name_from_path(p) for p in file_paths]
+    reporter = make_reporter(progress_token, user_id, filenames)
+    await reporter.begin()
+
+    for i, path in enumerate(file_paths):
+        _display_name = filenames[i]
+        await reporter.active(f"Reading {_display_name}…", stage="reading")
         text, low_conf = await extract_text(path)
         if len(text) < 30:
+            # OCR produced nothing usable — mark this file's row complete so it
+            # does not hang in the overlay, then skip extraction for it.
+            await reporter.file_phase(i, "extracted")
             continue
         all_low_conf += low_conf
 
@@ -176,19 +263,18 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
             except Exception as _tbl_err:
                 logger.warning("table_extractor: skipped %s — %s", os.path.basename(path), _tbl_err)
 
-        # Strip the UUID prefix (added in form_routes.py for storage safety) so the
-        # user sees the original filename, not "abc123_originalname.pdf". Computed
-        # BEFORE classification so the filename can serve as a supporting signal
-        # (Beta Report §4.2 action item #3).
-        _raw_basename = os.path.basename(path)
-        _parts = _raw_basename.split("_", 1)
-        _display_name = _parts[1] if len(_parts) == 2 and len(_parts[0]) == 32 and _parts[0].isalnum() else _raw_basename
+        # OCR (and table parsing) complete for this file → advance its row to
+        # "parsed" first (a real, distinct moment the overlay shows once, before
+        # any per-file extraction row goes active), then to "extracting" right
+        # before the fact-extraction LLM call begins.
+        await reporter.file_phase(i, "parsed")
 
         # Document classification (Beta Report §4.2): content keywords + narrative
         # detection rules + filename signals. Returns the canonical type plus the
         # confidence/source/signals used (surfaced to the UI + audit).
         classification = classify_document(text, filename=_display_name)
         doc_type  = classification["doc_type"]
+        await reporter.file_phase(i, "extracting", active=f"Extracting facts from {_display_name}…")
         raw       = await extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
         extracted = _validate_extraction_output(raw, doc_type)
 
@@ -208,11 +294,12 @@ async def run_extraction_pipeline(file_paths: list[str], user_id: Any) -> dict:
             "manual_confirmation_required": extracted.get("manual_confirmation_required") or [],
             "truncation_warning":    extracted.get("truncation_warning"),
         })
+        await reporter.file_phase(i, "extracted")
 
     if not processed_docs:
         raise ValueError("no_readable_text")
 
-    return await _finalize_pipeline(processed_docs, user_id)
+    return await _finalize_pipeline(processed_docs, user_id, progress_reporter=reporter)
 
 
 async def _finalize_pipeline(
@@ -223,6 +310,7 @@ async def _finalize_pipeline(
     integrity_override: Optional[dict] = None,
     confirmations: Optional[dict] = None,
     submission_label: Optional[str] = None,
+    progress_reporter: Any = None,
 ) -> dict:
     """Run everything AFTER per-document extraction: merge facts, cross-doc
     consistency, Submission Integrity Validation, and — only when integrity
@@ -244,6 +332,12 @@ async def _finalize_pipeline(
     # session for display but contribute no facts, conflicts, integrity identity,
     # or recommendations. We never score an empty package, so an all-excluded
     # package falls back to scoring everything.
+    # Progress reporter (Figure 1). Present only on a fresh upload; re-run callers
+    # (integrity resolve / reclassify / confirm) and the worker path pass none →
+    # a no-op reporter, so their behaviour is unchanged.
+    from utils.progress_tracker import make_reporter
+    reporter = progress_reporter if progress_reporter is not None else make_reporter(None, user_id, [])
+
     active_docs = [d for d in processed_docs if not d.get("excluded")] or processed_docs
 
     # Low-confidence OCR tokens are carried on each doc; aggregate for the
@@ -260,6 +354,7 @@ async def _finalize_pipeline(
     primary              = select_primary_truth(_primary_candidates)
     merged_facts, mflags = merge_facts(active_docs, primary)
     mflags["_doc_type"]  = primary.get("doc_type", "unknown")
+    await reporter.package_phase("normalized", "Normalizing data across documents…")
 
     # ── Deterministic has_umbrella safety net (Umbrella / Excess Adequacy) ────
     # The umbrella pillar is EXCLUDED (scored N/A) whenever has_umbrella is false,
@@ -413,6 +508,30 @@ async def _finalize_pipeline(
     tier2_score, tier2_missing = check_tier2(merged_facts, mflags)
     hard_stops, soft_stops     = evaluate_stops(merged_facts, mflags)
 
+    # Structured, code-tagged mirror of every issue added to hard_stops/soft_stops
+    # below (Figures 4/5: clustering + Required/Recommended/Binder-followup tiers).
+    # Purely additive - never read by SQS capping or dismiss-credit logic, which
+    # continue to use hard_stops/soft_stops exactly as before.
+    #
+    # evaluate_stops() (sqs_service.py, which itself starts from
+    # utils/validators.py::run_field_validations()) is the ORIGINAL field-level
+    # stop source and predates cross_form_validator.py - it returns plain,
+    # uncoded strings, including the exact "Property Minimum Viable COPE
+    # incomplete" hard stop. It carries no `code`, so each message is matched
+    # against known phrases via classify_legacy_message() instead of a code
+    # lookup - this must happen HERE, immediately, before any further stops are
+    # appended below, so only what evaluate_stops() itself produced is tagged.
+    structured_issues: list[dict] = []
+    hard_stops = _ensure_fix_hint(hard_stops)
+    for _i, _msg in enumerate(hard_stops):
+        _cluster, _tier = classify_legacy_message(_msg, "hard_stop")
+        structured_issues.append(make_issue(f"legacy_hard_{_i}", "hard_stop", _msg, cluster=_cluster, tier=_tier))
+
+    soft_stops = _ensure_fix_hint(_enrich_stops_with_source(soft_stops, active_docs))
+    for _i, _msg in enumerate(soft_stops):
+        _cluster, _tier = classify_legacy_message(_msg, "soft_warning")
+        structured_issues.append(make_issue(f"legacy_soft_{_i}", "soft_warning", _msg, cluster=_cluster, tier=_tier))
+
     # DEBUG (Beta Report §5): dump each document's extracted identity/policy
     # values. The cross-doc detectors compare EXACTLY these per-doc values, so a
     # conflict that fails to surface (e.g. only Gross Sales shows a picker) is
@@ -451,13 +570,19 @@ async def _finalize_pipeline(
                 code      = code_part.split("=", 1)[1] if "=" in code_part else "conflict"
                 doc_conflicts.append({"code": code, "message": msg, "hard_stop": True})
                 hard_stops = list(hard_stops) + [msg]
+                structured_issues.append(make_issue(f"doc_conflict_hard_{code}", "hard_stop", msg))
             elif issue.startswith("[warning]"):
                 # Spec: DBAs/address/LOB/revenue mismatches are warnings, not blockers.
                 rest = issue[len("[warning]"):].strip()
+                # Capture the machine token before stripping it, so the warning can
+                # still be clustered/tiered even though the user only sees plain text.
+                _wcode_match = re.match(r"^(?:field|code)=(\S+)", rest)
+                _wcode = _wcode_match.group(1) if _wcode_match else "conflict"
                 # Strip the leading machine token (field=foo / code=foo) so the
                 # user sees only the plain-language message (Beta Report P2 #28).
                 rest = re.sub(r"^(?:field|code)=\S+\s*", "", rest)
                 soft_stops = list(soft_stops) + [rest]
+                structured_issues.append(make_issue(f"doc_conflict_warn_{_wcode}", "soft_warning", rest))
             elif issue.startswith("[info]"):
                 # Normalization notice: values differed in format but were treated
                 # as equivalent. Surface to the user as an informational notice
@@ -468,6 +593,7 @@ async def _finalize_pipeline(
             else:
                 # Unknown prefix — treat as warning so it does not silently cap SQS at 60.
                 soft_stops = list(soft_stops) + [issue]
+                structured_issues.append(make_issue("doc_conflict_warn_unknown", "soft_warning", issue))
 
     # ── Core Underwriting Data Consistency (Beta Report §4.3) ───────────────
     # Normalization-aware reconciliation of Gross Sales (and similar fields):
@@ -479,11 +605,16 @@ async def _finalize_pipeline(
     if underwriting.get("review_required"):
         for f in underwriting["fields"]:
             if f.get("review_required"):
-                soft_stops = list(soft_stops) + [
+                _uw_msg = (
                     f"{f['label']}: documents disagree "
                     f"({', '.join(v['display'] for v in f['values'])}). "
-                    "Confirm the correct value to apply it across forms."
-                ]
+                    "Fix: Confirm the correct value to apply it across forms."
+                )
+                soft_stops = list(soft_stops) + [_uw_msg]
+                structured_issues.append(make_issue(
+                    f"underwriting_reconciliation_{f.get('fact_key', 'field')}",
+                    "soft_warning", _uw_msg,
+                ))
 
     # ── Cross-document source conflicts ─────────────────────────────────────
     # Surface field-level discrepancies between uploaded documents so the
@@ -506,6 +637,12 @@ async def _finalize_pipeline(
         if source_conflicts:
             logger.info("Source conflicts detected across docs: %d", len(source_conflicts))
             soft_stops = list(soft_stops) + source_conflicts
+            for _sc_msg in source_conflicts:
+                _sc_is_carrier = _sc_msg.startswith("Carrier names differ")
+                _sc_field_match = re.search(r"for '([^']+)'", _sc_msg)
+                _sc_field = _sc_field_match.group(1) if _sc_field_match else "field"
+                _sc_code = f"source_conflict_{'carrier_' if _sc_is_carrier else ''}{_sc_field}"
+                structured_issues.append(make_issue(_sc_code, "soft_warning", _sc_msg))
 
     # ── Submission Integrity Validation (Beta Report §4.1) ──────────────────
     # Runs AFTER extraction/classification and BEFORE form recommendations,
@@ -532,10 +669,10 @@ async def _finalize_pipeline(
             if fld not in _ocr_review_fields:
                 _ocr_review_fields.append(fld)
     if _ocr_review_fields:
-        soft_stops = list(soft_stops) + [
-            f"Low OCR confidence on critical field — confirm: {fld}"
-            for fld in _ocr_review_fields
-        ]
+        for fld in _ocr_review_fields:
+            _ocr_msg = f"Low OCR confidence on critical field — confirm: {fld}"
+            soft_stops = list(soft_stops) + [_ocr_msg]
+            structured_issues.append(make_issue(f"ocr_low_confidence_{fld}", "soft_warning", _ocr_msg))
 
     unique_low_conf = list(dict.fromkeys(all_low_conf))
     available_forms = filter_available_forms(load_all_forms())
@@ -574,6 +711,13 @@ async def _finalize_pipeline(
             hard_stops = list(hard_stops) + cf_hard
         if cf_soft:
             soft_stops = list(soft_stops) + cf_soft
+        for _cf_issue in cross_form_issues:
+            structured_issues.append(make_issue(
+                _cf_issue.get("code", "cross_form_issue"),
+                _cf_issue.get("type", "soft_warning"),
+                _cf_issue.get("message", ""),
+                _cf_issue.get("forms"),
+            ))
 
     # Human-friendly label for the submissions history (Beta Report §4.1). Prefer
     # an explicit label (e.g. a split cluster's insured name from "Create separate
@@ -582,6 +726,8 @@ async def _finalize_pipeline(
     _applicant_lbl = _unwrap_scalar(merged_facts.get("applicant_name"))
     _applicant_lbl = str(_applicant_lbl).strip() if _applicant_lbl else ""
     session_label  = (str(submission_label).strip() if submission_label else "") or _applicant_lbl or None
+
+    await reporter.package_phase("scored", "Scoring the submission…")
 
     session_payload = {
         "user_id":              user_id,
@@ -596,6 +742,7 @@ async def _finalize_pipeline(
         "soft_stops":           soft_stops,
         "normalized_differences": normalized_differences,
         "cross_form_issues":    cross_form_issues,
+        "structured_issues":    structured_issues,
         "all_forms":            available_forms,
         "recommendations":      recommendations,
         "account_profile":      account_profile,
@@ -613,6 +760,10 @@ async def _finalize_pipeline(
     else:
         sid = await new_processing_session(session_payload)
 
+    # Session is persisted → the submission is form-ready. Marking done AFTER the
+    # DB write means a poll that sees done=true can rely on the session existing.
+    await reporter.done(sid)
+
     return {
         "session_id":         sid,
         "processed_docs":     processed_docs,
@@ -628,6 +779,7 @@ async def _finalize_pipeline(
         "doc_conflicts":        doc_conflicts,
         "normalized_differences": normalized_differences,
         "cross_form_issues":    cross_form_issues,
+        "structured_issues":    structured_issues,
         "recommendations":      recommendations,
         "account_profile":      account_profile,
         "extra_forms_scored":   extra_forms_scored,
@@ -920,11 +1072,36 @@ async def confirm_underwriting_value(
     canonical = validate_confirmation(fact_key, value)
 
     confirmations = dict(session.get("underwriting_confirmations") or {})
+
+    # Figure 3 "apply to all": look up linked fields using the PRE-confirm state
+    # (so fact_key is still assessed as an open conflict and carries its
+    # linked_fields) and apply the SAME confirmed value to every linked field
+    # that (a) is itself an open conflict right now and (b) has no confirmation
+    # yet - never overwrite an explicit prior choice on another field. Best-effort:
+    # any failure here just skips the auto-apply, it never blocks the primary
+    # confirmation below.
+    linked_applied: List[str] = []
+    try:
+        active_docs = [d for d in docs if not d.get("excluded")] or docs
+        pre = assess_underwriting_consistency(active_docs, session.get("facts") or {}, confirmations)
+        target = next((f for f in pre.get("fields") or [] if f["fact_key"] == fact_key), None)
+        for link in (target.get("linked_fields") if target else None) or []:
+            lk = link["fact_key"]
+            if lk in confirmations:
+                continue
+            try:
+                confirmations[lk] = validate_confirmation(lk, canonical)
+                linked_applied.append(lk)
+            except ValueError:
+                continue  # not a valid value for this field's kind - skip, never fail the request
+    except Exception as exc:                              # pragma: no cover - defensive
+        logger.warning("confirm_underwriting_value: linked-field lookup skipped for %s - %s", fact_key, exc)
+
     confirmations[fact_key] = canonical
 
     logger.info(
-        "confirm_underwriting_value: session=%s field=%s value=%r (user=%s)",
-        session_id, fact_key, canonical, user_id or session.get("user_id"),
+        "confirm_underwriting_value: session=%s field=%s value=%r linked_applied=%s (user=%s)",
+        session_id, fact_key, canonical, linked_applied, user_id or session.get("user_id"),
     )
 
     prior_integrity = session.get("integrity") or {}
@@ -965,6 +1142,12 @@ async def apply_marketing_reason(
         _ADVERSE_CARRIER_REASONS, _CARRIER_MARKETING_OPTIONS, CARRIER_MARKETING_FIELD,
     )
 
+    # Figure 6 NOTE: once forms have been generated the producer can no longer
+    # return to this screen, so the answer is locked - re-answering here would
+    # silently rewrite the audit trail for a submission that already shipped.
+    if session.get("generated_forms"):
+        raise ValueError("marketing_reason_locked")
+
     reason = (reason or "").strip()[:200]
     if not reason or not (reason in _CARRIER_MARKETING_OPTIONS or reason.startswith("Other")):
         raise ValueError("marketing_invalid_reason")
@@ -977,6 +1160,23 @@ async def apply_marketing_reason(
     }
     is_adverse = reason.lower() in _ADVERSE_CARRIER_REASONS
     flags["prior_carrier_adverse_action"] = is_adverse
+
+    # Figure 6: persist a controlled reason_code + free-text reason_note as a
+    # DURABLE audit row (separate from the session facts blob above, which is
+    # nulled out by the facts-retention job and would not survive for an
+    # underwriter to review later). "Other: <text>" splits into code="Other" +
+    # the typed note; every other option is stored as its own code with no note.
+    if reason.startswith("Other"):
+        _reason_code = "Other"
+        _reason_note = reason[len("Other"):].lstrip(":").strip() or None
+    else:
+        _reason_code = reason
+        _reason_note = None
+    from services.audit_service import upsert_marketing_reason
+    await upsert_marketing_reason(
+        session_id, str(user_id or session.get("user_id") or ""),
+        _reason_code, _reason_note, is_adverse,
+    )
 
     active_docs   = [d for d in (session.get("docs") or []) if not d.get("excluded")]
     combined_text = " ".join(d.get("text", "") for d in active_docs)

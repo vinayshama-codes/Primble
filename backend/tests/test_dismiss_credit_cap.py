@@ -100,7 +100,10 @@ _RICH_FACTS = {
     "years_in_business": "12", "naics_code": "238160", "num_claims": "0",
     "total_payroll": "800000", "gl_limits": "1000000", "gl_aggregate": "2000000",
     "gl_class_codes_by_location": ["98305"], "gl_form_type": "occurrence",
-    "loss_run_years": "5",
+    # Current-valued loss runs: a genuinely "rich" (>85) submission carries a recent
+    # valuation date. Without it the §6.4 unknown-valuation-date penalty (-15) applies
+    # and the baseline lands exactly on 85, which no longer exceeds the 85 cap.
+    "loss_run_years": "5", "loss_run_age_days": "30",
     "acord101_remarks": (
         "Family-owned commercial roofing operator, 12 years in business with "
         "experienced management. No prior losses in 5 years. Written safety program "

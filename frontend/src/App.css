@@ -94,11 +94,14 @@ body {
 .dl-pill--gone:hover { color: #0f172a; }
 .dl-pill__dot  { display: none; }
 
-/* Dashboard nav link */
+/* Dashboard / Admin nav pills — fixed height so both sit at the same level
+   regardless of content (Admin has an extra chevron icon, Dashboard is text-only) */
 .header-dashboard-btn {
   display: inline-flex;
   align-items: center;
-  padding: 5px 12px;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 12px;
   border-radius: 999px;
   border: 1px solid rgba(230, 27, 132, 0.35);
   cursor: pointer;
@@ -124,7 +127,11 @@ body {
 }
 
 /* ── User Dropdown ── */
-.udrop-root { position: relative; }
+/* display:inline-flex + align-items:center centers the trigger the same way
+   a bare button (e.g. Dashboard) is centered by the header's flex row —
+   without it, a wrapper div with no display set can drift out of vertical
+   alignment with sibling buttons that aren't wrapped in a div. */
+.udrop-root { position: relative; display: inline-flex; align-items: center; }
 
 /* Trigger pill */
 .udrop-trigger {
@@ -1484,6 +1491,36 @@ body {
   color: #1e293b;
 }
 
+/* Each Required/Recommended/Binder-followup tier is plain (no card background
+   or border) - separation from its neighbors comes from spacing and the size
+   contrast between the tier header (Level 2) and the cluster headers (Level 3)
+   nested inside it, not from a boxed background. */
+.warning-tier-section {
+  padding: 0;
+  margin-bottom: 0;
+}
+.warning-tier-section:last-child {
+  margin-bottom: 0;
+}
+
+/* "Important" preview - the top 3 Required/Recommended warning clusters,
+   pulled to the top of the Warnings banner. Accent-colored so it reads as a
+   highlight rather than another plain tier section. */
+.warning-important-section {
+  border-left: 3px solid #E61B84;
+  background: rgba(230, 27, 132, 0.06);
+  border-radius: 6px;
+  padding: 8px 10px 6px;
+}
+.warning-important-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #E61B84;
+  margin-bottom: 6px;
+}
+
 /* ==================== DOC SUMMARY ==================== */
 .doc-summary {
   background: rgba(230, 27, 132, 0.07);
@@ -2193,6 +2230,7 @@ body {
 .acord-license-title { text-align: center; font-size: 20px; font-weight: 700; margin-bottom: 16px; }
 .acord-license-body { font-size: 14px; color: #374151; line-height: 1.6; margin-bottom: 16px; }
 .acord-license-link { color: #2563eb; text-decoration: underline; font-weight: 600; }
+.acord-license-note { font-size: 12px; color: #6b7280; line-height: 1.5; margin-top: 12px; padding: 8px 10px; background: #f9fafb; border-left: 3px solid #d1d5db; border-radius: 4px; }
 .acord-confirm-checkbox-label { display: flex; gap: 10px; align-items: flex-start; font-weight: 600; margin-bottom: 20px; cursor: pointer; }
 .acord-stub-actions { display: flex; gap: 8px; align-items: center; margin: 12px 0; padding: 10px; background: #f9fafb; border-radius: 6px; }
 .acord-stub-label { font-size: 11px; color: #9ca3af; }
@@ -2731,6 +2769,220 @@ body.app-header-collapsed .acord-modal-editor-root {
   .db-metric-value {
     font-size: 22px;
   }
+}
+
+/* ── Dashboard v2: top stat band, keyword search, in-app assistant ── */
+.db-statband {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 26px;
+}
+.db-stat { min-width: 0; }
+.db-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b5b5b5;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  line-height: 1.3;
+}
+.db-stat-value {
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  color: #E61B84;
+  word-break: break-word;
+}
+
+/* Keyword search */
+.db-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.db-search-icon {
+  position: absolute;
+  left: 15px;
+  color: #b5b5b5;
+  pointer-events: none;
+}
+.db-search-input {
+  width: 100%;
+  padding: 12px 40px 12px 42px;
+  border: 1.5px solid #e0e0e0;
+  border-radius: 12px;
+  font-size: 14px;
+  color: #0b0b0b;
+  background: #fff;
+  outline: none;
+  font-family: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color 0.15s;
+}
+.db-search-input::placeholder { color: #b5b5b5; }
+.db-search-input:focus { border-color: #E61B84; }
+.db-search-clear {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  color: #b5b5b5;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px;
+}
+.db-search-clear:hover { color: #E61B84; }
+.db-search-spinner {
+  position: absolute;
+  right: 34px;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #f0f0f0;
+  border-top-color: #E61B84;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+/* Search: no matches */
+.db-no-results {
+  text-align: center;
+  padding: 40px 24px;
+  background: #fff;
+  border: 1.5px dashed #e0e0e0;
+  border-radius: 18px;
+}
+.db-no-results-title {
+  font-size: 14px;
+  color: #6a6a6a;
+  margin: 0 0 14px;
+  word-break: break-word;
+}
+.db-no-results-btn {
+  padding: 9px 18px;
+  background: #fff;
+  border: 1.5px solid #E61B84;
+  color: #E61B84;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.db-no-results-btn:hover { background: rgba(230,0,122,0.06); }
+
+/* In-app assistant chatbot */
+.db-assistant-card {
+  display: flex;
+  flex-direction: column;
+}
+.db-assistant-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 2px 2px 6px;
+  margin-bottom: 10px;
+}
+.db-assistant-row { display: flex; }
+.db-assistant-row.is-user { justify-content: flex-end; }
+.db-assistant-row.is-bot  { justify-content: flex-start; }
+.db-assistant-bubble {
+  max-width: 88%;
+  padding: 8px 11px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.db-assistant-row.is-user .db-assistant-bubble {
+  background: #E61B84;
+  color: #fff;
+  border-radius: 12px 12px 2px 12px;
+}
+.db-assistant-row.is-bot .db-assistant-bubble {
+  background: #f5f5f5;
+  color: #0b0b0b;
+  border-radius: 12px 12px 12px 2px;
+}
+.db-assistant-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.db-assistant-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  border: 1.5px solid #E61B84;
+  border-radius: 22px;
+  font-size: 13px;
+  color: #0b0b0b;
+  background: #fff;
+  outline: none;
+  font-family: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.db-assistant-input::placeholder { color: #b5b5b5; }
+.db-assistant-send {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #E61B84, #C0157A);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: opacity 0.15s;
+}
+.db-assistant-send:disabled { opacity: 0.45; cursor: not-allowed; }
+.db-assistant-typing {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.db-assistant-typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  display: inline-block;
+  animation: db-bounce 1s ease-in-out infinite;
+}
+.db-assistant-typing span:nth-child(2) { animation-delay: 0.2s; }
+.db-assistant-typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes db-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+/* Responsive: stat band + inputs on tablet / mobile */
+@media (max-width: 900px) {
+  .db-stat-value { font-size: 34px; }
+}
+@media (max-width: 768px) {
+  .db-statband { gap: 14px; margin-bottom: 22px; }
+  .db-stat-value { font-size: 30px; }
+  /* iOS: 16px inputs stop focus auto-zoom */
+  .db-search-input, .db-assistant-input { font-size: 16px; }
+  .db-assistant-messages { max-height: 220px; }
+}
+@media (max-width: 380px) {
+  .db-statband { gap: 10px; }
+  .db-stat-value { font-size: 24px; }
+  .db-stat-label { font-size: 10px; letter-spacing: 0.05em; }
 }
 
 /* ── Modernized sidebar card base ── */

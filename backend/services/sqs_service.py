@@ -13,7 +13,7 @@ from services.normalization import distinct_normalized, normalize_general, norma
 logger = logging.getLogger(__name__)
 
 # ── SQS Version Control ───────────────────────────────────────────────────────
-SQS_MODEL_VERSION = "2.3.0"
+SQS_MODEL_VERSION = "2.4.0"
 
 # ── Client-approved underwriting thresholds (Beta Report §6 Q1/Q2/Q3 answers) ─
 _UMB_GL_OCC_MIN    = 1_000_000  # GL each occurrence min for umbrella attachment
@@ -32,7 +32,7 @@ _LOSS_NO_MATCH_CAP = 25         # Loss-history ceiling when loss runs do NOT mat
 _LOSS_RECENCY_MAX_PEN = 25      # Single cap for the ">90 days" reduction. The client
                                 # described ONE recency rule, so the same maximum applies
                                 # whether or not claim years were parsed (no split caps).
-_LOSS_RECENCY_UNKNOWN_PEN = 10  # Fixed penalty when the valuation date cannot be
+_LOSS_RECENCY_UNKNOWN_PEN = 15  # Fixed penalty when the valuation date cannot be
                                 # determined at all. Client requires "currently valued"
                                 # for full credit; an unverifiable date cannot satisfy
                                 # that bar, so full credit is not awarded.
@@ -46,7 +46,7 @@ NARRATIVE_COMPONENT_LABELS: Dict[str, str] = {
     "risk_controls":       "Risk Controls",
     "loss_history":        "Loss History Discussion",
     "coverage_discussion": "Coverage Discussion",
-    "carrier_market":      "Prior Carrier Context",
+    "carrier_market":      "Prior Carrier / Marketing Reason",
     "location_exposure":   "Location Details",
     "employee_practices":  "Employee / Payroll Context",
     "growth_trends":       "WC Payroll / Class Code Context",
@@ -131,6 +131,9 @@ _NARRATIVE_SCORE_SIGNALS: Dict[str, Tuple[str, ...]] = {
         "prior carrier", "current carrier", "expiring carrier", "incumbent",
         "carrier", "renewal", "seeking competitive", "marketing account",
         "non-renewal", "non renewal", "leaving", "prior insurer", "previous insurer",
+        # §6.3: component now also covers the marketing reason for seeking coverage
+        "marketing", "why marketing", "reason for marketing", "shopping",
+        "seeking coverage", "coverage needed", "remarketing",
     ),
     "location_exposure": (
         "location", "premises", "exposure", "square footage", "address",
@@ -1118,6 +1121,15 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
     #                 "message":   "Location count mismatch between application and property schedule - must reconcile or add ACORD 101",
     #             })
 
+    # Stamp a durable, content-derived issue_id on every issue so the rail's
+    # resolution-status layer can persist a status against it (issue_registry
+    # .issue_id_for). Purely additive: keyed off the message text, never consulted
+    # by scoring, and never changes the type/message the rest of the pipeline reads.
+    from services.issue_registry import issue_id_for
+    for _it in issues:
+        if isinstance(_it, dict) and not _it.get("issue_id"):
+            _it["issue_id"] = issue_id_for(_it.get("message", ""), _it.get("forms"))
+
     return issues
 
 
@@ -1144,6 +1156,33 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
 
     def _raw(key: str) -> List:
         return [_fv(d["facts"], key) for d in docs if _fv(d["facts"], key)]
+
+    # ── Attribution brackets (client feedback: "which document created the
+    # issue... and how to fix it") ────────────────────────────────────────────
+    # Appended only to actionable [hard_stop]/[warning] messages - never to
+    # [info] (those are already-resolved formatting differences; there is
+    # nothing to fix). Every field this function checks is ALSO a Data
+    # Consistency reconcilable field except lines_of_business, so the fix path
+    # is almost always "confirm it there" - the one real remediation choice is
+    # per-field, not per-document, so it is a small fixed lookup rather than a
+    # form list: these are core identity fields present on nearly every
+    # generated form, and RECONCILABLE_FIELDS itself declares an empty forms
+    # list for identity fields for exactly that reason (too universal to name
+    # specific ones - see underwriting_consistency.py).
+    _DATA_CONSISTENCY_FIX = "Confirm the correct value in the Data Consistency section below."
+
+    def _docs_for(key: str) -> List[str]:
+        seen, out = set(), []
+        for d in docs:
+            if _fv(d["facts"], key) and d.get("filename") not in seen:
+                seen.add(d.get("filename"))
+                out.append(d.get("filename") or "an uploaded document")
+        return out
+
+    def _bracket(key: str, remediation: str) -> str:
+        fns = _docs_for(key)
+        src = ", ".join(fns) if fns else "the uploaded documents"
+        return f" (Source: {src}. Fix: {remediation})"
 
     def _show(raw: List) -> str:
         """De-duplicated, human-readable join of the raw values for display.
@@ -1180,6 +1219,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         issues.append(
             "[hard_stop] code=name_conflict "
             f"Applicant name differs across documents: {_show(applicant_raw)}"
+            + _bracket("applicant_name", _DATA_CONSISTENCY_FIX)
         )
     elif len(applicant_raw) >= 2 and _raw_differ(applicant_raw):
         issues.append(
@@ -1194,6 +1234,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
             "[warning] field=dba_name "
             f"DBA / trade name differs across documents: {_show(dba_raw)}. "
             "Verify or add an ACORD 101 explanation."
+            + _bracket("dba_name", _DATA_CONSISTENCY_FIX)
         )
 
     # Spec: address mapping - compare physical_address across docs too,
@@ -1211,6 +1252,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
             issues.append(
                 f"[warning] field={key} "
                 f"{_FIELD_LABELS[key]} differs across documents: {_show(vals_raw)}"
+                + _bracket(key, _DATA_CONSISTENCY_FIX)
             )
         elif len(vals_raw) >= 2 and _raw_differ(vals_raw):
             issues.append(
@@ -1223,6 +1265,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         issues.append(
             "[hard_stop] code=fein_conflict "
             "FEIN differs across uploaded documents. Submission blocked."
+            + _bracket("fein", _DATA_CONSISTENCY_FIX)
         )
 
     # Spec (L67): misaligned dates → hard stop UNLESS explained.
@@ -1253,6 +1296,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         issues.append(
             f"{_date_prefix} code=date_conflict "
             "Policy date mismatch across documents. Submission blocked unless explained."
+            + _bracket("effective_date", _DATA_CONSISTENCY_FIX + " Or add an ACORD 101 explanation of the date difference.")
         )
     elif len(eff_raw) >= 2 and _raw_differ(eff_raw):
         issues.append(f"[info] code=effective_date_normalized Effective date: {_show(eff_raw)}")
@@ -1264,6 +1308,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         issues.append(
             f"{_date_prefix} code=expiration_conflict "
             "Policy expiration date mismatch across documents. Submission blocked unless explained."
+            + _bracket("expiration_date", _DATA_CONSISTENCY_FIX + " Or add an ACORD 101 explanation of the date difference.")
         )
     elif len(exp_raw) >= 2 and _raw_differ(exp_raw):
         issues.append(f"[info] code=expiration_date_normalized Expiration date: {_show(exp_raw)}")
@@ -1274,6 +1319,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     # manufacture a warning. Raw values are preserved for the user-facing message.
     lob_norm_sets = []     # normalized tokens — used for comparison
     lob_raw_display = []   # raw tokens — used for display
+    lob_doc_names = []     # filenames — used for the attribution bracket
     for d in docs:
         lob = _fv(d["facts"], "lines_of_business")
         if lob and isinstance(lob, list) and lob:
@@ -1281,11 +1327,16 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
             if norm:
                 lob_norm_sets.append(norm)
                 lob_raw_display.append(", ".join(str(x).strip() for x in lob if str(x).strip()))
+                lob_doc_names.append(d.get("filename") or "an uploaded document")
     if len(lob_norm_sets) >= 2 and len(set(lob_norm_sets)) > 1:
         _lob_display = "; ".join(lob_raw_display)
+        # Not a Data Consistency reconcilable field (no picker exists for it) -
+        # the only real fix is checking the source documents directly.
         issues.append(
             "[warning] field=lines_of_business "
             f"Lines of business differ across documents: {_lob_display}"
+            f" (Source: {', '.join(dict.fromkeys(lob_doc_names))}. "
+            "Fix: Review the source documents and confirm the correct coverage lines.)"
         )
     elif len(lob_raw_display) >= 2 and len({d.strip().lower() for d in lob_raw_display}) > 1:
         issues.append(
@@ -1424,6 +1475,24 @@ def _loss_history_conflict(facts: dict, flags: dict) -> bool:
     return no_loss and (claims > 0 or incurred > 0)
 
 
+def _recency_penalty(age_days: int) -> int:
+    """Loss-run recency reduction - client Q3 tiered bands (Clarification 2).
+
+    0-90 days = 0 | 91-180 = 10 | 181-365 = linear ramp 15 -> 20 | >365 = 25 (cap).
+    Replaces the previous continuous excess/11 curve so each band matches the
+    client's stepped values exactly. Shared by the doc-only and year-tier paths so
+    the two can never diverge.
+    """
+    if age_days <= _LOSS_RECENCY_DAYS:            # <= 90: currently valued, no deduction
+        return 0
+    if age_days <= 180:                           # 91-180
+        return 10
+    if age_days <= 365:                           # 181-365: ramp 15 (at 181) -> 20 (at 365)
+        span = (age_days - 181) / (365 - 181)
+        return int(round(15 + span * 5))
+    return _LOSS_RECENCY_MAX_PEN                   # > 365: 25 cap
+
+
 def calculate_p4_loss_history(
     facts: dict,
     flags: dict,
@@ -1518,10 +1587,15 @@ def calculate_p4_loss_history(
             recs.append("Loss run insured name does not match - verify these runs belong to this submission")
         else:
             recs.append("Loss runs uploaded - confirm claim years and recency to finalize loss-history score")
-        # Prior-carrier adjustment (client: present +10, missing -10). Loss runs are
-        # uploaded here - the exact scenario the client cites for prior-carrier
-        # evidence ("commonly found on loss runs and prior policy documents").
-        if has_carrier:
+        # Client Clarification 2 (§6.4): a strong (name + FEIN/policy) match with no
+        # claim years is the "Loss runs match insured, years = 0" state, pinned at 60
+        # - the loss runs effectively confirm no known losses. The prior-carrier
+        # +/-10 does NOT move this pinned state (it would otherwise read 40 with no
+        # carrier). All other match tiers keep the prior-carrier adjustment (client:
+        # present +10, missing -10 - "commonly found on loss runs / prior policies").
+        if loss_run_match == "strong":
+            credit = 60
+        elif has_carrier:
             credit = min(100, credit + 10)
         else:
             credit = max(0, credit - 10)
@@ -1529,30 +1603,33 @@ def calculate_p4_loss_history(
         # L6 fix: Q3 says ">90 days -> reduce + warn" - apply recency even on the
         # doc-only path, but ONLY when the age is KNOWN (a real valuation date or a
         # stated age). Never fabricate an age when it could not be determined.
-        if age_days is not None and age_days > _LOSS_RECENCY_DAYS:
-            excess      = age_days - _LOSS_RECENCY_DAYS
-            recency_pen = min(_LOSS_RECENCY_MAX_PEN, int(excess / 11))   # same rule/cap as the year-tier path
-            credit      = max(0, credit - recency_pen)
-            recs.append(f"Loss runs are {age_days} days old. Updated loss runs may be required.")
+        if age_days is not None:
+            recency_pen = _recency_penalty(age_days)
+            if recency_pen:
+                credit = max(0, credit - recency_pen)
+                recs.append(f"Loss runs appear stale ({age_days} days old). Updated loss runs may be required before bind.")
         elif age_days is None:
             credit = max(0, credit - _LOSS_RECENCY_UNKNOWN_PEN)
-            recs.append("Loss run valuation date not detected - recency unverified. Updated loss runs may be required.")
+            recs.append("Loss run valuation date could not be verified. Updated or currently valued loss runs may be required.")
         return _result(credit, recs)
     elif no_loss_attested:
-        # §6.4 item 3: a no-loss attestation (user-entered or stated in narrative)
-        # earns the client-approved score of 60 - below documented loss runs but
-        # above no-information (25). Both evidence sources share this score per the
-        # client's approved scoring table; they stay distinguished by the loss-
-        # history STATE, the evidence label, and the recommendation wording below -
-        # not by the number. "No Known Losses" is the industry term surfaced to users.
+        # §6.4 item 3: a no-loss attestation. The client's approved scoring table
+        # distinguishes the two evidence sources by NUMBER, not just by state:
+        #   - user attestation      -> 60 (an affirmative statement by the insured)
+        #   - stated in narrative    -> 45 (weaker: a passing mention in prose, not an
+        #                                    attestation; below the user-attested 60 and
+        #                                    above no-information 25)
+        # They also stay distinguished by the loss-history STATE, the evidence label,
+        # and the recommendation wording below. "No Known Losses" is the industry term
+        # surfaced to users.
         _user_attested = (
             bool(flags.get("no_prior_losses"))
             or _attested_true(_fv(facts, "no_prior_losses"))
             or _attested_true(_fv(facts, "loss_history_no_prior_losses_indicator"))
         )
         if _user_attested:
-            return _result(60, ["No Known Losses (attested by user) - attach loss runs to fully confirm"])
-        return _result(60, ["No Known Losses (stated in narrative) - confirm with the insured or attach loss runs to corroborate"])
+            return _result(60, ["No Known Losses (attested by user) - attach loss runs or a signed no-known-loss letter to fully confirm"])
+        return _result(45, ["No Known Losses (stated in narrative) - confirm with the insured, or attach loss runs or a signed no-known-loss letter to corroborate the statement"])
     elif flags.get("loss_run_pending") or str(_fv(facts, "loss_run_status") or "").lower() in ("pending", "requested"):
         return _result(70, ["Loss runs requested / pending - update score when received"])
     else:
@@ -1570,11 +1647,11 @@ def calculate_p4_loss_history(
     # Only when the age is KNOWN (deterministic from a valuation date, or a stated
     # age). Never assume an age - the old "default 365" punished loss runs whose
     # date the model failed to state and printed a fabricated age (Beta 2).
-    if age_days is not None and age_days > _LOSS_RECENCY_DAYS:
-        excess      = age_days - _LOSS_RECENCY_DAYS
-        recency_pen = min(_LOSS_RECENCY_MAX_PEN, int(excess / 11))   # max 25 pt penalty at ~365 days
-        base_score  = max(0, base_score - recency_pen)
-        recs.append(f"Loss runs are {age_days} days old. Updated loss runs may be required.")
+    if age_days is not None:
+        recency_pen = _recency_penalty(age_days)
+        if recency_pen:
+            base_score = max(0, base_score - recency_pen)
+            recs.append(f"Loss runs appear stale ({age_days} days old). Updated loss runs may be required before bind.")
     elif age_days is None and has_loss_run_doc:
         base_score = max(0, base_score - _LOSS_RECENCY_UNKNOWN_PEN)
         recs.append("Loss run valuation date not detected - recency unverified. Updated loss runs may be required.")
@@ -1930,13 +2007,13 @@ def _has_explicit_follow_form(text) -> bool:
 def _get_umbrella_state(facts: dict, flags: dict) -> str:
     """Return umbrella evidence state string per §6.5 item 1.
 
-    7 states (client-approved):
+    6 states (client-approved; §6.5 retired "umbrella_information_provided"):
       not_applicable               – no umbrella in this submission
       insufficient_information     – has_umbrella flag but no umbrella_limit found
       unknown                      – limit present but no underlying GL/auto value found
       umbrella_coverage_needs_review – underlying limits below thresholds
-      umbrella_information_provided – limits meet thresholds but NO supporting evidence yet
-      umbrella_coverage_present    – limits meet thresholds and one supporting document present
+      umbrella_coverage_present    – limits meet thresholds; zero or one supporting
+                                     document present (schedule OR follow-form missing)
       adequately_supported         – limits, EL, schedule, and follow-form all confirmed
     """
     if not flags.get("has_umbrella"):
@@ -1985,7 +2062,9 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
 
     # Underlying limits meet thresholds. Grade by how much supporting evidence
     # (schedule of underlying insurance + follow-form) corroborates the coverage:
-    #   neither present → umbrella_information_provided (limits stated, nothing corroborated yet)
+    #   neither present → umbrella_coverage_present (client §6.5: limits meet thresholds
+    #                       -> Coverage Present, even when schedule AND follow-form are
+    #                       both missing; the old "Information Provided" state is retired)
     #   one present     → umbrella_coverage_present     (partially corroborated)
     #   both present    → adequately_supported
     _has_schedule = bool(
@@ -2001,9 +2080,10 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
     _has_ff = _has_explicit_follow_form(_ff_combined)
 
     _support = (1 if _has_schedule else 0) + (1 if _has_ff else 0)
-    if _support == 0:
-        return "umbrella_information_provided"
-    if _support == 1:
+    if _support <= 1:
+        # §6.5: "Umbrella Information Provided" is retired. Once underlying limits
+        # meet thresholds, zero or one supporting document both read as Coverage
+        # Present (schedule OR follow-form still missing).
         return "umbrella_coverage_present"
     return "adequately_supported"
 
@@ -2489,7 +2569,7 @@ def _compute_category_breakdown(
                                  Carrier-Grade Preferred (Tier2) — mirrors _calculate_cope_score
       Loss History             - Loss History
       Umbrella Adequacy        - Umbrella Limits
-      Narrative Quality        - Narrative Quality, Prior Carrier Context
+      Narrative Quality        - Narrative Quality, Prior Carrier / Marketing Reason
     """
     ci = cross_issues or []
 
@@ -2659,7 +2739,7 @@ def _compute_category_breakdown(
         },
         "narrative_quality": {
             "narrative_quality":     _cat(None, "computed_separately", "Narrative Quality"),
-            "prior_carrier_context": _cat(carrier_s, carrier_st,       "Prior Carrier Context"),
+            "prior_carrier_context": _cat(carrier_s, carrier_st,       "Prior Carrier / Marketing Reason"),
         },
     }
 

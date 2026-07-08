@@ -8,7 +8,9 @@ from config.database import get_pool
 from models.schemas import (
     DismissRecommendationRequest,
     ResolveRecommendationRequest,
+    AnswerRecommendationRequest,
     DownloadAnywayRequest,
+    IssueStatusRequest,
 )
 from repositories.session_repository import get_processing_session
 from services.audit_service import (
@@ -18,9 +20,14 @@ from services.audit_service import (
     mark_recommendation_dismissed,
     mark_recommendation_resolved,
     log_download_with_open_recs,
+    log_field_change,
+    get_marketing_reason,
+    set_issue_status,
+    get_issue_statuses,
 )
 from services.auth_service import get_current_user
 from services.sqs_service import SQS_MODEL_VERSION, generate_sqs_narrative
+from config.settings import ENABLE_PRODUCER_ANSWERS
 
 router = APIRouter(tags=["audit"])
 logger = logging.getLogger(__name__)
@@ -304,6 +311,126 @@ async def dismiss_recommendation(
     })
 
 
+def _validate_producer_answer(field: str, answer: str) -> tuple:
+    """Lightweight type validation for a producer-entered recommendation answer.
+
+    Returns (ok, error_message). Monetary / percentage / date fields (detected by
+    the canonical field name) must parse via the existing field validators;
+    everything else is treated as free text and only needs to be non-empty and of
+    reasonable length. Deliberately lenient - the validators strip formatting like
+    "$" and "," - so a real value is never rejected, only genuine garbage is.
+    """
+    from utils.validators import (
+        validate_monetary, validate_percent, validate_date_format,
+    )
+    text = (answer or "").strip()
+    if not text:
+        return False, "Please enter an answer."
+    if len(text) > 2000:
+        return False, "Answer is too long."
+    f = (field or "").lower()
+    if any(t in f for t in ("percent", "pct", "coinsurance", "itv")):
+        ok, msg = validate_percent(text, "Percentage")
+        return (True, "") if ok else (False, msg)
+    if any(t in f for t in ("date", "effective", "expiration", "retro")):
+        ok, msg = validate_date_format(text, "Date")
+        return (True, "") if ok else (False, msg)
+    if any(t in f for t in ("limit", "value", "payroll", "revenue", "premium",
+                            "amount", "deductible", "income", "receipts", "sales")):
+        ok, msg = validate_monetary(text, "Amount")
+        return (True, "") if ok else (False, msg)
+    return True, ""
+
+
+@router.post("/api/audit/answer")
+async def answer_recommendation(
+    req: AnswerRecommendationRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Producer-entered answer to a recommendation card (Fig 13).
+
+    Validates the typed value, writes it into the session as a producer-provenance
+    fact, re-runs the SQS / cross-form rules, and returns the before/after impact
+    plus the recomputed per-form scores. The dismiss/waiver path is untouched.
+    """
+    await _verify_session_owner(req.session_id, current_user)
+    if not ENABLE_PRODUCER_ANSWERS:
+        return JSONResponse({
+            "success": False, "disabled": True,
+            "message": "Producer answers are disabled.",
+        })
+
+    ok, err = _validate_producer_answer(req.field, req.answer)
+    if not ok:
+        return JSONResponse({"success": False, "validation_error": err})
+
+    from services.arq_service import (
+        apply_producer_answer_to_session, recalculate_session_scores,
+    )
+    applied, _updated = await apply_producer_answer_to_session(
+        req.session_id, req.field, req.answer,
+    )
+    if not applied:
+        return JSONResponse({
+            "success": False,
+            "message": "This item can't be answered directly. Attach a supporting "
+                       "document or dismiss it with a note.",
+        })
+
+    try:
+        await log_field_change(
+            session_id=req.session_id,
+            user_id=str(current_user["id"]),
+            form_id=req.form_id,
+            field_name=req.field,
+            fact_key=req.field,
+            source="producer",
+            previous_value=None,
+            new_value=str(req.answer).strip(),
+            confidence="filled",
+            model_version=SQS_MODEL_VERSION,
+        )
+    except Exception as _le:
+        logger.warning(f"answer_recommendation: audit log failed: {_le}")
+
+    impact = await recalculate_session_scores(req.session_id)
+
+    # Read back the recomputed per-form scores so the UI can update each form tile,
+    # in the same {new_sqs_score/new_grade/new_tier/new_tier_color} shape the
+    # dismiss-credit path returns. Grade/tier/color are derived here (not read from
+    # the sqs dict) so they always agree with _grade_from_score, exactly like the
+    # dismiss path.
+    updated_forms: dict = {}
+    try:
+        sess = await get_processing_session(req.session_id)
+        for fid, fdata in (sess.get("generated_forms") or {}).items():
+            if not isinstance(fdata, dict):
+                continue
+            score = (fdata.get("sqs") or {}).get("sqs_score")
+            if score is None:
+                continue
+            g, t, c = _grade_from_score(int(score))
+            updated_forms[fid] = {
+                "new_sqs_score":  int(score),
+                "new_grade":      g,
+                "new_tier":       t,
+                "new_tier_color": c,
+            }
+    except Exception as _re:
+        logger.error(f"answer_recommendation: score read-back failed: {_re}")
+
+    open_recs = await get_open_recommendations(req.session_id)
+
+    return JSONResponse({
+        "success":               True,
+        "impact":                impact,
+        "updated_forms":         updated_forms,
+        "new_package_sqs_score": impact.get("score_after"),
+        "new_package_tier":      impact.get("tier"),
+        "open_recommendations":  open_recs,
+    })
+
+
 @router.post("/api/audit/resolve")
 async def resolve_recommendation(
     req: ResolveRecommendationRequest,
@@ -329,6 +456,50 @@ async def get_open_recs(
     return JSONResponse({"success": True, "open_recommendations": recs, "count": len(recs)})
 
 
+# ── Issue-rail resolution status (pure work-tracking, no SQS scoring) ───────────
+_ISSUE_STATUS_VALUES = {"open", "resolved", "dismissed"}
+
+
+@router.post("/api/issues/status")
+async def set_issue_status_route(
+    req: IssueStatusRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Record a broker's resolution status for one rail issue.
+
+    Intentionally isolated from the recommendation dismiss/resolve endpoints:
+    it never runs SQS scoring or dismiss-credit logic, so hard-stop / cross-form
+    acknowledgments stay a display-only work-tracking marker.
+    """
+    await _verify_session_owner(req.session_id, current_user)
+    status = (req.status or "").strip().lower()
+    if status not in _ISSUE_STATUS_VALUES:
+        raise HTTPException(422, "Invalid status")
+    ok = await set_issue_status(
+        session_id=req.session_id,
+        issue_id=req.issue_id,
+        status=status,
+        reason=req.reason,
+        user_id=str(current_user["id"]),
+        form_id=req.form_id,
+        field=req.field,
+        rule_code=req.rule_code,
+        source_fact=req.source_fact,
+        message=req.message,
+    )
+    return JSONResponse({"success": ok, "issue_id": req.issue_id, "status": status})
+
+
+@router.get("/api/issues/status/{session_id}")
+async def get_issue_statuses_route(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    await _verify_session_owner(session_id, current_user)
+    statuses = await get_issue_statuses(session_id)
+    return JSONResponse({"success": True, "issue_statuses": statuses})
+
+
 @router.get("/api/audit/dismissed/{session_id}")
 async def get_dismissed_recs(
     session_id: str,
@@ -352,6 +523,19 @@ async def download_anyway(
         user_id=str(current_user["id"]),
     )
     return JSONResponse({"success": True, "logged_count": count})
+
+
+@router.get("/api/audit/marketing-reason/{session_id}")
+async def get_marketing_reason_audit(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Figure 6: surface the producer's "Why are you marketing this account?"
+    answer (controlled reason_code + free-text reason_note) for underwriter /
+    internal review, independent of the processing_sessions JSON blob."""
+    await _verify_session_owner(session_id, current_user)
+    reason = await get_marketing_reason(session_id)
+    return JSONResponse({"success": True, "marketing_reason": reason})
 
 
 @router.get("/api/audit/summary/{session_id}")

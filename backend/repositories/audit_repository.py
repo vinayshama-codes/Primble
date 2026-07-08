@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -15,6 +16,11 @@ async def write_audit_log(
     form_name: str = None,
     session_id: str = None,
     ip_address: str = None,
+    sqs_score: float = None,
+    unresolved_issues: list = None,
+    file_checksum: str = None,
+    actor_email: str = None,
+    license_version: str = None,
 ) -> None:
     try:
         user_email = user.get("email")
@@ -31,12 +37,16 @@ async def write_audit_log(
                 pass
         user_email = user_email or ""
 
+        issues_json = json.dumps(unresolved_issues) if unresolved_issues is not None else None
+
         async with get_pool().acquire() as conn:
             await conn.execute(
                 """INSERT INTO acord_audit_log
                    (id, user_id, user_email, organization_name, action, form_id, form_name,
-                    session_id, ip_address, acord_license_confirmed, timestamp)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
+                    session_id, ip_address, acord_license_confirmed,
+                    sqs_score_at_download, unresolved_issues, file_checksum, actor_email,
+                    license_version, timestamp)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14,$15,$16)""",
                 str(uuid.uuid4()),
                 user.get("id"),
                 user_email,
@@ -47,6 +57,11 @@ async def write_audit_log(
                 session_id,
                 ip_address,
                 int(user.get("acord_license_confirmed", 0) or 0),
+                sqs_score,
+                issues_json,
+                file_checksum,
+                actor_email,
+                license_version,
                 datetime.now(timezone.utc).isoformat(),
             )
     except Exception as ex:

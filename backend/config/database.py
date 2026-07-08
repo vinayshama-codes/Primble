@@ -115,6 +115,7 @@ async def init_db() -> None:
                 acord_disclaimer_accepted_at  TEXT,
                 acord_license_confirmed       INTEGER DEFAULT 0,
                 acord_license_confirmed_at    TEXT,
+                acord_license_version         TEXT,
                 created_at                    TEXT,
                 last_login                    TEXT
             )
@@ -126,6 +127,7 @@ async def init_db() -> None:
             ("acord_disclaimer_accepted_at", "TEXT"),
             ("acord_license_confirmed",      "INTEGER DEFAULT 0"),
             ("acord_license_confirmed_at",   "TEXT"),
+            ("acord_license_version",        "TEXT"),
             ("packages_used",                "INTEGER DEFAULT 0"),
             ("packages_limit",               "INTEGER DEFAULT 0"),
             ("billing_cycle",                "TEXT DEFAULT 'monthly'"),
@@ -194,6 +196,14 @@ async def init_db() -> None:
         """)
 
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS admin_users (
+                email      TEXT PRIMARY KEY,
+                added_by   TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS acord_audit_log (
                 id                      TEXT PRIMARY KEY,
                 user_id                 TEXT NOT NULL,
@@ -205,6 +215,11 @@ async def init_db() -> None:
                 session_id              TEXT,
                 ip_address              TEXT,
                 acord_license_confirmed INTEGER DEFAULT 0,
+                sqs_score_at_download   REAL,
+                unresolved_issues       JSONB,
+                file_checksum           TEXT,
+                actor_email             TEXT,
+                license_version         TEXT,
                 timestamp               TEXT NOT NULL
             )
         """)
@@ -267,6 +282,21 @@ async def init_db() -> None:
             except Exception:
                 pass
 
+        # Package activity log — durable, user-level event feed. Persists
+        # independently of processing_sessions so the log survives session close
+        # (session_id is kept only as a grouping key, not a FK).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS activity_events (
+                id            TEXT PRIMARY KEY,
+                user_id       TEXT NOT NULL,
+                session_id    TEXT,
+                package_label TEXT DEFAULT '',
+                event_type    TEXT NOT NULL,
+                event_data    JSONB DEFAULT '{}',
+                created_at    TEXT NOT NULL
+            )
+        """)
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS processed_webhook_events (
                 event_id     TEXT PRIMARY KEY,
@@ -281,6 +311,19 @@ async def init_db() -> None:
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_used_at TEXT",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ip_address TEXT",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent TEXT",
+            # Download audit record (client requirement): score, unresolved issues and
+            # file checksum captured at the moment a package is downloaded.
+            "ALTER TABLE acord_audit_log ADD COLUMN IF NOT EXISTS sqs_score_at_download REAL",
+            "ALTER TABLE acord_audit_log ADD COLUMN IF NOT EXISTS unresolved_issues JSONB",
+            "ALTER TABLE acord_audit_log ADD COLUMN IF NOT EXISTS file_checksum TEXT",
+            # actor_email: for admin-initiated audit events (e.g. license_reset),
+            # records WHICH admin performed the action on the target user's row.
+            "ALTER TABLE acord_audit_log ADD COLUMN IF NOT EXISTS actor_email TEXT",
+            # license_version: which ACORD license modal wording
+            # (ACORD_LICENSE_VERSION in config/settings.py) a user agreed to,
+            # so re-confirmation can be forced when the legal text changes.
+            # (users.acord_license_version is handled by the users column loop above.)
+            "ALTER TABLE acord_audit_log ADD COLUMN IF NOT EXISTS license_version TEXT",
             # retry_count: incremented each time a job is requeued due to semaphore-full or transient error
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0",
             # priority: lower number = higher priority. 1=urgent (paid/retries), 5=default, 9=background.
@@ -308,6 +351,7 @@ async def init_db() -> None:
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ps_user_updated ON processing_sessions(user_id, updated_at DESC)",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_token ON sessions(token)",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)",
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_activity_user_created ON activity_events(user_id, created_at DESC)",
         ]:
             try:
                 await conn.execute(idx_stmt)

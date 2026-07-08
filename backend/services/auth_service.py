@@ -12,6 +12,7 @@ from typing import Optional
 from fastapi import HTTPException, Header, Cookie
 from config.database import get_pool
 from config.settings import SESSION_TTL_H as _CFG_SESSION_TTL_H
+from config.settings import ACORD_LICENSE_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,16 @@ _AUTH_CACHE_TTL        = 30                  # seconds — user dict cache (kept
 _SESSION_TTL_H         = _CFG_SESSION_TTL_H  # hours   — driven by SESSION_TTL_H env var
 _INACTIVITY_TIMEOUT_H  = int(os.getenv("SESSION_INACTIVITY_TIMEOUT_H", "2"))
 _REVOKED_KEY_PFX       = "revoked:"
+
+
+def is_acord_license_current(user: dict) -> bool:
+    """True only if the user confirmed the ACORD license AND under the
+    wording currently in force (ACORD_LICENSE_VERSION). A user who confirmed
+    under an older wording version reads as unconfirmed, so AcordModal is
+    shown again on their next download."""
+    confirmed = bool(int(user.get("acord_license_confirmed", 0) or 0))
+    version   = user.get("acord_license_version") or ""
+    return confirmed and version == ACORD_LICENSE_VERSION
 
 
 async def hash_password(password: str) -> str:

@@ -2811,13 +2811,13 @@ def detect_source_conflicts(docs: List[dict], skip_fields: Optional[set] = None)
             # map cannot collapse the names, never as a definitive hard conflict.
             conflicts.append(
                 f"Carrier names differ across documents for '{field}' - {sources}. "
-                "Flagged for review (possible carrier alias); confirm whether these "
-                "refer to the same carrier."
+                "Flagged for review (possible carrier alias). "
+                "Fix: Confirm whether these refer to the same carrier."
             )
         else:
             conflicts.append(
                 f"Conflicting values for '{field}' across documents - {sources}. "
-                "Review and confirm the correct value."
+                "Fix: Review and confirm the correct value."
             )
     return conflicts
 

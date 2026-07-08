@@ -44,6 +44,8 @@ from routes.download_routes import router as download_router
 from routes.stripe_routes import router as stripe_router
 from routes.signature_routes import router as signature_router
 from routes.arq_routes import router as arq_router
+from routes.activity_routes import router as activity_router
+from routes.assistant_routes import router as assistant_router
 from routes.audit_routes import router as audit_router
 from routes.job_routes import router as job_router
 from routes.admin_routes import router as admin_router
@@ -192,6 +194,8 @@ app.include_router(download_router)
 app.include_router(stripe_router)
 app.include_router(signature_router)
 app.include_router(arq_router)
+app.include_router(activity_router)
+app.include_router(assistant_router)
 app.include_router(audit_router)
 app.include_router(job_router)
 app.include_router(admin_router)

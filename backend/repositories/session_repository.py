@@ -324,19 +324,45 @@ def compute_session_status(data: dict) -> str:
 
 
 # ASYNC-SAFE
-async def count_sessions_for_user(user_id: str) -> int:
+async def count_sessions_for_user(user_id: str, search: str = None) -> int:
     """Total number of processing sessions for a user - drives dashboard paging.
-    Matches the COUNT(*) used by /api/sessions/stats total_packages."""
+    Matches the COUNT(*) used by /api/sessions/stats total_packages.
+    With `search`, counts only packages whose applicant name matches (keyword
+    search); without it, identical to the original unfiltered count."""
     async with get_pool().acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT COUNT(*)::int AS n FROM processing_sessions WHERE user_id = $1",
-            user_id,
-        )
+        if search:
+            row = await conn.fetchrow(
+                """
+                SELECT COUNT(*)::int AS n FROM processing_sessions
+                WHERE user_id = $1
+                  AND COALESCE(NULLIF(data->>'submission_label', ''),
+                               data->'facts'->'applicant_name'->>'value',
+                               data->'facts'->>'applicant_name') ILIKE '%' || $2 || '%'
+                """,
+                user_id, search,
+            )
+        else:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*)::int AS n FROM processing_sessions WHERE user_id = $1",
+                user_id,
+            )
     return int(row["n"]) if row and row["n"] is not None else 0
 
 
 # ASYNC-SAFE
-async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0) -> list:
+async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0, search: str = None) -> list:
+    # Optional keyword filter on the displayed applicant name. Server-side so it
+    # spans the whole account, not just the current page. Backward compatible:
+    # with no search, the query and params are identical to before.
+    search_clause = ""
+    params = [user_id, limit, offset]
+    if search:
+        search_clause = (
+            " AND COALESCE(NULLIF(data->>'submission_label', ''), "
+            "data->'facts'->'applicant_name'->>'value', "
+            "data->'facts'->>'applicant_name') ILIKE '%' || $4 || '%'"
+        )
+        params.append(search)
     async with get_pool().acquire() as conn:
         rows = await conn.fetch(
             """
@@ -364,11 +390,11 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0)
                       AND a.status = 'pending'
                 )                                                    AS arq_pending
             FROM processing_sessions
-            WHERE user_id = $1
+            WHERE user_id = $1""" + search_clause + """
             ORDER BY updated_at DESC
             LIMIT $2 OFFSET $3
             """,
-            user_id, limit, offset,
+            *params,
         )
     result = []
     for row in rows:
