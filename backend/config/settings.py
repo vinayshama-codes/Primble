@@ -100,6 +100,60 @@ ENABLE_ALIAS_STAMPING: bool = os.getenv("ENABLE_ALIAS_STAMPING", "false").lower(
 # per form. Default off → behavior identical to the prior pipeline.
 ENABLE_COMBINED_GAP_FILL: bool = os.getenv("ENABLE_COMBINED_GAP_FILL", "false").lower() == "true"
 
+# Display canonicalization (Beta Report Sec 5 follow-up / Figure 26 trust
+# feedback). When true, values are cleaned to a consistent DISPLAY format before
+# being stamped onto the generated PDF (dates -> MM/DD/YYYY, street suffixes
+# abbreviated, currency grouped, state -> 2-letter, casing standardized) while
+# PRESERVING all content (entity suffix, unit number, ZIP+4). The raw value
+# stays in the fact envelope. This is NON-destructive and distinct from the
+# comparison normalizer in services/normalization.py. Default off -> the raw
+# extracted value is stamped exactly as before.
+ENABLE_DISPLAY_CANONICALIZATION: bool = os.getenv("ENABLE_DISPLAY_CANONICALIZATION", "false").lower() == "true"
+
+# Form-level field QA (Figure 26 client feedback). When true, every mapped ACORD
+# field is checked against its source fact + confidence threshold after
+# generation; fields that fail (empty-required, or stamped value disagrees with
+# the source fact) or need review (AI-inferred) are surfaced in the existing
+# pre-download review so the producer sees them before a clean download. Advisory
+# only - it never blocks the download or alters a value. Default off -> no QA
+# rows are produced and behavior is identical to the prior pipeline.
+ENABLE_FIELD_QA: bool = os.getenv("ENABLE_FIELD_QA", "false").lower() == "true"
+
+# Field-mapping integrity download gate (Figure 33 client feedback). When true,
+# the download routes refuse to serve a package (HTTP 409) while any insured/owner
+# field appears to contain carrier or policy data - the exact bug the client
+# flagged ("Block download if carrier/policy data is mapped into insured/owner
+# fields"). Detection is precise (services/field_mapping_integrity.py): it fires
+# only on a genuine contamination, so a clean package is unaffected. The producer
+# clears it by correcting the field (existing field-edit flow). Default off -> no
+# gate is applied and download behavior is identical to the prior pipeline.
+ENABLE_FIELD_MAPPING_GATE: bool = os.getenv("ENABLE_FIELD_MAPPING_GATE", "false").lower() == "true"
+
+# Full-field cross-document reconciliation (Beta Report Sec 4.3 "and similar
+# fields" -> generalized to every field, per client). When true, the underwriting
+# consistency picker covers EVERY scalar fact that disagrees across documents,
+# not just the curated set - so no field is silently merged. Auto-discovered
+# fields are non-blocking (never a hard stop or a generation block) and use the
+# shared normalizer, so formatting-only differences never surface. Default off ->
+# only the curated RECONCILABLE_FIELDS are reconciled, exactly as before.
+ENABLE_FULL_FIELD_RECONCILIATION: bool = os.getenv("ENABLE_FULL_FIELD_RECONCILIATION", "false").lower() == "true"
+
+# Evidence-gated fill for narrative answer fields (Figure 30 client feedback).
+# When true, free-text "…Explanation" answers produced by the gap-fill LLM are
+# stamped ONLY if the model marked them as copied from the document text
+# (raw_text_sourced). Inferred/boilerplate answers are dropped and left blank so
+# the field becomes a client/producer question instead of being over-filled.
+# Default off → behavior identical to the prior pipeline.
+ENABLE_EVIDENCE_GATED_FILL: bool = os.getenv("ENABLE_EVIDENCE_GATED_FILL", "false").lower() == "true"
+
+# ACORD 101 overflow routing (Figure 29 client feedback). When true, oversized
+# operations/classification narrative that exceeds a form field's practical
+# capacity is ALSO routed in full to the ACORD 101 "Additional Remarks" section
+# (lossless — the originating form field is never truncated), and the ACORD 101
+# RemarkText fields are stamped deterministically from the remarks fact instead
+# of relying on the gap-fill LLM. Default off → behavior identical to prior.
+ENABLE_ACORD101_OVERFLOW: bool = os.getenv("ENABLE_ACORD101_OVERFLOW", "false").lower() == "true"
+
 # Producer-entered answers on the recommendation cards (Fig 13). When true, the
 # "Submit" action on a recommendation writes the typed value into the session as
 # a producer-provenance fact and re-runs the SQS / cross-form rules, instead of

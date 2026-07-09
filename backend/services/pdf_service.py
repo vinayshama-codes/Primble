@@ -176,10 +176,12 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     "PropertyLocation_ConstructionType": _ScheduleDef("property_locations", "construction_type"),
     "PropertyLocation_YearBuilt":        _ScheduleDef("property_locations", "year_built"),
 
-    # ── GL Class Codes by Location (ACORD 126) ───────────────────────────────
-    "GL_LocationClassCode":          _ScheduleDef("gl_class_codes_by_location", "codes"),
-    "GL_ClassCode":                  _ScheduleDef("gl_class_codes_by_location", "codes"),
-    "GL_Location":                   _ScheduleDef("gl_class_codes_by_location", "location"),
+    # ── GL Class Codes (ACORD 126 schedule of hazards) ───────────────────────
+    # NOTE: the real ACORD 126 field names are `GeneralLiability_Hazard_*_A/_B/_C`
+    # (see ACORD_126_schema.json). The former "GL_ClassCode" / "GL_Location" keys
+    # matched no real field and were dead. Structured filling now lives in
+    # `_resolve_gl_hazard_row`, which is checked at the top of `_deterministic_map`
+    # so an absent schedule falls through to gap-fill instead of being blanked.
 
     # ── Inland Marine Items (ACORD 160) ─────────────────────────────────────
     "InlandMarine_ItemDescription":  _ScheduleDef("inland_marine_items", "description"),
@@ -1091,8 +1093,8 @@ _INDICATOR_RULES: Dict[str, Tuple[str, str]] = {
     # Property valuation
     "ValuationCode_ReplacementCostIndicator": ("valuation_method", "rcv"),
     "ValuationCode_ActualCashValueIndicator": ("valuation_method", "acv"),
-    # Loss history
-    "LossHistory_NoPriorLossesIndicator": ("num_claims", "0"),
+    # Loss history — handled by _derive_no_prior_losses_indicator (evidence-driven,
+    # multi-input); intentionally NOT a generic single-key substring rule.
     # Umbrella form type
     "ExcessUmbrella_OccurrenceIndicator": ("gl_form_type", "occurrence"),
     "ExcessUmbrella_ClaimsMadeIndicator": ("gl_form_type", "claims"),
@@ -1118,6 +1120,71 @@ def _resolve_bool_indicator(val) -> str:
     return "Yes" if s in {"yes", "y", "true", "1", "on"} else "No"
 
 
+def _int_or_none(val) -> Optional[int]:
+    """First signed integer in `val`, else None. Booleans and bare text → None."""
+    if val is None or isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return val
+    if isinstance(val, float):
+        return int(val)
+    m = re.search(r"-?\d+", str(val).replace(",", ""))
+    return int(m.group()) if m else None
+
+
+def _money_positive(val) -> bool:
+    """True if `val` parses to a number greater than zero (e.g. '$12,500')."""
+    if val is None or isinstance(val, bool):
+        return False
+    m = re.search(r"-?\d+(?:\.\d+)?", str(val).replace(",", ""))
+    try:
+        return bool(m) and float(m.group()) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _attests_no_loss(val) -> bool:
+    """True when `val` affirmatively states 'no prior/known losses'.
+
+    Accepts booleans, truthy tokens, and free-text no-loss phrasing. A stored
+    "No"/"false"/"0" is NOT an attestation (mirrors sqs_service._attested_true so
+    the form indicator and the P4 loss score can never disagree on the evidence).
+    """
+    if val is None or val is False:
+        return False
+    if val is True:
+        return True
+    s = str(val).strip().lower()
+    if s in {"yes", "y", "true", "1", "on"}:
+        return True
+    return ("no " in s or s.startswith("no")) and ("loss" in s or "claim" in s)
+
+
+def _derive_no_prior_losses_indicator(facts: dict) -> Optional[str]:
+    """Resolve the ACORD 125 'No Prior Losses' checkbox from the SAME evidence the
+    SQS loss-history state rests on, so the printed form and the score agree.
+
+      • Actual claims / incurred present            → "No"  (losses DO exist)
+      • Attested no-loss (user, narrative, or a real 0 claim count) → "Yes"
+      • Nothing extracted either way                → None  (leave BLANK so the
+        questionnaire asks for loss runs / a no-known-loss confirmation instead
+        of a blank box silently reading as "no losses").
+
+    Replaces the previous num_claims=="0" SUBSTRING rule, which mis-fired for any
+    claim count containing the digit 0 (e.g. 10 → "0" in "10" → wrongly "Yes").
+    """
+    claims = _int_or_none(_fv(facts, "num_claims"))
+    if (claims is not None and claims > 0) or _money_positive(_fv(facts, "total_incurred")):
+        return "No"
+    attested = (
+        _attests_no_loss(_fv(facts, "no_prior_losses"))
+        or _attests_no_loss(_fv(facts, "narrative_states_no_losses"))
+        or _attests_no_loss(_fv(facts, "loss_history_no_prior_losses_indicator"))
+        or claims == 0
+    )
+    return "Yes" if attested else None
+
+
 def _derive_indicator(field_name: str, facts: dict) -> Optional[str]:
     """Return 'Yes'/'No' for indicator/checkbox fields based on extracted facts.
 
@@ -1125,6 +1192,10 @@ def _derive_indicator(field_name: str, facts: dict) -> Optional[str]:
     Policy_LineOfBusiness_CommercialGeneralLiability_A (no 'Indicator' suffix).
     """
     fn_lower = field_name.lower()
+    # Loss-history "No Prior Losses" is evidence-driven and multi-input — resolve
+    # it deterministically before the generic single-key substring rules below.
+    if "nopriorlosses" in fn_lower.replace("_", ""):
+        return _derive_no_prior_losses_indicator(facts)
     for substr, (fact_key, match_val) in _INDICATOR_RULES.items():
         if substr.lower() in fn_lower:
             raw = _fv(facts, fact_key)
@@ -1171,7 +1242,57 @@ def _derive_indicator(field_name: str, facts: dict) -> Optional[str]:
     return None
 
 
+# ── GL schedule-of-hazards structured fill (ACORD 126) ───────────────────────
+# Maps each broker-fillable hazard column to its key inside a row of the
+# `gl_class_code_schedule` fact (list of dicts). Kept separate from the generic
+# _SCHEDULE_REGISTRY so an ABSENT schedule falls through to gap-fill (returns
+# "UNMATCHED") instead of being marked an authoritative blank — the client
+# requires missing class/hazard data to remain a visible high-priority gap.
+_GL_HAZARD_COL_TO_KEY = {
+    "ClassCode":        "class_code",
+    "Classification":   "classification",
+    "PremiumBasisCode": "premium_basis",
+    "Exposure":         "exposure_amount",
+    "TerritoryCode":    "territory",
+}
+_GL_HAZARD_ROW_RE = re.compile(
+    r"^GeneralLiability_Hazard_"
+    r"(ClassCode|Classification|PremiumBasisCode|Exposure|TerritoryCode)_([A-N])$"
+)
+
+
+def _resolve_gl_hazard_row(field_name: str, facts: dict):
+    """Resolve an ACORD 126 schedule-of-hazards data cell from the structured
+    `gl_class_code_schedule` fact.
+
+    Returns
+    -------
+    _SCHED_SKIP  — not a GL hazard data field; caller continues normally.
+    str          — the structured value for this row/column.
+    "UNMATCHED"  — GL hazard field with no structured value → send to gap-fill
+                   so the LLM can still read it from raw text (never a silent blank).
+    """
+    m = _GL_HAZARD_ROW_RE.match(field_name)
+    if not m:
+        return _SCHED_SKIP
+    col, letter = m.group(1), m.group(2)
+    idx = _ROW_LETTER_TO_IDX[letter]
+    rows = _fv(facts, "gl_class_code_schedule")
+    if isinstance(rows, list) and idx < len(rows):
+        row = rows[idx]
+        if isinstance(row, dict):
+            val = row.get(_GL_HAZARD_COL_TO_KEY[col])
+            if val is not None and str(val).strip():
+                return str(val).strip()
+    return "UNMATCHED"
+
+
 def _deterministic_map(field_name: str, facts: dict):
+    # ── GL schedule-of-hazards structured cells (highest priority) ───────────
+    gl_haz = _resolve_gl_hazard_row(field_name, facts)
+    if gl_haz is not _SCHED_SKIP:
+        return gl_haz  # value string, or "UNMATCHED" → gap-fill from raw text
+
     # ── Schedule row resolution (highest priority) ───────────────────────────
     sched = _resolve_schedule_row(field_name, facts)
     if sched is not _SCHED_SKIP:
@@ -1727,11 +1848,18 @@ def _fill_unmatched_with_gpt(
     llm_model = model or GPT_MODEL
 
     # ── Filter out schedule/admin fields ─────────────────────────────────────
+    # GL schedule-of-hazards DATA columns are exempted from the skip patterns:
+    # they contain "Hazard_" (and PremiumBasisCode contains "Premium") but ARE
+    # broker-fillable, so when structured extraction missed them the gap-fill LLM
+    # must still get a chance to read them from raw text (client Figure 29).
     eligible_fields = {
         f: meta
         for f, meta in unmatched_fields.items()
         if not _is_schedule_field(f)
-        and not any(p in f for p in _RAW_TEXT_SKIP_PATTERNS)
+        and (
+            _GL_HAZARD_FILLABLE_RE.match(f)
+            or not any(p in f for p in _RAW_TEXT_SKIP_PATTERNS)
+        )
     }
     if not eligible_fields:
         return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": llm_model}
@@ -2268,6 +2396,20 @@ def _fill_unmatched_with_gpt(
     }
 
 
+# GL schedule-of-hazards DATA columns (ACORD 126) that the broker fills from a
+# class-code / payroll / gross-sales schedule. They must be treated as fillable
+# even though the broad "Hazard_" and "Premium" substrings below would otherwise
+# blanket-block the entire hazard block — which force-blanked class codes,
+# exposure basis, exposure amount, territory and classification and hid the
+# high-priority gap the client flagged (Figure 29). The Rate / PremiumAmount
+# columns are deliberately NOT here: those are underwriter-computed and stay
+# blocked by the "Rate_" / "Premium" substrings.
+_GL_HAZARD_FILLABLE_RE = re.compile(
+    r"^GeneralLiability_Hazard_"
+    r"(ClassCode|PremiumBasisCode|Exposure|TerritoryCode|Classification)_[A-N]$"
+)
+
+
 def _is_nonfillable_field(field: str) -> bool:
     """Return True when a field is carrier-computed or administrative and should
     never be retried via GPT even when its cached fact_key is None.
@@ -2275,6 +2417,11 @@ def _is_nonfillable_field(field: str) -> bool:
     These match _RAW_TEXT_SKIP_PATTERNS but are checked by name so we can keep
     Indicator fields OUT of this list (they ARE fillable business fields).
     """
+    # Explicit allow (wins over the broad substrings): GL hazard data columns.
+    # PremiumBasisCode in particular contains the substring "Premium", so this
+    # override is required, not just a matter of dropping "Hazard_".
+    if _GL_HAZARD_FILLABLE_RE.match(field):
+        return False
     _NONFILLABLE_SUBSTRINGS = (
         "Signature", "_Sig", "InsurerLetterCode",
         "Attachment_", "Hazard_", "Premium", "Rate_", "Revision",
@@ -2607,6 +2754,106 @@ _LEGAL_ENTITY_INDICATOR_PRIORITY = (
 
 _ENTITY_BASE_RE = re.compile(r"^(.*LegalEntity_)(\w+Indicator)_([A-N])$")
 
+# ── Post-fill guard helpers (Guards 3 & 4) ───────────────────────────────────
+_CHECKBOX_VALID_VALUES = frozenset({
+    "yes", "no", "y", "n", "true", "false", "1", "0", "on", "off", "x", "checked",
+})
+
+# Tokens that mark a field as PROSE-expecting — such fields are never treated as
+# numeric/date even if a numeric hint also appears in the name (e.g.
+# "AnyExposure...Explanation", "Hazard_Classification").
+_PROSE_FIELD_TOKENS = (
+    "Explanation", "Description", "Remark", "Comment", "Operations",
+    "Classification", "Narrative", "FullName", "Address", "Name",
+)
+# Field-name hints that a value must be numeric / a code / a date — never prose.
+# Deliberately tight: "Number" is excluded (policy numbers are alphanumeric).
+_NUMERIC_DATE_FIELD_HINTS = (
+    "_Amount", "Deductible", "Count", "Percent", "PostalCode", "ZipCode",
+    "Hazard_Exposure", "YearBuilt", "ModelYear", "OwnershipPercent", "Date",
+)
+
+
+def _is_numeric_or_date_field(field: str) -> bool:
+    if any(t in field for t in _PROSE_FIELD_TOKENS):
+        return False
+    return any(h in field for h in _NUMERIC_DATE_FIELD_HINTS)
+
+
+def _looks_like_number_or_date(s: str) -> bool:
+    """True when the string is only digits/punctuation/currency/space — a number,
+    code, money or date carrying no prose words."""
+    return bool(re.fullmatch(r"[\s\d.,/$%()\-:+#]+", s or ""))
+
+
+def _is_evidence_required_field(field: str) -> bool:
+    """Narrative answers to Yes/No application questions (the "…Explanation"
+    fields — e.g. ACORD 126 claims-made / employee-benefits sections). Under
+    ENABLE_EVIDENCE_GATED_FILL these are stamped only when the gap-fill LLM
+    copied them from the document, never when inferred (client Figure 30)."""
+    return "Explanation" in field
+
+
+# ── ACORD 101 overflow routing (Figure 29) ───────────────────────────────────
+# A single ACORD /Tx field holds far less than a full operations/classification
+# narrative. When such text exceeds this budget it is routed IN FULL to the
+# ACORD 101 "Additional Remarks" section — losslessly (the originating form's
+# field is never truncated). Gated by ENABLE_ACORD101_OVERFLOW.
+_OVERFLOW_CHAR_THRESHOLD = 300
+_ACORD101_REMARK_ROWS = ("A", "B", "C", "D", "E", "F")
+
+
+def _compose_acord101_remarks(facts: dict) -> List[str]:
+    """Ordered, de-duplicated remark blocks destined for ACORD 101."""
+    blocks: List[str] = []
+    # 1. Explicit remarks fact (conflict explanations, client answers via ARQ).
+    for key in ("acord101_remarks", "additional_remarks_text"):
+        v = _fv(facts, key)
+        if not v:
+            continue
+        if isinstance(v, list):
+            blocks.extend(str(x).strip() for x in v if str(x).strip())
+        elif str(v).strip():
+            blocks.append(str(v).strip())
+    # 2. Oversized operations narrative that will not fit its form field.
+    ops = _fv(facts, "operations_description")
+    if ops and len(str(ops).strip()) > _OVERFLOW_CHAR_THRESHOLD:
+        blocks.append("Operations (continued): " + str(ops).strip())
+    seen: set = set()
+    out: List[str] = []
+    for b in blocks:
+        k = b.lower()
+        if k and k not in seen:
+            seen.add(k)
+            out.append(b)
+    return out
+
+
+def _apply_acord101_overflow(mapped: dict, schema: dict, facts: dict,
+                             deterministic_filled: set) -> None:
+    """Stamp ACORD 101 RemarkText rows from the composed remark blocks. Remarks
+    are authoritative for ACORD 101, so this overrides any gap-fill guess. Any
+    surplus beyond the last available row is concatenated into it (never dropped)."""
+    blocks = _compose_acord101_remarks(facts)
+    if not blocks:
+        return
+    rows = [
+        f"AdditionalRemark_RemarkText_{r}"
+        for r in _ACORD101_REMARK_ROWS
+        if f"AdditionalRemark_RemarkText_{r}" in schema
+    ]
+    if not rows:
+        return
+    if len(blocks) > len(rows):
+        values = blocks[: len(rows) - 1] + ["\n\n".join(blocks[len(rows) - 1:])]
+    else:
+        values = blocks
+    for field, text in zip(rows, values):
+        mapped[field] = text
+        deterministic_filled.add(field)
+    logger.info("acord101_overflow: filled %d remark row(s) from %d block(s)",
+                len(values), len(blocks))
+
 
 def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict) -> None:
     """Deterministic safety nets applied to `mapped` in place AFTER all fill
@@ -2619,8 +2866,17 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict) -> None:
 
     Guard 2 - Repeating-row de-duplication: non-schedule repeating rows
               (NamedInsured_FullName_B, premises rows, etc.) must not echo the
-              row-A value. Schedule fields are exempt - two vehicles can share
-              a model year. Only collapses an exact duplicate of row A.
+              row-A value. Schedule / GL-hazard fields are exempt - two vehicles
+              can share a model year. Only collapses an exact duplicate of row A.
+
+    Guard 3 - Wrong-type value rejection: prose dropped into a checkbox or a
+              numeric/date cell (e.g. a contractor description in a per-claim
+              deductible box) is always wrong — blank it (Figure 30).
+
+    Guard 4 - Cross-field boilerplate bleed: the same generic sentence pasted
+              into 3+ unrelated field families is boilerplate, not data. Keep
+              only the field(s) whose own deterministic rule produces that value
+              and blank the rest (Figure 30).
     """
     # ── Guard 1: legal-entity mutual exclusion ───────────────────────────────
     # Group entity indicator fields present in this schema by their row letter.
@@ -2689,8 +2945,8 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict) -> None:
         base, letter = m.group(1), m.group(2)
         if _ROW_LETTER_TO_IDX[letter] < 1:
             continue  # row A is the canonical row — never blanked
-        if _is_schedule_field(field):
-            continue  # schedule rows may legitimately repeat values
+        if _is_schedule_field(field) or _GL_HAZARD_ROW_RE.match(field):
+            continue  # schedule / GL hazard rows may legitimately repeat values
         # Checkbox/indicator rows legitimately share Yes/No across distinct entities
         # (two LLCs both have LLC=Yes; two locations can both be "inside city limits").
         # De-duplication must only collapse free-text VALUE rows (names, addresses).
@@ -2704,6 +2960,56 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict) -> None:
         if a_val is not None and str(val).strip() and str(val).strip() == str(a_val).strip():
             mapped[field] = None
             logger.info("post_fill_guard row_dedup blanked=%s (== %s)", field, row_a)
+
+    # ── Guard 3: wrong-type value rejection ──────────────────────────────────
+    # An LLM sometimes drops a prose description into a field that structurally
+    # cannot hold prose (a checkbox, or a numeric/date cell) — e.g. the reported
+    # "COMMERCIAL GENERAL CONTRACTOR" landing in a per-claim DEDUCTIBLE box
+    # (Figure 30). These are always wrong, so blank them deterministically.
+    for field, val in list(mapped.items()):
+        if val is None or not isinstance(val, str):
+            continue
+        s = val.strip()
+        if not s:
+            continue
+        meta = schema.get(field) or {}
+        is_checkbox = isinstance(meta, dict) and meta.get("ft") == "/Btn"
+        prose_like = bool(re.search(r"[A-Za-z]{3,}\s+[A-Za-z]{3,}", s))
+        if is_checkbox and s.lower() not in _CHECKBOX_VALID_VALUES:
+            mapped[field] = None
+            logger.info("post_fill_guard type_reject blanked=%s (checkbox got %r)", field, s[:40])
+        elif prose_like and _is_numeric_or_date_field(field):
+            mapped[field] = None
+            logger.info("post_fill_guard type_reject blanked=%s (numeric/date got prose %r)", field, s[:40])
+
+    # ── Guard 4: cross-field boilerplate bleed ───────────────────────────────
+    # The same generic sentence pasted into several UNRELATED fields is boilerplate
+    # bleed, not real data (Figure 30). Group non-trivial free-text values; when one
+    # value spans 3+ distinct field families, keep only the field(s) whose own
+    # deterministic rule legitimately produces that value (e.g. the real operations
+    # description field) and blank the rest.
+    value_to_fields: Dict[str, List[str]] = {}
+    for field, val in mapped.items():
+        if not isinstance(val, str):
+            continue
+        s = val.strip()
+        if len(s) < 20 or " " not in s or _looks_like_number_or_date(s):
+            continue
+        value_to_fields.setdefault(s.lower(), []).append(field)
+
+    for val_l, fields in value_to_fields.items():
+        families = {
+            (_SCHED_ROW_RE.match(f).group(1) if _SCHED_ROW_RE.match(f) else f)
+            for f in fields
+        }
+        if len(families) < 3:
+            continue  # not a broad enough spread to be confident it's bleed
+        for f in fields:
+            det = _deterministic_map(f, facts)
+            legit_owner = isinstance(det, str) and det.strip().lower() == val_l
+            if not legit_owner:
+                mapped[f] = None
+                logger.info("post_fill_guard boilerplate_bleed blanked=%s", f)
 
 
 def map_facts_to_form(
@@ -2816,6 +3122,7 @@ def map_facts_to_form(
             logger.warning("map_facts ALIAS form=%s | error: %s", form_id, exc)
 
     gpt_raw_fields: set = set()
+    gpt_filled_set: set = set()
 
     if unmatched and pre_filled_gpt is not None:
         # Combined gap-fill path: consume pre-computed values from the cross-form
@@ -2856,11 +3163,72 @@ def map_facts_to_form(
             form_id or "unknown", len(gpt_filled_set), len(unmatched), len(gpt_raw_fields),
         )
 
+    # ── Evidence-gated fill (opt-in, Figure 30) ──────────────────────────────
+    # Narrative answers to Yes/No application questions must be grounded in the
+    # document. Drop any "…Explanation" value the gap-fill LLM INFERRED rather
+    # than copied from raw text, so the field becomes a client/producer question
+    # instead of being over-filled with a generic description. Deterministic and
+    # raw-text-sourced values are untouched.
+    try:
+        from config.settings import ENABLE_EVIDENCE_GATED_FILL
+    except Exception:                              # noqa: BLE001
+        ENABLE_EVIDENCE_GATED_FILL = False
+    if ENABLE_EVIDENCE_GATED_FILL:
+        _gated = 0
+        for field in gpt_filled_set:
+            if field in gpt_raw_fields:
+                continue
+            if _is_evidence_required_field(field) and mapped.get(field) is not None:
+                mapped[field] = None
+                _gated += 1
+        if _gated:
+            logger.info(
+                "map_facts EVIDENCE_GATE form=%s | dropped_inferred=%d",
+                form_id or "unknown", _gated,
+            )
+
+    # ── ACORD 101 overflow routing (opt-in, Figure 29) ───────────────────────
+    # Oversized operations/classification narrative and accumulated remarks are
+    # routed IN FULL to this form's Additional Remarks rows. Only ACORD 101 owns
+    # these fields, so this is self-contained and lossless for every other form.
+    if form_id == "ACORD_101":
+        try:
+            from config.settings import ENABLE_ACORD101_OVERFLOW
+        except Exception:                          # noqa: BLE001
+            ENABLE_ACORD101_OVERFLOW = False
+        if ENABLE_ACORD101_OVERFLOW:
+            _apply_acord101_overflow(mapped, schema, facts, _deterministic_filled)
+
     # ── Post-fill deterministic guards ───────────────────────────────────────
     # Enforce invariants the gap-fill prompt can only request, not guarantee:
     # legal-entity mutual exclusion and repeating-row de-duplication. Runs on the
     # merged result so it corrects values from any source (Pass 1, alias, GPT).
     _enforce_post_fill_guards(mapped, schema, facts)
+
+    # ── Display canonicalization (Beta feedback: stamp clean, standardized
+    # values, not raw OCR strings) ───────────────────────────────────────────
+    # NON-destructive: standardizes date / currency / address / name / state
+    # formatting while PRESERVING all content (entity suffix, unit number,
+    # ZIP+4). The raw value stays in the fact envelope for verification. This is
+    # distinct from services/normalization.py, whose stripped comparison key must
+    # never be stamped. Gated OFF by default so behavior is identical to the
+    # prior pipeline unless ENABLE_DISPLAY_CANONICALIZATION is set.
+    try:
+        from config.settings import ENABLE_DISPLAY_CANONICALIZATION
+    except Exception:
+        ENABLE_DISPLAY_CANONICALIZATION = False
+    if ENABLE_DISPLAY_CANONICALIZATION:
+        try:
+            from services.display_canonicalizer import canonicalize_for_field
+            for _field in list(mapped.keys()):
+                _val = mapped.get(_field)
+                if _val is None:
+                    continue
+                _clean = canonicalize_for_field(_field, _val)
+                if _clean is not None and _clean != _val:
+                    mapped[_field] = _clean
+        except Exception as _cex:
+            logger.warning("display canonicalization skipped (form=%s): %s", form_id, _cex)
 
     # ── Confidence / highlight assignment ────────────────────────────────────
     # A filled value is "confident" (no highlight) when it was either filled by

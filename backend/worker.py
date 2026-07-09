@@ -242,7 +242,7 @@ async def _process_form_generation_job(job: dict, queue) -> None:
         from repositories.session_repository import get_processing_session, upd_processing_session
         from services.form_service import process_single_form
         from services.sqs_service import cross_validate, calculate_package_sqs, SQS_MODEL_VERSION
-        from services.audit_service import log_recommendations_presented
+        from services.audit_service import log_recommendations_presented, run_and_log_field_qa
         import os as _os
 
         session = await get_processing_session(session_id)
@@ -418,6 +418,14 @@ async def _process_form_generation_job(job: dict, queue) -> None:
                     )
                 except Exception as ex:
                     logger.warning("Job %s: audit log failed for %s: %s", job_id, fid, ex)
+
+        # Form-level field QA (Figure 26): parity with the sync route. Advisory;
+        # gated OFF by default.
+        await run_and_log_field_qa(
+            session_id, user_id, results,
+            session.get("facts") or {}, session.get("underwriting_confirmations") or {},
+            _os.getenv("ENABLE_FIELD_QA", "false").lower() == "true",
+        )
 
         completion_result: dict = {"session_id": session_id, "form_ids": list(results.keys())}
         if failed_form_ids:

@@ -58,6 +58,7 @@ from services.audit_service import (
     log_integrity_resolution,
     log_document_reclassified,
     log_underwriting_confirmation,
+    run_and_log_field_qa,
 )
 from utils.rate_limiter import check_upload_rate_limit
 from utils.concurrency import try_acquire_heavy, release_heavy
@@ -1188,6 +1189,16 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                 except Exception as _audit_ex:
                     logger.warning(f"Audit log failed for {fid}: {_audit_ex}")
 
+        # Form-level field QA (Figure 26): check every mapped field against its
+        # source fact + confidence threshold and surface fails/reviews in the
+        # existing pre-download review. Advisory only; gated OFF by default.
+        from config.settings import ENABLE_FIELD_QA
+        await run_and_log_field_qa(
+            req.session_id, str(current_user["id"]), results,
+            session.get("facts") or {}, session.get("underwriting_confirmations") or {},
+            ENABLE_FIELD_QA,
+        )
+
         await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": req.session_id, "form_ids": combined_ids})
 
         return JSONResponse({
@@ -1694,6 +1705,16 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             "cross_issues_last": _display_cross,
             "underwriting_stamp_consistency": _stamp_check,
         })
+
+        # Refresh field-QA advisories after the edit so a fixed field stops being
+        # flagged and a newly-introduced mismatch is caught. Advisory; gated off.
+        from config.settings import ENABLE_FIELD_QA
+        await run_and_log_field_qa(
+            req.session_id, str(current_user["id"]), generated,
+            updated_facts, session.get("underwriting_confirmations") or {},
+            ENABLE_FIELD_QA,
+        )
+
         return JSONResponse({"success": True, "sqs": sqs, "confidence": confidence,
                              "package_sqs": pkg_sqs, "cross_issues": _display_cross,
                              "stamp_consistency": _stamp_check})

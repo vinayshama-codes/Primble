@@ -440,6 +440,15 @@ FACT_REGISTRY: dict[str, dict] = {
         "validate":    None,
         "format_hint": None,
     },
+    "gl_class_code_schedule": {
+        "forms":       {"ACORD_126"},
+        "question":    "Provide the GL rating schedule per class code (class code, "
+                       "premium/exposure basis, exposure amount i.e. payroll or gross "
+                       "sales, territory, and subcontracted %).",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": "List of class-code rows with rating basis and exposure",
+    },
     "retro_date": {
         "forms":       {"ACORD_126"},
         "question":    "What was the original continuous coverage start date? (Required for claims-made policies)",

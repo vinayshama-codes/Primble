@@ -516,6 +516,52 @@ def _suggest_for_field(fact_key: str, kind: str, values: List[dict]) -> Optional
     }
 
 
+# ── Full-field reconciliation helpers (generic all-scalar-field picker) ───────
+
+def _full_field_enabled() -> bool:
+    """Whether generic all-field reconciliation is enabled (settings flag).
+
+    Lazy import keeps this module import-pure (it otherwise imports only the
+    normalization layer) and unit-testable in isolation. Default False -> only
+    the curated RECONCILABLE_FIELDS are reconciled, exactly as before.
+    """
+    try:
+        from config.settings import ENABLE_FULL_FIELD_RECONCILIATION
+        return bool(ENABLE_FULL_FIELD_RECONCILIATION)
+    except Exception:
+        return False
+
+
+def _humanize(fact_key: str) -> str:
+    """Readable label for an auto-discovered fact key
+    ('gl_each_occurrence_limit' -> 'Gl Each Occurrence Limit')."""
+    return fact_key.replace("_", " ").strip().title() or fact_key
+
+
+def _auto_scalar_keys(docs: List[dict], exclude: set) -> set:
+    """Fact keys eligible for generic cross-document reconciliation.
+
+    Any SCALAR fact (not list / dict / bool) present in the documents that is not
+    already a curated reconcilable field and not a private/internal ('_'-prefixed)
+    key. Determined from the actual values, so it needs no static schema and
+    never trips over list/structured facts - those cannot use a two-value picker
+    and are intentionally left to the existing detectors.
+    """
+    keys: set = set()
+    for d in docs or []:
+        facts = d.get("facts") or {}
+        if not isinstance(facts, dict):
+            continue
+        for k, v in facts.items():
+            if not k or k.startswith("_") or k in exclude or k in keys:
+                continue
+            val = v["value"] if isinstance(v, dict) and "value" in v else v
+            if val is None or isinstance(val, (list, dict, bool)):
+                continue
+            keys.add(k)
+    return keys
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def assess_underwriting_consistency(
@@ -579,10 +625,26 @@ def assess_underwriting_consistency(
 
     fields_out: List[dict] = []
     conflict_count = 0
+    assessed_keys: set = set()
 
-    for fact_key, cfg in RECONCILABLE_FIELDS.items():
+    # Effective registry = the curated fields, plus (when full-field
+    # reconciliation is enabled) every OTHER scalar fact present across the
+    # documents. This closes the "silent-fill" gap for fields outside the curated
+    # set: a cross-document disagreement on ANY scalar fact now gets a user
+    # choice instead of a silent merge. Auto fields are identity-kind (routed
+    # through the shared normalizer, so formatting-only differences never
+    # conflict), never hard stops, never generation-blocking. Flag OFF ->
+    # effective == RECONCILABLE_FIELDS and behavior is identical to before.
+    effective_fields = dict(RECONCILABLE_FIELDS)
+    if _full_field_enabled():
+        for _k in _auto_scalar_keys(docs, exclude=set(RECONCILABLE_FIELDS)):
+            effective_fields[_k] = {"label": _humanize(_k), "kind": "identity", "forms": [], "_auto": True}
+
+    for fact_key, cfg in effective_fields.items():
         kind = cfg["kind"]
         label = cfg["label"]
+        is_auto = bool(cfg.get("_auto"))
+        assessed_keys.add(fact_key)
 
         # Group raw values by their normalized form, recording every source doc.
         # Two-pass approach:
@@ -622,9 +684,11 @@ def assess_underwriting_consistency(
 
             # Pass 2: text-scan of raw OCR.
             # Only add a text-scan value if it is DIFFERENT from the LLM value,
-            # so we don't double-report an agreed value.
+            # so we don't double-report an agreed value. Skipped for auto-
+            # discovered fields (they have no bespoke pattern and the generic
+            # label scan adds cost without a reliable signal for arbitrary keys).
             raw_text = d.get("text") or ""
-            if raw_text:
+            if raw_text and not is_auto:
                 for scanned_raw in _text_scan_values(raw_text, fact_key):
                     scanned_norm = _normalize(scanned_raw, kind, fact_key)
                     if not scanned_norm or scanned_norm == llm_norm:
@@ -667,6 +731,15 @@ def assess_underwriting_consistency(
         else:
             status = "confirmed"   # confirmed-only handled above; unreachable
             review_required = False
+
+        # Auto-discovered fields only surface when actionable (conflict or a
+        # stored confirmation). A consistent auto field adds nothing to review
+        # and would only bloat the payload/UI - it stays OWNED (already recorded
+        # in assessed_keys above, so the crude detector skips it) but is not
+        # listed. Curated fields keep their existing behavior (consistent rows
+        # are still emitted, unchanged).
+        if is_auto and status == "consistent":
+            continue
 
         # Figure 3: recommend the most complete/correct value + a confidence level.
         # Only computed for an OPEN conflict — a confirmed/consistent field needs
@@ -725,6 +798,10 @@ def assess_underwriting_consistency(
         "fields":          fields_out,
         "review_required": any(f["review_required"] for f in fields_out),
         "conflict_count":  conflict_count,
+        # Every fact key this pass evaluated (curated + auto). The pipeline unions
+        # this into detect_source_conflicts' skip set so an auto-reconciled field
+        # is never ALSO reported as a raw-string source conflict (no double count).
+        "assessed_keys":   sorted(assessed_keys),
         "model_version":   UNDERWRITING_CONSISTENCY_MODEL_VERSION,
         "assessed_at":     now,
     }

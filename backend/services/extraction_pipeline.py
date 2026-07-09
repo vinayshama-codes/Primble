@@ -632,7 +632,12 @@ async def _finalize_pipeline(
         }
         source_conflicts = detect_source_conflicts(
             active_docs,
-            skip_fields=set(RECONCILABLE_FIELD_KEYS) | _consistency_owned,
+            # Union the keys the reconciler actually assessed (curated + any
+            # auto-discovered scalar fields when full-field reconciliation is on)
+            # so a field owned by the picker is never double-reported here.
+            skip_fields=set(RECONCILABLE_FIELD_KEYS)
+            | _consistency_owned
+            | set(underwriting.get("assessed_keys") or []),
         )
         if source_conflicts:
             logger.info("Source conflicts detected across docs: %d", len(source_conflicts))

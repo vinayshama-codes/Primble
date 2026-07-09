@@ -91,6 +91,16 @@ _EXTRACT_SCHEMA = (
     '  "gl_fire_damage_limit": string or null,\n'
     '  "gl_medical_expense": string or null,\n'
     '  "gl_class_codes_by_location": [{"location": string, "codes": [string]}],\n'
+    # GL schedule of hazards (ACORD 126): one object per class-code row. Capture
+    # the RATING data SEPARATELY from the operations_description narrative.
+    #   premium_basis    = exposure/premium basis: the code or word shown on the
+    #                      form (P=Payroll, S=Gross Sales, A=Area, U=Unit,
+    #                      C=Total Cost, M=Admissions, T=Per $1,000/other).
+    #   exposure_amount  = the basis figure itself (payroll $ or gross sales $).
+    #   subcontractor_pct= % of this class code's work that is subcontracted.
+    # Emit [] when no class-code / payroll / gross-sales schedule is present; do
+    # NOT synthesize rows from the prose operations description.
+    '  "gl_class_code_schedule": [{"location": string or null, "class_code": string or null, "classification": string or null, "premium_basis": string or null, "exposure_amount": string or null, "territory": string or null, "subcontractor_pct": string or null}],\n'
     '  "gl_deductible": string or null, "gl_form_type": string or null,\n'
     '  "retro_date": string or null,\n'
     '  "carrier_name": string or null,\n'
@@ -1176,7 +1186,8 @@ _STRUCTURED_DICT_FIELDS = frozenset({
 _LIST_FIELDS = frozenset({
     "lines_of_business", "locations", "property_locations",
     "auto_vin_schedule", "auto_garaging_addresses", "auto_drivers",
-    "gl_class_codes_by_location", "wc_class_codes", "underlying_policies",
+    "gl_class_codes_by_location", "gl_class_code_schedule",
+    "wc_class_codes", "underlying_policies",
     "additional_named_insureds", "auto_covered_symbols",
     "loss_history", "prior_coverage_by_line", "wc_officers",
     "inland_marine_items", "contractor_high_hazard_ops",
@@ -1432,7 +1443,8 @@ def _parse_flat_json(raw: str, context: str = "") -> dict:
 # ── Chunking ──────────────────────────────────────────────────────────────────
 _LONG_DOC_LIST_KEYS = [
     "locations", "property_locations", "auto_vin_schedule", "auto_garaging_addresses",
-    "auto_drivers", "gl_class_codes_by_location", "wc_class_codes", "underlying_policies",
+    "auto_drivers", "gl_class_codes_by_location", "gl_class_code_schedule",
+    "wc_class_codes", "underlying_policies",
     "additional_named_insureds", "auto_covered_symbols",
     "loss_history", "prior_coverage_by_line", "wc_officers",
     "inland_marine_items", "contractor_high_hazard_ops",
@@ -2719,6 +2731,7 @@ _FIELD_CONFIDENCE_SOURCES: Dict[str, Tuple[str, ...]] = {
     "wc_payroll_by_state":           ("application",),
     "num_employees":                 ("application",),
     "gl_class_codes_by_location":    ("application",),
+    "gl_class_code_schedule":        ("application", "payroll_report", "gross_sales_report"),
     "wc_class_codes":                ("application",),
     "fein":                          ("application", "dec_page"),
     "years_in_business":             ("application", "dec_page"),

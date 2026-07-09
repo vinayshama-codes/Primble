@@ -88,6 +88,91 @@ async def log_recommendations_presented(
 
 
 # ASYNC-SAFE
+async def sync_field_qa_findings(
+    session_id: str,
+    user_id: str,
+    rows: list,
+    model_version: str,
+) -> None:
+    """Replace this session's field-QA advisory rows with the current set.
+
+    Field QA is RECOMPUTED on every generation, so the prior field_qa rows for
+    the session are cleared first and the fresh findings inserted - a field that
+    got fixed stops showing, a still-open one stays. Reuses the shared
+    sqs_recommendation_audit table (recommendation_type='field_qa') so the
+    existing pre-download review surfaces these with no new UI or endpoint. These
+    rows are advisory/soft - they never block a download.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        async with get_pool().acquire() as conn:
+            async with conn.transaction():
+                # Clear the previous QA snapshot for this session only.
+                await conn.execute(
+                    "DELETE FROM sqs_recommendation_audit "
+                    "WHERE session_id=$1 AND recommendation_type='field_qa'",
+                    session_id,
+                )
+                for rec in rows or []:
+                    await conn.execute(
+                        """
+                        INSERT INTO sqs_recommendation_audit (
+                            id, session_id, user_id, form_id, rec_id, field,
+                            recommendation_type, component, message, score_impact,
+                            presented_at, sqs_score_at_presentation, model_version
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                        ON CONFLICT (session_id, rec_id) DO NOTHING
+                        """,
+                        f"audit_{uuid.uuid4().hex}",
+                        session_id, user_id, rec.get("component"), rec.get("rec_id"),
+                        rec.get("field"),
+                        "field_qa",
+                        rec.get("component"),
+                        rec.get("message"),
+                        rec.get("score_impact"),
+                        now, None, model_version,
+                    )
+        if rows:
+            logger.info("Logged %d field-QA finding(s) for session %s", len(rows), session_id)
+    except Exception as ex:
+        logger.warning(f"sync_field_qa_findings failed for session {session_id}: {ex}")
+
+
+# ASYNC-SAFE
+async def run_and_log_field_qa(
+    session_id: str,
+    user_id: str,
+    generated_forms: dict,
+    merged_facts: dict,
+    confirmations: Optional[dict],
+    enabled: bool,
+) -> None:
+    """Run form-level field QA and refresh its pre-download advisory rows.
+
+    Single entry point used by every generation path (sync route, field-edit
+    route, async worker) so the behavior can't drift between them. No-op unless
+    ``enabled`` (ENABLE_FIELD_QA). Never raises - QA is advisory and must never
+    break generation.
+    """
+    if not enabled:
+        return
+    try:
+        from services.field_qa import (
+            run_field_qa, to_recommendation_rows, FIELD_QA_MODEL_VERSION,
+        )
+        qa = run_field_qa(
+            generated_forms,
+            merged_facts=merged_facts or {},
+            confirmations=confirmations or {},
+        )
+        await sync_field_qa_findings(
+            session_id, user_id, to_recommendation_rows(qa), FIELD_QA_MODEL_VERSION,
+        )
+    except Exception as ex:
+        logger.warning(f"run_and_log_field_qa skipped for session {session_id}: {ex}")
+
+
+# ASYNC-SAFE
 async def log_field_change(
     session_id: str,
     user_id: str,
