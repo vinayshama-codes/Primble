@@ -1338,3 +1338,70 @@ TIER2_SCORED_FIELDS: dict[str, str] = {
     for k, v in FACT_REGISTRY.items()
     if v.get("tier") == 2
 }
+
+# ---------------------------------------------------------------------------
+# Schedule row validation — validates the ROWS inside a list fact (e.g. one
+# driver inside auto_drivers). Separate from FACT_REGISTRY's scalar
+# ``validate`` above, which only ever sees one string value, never a list of
+# dicts.
+#
+# Each rule: {"required": bool, "validate": callable(value) -> bool or None}.
+# A sub-key with no rule entry is never checked. "required" only flags a
+# missing value; it does not block anything downstream (field_qa, the sole
+# consumer, is advisory-only — see services/field_qa.py).
+# ---------------------------------------------------------------------------
+
+def _is_experience_years(v) -> bool:
+    try:
+        n = float(str(v).strip())
+        return 0 <= n <= 75
+    except (ValueError, TypeError):
+        return False
+
+
+SCHEDULE_ROW_RULES: dict[str, dict[str, dict]] = {
+    # ACORD 127 driver schedule (Figure 32 client feedback).
+    "auto_drivers": {
+        "name":                {"required": True,  "validate": lambda v: len(str(v).strip()) >= 2},
+        "dob":                 {"required": False, "validate": _is_date},
+        "license_number":      {"required": True,  "validate": lambda v: len(str(v).strip()) >= 3},
+        "license_state":       {"required": False, "validate": None},
+        "hire_date":           {"required": False, "validate": _is_date},
+        "experience_years":    {"required": False, "validate": _is_experience_years},
+        "vehicle_use_percent": {"required": False, "validate": _is_percent},
+    },
+}
+
+
+def validate_schedule_rows(list_key: str, rows) -> list[dict]:
+    """Validate every row of a schedule list fact against SCHEDULE_ROW_RULES.
+
+    Returns a list of {"row_index", "sub_key", "issue" ("missing"|"invalid"),
+    "value"} dicts — empty if ``list_key`` has no registered rules, ``rows``
+    isn't a list, or every row passes. Never raises: a validator exception is
+    treated as "invalid", not propagated.
+    """
+    rules = SCHEDULE_ROW_RULES.get(list_key)
+    if not rules or not isinstance(rows, list):
+        return []
+    issues: list[dict] = []
+    for idx, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        for sub_key, rule in rules.items():
+            val = row.get(sub_key)
+            has_val = val is not None and str(val).strip().lower() not in ("", "null", "none")
+            if not has_val:
+                if rule.get("required"):
+                    issues.append({"row_index": idx, "sub_key": sub_key, "issue": "missing", "value": None})
+                continue
+            validator = rule.get("validate")
+            if validator is None:
+                continue
+            try:
+                ok = bool(validator(val))
+            except Exception:
+                ok = False
+            if not ok:
+                issues.append({"row_index": idx, "sub_key": sub_key, "issue": "invalid", "value": str(val)})
+    return issues

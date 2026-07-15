@@ -42,6 +42,7 @@ from services.pdf_service import (
     extract_form_fields_with_positions, get_page_dims_pikepdf, regenerate_pdf_for_form,
     fill_pdf, _is_signature_field, _load_fieldmap,
     apply_acord125_missing_field_highlights,
+    apply_acord126_missing_field_highlights,
     extract_form_schema, compute_form_gaps, combined_gap_fill,
 )
 from services.sqs_service import (
@@ -59,6 +60,7 @@ from services.audit_service import (
     log_document_reclassified,
     log_underwriting_confirmation,
     run_and_log_field_qa,
+    run_and_log_field_mapping_check,
 )
 from utils.rate_limiter import check_upload_rate_limit
 from utils.concurrency import try_acquire_heavy, release_heavy
@@ -1199,6 +1201,14 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             ENABLE_FIELD_QA,
         )
 
+        # Field-mapping integrity warnings (Figure 33): carrier/policy data in an
+        # insured/owner field. Always on, no feature flag - surfaces as a warning
+        # on the pre-download and post-download screens; never blocks.
+        await run_and_log_field_mapping_check(
+            req.session_id, str(current_user["id"]), results,
+            session.get("facts") or {}, session.get("underwriting_confirmations") or {},
+        )
+
         await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": req.session_id, "form_ids": combined_ids})
 
         return JSONResponse({
@@ -1353,6 +1363,9 @@ async def get_form_fields(
     confidence = apply_acord125_missing_field_highlights(
         form_id, proc_session.get("facts", {}), field_state, confidence
     )
+    confidence = apply_acord126_missing_field_highlights(
+        form_id, proc_session.get("facts", {}), field_state, confidence
+    )
 
     for f in fields:
         name = f["name"]
@@ -1475,6 +1488,9 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                     confidence[k] = "low_confidence"
 
         confidence = apply_acord125_missing_field_highlights(
+            form_id, session.get("facts", {}), current_state, confidence
+        )
+        confidence = apply_acord126_missing_field_highlights(
             form_id, session.get("facts", {}), current_state, confidence
         )
 
@@ -1713,6 +1729,13 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             req.session_id, str(current_user["id"]), generated,
             updated_facts, session.get("underwriting_confirmations") or {},
             ENABLE_FIELD_QA,
+        )
+
+        # Field-mapping integrity warnings (Figure 33): refresh after the edit so
+        # a fixed field stops being flagged. Always on; never blocks.
+        await run_and_log_field_mapping_check(
+            req.session_id, str(current_user["id"]), generated,
+            updated_facts, session.get("underwriting_confirmations") or {},
         )
 
         return JSONResponse({"success": True, "sqs": sqs, "confidence": confidence,

@@ -385,16 +385,13 @@ async def _finalize_pipeline(
     # misread as an attestation - bool("No") is True in Python, which would have
     # wrongly credited a no-loss attestation for an insured that DOES have losses.
     from services.sqs_service import _attested_true
+    from services.normalization import detect_no_loss_assertion
     _npl = merged_facts.get("loss_history_no_prior_losses_indicator")
     if isinstance(_npl, dict):
         _npl = _npl.get("value")
     if _attested_true(_npl):
         mflags["no_prior_losses"] = True
 
-    _no_loss_phrases = (
-        "no prior losses", "no losses", "no prior claims",
-        "no claims", "clean loss history", "favorable loss history",
-    )
     # M5 fix: collect which fact keys were contributed by narrative docs so
     # _derive_evidence_labels can emit "stated_in_narrative" for them.
     _narrative_fact_keys: set = set()
@@ -407,8 +404,12 @@ async def _finalize_pipeline(
         # table is classified as loss_run, so the old narrative-only gate missed it.
         # The conflict guard in _loss_history_conflict() (claims > 0 or incurred > 0)
         # prevents false positives: a clean loss run mentioning "no losses" won't fire
-        # conflict because num_claims = 0.
-        if any(p in _ndoc_text for p in _no_loss_phrases):
+        # conflict because num_claims = 0. Threshold phrasing ("no losses exceed $10,000")
+        # is excluded up front by detect_no_loss_assertion - see its docstring
+        # (services/normalization.py) - the same detector pdf_service.py uses to
+        # decide the LossHistory_NoPriorLossesIndicator_A checkbox, so the two
+        # can never disagree with each other.
+        if detect_no_loss_assertion(_ndoc_text):
             mflags["narrative_states_no_losses"] = True
         # Fact provenance attribution stays narrative-only — we only label facts as
         # "stated in narrative" when the source document is actually a narrative.

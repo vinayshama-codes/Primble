@@ -2221,7 +2221,7 @@ const AcordModal = forwardRef(function AcordModal({
     try {
       const res = await fetch(`${API_BASE}/api/download-pdf/${sessionId}/${formId}?include_cover=false`, { credentials: "include" });
       if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.payment_locked) { setError("Account payment overdue."); return; } if (d.upgrade_required) { onShowUpgrade(); return; } setError(d.message || "Download blocked"); return; }
-      if (!res.ok) { setError("Download failed"); return; }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.detail?.message || d.message || "Download failed"); return; }
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
       const blob = await res.blob(); const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = `${formId}_Package.zip`;
@@ -2256,7 +2256,7 @@ const AcordModal = forwardRef(function AcordModal({
     try {
       const res = await fetch(`${API_BASE}/api/download-pdf/${sessionId}/${formId}`, { credentials: "include" });
       if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.payment_locked) { setError("Account payment overdue."); return; } if (d.upgrade_required) { onShowUpgrade(); return; } setError(d.message || "Download blocked"); return; }
-      if (!res.ok) { setError("Download failed"); return; }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.detail?.message || d.message || "Download failed"); return; }
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
       const blob = await res.blob(); const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = `${formId}_Package.zip`;
@@ -2273,7 +2273,7 @@ const AcordModal = forwardRef(function AcordModal({
     try {
       const res = await fetch(`${API_BASE}/api/download-all/${sessionId}`, { credentials: "include" });
       if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.payment_locked) { setError("Account payment overdue."); return; } if (d.upgrade_required) { onShowUpgrade(); return; } setError(d.message || "Download blocked"); return; }
-      if (!res.ok) { setError("Download failed"); return; }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.detail?.message || d.message || "Download failed"); return; }
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
       const blob = await res.blob(); const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = "ACORD_Package_Primble.zip";
@@ -5012,6 +5012,9 @@ const AcordModal = forwardRef(function AcordModal({
                               onClick={(e) => openProv("loss_history", "state", e.currentTarget)}
                               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProv("loss_history", "state", e.currentTarget); } }}
                               style={{ fontSize: 9.5, fontWeight: 600, cursor: "pointer", width: "fit-content", textDecoration: provCard?.group === "loss_history" ? "underline" : "none", color: packageSqs.loss_history_state === "loss_history_conflicting" || packageSqs.loss_history_state === "loss_runs_do_not_match" ? "#dc2626" : (packageSqs.loss_history_state === "no_information" ? "#b45309" : "#334155") }}>{LOSS_HISTORY_STATE_LABEL[packageSqs.loss_history_state] || packageSqs.loss_history_state}</div>
+                            {packageSqs.loss_history_state_client_label && (
+                              <div style={{ fontSize: 8.5, color: "#94a3b8", marginTop: 2, textTransform: "uppercase", letterSpacing: 0.3 }}>{packageSqs.loss_history_state_client_label}</div>
+                            )}
                             {packageSqs.loss_history_state === "no_information" && (
                               <div style={{ fontSize: 9.5, color: "#64748b", marginTop: 3, lineHeight: 1.4 }}>Request loss runs or have the client confirm via the questionnaire.</div>
                             )}

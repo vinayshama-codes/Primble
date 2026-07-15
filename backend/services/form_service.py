@@ -8,7 +8,7 @@ from typing import Dict, FrozenSet, List, Optional, Tuple
 
 from config.settings import TEMPLATE_DIR, FORMS_DB_DIR, FORMS_INDEX
 from services.extraction_service import _fv, _is_empty
-from services.pdf_service import extract_form_schema, map_facts_to_form, fill_pdf
+from services.pdf_service import extract_form_schema, map_facts_to_form, fill_pdf, _OVERFLOW_CHAR_THRESHOLD
 from services.sqs_service import cross_validate, calculate_sqs, _check_loss_run_insured_match, _extract_narrative_doc_text
 from utils.validators import US_STATES, run_field_validations
 
@@ -1396,6 +1396,17 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
 
     if _fv(facts, "gl_class_codes_by_location") and len(ops) < 30 and not _fv(facts, "occupancy_type"):
         _101_optional_reasons.append("GL class codes present but operations description is vague (<30 chars)")
+
+    # Operations narrative too long for its own ACORD field (Figure 29 overflow).
+    # pdf_service.combined_gap_fill routes the full text to ACORD 101's Additional
+    # Remarks rows losslessly, but only if ACORD 101 is actually in the packet -
+    # this is what gets it there. Same threshold pdf_service uses to decide a
+    # field can't hold the text, so the two stay in lockstep by construction.
+    if len(ops) > _OVERFLOW_CHAR_THRESHOLD:
+        _101_recommended_reasons.append(
+            f"operations narrative is {len(ops)} characters - exceeds field capacity, "
+            "full text continues on ACORD 101"
+        )
 
     _payroll_str = _fv(facts, "total_payroll") or _fv(facts, "wc_payroll")
     _revenue_str = _fv(facts, "total_revenue")

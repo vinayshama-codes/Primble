@@ -37,6 +37,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from services.normalization import normalize_value
+from services.fact_registry import FACT_REGISTRY, SCHEDULE_ROW_RULES, validate_schedule_rows
 from services.field_mapping_integrity import is_high_impact_field
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ FIELD_QA_MODEL_VERSION = "1.0.0"
 _CONF_VERDICT = {
     "filled": "pass",
     "client_arq": "pass",
+    "ai_verified": "pass",       # AI value confirmed present in the documents
     "low_confidence": "review",
     "missing_required": "fail",
 }
@@ -134,7 +136,11 @@ def run_field_qa(
     fail = review = passed = checked = 0
 
     try:
-        from services.pdf_service import fact_to_form_fields
+        from services.pdf_service import (
+            fact_to_form_fields,
+            expected_value_for_field,
+            _is_nonfillable_field,
+        )
     except Exception as exc:                              # pragma: no cover
         logger.warning("field_qa: pdf_service unavailable - %s", exc)
         return {
@@ -172,6 +178,7 @@ def run_field_qa(
         fr = fr or {}
         mapped = fr.get("field_state") or fr.get("mapped") or {}
         confidence = fr.get("confidence") or {}
+        schema = fr.get("schema") or {}
         # Every schema field carries a confidence label; the mapped dict holds the
         # values. Union so empty required fields (missing_required) are included.
         all_fields = set(confidence.keys()) | set(mapped.keys())
@@ -183,15 +190,27 @@ def run_field_qa(
             # High-impact fields (Figure 33: insured/owner identity, auto
             # ownership, HNOA, leasing, hazardous materials, maintenance) are
             # surfaced individually rather than rolled into the generic summary,
-            # so a loosely-inferred value here is never buried.
-            high_impact = is_high_impact_field(field)
+            # so a loosely-inferred value here is never buried. The schema
+            # tooltip is passed too: several of these questions' Yes/No ANSWER
+            # fields carry an opaque ACORD code as their field name (the
+            # descriptive text exists only in the tooltip) - the tooltip is what
+            # lets the answer itself, not just its free-text explanation, be
+            # recognized as high-impact.
+            _tu = (schema.get(field) or {}).get("tu") if isinstance(schema.get(field), dict) else None
+            high_impact = is_high_impact_field(field, _tu)
 
             # (1) Value-vs-source: a stamped value that materially disagrees with
-            # its source fact is a fail regardless of confidence label.
+            # its source fact is a fail regardless of confidence label. Address
+            # sub-fields (LineOne/City/State/Zip) only ever hold ONE piece of the
+            # full address - expected_value_for_field() extracts the matching
+            # piece so e.g. a stamped city isn't compared against the whole
+            # street+city+state+zip fact string (which would never match).
             fact_key = field_fact.get((form_id, field))
             if has_val and fact_key and fact_key in fact_expected:
-                expected = fact_expected[fact_key]
-                if not _value_matches(fact_key, val, expected):
+                expected = expected_value_for_field(field, fact_key, fact_expected[fact_key])
+                if not expected:
+                    pass  # this field's piece has no signal - fall through to (2)
+                elif not _value_matches(fact_key, val, expected):
                     checked += 1
                     fail += 1
                     results.append({
@@ -260,10 +279,91 @@ def run_field_qa(
                     "stamped":  str(val),
                     "expected": None,
                 })
+            elif verdict == "review" and not has_val and not _is_nonfillable_field(field):
+                # NOT-ANSWERED: the field was a fillable gap-fill candidate (no
+                # deterministic rule) that the AI returned null/omitted for. It is
+                # not required, so it produces NO signal anywhere else: pink needs
+                # a value (pdf_service:944), yellow needs `required` (pdf_service:942),
+                # and the low_confidence review branch above needs a value. Without
+                # this branch, an AI silently skipping a standard question (e.g. an
+                # ACORD 125 compliance Y/N code) is a fully invisible failure mode.
+                # Surface it as an advisory review item so the non-answer is visible.
+                checked += 1
+                review += 1
+                results.append({
+                    "form_id":     form_id,
+                    "field":       field,
+                    "field_label": _humanize_field(field),
+                    "fact_key":    None,
+                    "verdict":     "review",
+                    "reason_code": "not_answered",
+                    "high_impact": high_impact,
+                    "message": (
+                        f"{_humanize_field(field)} on {form_id.replace('ACORD_', 'ACORD ')} "
+                        + (
+                            "is a high-impact question the AI left blank (no value found "
+                            "in the documents). Fix: Answer it manually if it applies."
+                            if high_impact else
+                            "was left blank by the AI (no value found in the documents). "
+                            "Fix: Answer it manually if it applies."
+                        )
+                    ),
+                    "stamped":  None,
+                    "expected": None,
+                })
             elif verdict == "pass" and has_val:
                 checked += 1
                 passed += 1
-            # (review with no value / pass with no value -> nothing to report)
+            # (pass with no value -> nothing to report)
+
+    # ── Schedule row QA (Figure 32 driver-schedule client feedback) ─────────
+    # Validates ROWS inside a list fact (e.g. one driver inside auto_drivers)
+    # against fact_registry.SCHEDULE_ROW_RULES. Only surfaced when a form that
+    # actually consumes the list fact was generated, so e.g. driver-row issues
+    # never appear when ACORD 127 wasn't selected.
+    generated_form_ids = set(generated_forms.keys())
+    for list_key in SCHEDULE_ROW_RULES:
+        entry = FACT_REGISTRY.get(list_key) or {}
+        if not (entry.get("forms") or set()) & generated_form_ids:
+            continue
+        rows_val = confirmations.get(list_key)
+        if rows_val is None:
+            rows_val = _fv(merged_facts, list_key)
+        if not isinstance(rows_val, list) or not rows_val:
+            continue
+        target_form = next(iter(entry.get("forms") or [""]), "")
+        for issue in validate_schedule_rows(list_key, rows_val):
+            checked += 1
+            row_label = f"{_humanize_field(list_key)} row {issue['row_index'] + 1}"
+            sub_label = issue["sub_key"].replace("_", " ")
+            if issue["issue"] == "missing":
+                fail += 1
+                verdict, reason = "fail", "schedule_row_missing"
+                message = (
+                    f"{row_label}: {sub_label} is required but missing. "
+                    "Fix: Provide a value or remove the row."
+                )
+                stamped = None
+            else:
+                review += 1
+                verdict, reason = "review", "schedule_row_invalid"
+                message = (
+                    f"{row_label}: {sub_label} value \"{issue.get('value')}\" "
+                    "does not look valid. Fix: Verify against the source document."
+                )
+                stamped = issue.get("value")
+            results.append({
+                "form_id":     target_form,
+                "field":       f"{list_key}[{issue['row_index']}].{issue['sub_key']}",
+                "field_label": f"{row_label} - {sub_label}",
+                "fact_key":    list_key,
+                "verdict":     verdict,
+                "reason_code": reason,
+                "high_impact": False,
+                "message":     message,
+                "stamped":     stamped,
+                "expected":    None,
+            })
 
     if fail or review:
         logger.info(
@@ -290,6 +390,17 @@ def _rec_id(*parts: str) -> str:
     return f"fieldqa_{slug.strip('_')[:80]}"
 
 
+# A trailing single- or double-letter row suffix (_A, _B, ... _AA, _AB, ...) -
+# ACORD's repeating-schedule convention (see pdf_service._ROW_LETTER_TO_IDX).
+# Used ONLY to GROUP high-impact recommendation rows for display; never
+# affects which field is actually checked or highlighted.
+_ROW_SUFFIX_STRIP_RE = re.compile(r"_[A-Z]{1,2}$")
+
+
+def _base_field_for_grouping(field: str) -> str:
+    return _ROW_SUFFIX_STRIP_RE.sub("", field or "")
+
+
 def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
     """Translate a run_field_qa() result into rows for the existing pre-download
     review (sqs_recommendation_audit / DownloadPreflightModal).
@@ -299,33 +410,58 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
     the source" items), while empty-required and AI-inferred fields - which are
     ALREADY shown by the existing yellow/pink highlights and the N Required /
     N Review badges - are rolled up into a SINGLE summary row so the review
-    stays readable. All rows are recommendation_type 'field_qa' (soft; the
-    producer can still Download Anyway).
+    stays readable. All rows use recommendation_type 'suggestion' (soft; the
+    producer can still Download Anyway) - identifiable as field-QA via the
+    "fieldqa_" rec_id prefix (see _rec_id / sync_field_qa_findings).
+
+    High-impact rows (Figure 33) are surfaced individually so a loosely-
+    inferred or empty high-impact field is never buried - but a form with many
+    repeating schedule slots (e.g. ACORD 137_CA's Vehicle_NonOwned_
+    StateOrProvinceCode_A/_B/.../_AA/_AB/...) previously produced ONE row PER
+    slot, all with near-identical wording (client feedback 2026-07-15: "mostly
+    repeating or mostly similar"). Rows sharing the same form + underlying
+    field (row suffix stripped) + reason are now merged into a single row with
+    a count - still individually visible, no longer duplicated per slot.
     """
     if not qa_result:
         return []
     rows: List[dict] = []
     n_missing = 0
     n_review = 0
+    n_blank = 0
+    high_impact_groups: Dict[tuple, dict] = {}
+
     for item in qa_result.get("results") or []:
         code = item.get("reason_code")
         if code == "value_mismatch":
             rows.append({
                 "rec_id":       _rec_id(item.get("form_id"), item.get("field"), "mismatch"),
                 "message":      item.get("message"),
-                "type":         "field_qa",
+                # sqs_recommendation_audit.recommendation_type has a fixed CHECK
+                # constraint ('hard_stop','soft_warning','missing_field',
+                # 'suggestion') - reuse the existing generic 'suggestion' type
+                # (the same default log_recommendations_presented() already uses)
+                # rather than adding a new allowed value / migration. Rows stay
+                # identifiable as field-QA via the "fieldqa_" rec_id prefix.
+                "type":         "suggestion",
                 "field":        item.get("field"),
                 "component":    item.get("form_id"),
                 "score_impact": None,
             })
         elif item.get("high_impact"):
-            # High-impact fields (Figure 33) are surfaced INDIVIDUALLY so a
-            # loosely-inferred or empty high-impact field is never buried in the
-            # rollup. Still soft ('field_qa') - advisory, never blocks.
+            form_id = item.get("form_id")
+            field = item.get("field") or ""
+            key = (form_id, _base_field_for_grouping(field), code)
+            grp = high_impact_groups.setdefault(key, {"fields": [], "message": item.get("message")})
+            grp["fields"].append(field)
+        elif code in ("schedule_row_missing", "schedule_row_invalid"):
+            # Individual driver-schedule row issues (Figure 32) - surfaced like
+            # value_mismatch rather than rolled into the summary count, since
+            # each is a distinct, actionable row/sub-field.
             rows.append({
-                "rec_id":       _rec_id(item.get("form_id"), item.get("field"), code or "high_impact"),
+                "rec_id":       _rec_id(item.get("form_id"), item.get("field"), code),
                 "message":      item.get("message"),
-                "type":         "field_qa",
+                "type":         "suggestion",
                 "field":        item.get("field"),
                 "component":    item.get("form_id"),
                 "score_impact": None,
@@ -334,20 +470,55 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
             n_missing += 1
         elif code == "low_confidence":
             n_review += 1
+        elif code == "not_answered":
+            # Non-high-impact blanks roll into the summary count (high-impact ones
+            # were surfaced individually by the high_impact branch above).
+            n_blank += 1
 
-    if n_missing or n_review:
+    for (form_id, base_field, code), grp in high_impact_groups.items():
+        fields = grp["fields"]
+        n = len(fields)
+        if n == 1:
+            message = grp["message"]
+        else:
+            label = _humanize_field(base_field)
+            form_label = (form_id or "").replace("ACORD_", "ACORD ")
+            if code == "low_confidence":
+                verb = "were AI-inferred (not copied verbatim from a document)"
+                action = "Confirm each against the source before sending."
+            elif code == "not_answered":
+                verb = "were left blank by the AI (no value found in the documents)"
+                action = "Answer manually if they apply."
+            else:  # missing_required
+                verb = "are required but empty"
+                action = "Provide values before sending."
+            message = (
+                f"{label} on {form_label}: {n} high-impact repeating rows {verb}. Fix: {action}"
+            )
+        rows.append({
+            "rec_id":       _rec_id(form_id, base_field, code, "grp"),
+            "message":      message,
+            "type":         "suggestion",
+            "field":        fields[0] if n == 1 else None,
+            "component":    form_id,
+            "score_impact": None,
+        })
+
+    if n_missing or n_review or n_blank:
         parts = []
         if n_missing:
             parts.append(f"{n_missing} required field{'s' if n_missing != 1 else ''} still empty")
         if n_review:
             parts.append(f"{n_review} AI-inferred field{'s' if n_review != 1 else ''} to verify")
+        if n_blank:
+            parts.append(f"{n_blank} field{'s' if n_blank != 1 else ''} the AI left blank")
         rows.append({
             "rec_id":       "fieldqa_summary",
             "message": (
                 "Field QA: " + " and ".join(parts)
                 + ". Review the highlighted fields before a clean download."
             ),
-            "type":         "field_qa",
+            "type":         "suggestion",
             "field":        None,
             "component":    None,
             "score_impact": None,

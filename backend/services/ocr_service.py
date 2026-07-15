@@ -2,11 +2,12 @@ import asyncio
 import base64
 import json
 import os
+import re
 import logging
 import tempfile
 import uuid
 import zipfile
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
 import pdfplumber
@@ -285,13 +286,148 @@ def extract_images_from_pdf(pdf_path: str) -> List[str]:
     return out_paths
 
 
+# ── Two-column label/value scramble recovery ──────────────────────────────
+# pdfplumber's default extract_text() (and layout=True, and Google Vision's
+# own document_text_detection - both tested, both fail identically) read a
+# page in a single global top-to-bottom order. On a genuine two-column
+# label/value block (e.g. "CARRIER" in a left column, the carrier name in a
+# right column) whose row heights drift even slightly between the two
+# columns - common in Word/reporting-engine table exports - that single
+# reading order interleaves the wrong label with the wrong value ("CARRIER:
+# 84-2210987", the actual FEIN, instead of the actual carrier name).
+#
+# Recovery: detect the corruption by its fingerprint (a meaningful fraction
+# of lines are a bare label with NOTHING after it on the same line - which a
+# correctly-paired document essentially never produces), then reconstruct
+# just that y-band by splitting words into two x-clusters and pairing lines
+# by their ORDINAL position within each column (not by matching absolute
+# y-coordinates, which is what breaks under drift). The reflow is scoped to
+# only the y-band containing the scrambled lines - not the whole page - so a
+# genuine multi-column table elsewhere on the same page (Schedule of
+# Hazards, a vehicle schedule, ...) is left untouched. If the fingerprint
+# isn't present, or the reflow doesn't actually reduce it, the untouched
+# default extraction is used - this never makes a normal document worse.
+_BARE_LABEL_RE = re.compile(r'^[A-Za-z][A-Za-z0-9 /\-\']{1,40}:\s*$')
+_COLUMN_GAP_THRESHOLD = 40   # points; the x-gap that marks a real column boundary
+
+
+def _cluster_words_into_lines(words: list, y_tol: float = 4) -> List[str]:
+    words = sorted(words, key=lambda w: (w["top"], w["x0"]))
+    lines: List[list] = []
+    cur: list = []
+    cur_top: Optional[float] = None
+    for w in words:
+        if cur and abs(w["top"] - cur_top) > y_tol:
+            lines.append(cur)
+            cur = []
+        cur.append(w)
+        cur_top = w["top"] if cur_top is None else (cur_top if abs(w["top"] - cur_top) <= y_tol else w["top"])
+    if cur:
+        lines.append(cur)
+    return [" ".join(x["text"] for x in sorted(ln, key=lambda w: w["x0"])) for ln in lines]
+
+
+def _reflow_two_column_words(words: list) -> Optional[str]:
+    """Split words into two x-clusters at the single largest horizontal gap
+    and pair lines by ordinal position within each column. Returns None when
+    no gap wide enough to be a real column boundary is found."""
+    if not words:
+        return None
+    xs = sorted(w["x0"] for w in words)
+    gaps = sorted(
+        ((xs[i + 1] - xs[i], xs[i], xs[i + 1]) for i in range(len(xs) - 1)),
+        reverse=True,
+    )
+    if not gaps or gaps[0][0] < _COLUMN_GAP_THRESHOLD:
+        return None
+    split_x = (gaps[0][1] + gaps[0][2]) / 2
+    left  = _cluster_words_into_lines([w for w in words if w["x0"] < split_x])
+    right = _cluster_words_into_lines([w for w in words if w["x0"] >= split_x])
+    n = max(len(left), len(right))
+    out = []
+    for i in range(n):
+        l = left[i] if i < len(left) else ""
+        r = right[i] if i < len(right) else ""
+        out.append(f"{l} {r}".strip())
+    return "\n".join(out)
+
+
+def _extract_page_text_smart(page) -> str:
+    """Default extraction, unless the page shows the bare-label scramble
+    fingerprint - then attempt a scoped column-reflow recovery and use it
+    only if that recovery actually reduces the fingerprint. See module
+    comment above for the full rationale."""
+    default = page.extract_text() or ""
+
+    try:
+        words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
+    except Exception:
+        return default
+    if not words:
+        return default
+
+    # Line groups WITH bounding boxes (needed to find the scrambled y-band).
+    sorted_words = sorted(words, key=lambda w: (w["top"], w["x0"]))
+    groups: List[list] = []
+    cur: list = []
+    cur_top: Optional[float] = None
+    for w in sorted_words:
+        if cur and abs(w["top"] - cur_top) > 4:
+            groups.append(cur)
+            cur = []
+        cur.append(w)
+        cur_top = w["top"] if cur_top is None else (cur_top if abs(w["top"] - cur_top) <= 4 else w["top"])
+    if cur:
+        groups.append(cur)
+
+    lines_bbox = []
+    for g in groups:
+        text = " ".join(x["text"] for x in sorted(g, key=lambda w: w["x0"]))
+        lines_bbox.append((text, min(x["top"] for x in g), max(x["bottom"] for x in g)))
+
+    bare = [(t, top, bot) for t, top, bot in lines_bbox if _BARE_LABEL_RE.match(t.strip())]
+    total_lines = len(lines_bbox) or 1
+    if len(bare) < 3 or (len(bare) / total_lines) < 0.15:
+        return default  # no scramble fingerprint - untouched, zero risk
+
+    line_heights = [b - t for _, t, b in lines_bbox if b > t]
+    avg_h = (sum(line_heights) / len(line_heights)) if line_heights else 12
+    zone_top    = max(0.0, min(top for _, top, _ in bare) - avg_h * 2)
+    zone_bottom = min(page.height, max(bot for _, _, bot in bare) + avg_h * (len(bare) + 3))
+
+    try:
+        zone = page.within_bbox((0, zone_top, page.width, zone_bottom))
+        zone_words = zone.extract_words(use_text_flow=False, keep_blank_chars=False)
+        zone_default = zone.extract_text() or ""
+    except Exception:
+        return default
+
+    reflowed_zone = _reflow_two_column_words(zone_words)
+    if reflowed_zone is None:
+        return default
+
+    bare_before = sum(1 for l in zone_default.splitlines() if _BARE_LABEL_RE.match(l.strip()))
+    bare_after  = sum(1 for l in reflowed_zone.splitlines() if _BARE_LABEL_RE.match(l.strip()))
+    if bare_after >= bare_before:
+        return default  # reflow didn't actually help here - don't ship a guess
+
+    try:
+        before_text = (page.within_bbox((0, 0, page.width, zone_top)).extract_text() or "")
+        after_text  = (page.within_bbox((0, zone_bottom, page.width, page.height)).extract_text() or "")
+    except Exception:
+        return default
+
+    parts = [p for p in (before_text, reflowed_zone, after_text) if p.strip()]
+    return "\n".join(parts)
+
+
 def _pdfplumber_extract(pdf_path: str) -> str:
     """Sync pdfplumber text extraction — called via executor."""
     text = ""
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
-                t = page.extract_text()
+                t = _extract_page_text_smart(page)
                 if t:
                     text += t + "\n"
     except Exception as ex:

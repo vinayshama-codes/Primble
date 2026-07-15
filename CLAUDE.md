@@ -207,8 +207,13 @@ OPENAI_MAX_CONCURRENT=8
 OCR_PROVIDER=google   # google | google_vision | vision (all mean Google Cloud Vision)
 
 # Feature flags (new pipeline)
-ENABLE_ALIAS_STAMPING=true    # Pass 1.5 deterministic alias fill
-ENABLE_COMBINED_GAP_FILL=true # Stages 4-6 shared LLM gap fill
+ENABLE_ALIAS_STAMPING=true             # Pass 1.5 deterministic alias fill
+ENABLE_COMBINED_GAP_FILL=true          # Stages 4-6 shared LLM gap fill
+ENABLE_DISPLAY_CANONICALIZATION=true   # Clean/standardized display formatting
+ENABLE_FIELD_QA=true                   # Post-generation per-field QA + review surfacing
+ENABLE_FULL_FIELD_RECONCILIATION=true  # Cross-document conflict picker for every field
+ENABLE_EVIDENCE_GATED_FILL=true        # Figure 30/33: drop ungrounded Y-N/narrative answers, all forms
+ENABLE_ACORD101_OVERFLOW=true          # Figure 29: overflow narrative to ACORD 101
 
 # Job queue
 JOB_QUEUE_BACKEND=db          # db | memory | local_file | sqs
@@ -232,8 +237,16 @@ SESSION_TTL_H=8
 |------|---------|-----------------|
 | `ENABLE_ALIAS_STAMPING` | false | Activates Pass 1.5: fills fields from alias maps without LLM |
 | `ENABLE_COMBINED_GAP_FILL` | false | Stages 4-6: one shared gap fill instead of per-form LLM calls |
+| `ENABLE_DISPLAY_CANONICALIZATION` | false | Standardizes date/currency/address/name/state display formatting on stamped values (non-destructive; raw value stays in the fact envelope) |
+| `ENABLE_FIELD_QA` | false | Runs post-generation per-field QA (confidence threshold + source-fact agreement); surfaces fail/review items in the pre-download modal. Advisory only, never blocks or mutates |
+| `ENABLE_FULL_FIELD_RECONCILIATION` | false | Extends the underwriting cross-document conflict picker to every scalar fact, not just the curated set |
+| `ENABLE_EVIDENCE_GATED_FILL` | false | Figure 30/33, generalized: gates **every** gap-fill Yes/No answer on every form (compliance "…Question_*Code_*" fields, every `/Btn` checkbox regardless of topic, and any other field whose tooltip is the ACORD Y/N-entry convention) plus their paired "…Explanation"/"…OtherDescription"/"…ResolutionDescription" narrative, dropping either when not grounded in the uploaded document text |
+| `ENABLE_ACORD101_OVERFLOW` | false | Figure 29: routes oversized operations/classification narrative + accumulated remarks in full to ACORD 101's Additional Remarks rows (lossless) |
+| `ENABLE_PRODUCER_ANSWERS` | true | "Submit" on a recommendation card writes a producer-provenance fact and re-runs SQS/cross-form rules, instead of only dismissing. Set false to fall back to dismiss-only |
 | `ENABLE_ASYNC_PROCESSING` | false | Returns 202 + runs jobs in worker.py background process |
 | `DEV_ROUTES_ENABLED` | false | Enables dev/test endpoints |
+
+**All 5 flags above marked default `false` but effectively on in this deployment are set `true` in `backend/.env`** (see the env var block above) — the table default is what a fresh environment gets without that file.
 
 ---
 
@@ -257,6 +270,117 @@ Three specific bugs in `backend/services/pdf_service.py`:
    Full code in `CHANGES_THIS_CHAT.txt`.
 
 Expected result after fix: 17 minutes → 3–4 minutes.
+
+**Status note (2026-07-10):** items 1 and 2 above are already implemented in current code
+(`max_completion_tokens=_FORM_FILL_MAX_TOKENS` in `_call_llm_sync()`; `_chunk_pool_size = 1
+if (len(field_list) > 200 or _is_combined_batch) else min(...)`). Item 3's field-batching
+is done via `_COMBINED_FIELD_BATCH` (200/batch), but the "truncate raw text to 160k chars"
+half was deliberately NOT implemented — full-document chunking is used instead so no text
+is dropped. See the repeating-group bug below for a newly-found root cause of the
+"~400 chars/field" bloat this section cites.
+
+### PDF Text Extraction Can Scramble Label/Value Pairs — FIXED (2026-07-11)
+**Was the root cause of carrier/agency swaps and address bleeds into unrelated fields.**
+`services/ocr_service.py::_pdfplumber_extract()` called `page.extract_text()` with no
+layout mode. On a two-column dec page (labels in one column, values in another) whose row
+heights drift even slightly between the two columns, pdfplumber's default reading order
+interleaves the wrong label with the wrong value — e.g. "CARRIER: 84-2210987" (the FEIN)
+instead of the real carrier name.
+
+Confirmed by direct A/B test (2026-07-10): identical source content, submitted once as a
+clean `.txt` and once as an equivalent two-column PDF. The `.txt` run filled carrier,
+policy #, effective date, all 6 limits, and both Y/N explanation fields correctly. The PDF
+run produced a carrier/agency swap, an address bled into an unrelated Additional Interest
+block, and blank limits/dates — same code, same flags, only the input format differed.
+
+**Both originally-proposed fix candidates were tested and REJECTED** — `extract_text
+(layout=True)` and Google Vision's `document_text_detection` both reproduce the identical
+wrong pairing on a drifted two-column layout. Neither understands semantic label/value
+correspondence; both just impose a different global reading order.
+
+**Actual fix — scoped column-reflow recovery**, in `ocr_service.py` (`_extract_page_text_smart`,
+`_reflow_two_column_words`, `_cluster_words_into_lines`, wired into `_pdfplumber_extract`):
+1. Detect the corruption by its fingerprint — a meaningful fraction of lines are a bare
+   label with nothing after it on the same line (`"Legal Entity:"` alone), which a
+   correctly-paired document essentially never produces.
+2. If absent, return `extract_text()` unchanged — zero risk to normal documents.
+3. If present, isolate the y-band containing the scrambled lines only (via
+   `page.within_bbox()`), split that band's words into two x-clusters at the largest
+   horizontal gap, and pair lines by ORDINAL position within each column (not by matching
+   absolute y-coordinates, which is what breaks under drift).
+4. Content above/below that band (a heading, an unrelated table further down the same
+   page) is extracted normally and spliced back in untouched.
+5. If the reflow doesn't actually reduce the bare-label count, fall back to default
+   extraction rather than ship a guess.
+
+Verified against 4 cases before shipping: the original scrambled repro (fixed), a normal
+single-column paragraph (byte-identical to default), a genuine 3+ column table alone
+(byte-identical to default — the critical false-positive guard), and a composite page with
+a scrambled identity block AND a real table on the same page (identity block fixed, table
+untouched — the critical regression guard). Full backend suite (440 tests) run before and
+after with zero new failures. Regression tests: `backend/tests/test_ocr_column_reflow.py`.
+
+### Evidence Gate Only Covered ~8 Forms' Compliance Questions, Not Every Yes/No Field — FIXED (2026-07-15)
+**Client requirement: "in all the forms... certain fields where Y/N/Yes/No to be filled...
+only fill if we found concrete evidence... if yes, add explanation in the adjacent field;
+if no, no explanation needed."** `ENABLE_EVIDENCE_GATED_FILL` (Figure 30) already did exactly
+this, but only for fields matching the `_Question_<code>Code_` naming convention — the
+compliance-question family on 8 forms (125/126/127/130/131/141/160/186). A prior session
+(Figure 33 audit) had already extended it to the auto ownership/HNOA checkbox pairs on
+137/138 that lack that name. Neither covered the other 1500+ `/Btn` checkbox fields across
+all 17 schemas (sink hole, mine subsidence, building improvements, entity type, LOB
+selection, ...) or the `/Tx` "Enter Y for a Yes response..." text-field convention used on
+forms like 140/25 that don't use `_Question_Code_` naming at all — a gap-fill hallucination
+on any of those shipped to the PDF completely unchecked.
+
+**Fix — `services/pdf_service.py`:** a new `_is_yes_no_field(field, schema)` recognizes a
+Yes/No field via three schema-driven signals (any one sufficient): the `_Question_<code>
+Code_` name pattern, `ft == "/Btn"` (any checkbox, not just high-impact ones), or a tooltip
+starting with the ACORD "Enter Y for a "Yes" response..." boilerplate. The evidence-gate
+Pass A/B logic (`_is_gated_field` inside `map_facts_to_form`) now delegates to it instead of
+name-matching alone, and the gap-fill prompt's rule 8 now asks for a grounding quote on
+every such field, not just Question-code/high-impact ones (the two sides must move
+together — the gate blanks anything ungrounded, so the prompt must actually ask for
+grounding wherever the gate now checks for it, or every newly-covered field would get
+wiped). `_question_explanation_pairs` (the "…Explanation"/"…OtherDescription" adjacency
+pairing) was separately broadened to include `/Btn` checkboxes — this is exactly the very
+common ACORD `"…OtherIndicator_<row>"` → `"…OtherDescription_<row>"` convention ("Other"
+checked → please specify), present on 10+ forms and previously invisible to this function.
+
+**Deliberately did NOT** extend pairing to the tooltip-only signal: auditing all 17 real
+schemas found 2 cases (out of 175 candidate pairs) where a `/Tx` Yes/No field by tooltip
+convention sits directly before an unrelated `Explanation`/`OtherDescription` field from a
+different form section — a checkbox's PDF layout position is a stronger structural signal
+than an arbitrarily-ordered text field's, so pairing trusts `_Question_Code_` naming and
+`/Btn` type but not the broader tooltip signal (which is still used to gate that field's own
+answer, just not to pair it with a neighbor). Deterministic Pass 1 / alias-stamped values are
+untouched either way — this only ever governs what the gap-fill LLM guesses.
+
+Verified against the real schemas (not just synthetic test fixtures): confirmed the fix adds
+69 legitimate pairs across 6 forms that previously had zero pairing coverage (140/186/28),
+and confirmed both known-bad coincidental adjacencies are excluded by name. Full backend
+suite (556 tests) run before and after with zero new failures (2 pre-existing, unrelated
+failures: an `openai`/`httpx` version conflict and an unrelated `normalize_general` gap).
+Regression tests added to `backend/tests/test_raw_text_verification.py`.
+
+### Gap-Fill Prompt Wraps Every Single-Row Field as a Fake "Repeating Group" (Priority #2 — perf/cost, not yet fixed)
+`_ROW_SUFFIX_RE` in `pdf_service.py::_fill_unmatched_with_gpt()` matches any field ending
+in `_A`–`_N` and renders it via `_slot_group_block()` — "REPEATING GROUP … RULE: find N
+distinct values … leave null if fewer distinct values exist than expected" — even when
+that field has zero siblings (no `_B`, `_C`, …). Because ACORD's schema convention suffixes
+nearly every field with a row letter, most fields get this treatment regardless of whether
+they're a real schedule row or a one-off narrative field.
+
+Measured on a real ACORD 126 gap-fill prompt: 156 of 181 "REPEATING GROUP" blocks were fake
+1-slot groups. Rendering those as plain single-line specs instead would cut that prompt
+from 114k to an estimated ~78k chars (~30% waste) — very likely the dominant contributor to
+the "~400 chars/field" figure the Active Performance Bug section above cites for the 612k
+char field-block problem.
+
+Fix (surgical, not yet applied): in the `active_groups` partition inside
+`_build_user_prompt()`, only route a field through `_slot_group_block()` when
+`len(_base_to_slots[base]) > 1`; singletons should fall through to the plain
+`_field_spec()` line. Real multi-row groups are unaffected.
 
 ### Security / Compliance Gaps (before production)
 - Field-level encryption is implemented (`utils/crypto.py`) but may not be applied everywhere

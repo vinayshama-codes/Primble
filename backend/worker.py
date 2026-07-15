@@ -242,7 +242,9 @@ async def _process_form_generation_job(job: dict, queue) -> None:
         from repositories.session_repository import get_processing_session, upd_processing_session
         from services.form_service import process_single_form
         from services.sqs_service import cross_validate, calculate_package_sqs, SQS_MODEL_VERSION
-        from services.audit_service import log_recommendations_presented, run_and_log_field_qa
+        from services.audit_service import (
+            log_recommendations_presented, run_and_log_field_qa, run_and_log_field_mapping_check,
+        )
         import os as _os
 
         session = await get_processing_session(session_id)
@@ -425,6 +427,13 @@ async def _process_form_generation_job(job: dict, queue) -> None:
             session_id, user_id, results,
             session.get("facts") or {}, session.get("underwriting_confirmations") or {},
             _os.getenv("ENABLE_FIELD_QA", "false").lower() == "true",
+        )
+
+        # Field-mapping integrity warnings (Figure 33): parity with the sync
+        # route. Always on, no feature flag; never blocks.
+        await run_and_log_field_mapping_check(
+            session_id, user_id, results,
+            session.get("facts") or {}, session.get("underwriting_confirmations") or {},
         )
 
         completion_result: dict = {"session_id": session_id, "form_ids": list(results.keys())}

@@ -1,0 +1,124 @@
+"""
+Regression tests for schedule-row duplicate detection (Figure 32 client
+feedback: "Build driver roster ingestion with ... duplicate detection").
+
+Bug context: extraction_service._merge_list_fields' cross-chunk merge only
+ever deduped BYTE-IDENTICAL rows (exact json.dumps equality). The same driver
+appearing on two document pages/chunks with a trivial formatting difference
+(DL# filled on one page, blank on another; different capitalization) produced
+two separate rows instead of one. Fixed via _dedupe_schedule_rows, keyed by
+license number (else normalized name+dob), merging gaps rather than dropping
+data, wired into both the multi-partial merge loop and the single-partial
+fast path. DOB is normalized via normalize_date() (not raw string comparison)
+so the same date extracted in two different valid formats still matches.
+
+Run from backend/:
+    python -m pytest tests/test_schedule_row_dedup.py -v
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from services.extraction_service import (  # noqa: E402
+    _dedupe_schedule_rows,
+    _driver_dedup_keys,
+    _merge_list_fields,
+)
+
+
+def test_same_license_number_merges_despite_different_casing():
+    rows = [
+        {"name": "Erin Royal", "dob": None, "license_number": "94-327-1211", "license_state": None},
+        {"name": "ERIN ROYAL", "dob": "1985-04-02", "license_number": "943271211", "license_state": "CO"},
+    ]
+    out = _dedupe_schedule_rows("auto_drivers", rows)
+    assert len(out) == 1
+    assert out[0]["dob"] == "1985-04-02"          # gap filled from the 2nd row
+    assert out[0]["license_state"] == "CO"        # gap filled from the 2nd row
+    assert out[0]["name"] == "Erin Royal"          # first-seen value kept, not overwritten
+
+
+def test_falls_back_to_name_plus_dob_across_different_date_formats():
+    # Regression for a live-test finding (2026-07-13): a genuine duplicate
+    # (same driver, no license number available to key off) intermittently
+    # failed to merge because the model extracted the identical DOB in two
+    # different valid formats across the two mentions. The fallback key must
+    # normalize DOB (ISO form) rather than compare it as a raw string.
+    rows = [
+        {"name": "Priya Okafor", "dob": "07/22/1979", "license_number": None, "license_state": "OR"},
+        {"name": "Priya Okafor", "dob": "7/22/1979", "license_number": None, "license_state": "OR"},
+    ]
+    out = _dedupe_schedule_rows("auto_drivers", rows)
+    assert len(out) == 1
+
+
+def test_falls_back_to_name_plus_dob_when_no_license_number():
+    rows = [
+        {"name": "Madonna", "dob": "1970-01-01", "license_number": None, "license_state": None},
+        {"name": "madonna", "dob": "1970-01-01", "license_number": "X123", "license_state": "CA"},
+    ]
+    out = _dedupe_schedule_rows("auto_drivers", rows)
+    assert len(out) == 1
+    assert out[0]["license_number"] == "X123"
+
+
+def test_distinct_drivers_not_merged():
+    rows = [
+        {"name": "Erin Royal", "dob": None, "license_number": "111-11-1111", "license_state": "CO"},
+        {"name": "John Smith", "dob": None, "license_number": "222-22-2222", "license_state": "TX"},
+    ]
+    out = _dedupe_schedule_rows("auto_drivers", rows)
+    assert len(out) == 2
+
+
+def test_unregistered_list_key_passes_through_unchanged():
+    # Only auto_drivers has a registered dedup key today — every other
+    # schedule (vehicles, officers, loss history, ...) must behave exactly
+    # as before this fix: identity passthrough, no merging.
+    rows = [{"vin": "ABC123", "year": "2020"}, {"vin": "ABC123", "year": "2021"}]
+    out = _dedupe_schedule_rows("auto_vin_schedule", rows)
+    assert out == rows
+
+
+def test_driver_dedup_keys_includes_both_when_available():
+    keys = _driver_dedup_keys({"name": "A", "dob": "2000-01-01", "license_number": "12-3456789"})
+    assert "lic:123456789" in keys
+    assert "name:a|dob:2000-01-01" in keys
+
+
+def test_driver_dedup_keys_empty_when_nothing_identifying():
+    assert _driver_dedup_keys({"name": "", "license_number": ""}) == []
+
+
+# ── Integration: the cross-chunk merge path ─────────────────────────────────
+
+def test_merge_list_fields_dedupes_near_duplicate_driver_across_chunks():
+    partials = [
+        {"facts": {"auto_drivers": [
+            {"name": "Erin Royal", "dob": None, "license_number": "94-327-1211", "license_state": None},
+        ]}, "_chunk_idx": 0},
+        {"facts": {"auto_drivers": [
+            {"name": "Erin Royal", "dob": "1985-04-02", "license_number": "943271211", "license_state": "CO"},
+        ]}, "_chunk_idx": 1},
+    ]
+    merged = _merge_list_fields(partials, list_keys=["auto_drivers"])
+    drivers = merged["facts"]["auto_drivers"] if "facts" in merged else merged.get("auto_drivers")
+    assert len(drivers) == 1
+    assert drivers[0]["license_state"] == "CO"
+
+
+def test_merge_list_fields_single_partial_also_dedupes():
+    # The len(partials) == 1 fast path must apply the same dedup, not just the
+    # multi-partial branch, so a short single-chunk document isn't a blind spot.
+    partials = [
+        {"facts": {"auto_drivers": [
+            {"name": "Erin Royal", "dob": None, "license_number": "94-327-1211", "license_state": None},
+            {"name": "Erin Royal", "dob": "1985-04-02", "license_number": "94-327-1211", "license_state": "CO"},
+        ]}},
+    ]
+    merged = _merge_list_fields(partials, list_keys=["auto_drivers"])
+    drivers = merged["facts"]["auto_drivers"]
+    assert len(drivers) == 1
+    assert drivers[0]["dob"] == "1985-04-02"

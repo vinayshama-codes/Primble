@@ -119,15 +119,12 @@ ENABLE_DISPLAY_CANONICALIZATION: bool = os.getenv("ENABLE_DISPLAY_CANONICALIZATI
 # rows are produced and behavior is identical to the prior pipeline.
 ENABLE_FIELD_QA: bool = os.getenv("ENABLE_FIELD_QA", "false").lower() == "true"
 
-# Field-mapping integrity download gate (Figure 33 client feedback). When true,
-# the download routes refuse to serve a package (HTTP 409) while any insured/owner
-# field appears to contain carrier or policy data - the exact bug the client
-# flagged ("Block download if carrier/policy data is mapped into insured/owner
-# fields"). Detection is precise (services/field_mapping_integrity.py): it fires
-# only on a genuine contamination, so a clean package is unaffected. The producer
-# clears it by correcting the field (existing field-edit flow). Default off -> no
-# gate is applied and download behavior is identical to the prior pipeline.
-ENABLE_FIELD_MAPPING_GATE: bool = os.getenv("ENABLE_FIELD_MAPPING_GATE", "false").lower() == "true"
+# Note: field-mapping integrity (Figure 33 client feedback - carrier/policy data
+# mapped into an insured/owner field) has no feature flag. It always runs after
+# form generation (services/field_mapping_integrity.py, invoked via
+# audit_service.run_and_log_field_mapping_check) and surfaces findings as an
+# advisory warning on the pre-download and post-download screens. It never
+# blocks the download.
 
 # Full-field cross-document reconciliation (Beta Report Sec 4.3 "and similar
 # fields" -> generalized to every field, per client). When true, the underwriting

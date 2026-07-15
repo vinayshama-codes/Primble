@@ -96,12 +96,18 @@ async def sync_field_qa_findings(
 ) -> None:
     """Replace this session's field-QA advisory rows with the current set.
 
-    Field QA is RECOMPUTED on every generation, so the prior field_qa rows for
+    Field QA is RECOMPUTED on every generation, so the prior field-QA rows for
     the session are cleared first and the fresh findings inserted - a field that
     got fixed stops showing, a still-open one stays. Reuses the shared
-    sqs_recommendation_audit table (recommendation_type='field_qa') so the
-    existing pre-download review surfaces these with no new UI or endpoint. These
-    rows are advisory/soft - they never block a download.
+    sqs_recommendation_audit table so the existing pre-download review surfaces
+    these with no new UI or endpoint. These rows are advisory/soft - they never
+    block a download.
+
+    recommendation_type has a fixed CHECK constraint ('hard_stop','soft_warning',
+    'missing_field','suggestion') - field-QA rows use the existing 'suggestion'
+    type (see field_qa.to_recommendation_rows) rather than adding a new allowed
+    value, and are identified for this session-scoped refresh by their
+    "fieldqa_" rec_id prefix instead.
     """
     now = datetime.now(timezone.utc).isoformat()
     try:
@@ -110,7 +116,7 @@ async def sync_field_qa_findings(
                 # Clear the previous QA snapshot for this session only.
                 await conn.execute(
                     "DELETE FROM sqs_recommendation_audit "
-                    "WHERE session_id=$1 AND recommendation_type='field_qa'",
+                    "WHERE session_id=$1 AND rec_id LIKE 'fieldqa_%'",
                     session_id,
                 )
                 for rec in rows or []:
@@ -126,7 +132,7 @@ async def sync_field_qa_findings(
                         f"audit_{uuid.uuid4().hex}",
                         session_id, user_id, rec.get("component"), rec.get("rec_id"),
                         rec.get("field"),
-                        "field_qa",
+                        rec.get("type", "suggestion"),
                         rec.get("component"),
                         rec.get("message"),
                         rec.get("score_impact"),
@@ -170,6 +176,95 @@ async def run_and_log_field_qa(
         )
     except Exception as ex:
         logger.warning(f"run_and_log_field_qa skipped for session {session_id}: {ex}")
+
+
+# ASYNC-SAFE
+async def sync_field_mapping_findings(
+    session_id: str,
+    user_id: str,
+    rows: list,
+    model_version: str,
+) -> None:
+    """Replace this session's field-mapping-integrity warning rows with the
+    current set (Figure 33 client feedback).
+
+    Mirrors sync_field_qa_findings exactly, but isolated by the "fieldmap_"
+    rec_id prefix so this never touches field-QA's own rows or any SQS-engine
+    recommendation. Recomputed on every generation: a field the producer fixes
+    stops showing, a still-contaminated one stays. Reuses the shared
+    sqs_recommendation_audit table so the existing pre-download preflight modal
+    AND the post-download checklist both surface these with no new UI/endpoint -
+    they read the same session's open recommendations. Advisory/soft only -
+    never blocks a download.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        async with get_pool().acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "DELETE FROM sqs_recommendation_audit "
+                    "WHERE session_id=$1 AND rec_id LIKE 'fieldmap_%'",
+                    session_id,
+                )
+                for rec in rows or []:
+                    await conn.execute(
+                        """
+                        INSERT INTO sqs_recommendation_audit (
+                            id, session_id, user_id, form_id, rec_id, field,
+                            recommendation_type, component, message, score_impact,
+                            presented_at, sqs_score_at_presentation, model_version
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                        ON CONFLICT (session_id, rec_id) DO NOTHING
+                        """,
+                        f"audit_{uuid.uuid4().hex}",
+                        session_id, user_id, rec.get("component"), rec.get("rec_id"),
+                        rec.get("field"),
+                        rec.get("type", "suggestion"),
+                        rec.get("component"),
+                        rec.get("message"),
+                        rec.get("score_impact"),
+                        now, None, model_version,
+                    )
+        if rows:
+            logger.info("Logged %d field-mapping warning(s) for session %s", len(rows), session_id)
+    except Exception as ex:
+        logger.warning(f"sync_field_mapping_findings failed for session {session_id}: {ex}")
+
+
+# ASYNC-SAFE
+async def run_and_log_field_mapping_check(
+    session_id: str,
+    user_id: str,
+    generated_forms: dict,
+    merged_facts: dict,
+    confirmations: Optional[dict],
+) -> None:
+    """Detect carrier/policy data mapped into an insured/owner field and refresh
+    its warning rows (Figure 33 client feedback).
+
+    Always runs - no feature flag, unlike field QA - so the check is active by
+    default with no environment configuration required. Single entry point used
+    by every generation path (sync route, field-edit route, async worker) so
+    behavior can't drift between them. NEVER blocks the download: this only
+    writes advisory rows that the existing pre-download preflight modal and
+    post-download checklist already know how to display. Never raises - a
+    detector fault must never break form generation.
+    """
+    try:
+        from services.field_mapping_integrity import (
+            detect_field_mapping_contamination, to_recommendation_rows,
+            FIELD_MAPPING_INTEGRITY_MODEL_VERSION,
+        )
+        result = detect_field_mapping_contamination(
+            generated_forms or {},
+            merged_facts=merged_facts or {},
+            confirmations=confirmations or {},
+        )
+        await sync_field_mapping_findings(
+            session_id, user_id, to_recommendation_rows(result), FIELD_MAPPING_INTEGRITY_MODEL_VERSION,
+        )
+    except Exception as ex:
+        logger.warning(f"run_and_log_field_mapping_check skipped for session {session_id}: {ex}")
 
 
 # ASYNC-SAFE
@@ -263,6 +358,7 @@ async def mark_recommendation_resolved(
                     SET action='resolved', action_at=EXCLUDED.action_at,
                         sqs_score_at_action=EXCLUDED.sqs_score_at_action
                     WHERE sqs_recommendation_audit.action IS NULL
+                       OR sqs_recommendation_audit.action = 'downloaded_anyway'
                 """,
                 f"audit_{uuid.uuid4().hex}",
                 session_id, user_id, form_id, rec_id,
@@ -469,22 +565,45 @@ async def get_marketing_reason(session_id: str) -> Optional[dict]:
 
 
 # ASYNC-SAFE
-async def get_open_recommendations(session_id: str) -> List[dict]:
-    """'Never reviewed' recommendations only (action IS NULL).
+async def get_open_recommendations(session_id: str, include_acknowledged: bool = False) -> List[dict]:
+    """Recommendations that still need the producer's attention.
 
-    Used exclusively to decide whether the pre-download SQS Review modal needs to
-    show again. Once a producer has seen an item and clicked "Download Anyway", it
-    is marked 'downloaded_anyway' and this function correctly stops returning it -
-    otherwise every repeat download of the same package would re-trigger the gate.
+    Default (``include_acknowledged=False``): 'never reviewed' only (action IS
+    NULL). Kept for the non-download callers (ARQ recalc auto-resolve, the
+    recommendation-card refresh) whose semantics must not change.
+
+    ``include_acknowledged=True`` (passed ONLY by the pre-download preflight
+    route): returns EVERY still-unresolved item - action IS NULL *or*
+    'downloaded_anyway' - excluding only 'resolved' (actually fixed) and
+    'dismissed' (marked N/A). This is what makes the pre-download modal and the
+    post-download checklist re-show ALL outstanding issues on EVERY download,
+    however many times, and drop each one the moment it is genuinely fixed:
+      * SQS recs           -> fixed => mark_recommendation_resolved sets
+                              action='resolved' (now overrides a prior
+                              'downloaded_anyway' too), so it stops returning.
+      * field-QA / field-mapping rows -> fixed => their row is DELETEd + rebuilt
+                              from live values on the next generation/edit, so a
+                              corrected field simply has no row.
+    A prior "Download Anyway" acknowledges but never suppresses - only a real
+    fix (resolved) or an explicit dismiss removes an item from this set.
+
     Do NOT reuse this for audit/reporting purposes - see get_unresolved_recommendations.
     """
+    # The WHERE clause is built from fixed literals only (no user input), so the
+    # f-string interpolation below carries no injection risk.
+    where = "action IS NULL"
+    if include_acknowledged:
+        where = (
+            "action IS DISTINCT FROM 'resolved' "
+            "AND action IS DISTINCT FROM 'dismissed'"
+        )
     try:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
-                """SELECT rec_id, field, recommendation_type, message, score_impact
-                   FROM sqs_recommendation_audit
-                   WHERE session_id=$1 AND action IS NULL
-                   ORDER BY score_impact DESC NULLS LAST""",
+                f"""SELECT rec_id, field, recommendation_type, message, score_impact
+                    FROM sqs_recommendation_audit
+                    WHERE session_id=$1 AND {where}
+                    ORDER BY score_impact DESC NULLS LAST""",
                 session_id,
             )
         return [dict(r) for r in rows]

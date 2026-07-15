@@ -114,6 +114,11 @@ def _parse_address(addr: str) -> dict:
         result["line1"] = parts[0]
     if len(parts) >= 3:
         # 3-part format: "Street, City, ST ZIP"
+        # 4+-part format: "Street, Suite/Unit, City, ST ZIP" - the segment(s)
+        # between the street and the city (e.g. "Suite 310") used to be silently
+        # dropped (neither line1 nor city nor anywhere); they belong on line2.
+        if len(parts) > 3:
+            result["line2"] = ", ".join(parts[1:-2])
         last = parts[-1].strip().split()
         if len(last) >= 2:
             result["state"] = last[-2]

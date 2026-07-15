@@ -2514,6 +2514,14 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         _auto_resolved = 0
         for _orec in _open_recs:
             _rid = _orec.get("rec_id")
+            # Only SQS-engine recommendations are auto-resolved here. Field-QA
+            # ('fieldqa_') and field-mapping-integrity ('fieldmap_') advisory
+            # rows are NOT SQS recs - they never appear in active_rec_ids, and
+            # are managed by their own DELETE+rebuild refresh on generation/edit.
+            # Auto-resolving them here would silently clear a live contamination
+            # warning the moment a client answers any questionnaire item.
+            if _rid and (_rid.startswith("fieldmap_") or _rid.startswith("fieldqa_")):
+                continue
             if _rid and _rid not in active_rec_ids:
                 await mark_recommendation_resolved(
                     session_id=processing_session_id,

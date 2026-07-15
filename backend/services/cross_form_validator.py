@@ -1340,6 +1340,13 @@ def _check_auto_optional_coverages(
     return issues
 
 
+# Mirrors pdf_service._OVERFLOW_CHAR_THRESHOLD (Figure 29 ACORD 101 overflow
+# routing). That routing only ever fires if ACORD 101 is already in the
+# generated packet, so this trigger is what actually gets it there when the
+# operations narrative alone is too long for its own form field.
+_OPS_OVERFLOW_CHAR_THRESHOLD = 300
+
+
 def _check_acord101_triggers(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
@@ -1371,6 +1378,14 @@ def _check_acord101_triggers(
     if gl_codes and isinstance(gl_codes, list) and gl_codes and len(ops_desc) < 30:
         needs_101 = True
         reason_parts.append("GL class codes present but operations description is insufficient")
+
+    # Operations narrative exceeds what its own ACORD field can hold
+    if len(ops_desc) > _OPS_OVERFLOW_CHAR_THRESHOLD:
+        needs_101 = True
+        reason_parts.append(
+            f"operations narrative is {len(ops_desc)} characters - exceeds field capacity, "
+            "full text continues on ACORD 101"
+        )
 
     # Payroll / revenue anomaly
     rev = _to_float(_fv(facts, "total_revenue"))
@@ -1756,6 +1771,52 @@ def _check_carrier_grade_cope_quality(
     return issues
 
 
+def _check_per_location_cope_completeness(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """
+    Beta Report Figure 27: a submission with multiple DISTINCT insured
+    locations should have COPE detail (construction type, building/BPP value)
+    captured per location, not just once at the submission level.
+
+    `_check_minimum_viable_cope_unit` already hard-stops when the
+    submission-wide COPE scalars are empty. That check is satisfied as soon
+    as ONE location has values, so a second/third location with genuinely
+    different COPE detail can stay blank without tripping it. This is a
+    non-blocking companion check: it only fires when some locations in the
+    canonical `property_locations` list have COPE detail and others don't -
+    i.e. partial per-location data, not "no data at all" (already covered).
+    """
+    issues: List[dict] = []
+
+    if not flags.get("has_property_coverage"):
+        return issues
+
+    locs = _fv(facts, "property_locations")
+    if not isinstance(locs, list) or len(locs) < 2:
+        return issues
+
+    def _has_cope(loc: dict) -> bool:
+        return bool(loc.get("construction_type") and (loc.get("building_value") or loc.get("bpp_value")))
+
+    dict_locs = [loc for loc in locs if isinstance(loc, dict)]
+    incomplete = [loc for loc in dict_locs if not _has_cope(loc)]
+
+    if incomplete and len(incomplete) < len(dict_locs):
+        issues.append(_issue(
+            "soft_warning",
+            "per_location_cope_incomplete",
+            (
+                f"{len(incomplete)} of {len(dict_locs)} insured locations are missing "
+                "construction type or building/BPP value. Confirm COPE detail for every "
+                "location before treating the property submission as complete."
+            ),
+            ["ACORD_140"],
+        ))
+
+    return issues
+
+
 def _check_auto_agreed_value_schedule(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
@@ -1851,6 +1912,7 @@ _RULE_FUNCTIONS = [
     _check_builders_risk_project_value,
     _check_minimum_viable_cope_unit,
     _check_carrier_grade_cope_quality,
+    _check_per_location_cope_completeness,
     _check_auto_agreed_value_schedule,
     _check_certificate_requested_but_missing,
     _check_wc_payroll_reconciliation,

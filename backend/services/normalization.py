@@ -57,6 +57,7 @@ ADDRESS_FIELDS = frozenset({
 })
 CARRIER_FIELDS = frozenset({
     "carrier_name", "prior_carrier", "carrier", "current_carrier", "insurer_name",
+    "wc_prior_carrier",
 })
 FEIN_FIELDS = frozenset({"fein", "fein_ssn", "tax_id"})
 
@@ -543,3 +544,57 @@ def distinct_normalized(field: str, raw_values: List[Any]) -> Set[str]:
 def values_conflict(field: str, raw_values: List[Any]) -> bool:
     """True when ``raw_values`` materially differ after normalization."""
     return len(distinct_normalized(field, raw_values)) > 1
+
+
+# ── Loss-history no-loss assertion detector ───────────────────────────────────
+# Single source of truth shared by extraction_pipeline.py (drives the
+# narrative_states_no_losses flag that feeds SQS scoring) and pdf_service.py
+# (drives the LossHistory_NoPriorLossesIndicator_A "Check if none" checkbox).
+# Previously these were two independent detectors: the SQS side used this
+# phrase scan, the PDF checkbox was decided by a separate, unrelated GPT
+# per-field judgment call - so the checkbox could come back "Yes" (checked,
+# reads as confirmed) while the SQS panel simultaneously called the exact same
+# submission "an assertion, weaker than an attestation, please confirm". Both
+# surfaces now call this one function, so they can no longer disagree.
+_NO_LOSS_PHRASES = (
+    "no prior losses", "no losses", "no prior claims", "no claims",
+    # "no known losses" is the single most common industry phrasing and is NOT
+    # a superset of "no losses" (the word "known" sits between them), so it
+    # must be listed explicitly. Same for the "reported"/"free" variants.
+    "no known losses", "no known claims",
+    "no reported losses", "no reported claims",
+    "loss-free", "loss free", "claims-free", "claims free",
+    "clean loss history", "favorable loss history", "clean loss record",
+)
+# Standard ACORD/loss-run boilerplate reads "...no claims exceeding $10,000"
+# and real loss-run summaries say "no losses exceed $10,000" / "no losses over
+# $X" - a THRESHOLD statement (losses exist, none cross the cap), not a
+# zero-loss assertion. A bare substring match on "no losses" misreads that as
+# a no-loss assertion even when real claims are attached. Skip a phrase hit
+# when immediately followed by a threshold qualifier.
+_NO_LOSS_QUALIFIERS = (
+    "exceed", "exceeding", "over", "above", "in excess", "greater than", "more than",
+)
+
+
+def detect_no_loss_assertion(text: str) -> bool:
+    """True if ``text`` contains an unqualified "no losses/claims" assertion.
+
+    Case-insensitive substring scan for common industry no-loss phrasing,
+    guarded against threshold statements ("no losses exceed $10,000") that
+    read as a match but actually mean the opposite (losses exist, capped).
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+    for phrase in _NO_LOSS_PHRASES:
+        start = 0
+        while True:
+            idx = lowered.find(phrase, start)
+            if idx == -1:
+                break
+            tail = lowered[idx + len(phrase): idx + len(phrase) + 20].lstrip()
+            if not any(tail.startswith(q) for q in _NO_LOSS_QUALIFIERS):
+                return True
+            start = idx + len(phrase)
+    return False

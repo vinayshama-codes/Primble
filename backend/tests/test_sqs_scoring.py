@@ -214,32 +214,55 @@ def test_follow_form_never_guessed_from_negation_or_uncertainty():
 
 def test_loss_year_tiers():
     # 5+ years + prior carrier → full credit (+10 carrier, capped at 100).
+    # has_loss_run_doc=True: year-tier credit requires actual loss-run evidence
+    # (2026-07-11 fix) - a bare years number with no document is attestation-tier
+    # at best, never full/partial year-tier credit. See test_loss_year_tiers_require_doc.
     full, _ = sq.calculate_p4_loss_history(
-        {"loss_history_years": "5", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {})
+        {"loss_history_years": "5", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {},
+        has_loss_run_doc=True)
     assert full == 100
     # 3-4 years base = 80 (client table). Prior carrier MISSING applies -10 → 70.
     partial, _ = sq.calculate_p4_loss_history(
-        {"loss_history_years": "3", "loss_run_age_days": "30"}, {})
+        {"loss_history_years": "3", "loss_run_age_days": "30"}, {}, has_loss_run_doc=True)
     assert partial == 70
     # 3-4 years WITH prior carrier: +10 → 90 (client: prior carrier present +10).
     partial_with_carrier, _ = sq.calculate_p4_loss_history(
-        {"loss_history_years": "3", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {})
+        {"loss_history_years": "3", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {},
+        has_loss_run_doc=True)
     assert partial_with_carrier == 90
     # 1-2 years base = 40; prior carrier missing -10 → 30.
     thin, _ = sq.calculate_p4_loss_history(
-        {"loss_history_years": "2", "loss_run_age_days": "30"}, {})
+        {"loss_history_years": "2", "loss_run_age_days": "30"}, {}, has_loss_run_doc=True)
     assert thin == 30
     # No loss info: 25 (client V1) — carrier adjustment does not apply on this path.
     none, _ = sq.calculate_p4_loss_history({}, {})
     assert none == 25
 
 
+def test_loss_year_tiers_require_doc():
+    # Regression guard (2026-07-11): a "loss_history_years" figure with NO loss-run
+    # document behind it must NOT earn year-tier credit. Real-world cause: a Yes/No
+    # question's lookback window ("...in the past five (5) years?") or the ACORD
+    # form's own "FOR THE LAST ___ YEARS" blank can populate this fact with zero
+    # loss-run evidence attached - that must fall through to the attestation/
+    # no-info tiers, not silently outscore genuine documentation.
+    undocumented, _ = sq.calculate_p4_loss_history(
+        {"loss_history_years": "5", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {},
+        has_loss_run_doc=False)
+    assert undocumented == 25, f"Expected no-info baseline with no doc, got {undocumented}"
+    documented, _ = sq.calculate_p4_loss_history(
+        {"loss_history_years": "5", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {},
+        has_loss_run_doc=True)
+    assert documented > undocumented
+
+
 def test_loss_prior_carrier_delta():
     # Client: prior carrier present +10, missing -10 on the same base tier.
     with_c, _ = sq.calculate_p4_loss_history(
-        {"loss_history_years": "3", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {})
+        {"loss_history_years": "3", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {},
+        has_loss_run_doc=True)
     without_c, _ = sq.calculate_p4_loss_history(
-        {"loss_history_years": "3", "loss_run_age_days": "30"}, {})
+        {"loss_history_years": "3", "loss_run_age_days": "30"}, {}, has_loss_run_doc=True)
     assert with_c - without_c == 20  # (+10) - (-10)
 
 
@@ -255,9 +278,11 @@ def test_loss_run_moderate_match_name_plus_address():
 
 def test_loss_recency_penalty():
     recent, _ = sq.calculate_p4_loss_history(
-        {"loss_history_years": "5", "loss_run_age_days": "30", "prior_carrier": "X"}, {})
+        {"loss_history_years": "5", "loss_run_age_days": "30", "prior_carrier": "X"}, {},
+        has_loss_run_doc=True)
     stale, recs = sq.calculate_p4_loss_history(
-        {"loss_history_years": "5", "loss_run_age_days": "400", "prior_carrier": "X"}, {})
+        {"loss_history_years": "5", "loss_run_age_days": "400", "prior_carrier": "X"}, {},
+        has_loss_run_doc=True)
     assert stale < recent
     assert any("updated loss runs" in r.lower() for r in recs)
 
@@ -330,10 +355,11 @@ def test_five_year_prior_carrier_delta():
     # uniformly across all year tiers, including the 5-year full-credit tier.
     # 5 years + prior carrier: base 100 + 10 → capped at 100.
     with_carrier, _ = sq.calculate_p4_loss_history(
-        {"loss_history_years": "5", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {})
+        {"loss_history_years": "5", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {},
+        has_loss_run_doc=True)
     # 5 years WITHOUT prior carrier: base 100 - 10 → 90; recommendation surfaced.
     without_carrier, recs = sq.calculate_p4_loss_history(
-        {"loss_history_years": "5", "loss_run_age_days": "30"}, {})
+        {"loss_history_years": "5", "loss_run_age_days": "30"}, {}, has_loss_run_doc=True)
     assert with_carrier == 100
     assert without_carrier == 90
     assert any("prior carrier" in r.lower() for r in recs)
@@ -368,20 +394,24 @@ def test_clean_multiyear_loss_runs_with_attestation_not_conflict():
     # 5 years of CLEAN loss runs (no claims) CONFIRM a no-loss attestation - they
     # must NOT be treated as a conflict or capped (false-positive guard).
     facts = {"loss_history_years": "5", "loss_run_age_days": "30", "prior_carrier": "X"}
-    score, _ = sq.calculate_p4_loss_history(facts, {"no_prior_losses": True})
+    score, _ = sq.calculate_p4_loss_history(facts, {"no_prior_losses": True}, has_loss_run_doc=True)
     assert score == 100
-    assert sq._get_loss_history_state(facts, {"no_prior_losses": True}) != "loss_history_conflicting"
+    assert sq._get_loss_history_state(
+        facts, {"no_prior_losses": True}, has_loss_run_doc=True) != "loss_history_conflicting"
 
 
 # ── 6.4 / 2b: loss-run recency is deterministic, never fabricated ─────────────
 
 def test_loss_run_age_unverified_no_penalty_no_fabricated_age():
-    # No valuation date and no stated age → recency UNVERIFIED: no penalty and no
-    # fabricated "365 days old" warning (the old default-365 behaviour).
+    # No valuation date and no stated age → recency UNVERIFIED: the deliberate
+    # -15 "could not verify" penalty applies (_LOSS_RECENCY_UNKNOWN_PEN), but never
+    # a fabricated "365 days old" staleness warning (the old default-365 behaviour,
+    # which this test guards against - not "no penalty at all").
     facts = {"loss_history_years": "5", "prior_carrier": "X"}
-    score, recs = sq.calculate_p4_loss_history(facts, {})
-    assert score == 100
+    score, recs = sq.calculate_p4_loss_history(facts, {}, has_loss_run_doc=True)
+    assert score == 85, f"Expected 100 - 15 recency-unverified penalty, got {score}"
     assert not any("days old" in r for r in recs)
+    assert any("recency unverified" in r.lower() for r in recs)
 
 
 def test_loss_run_age_computed_from_valuation_date():
@@ -389,9 +419,11 @@ def test_loss_run_age_computed_from_valuation_date():
     stale_date = (datetime.now(timezone.utc) - timedelta(days=200)).strftime("%m/%d/%Y")
     fresh_date = (datetime.now(timezone.utc) - timedelta(days=10)).strftime("%m/%d/%Y")
     stale, recs = sq.calculate_p4_loss_history(
-        {"loss_history_years": "5", "prior_carrier": "X", "loss_run_valuation_date": stale_date}, {})
+        {"loss_history_years": "5", "prior_carrier": "X", "loss_run_valuation_date": stale_date}, {},
+        has_loss_run_doc=True)
     fresh, _ = sq.calculate_p4_loss_history(
-        {"loss_history_years": "5", "prior_carrier": "X", "loss_run_valuation_date": fresh_date}, {})
+        {"loss_history_years": "5", "prior_carrier": "X", "loss_run_valuation_date": fresh_date}, {},
+        has_loss_run_doc=True)
     assert stale < fresh
     assert any("updated loss runs" in r.lower() for r in recs)
 
@@ -404,7 +436,7 @@ def test_loss_history_years_computed_from_period_dates():
     valued = (datetime.now(timezone.utc) - timedelta(days=20)).strftime("%m/%d/%Y")
     facts  = {"loss_history_years": "2", "loss_run_period_start": start,
               "loss_run_valuation_date": valued, "prior_carrier": "X"}
-    score, _ = sq.calculate_p4_loss_history(facts, {})
+    score, _ = sq.calculate_p4_loss_history(facts, {}, has_loss_run_doc=True)
     assert score == 100
 
 

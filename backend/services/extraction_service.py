@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Tuple, Dict, Any
 
 from config.settings import groq_chat, LLM_MODEL, LLM_PROVIDER
+from services.normalization import normalize_date
 
 # ASYNC-SAFE: shared executor for CPU-bound blocking work (tiktoken, sync helpers)
 _EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
@@ -146,7 +147,7 @@ _EXTRACT_SCHEMA = (
     '  "wc_prior_carrier": string or null,\n'
     '  "wc_payroll_period": string or null,\n'
     # Driver schedule: one object per driver row
-    '  "auto_drivers": [{"name": string, "dob": string or null, "license_number": string or null, "license_state": string or null}],\n'
+    '  "auto_drivers": [{"name": string, "dob": string or null, "license_number": string or null, "license_state": string or null, "hire_date": string or null, "experience_years": string or null, "vehicle_use_percent": string or null}],\n'
     '  "auto_radius_of_operation": string or null,\n'
     '  "auto_physical_damage_valuation": string or null,\n'
     '  "auto_covered_symbols": [int],\n'
@@ -163,13 +164,24 @@ _EXTRACT_SCHEMA = (
     '  "total_incurred": string or null,\n'
     '  "total_paid": string or null,\n'
     '  "open_claims_count": string or null,\n'
-    # Property location schedule: one object per location row
-    '  "property_locations": [{"address": string, "building_value": string or null, "bpp_value": string or null, "construction_type": string or null, "year_built": string or null}],\n'
+    # Property location schedule: one object per DISTINCT physical location.
+    # Sub-fields mirror ACORD's own per-location premises data (occupancy,
+    # ownership, employee counts, revenue) so multi-location submissions are
+    # captured with real per-location facts instead of one company-wide total.
+    '  "property_locations": [{"address": string, "ownership": string or null (owner, tenant, or a short description '
+    'of the actual interest if neither, e.g. "licensee"), '
+    '"inside_city_limits": boolean or null, "full_time_employees": string or null, "part_time_employees": string or null, '
+    '"annual_revenue": string or null, "occupied_area": string or null, "open_to_public_area": string or null, '
+    '"total_building_area": string or null (the TOTAL square footage of the building, NOT the same as occupied_area - '
+    'leave null if the document does not state the whole building\'s size), '
+    '"operations_description": string or null, "building_value": string or null, "bpp_value": string or null, '
+    '"construction_type": string or null, "year_built": string or null}],\n'
     '  "loss_run_age_days": string or null,\n'
     # Loss-run dating: the "valued as of" / valuation / evaluation date printed on
     # the loss run, and the earliest experience-period (policy-period) start date
     # the loss runs cover. Used to compute recency and years deterministically.
     '  "loss_run_valuation_date": string or null, "loss_run_period_start": string or null,\n'
+    '  "loss_run_period_end": string or null,\n'
     # Loss-run availability status: set to "pending" or "requested" when the submission
     # explicitly mentions loss runs have been requested but not yet received.
     # Null when loss run data is actually present or when no loss runs are mentioned.
@@ -301,7 +313,9 @@ _EXTRACT_PROMPT_PREFIX = (
     '  • Vehicle schedule      → one entry per vehicle in auto_vin_schedule\n'
     '  • WC class code table   → one entry per class code row in wc_class_codes\n'
     '  • Driver schedule       → one entry per driver in auto_drivers\n'
-    '  • Property locations    → one entry per location in property_locations\n\n'
+    '  • Property locations    → one entry per DISTINCT physical location in property_locations. '
+    'The SAME address printed on multiple pages (dec page, attached schedule, certificate) is still '
+    'ONE location — do not emit a duplicate entry for a repeated mention of the same address.\n\n'
     'RULE 3 — Never hallucinate. If a value is not visible in the document, set the field to null '
     '(or [] for list fields). Do not invent or infer values that are not explicitly stated.\n\n'
     'RULE 4 — Extract ALL financial figures exactly as printed: limits, premiums, payrolls, '
@@ -401,6 +415,28 @@ _EXTRACT_PROMPT_PREFIX = (
     'actual loss run data IS present in this document (use loss_history, loss_run_valuation_date, '
     'and related fields for that), and do NOT infer pending status from the absence of loss '
     'runs alone - there must be an affirmative statement that they are outstanding.\n\n'
+    'RULE 13 — Loss-run period dating (loss_run_period_start / loss_run_period_end / '
+    'loss_history_years): these are deterministic scoring inputs, not the per-claim list from '
+    'RULE 7 - extract them whenever a loss run states its OWN coverage/experience period, even '
+    'if that period contains zero claims.\n'
+    '  loss_run_period_start: the EARLIEST date of the stated experience period.\n'
+    '  loss_run_period_end: the LATEST date of that period (often the same as, or close to, '
+    'the valuation date). If the document gives a range "X to Y" or "X through Y", '
+    'loss_run_period_start = X and loss_run_period_end = Y.\n'
+    '  loss_history_years: an EXPLICIT year count the document itself states for this period '
+    '(e.g., "(5 years)", "5-year loss run", "for the last 5 years") - a direct cross-check, not '
+    'a value you calculate yourself from the dates.\n'
+    '  Example: "Loss Run Period: 09/01/2021 to 09/01/2026 (5 years)" → '
+    'loss_run_period_start="09/01/2021", loss_run_period_end="09/01/2026", loss_history_years="5".\n'
+    '  Example: "5-year loss history requested, currently valued 07/01/2026" with no explicit '
+    'start date → loss_run_valuation_date="07/01/2026", loss_history_years="5", '
+    'loss_run_period_start/end may be null since no explicit range was given.\n'
+    '  Do NOT confuse this with a lookback WINDOW inside a Yes/No question ("...in the past 5 '
+    'years?") or the blank ACORD Loss History section header asks the filer to fill in ("FOR THE '
+    'LAST ___ YEARS") - those describe how far back the FORM asks, not how much loss-run '
+    'DOCUMENTATION was actually supplied. Only extract loss_history_years from a phrase that '
+    'describes an actual loss run/claims history document, not from the disclosure window in an '
+    'unanswered or narrative-only question.\n\n'
     'Return ONLY a valid JSON object with exactly these two top-level keys:\n\n'
     + _EXTRACT_SCHEMA
     + '\n\nReturn ONLY the JSON object. No markdown fences, no explanation, no extra text. '
@@ -1900,6 +1936,82 @@ def _score_value(field: str, record: Any, freq: int) -> float:
     return tier_weight * (freq_score + conf_score)
 
 
+# ── Schedule row dedup ────────────────────────────────────────────────────────
+# _merge_list_fields' cross-chunk merge below only dedupes byte-identical rows
+# (exact JSON match). That misses the common real case: the SAME driver/entity
+# appearing on two document pages/chunks with a formatting difference (a DL#
+# filled in on one page and blank on another, different name capitalization).
+# For list keys registered here, rows are merged by a natural key instead -
+# duplicates are combined (first non-empty value per sub-key wins) rather than
+# kept as separate rows. List keys with no entry here are completely unaffected
+# (identity passthrough), so this only changes behavior for auto_drivers today.
+
+def _driver_dedup_keys(item: dict) -> List[str]:
+    """Candidate natural keys for one auto_drivers row: license number (a
+    real-world driver has exactly one) AND normalized name+dob, when present.
+    Returning BOTH (not just whichever is available) lets a row missing its
+    license number still match an earlier row that has one, as long as the
+    name+dob agree - the common case where one page/chunk lists a driver
+    without their DL# and another page lists the same driver with it.
+
+    DOB is normalized to ISO form via normalize_date() rather than compared as
+    a raw string. Found via live test 2026-07-13: the same real duplicate
+    driver (identical DOB) intermittently failed to merge because the model
+    extracted the date in two different valid formats ("07/22/1979" vs
+    "7/22/1979") across the two mentions - an exact-string comparison treated
+    those as different people. Falls back to the raw stripped string if the
+    value isn't a parseable date, so behavior is unchanged for anything
+    normalize_date() can't handle."""
+    keys: List[str] = []
+    lic = re.sub(r"[\s-]", "", str(item.get("license_number") or "")).strip().upper()
+    if lic:
+        keys.append(f"lic:{lic}")
+    name = str(item.get("name") or "").strip().lower()
+    if name:
+        dob_raw = str(item.get("dob") or "").strip()
+        dob_key = normalize_date(dob_raw) or dob_raw
+        keys.append(f"name:{name}|dob:{dob_key}")
+    return keys
+
+
+_SCHEDULE_DEDUP_KEYS: Dict[str, Any] = {
+    "auto_drivers": _driver_dedup_keys,
+}
+
+
+def _dedupe_schedule_rows(list_key: str, items: List[dict]) -> List[dict]:
+    """Merge rows describing the same entity (per _SCHEDULE_DEDUP_KEYS),
+    filling gaps from later duplicates rather than dropping their data. Two
+    rows merge if ANY of their candidate keys match (see _driver_dedup_keys).
+    Returns ``items`` unchanged for any list_key with no registered key fn."""
+    key_fn = _SCHEDULE_DEDUP_KEYS.get(list_key)
+    if key_fn is None:
+        return items
+    groups: List[dict] = []
+    key_to_group: Dict[str, int] = {}
+    unkeyed: List[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            unkeyed.append(item)
+            continue
+        keys = key_fn(item)
+        if not keys:
+            unkeyed.append(item)
+            continue
+        group_idx = next((key_to_group[k] for k in keys if k in key_to_group), None)
+        if group_idx is None:
+            group_idx = len(groups)
+            groups.append(dict(item))
+        else:
+            existing = groups[group_idx]
+            for sub_key, val in item.items():
+                if _is_empty(existing.get(sub_key)) and not _is_empty(val):
+                    existing[sub_key] = val
+        for k in keys:
+            key_to_group[k] = group_idx
+    return groups + unkeyed
+
+
 def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
     if not partials:
         return {"facts": {}, "flags": {}}
@@ -1907,6 +2019,21 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
         p = dict(partials[0])
         for k in ("_chunk_idx", "_char_start", "_char_end"):
             p.pop(k, None)
+        raw_facts = p.get("facts")
+        if isinstance(raw_facts, dict) and any(k in _SCHEDULE_DEDUP_KEYS for k in list_keys):
+            facts = dict(raw_facts)
+            for lk in list_keys:
+                items = facts.get(lk)
+                if isinstance(items, list) and items:
+                    deduped = _dedupe_schedule_rows(lk, items)
+                    if lk in _SCHEDULE_DEDUP_KEYS and len(deduped) != len(items):
+                        logger.info(
+                            "merge schedule_dedup field=%r partials=1 (single-chunk doc) "
+                            "rows_before=%d rows_after=%d",
+                            lk, len(items), len(deduped),
+                        )
+                    facts[lk] = deduped
+            p["facts"] = facts
         return p
 
     val_candidates: Dict[str, Dict[str, dict]] = {}
@@ -1970,7 +2097,14 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
             for item in (partial.get("facts", {}).get(lk) or []):
                 seen.setdefault(json.dumps(item, sort_keys=True), item)
         if seen:
-            merged_facts[lk] = list(seen.values())
+            before = list(seen.values())
+            after = _dedupe_schedule_rows(lk, before)
+            if lk in _SCHEDULE_DEDUP_KEYS and len(after) != len(before):
+                logger.info(
+                    "merge schedule_dedup field=%r partials=%d rows_before=%d rows_after=%d",
+                    lk, len(partials), len(before), len(after),
+                )
+            merged_facts[lk] = after
 
     # wc_payroll_by_state: scored per state
     wc_candidates: Dict[str, Dict[str, dict]] = {}
@@ -2837,6 +2971,151 @@ def detect_source_conflicts(docs: List[dict], skip_fields: Optional[set] = None)
 
 # ── Multi-doc merge ───────────────────────────────────────────────────────────
 
+def _consolidate_property_locations(facts: dict) -> None:
+    """Consolidate `locations` / `property_locations` into ONE canonical,
+    deduplicated multi-location list (Beta Report Figure 27 fix).
+
+    Chunk-level and cross-document merge (`_merge_list_fields`) only dedupe
+    list items by EXACT string/JSON equality. The same physical location
+    mentioned with slightly different formatting at multiple points in the
+    source document(s) - dec page, an attached ACORD 823, a certificate -
+    therefore survives as several near-duplicate entries. This pass re-groups
+    every entry by NORMALIZED address (services.normalization.normalize_address,
+    the same function already used to compare addresses elsewhere), merges
+    whatever sub-fields each near-duplicate mention contributed (nothing is
+    discarded), decomposes the address into line1/city/state/zip for per-slot
+    ACORD stamping, and derives the boolean indicators the PDF checkboxes need.
+
+    Mutates `facts` in place. Runs once, after chunk + cross-document merge
+    are both complete, so it is the single source of truth every multi-row
+    ACORD schedule (125/131/140/160/186 all reuse these same ACORD field
+    concepts - see pdf_service._SCHEDULE_REGISTRY) stamps from.
+    """
+    from services.normalization import normalize_address
+    from utils.helpers import _parse_address
+
+    raw_objs  = facts.get("property_locations") or []
+    raw_addrs = facts.get("locations") or []
+
+    entries: List[dict] = []
+    for item in raw_objs:
+        entries.append(dict(item) if isinstance(item, dict) else {"address": str(item)})
+    for addr in raw_addrs:
+        if addr:
+            entries.append({"address": str(addr)})
+
+    if not entries:
+        # No dedicated location list at all - fall back to the submission-level
+        # address scalars so slot A of a multi-row schedule (e.g. ACORD 125
+        # premises) is never blank just because no location list was extracted.
+        fallback = _fv(facts, "physical_address") or _fv(facts, "mailing_address")
+        if fallback:
+            entries.append({"address": str(fallback)})
+
+    if not entries:
+        return
+
+    # Decompose each entry's address UP FRONT so grouping and merging both key
+    # off the STABLE street-line identity rather than the full address string.
+    # A bare street mention ("4800 Dahlia St #D13") and a fully-qualified
+    # mention of the SAME street ("4800 Dahlia St #D13, Denver, CO 80216-3121")
+    # must dedupe together - city/state/zip are frequently present on one
+    # mention and dropped on another (chunk truncation, a summary line vs. a
+    # detail line), while the street line itself is the stable identifier for
+    # "this building." This mirrors the client's own §5.2 normalization
+    # examples, which compare on the street line, not the full address.
+    for entry in entries:
+        addr = str(entry.get("address") or "").strip()
+        if not addr:
+            continue
+        parsed = _parse_address(addr)
+        entry.setdefault("address_line1", parsed.get("line1"))
+        entry.setdefault("address_city",  parsed.get("city"))
+        entry.setdefault("address_state", parsed.get("state"))
+        entry.setdefault("address_zip",   parsed.get("zip"))
+
+    groups: Dict[str, dict] = {}
+    order: List[str] = []
+    for entry in entries:
+        addr  = str(entry.get("address") or "").strip()
+        line1 = str(entry.get("address_line1") or "").strip()
+        key = normalize_address(line1) if line1 else (normalize_address(addr) if addr else "")
+        if not key:
+            # No usable address signal - keep as its own singleton so whatever
+            # sub-field data it carries is never silently dropped.
+            key = f"__no_address_{len(groups)}__"
+        if key not in groups:
+            groups[key] = {}
+            order.append(key)
+        target = groups[key]
+        for k, v in entry.items():
+            if v is None or (isinstance(v, str) and not v.strip()):
+                continue
+            # First non-empty value wins per sub-field - a later near-duplicate
+            # mention only fills gaps, it never overwrites an earlier value.
+            target.setdefault(k, v)
+        # Prefer the LONGEST raw address string as the display value - it is
+        # usually the more complete mention (with city/state/zip) rather than
+        # a truncated repeat.
+        if len(addr) > len(str(target.get("address") or "")):
+            target["address"] = addr
+
+    consolidated: List[dict] = []
+    for i, key in enumerate(order):
+        obj = groups[key]
+        obj["location_id"] = f"L{i + 1}"
+        # Plain numeric companion to location_id - ACORD's own "LOC #" box
+        # (CommercialStructure_Location_ProducerIdentifier_{row}) expects a
+        # bare number ("1", "2", ...), not the "L1" internal id format.
+        obj["location_number"] = str(i + 1)
+        obj.setdefault("address_line1", obj.get("address"))
+        obj.setdefault("address_city", None)
+        obj.setdefault("address_state", None)
+        obj.setdefault("address_zip", None)
+
+        # Owner / Tenant / Other are mutually exclusive on the real ACORD
+        # form. Deriving ALL THREE deterministically (not just owner/tenant)
+        # matters: an ungated "Other" checkbox left open for GPT gap-fill
+        # will independently re-guess an interest for a row already resolved
+        # here, producing a contradictory PDF (e.g. Tenant=Yes AND Other=Yes
+        # with a redundant description on the same row).
+        ownership = str(obj.get("ownership") or "").strip()
+        ownership_l = ownership.lower()
+        if ownership_l.startswith("owner"):
+            obj["is_owner"], obj["is_tenant"], obj["is_other_interest"] = True, False, False
+            obj["other_interest_description"] = None
+        elif ownership_l.startswith("tenant"):
+            obj["is_owner"], obj["is_tenant"], obj["is_other_interest"] = False, True, False
+            obj["other_interest_description"] = None
+        elif ownership_l:
+            # A real signal that is neither "owner" nor "tenant" - a genuine
+            # "Other" interest (e.g. licensee, easement holder).
+            obj["is_owner"], obj["is_tenant"], obj["is_other_interest"] = False, False, True
+            obj["other_interest_description"] = ownership
+        else:
+            obj["is_owner"] = obj["is_tenant"] = obj["is_other_interest"] = None
+            obj["other_interest_description"] = None
+
+        city_limits = obj.get("inside_city_limits")
+        if isinstance(city_limits, bool):
+            obj["is_inside_city_limits"], obj["is_outside_city_limits"] = city_limits, not city_limits
+        elif isinstance(city_limits, str) and city_limits.strip():
+            cl = city_limits.strip().lower()
+            if cl in ("yes", "true", "inside"):
+                obj["is_inside_city_limits"], obj["is_outside_city_limits"] = True, False
+            elif cl in ("no", "false", "outside"):
+                obj["is_inside_city_limits"], obj["is_outside_city_limits"] = False, True
+            else:
+                obj["is_inside_city_limits"] = obj["is_outside_city_limits"] = None
+        else:
+            obj["is_inside_city_limits"] = obj["is_outside_city_limits"] = None
+
+        consolidated.append(obj)
+
+    facts["property_locations"] = consolidated
+    facts["locations"] = [str(o["address"]) for o in consolidated if o.get("address")]
+
+
 def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     """
     Multi-document merge with field-level source confidence.
@@ -2908,5 +3187,13 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
             mg["wc_multi_state"] = True
         if state_codes & _MONOPOLISTIC_STATES:
             mg["wc_has_monopolistic_state"] = True
+
+    # Canonical, deduplicated multi-location list (Beta Report Figure 27).
+    # Must run LAST, after every chunk/doc-level merge above, so it is the
+    # single final consolidation pass rather than one of several partial ones.
+    try:
+        _consolidate_property_locations(mf)
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: location consolidation failed: %s", exc)
 
     return mf, mg

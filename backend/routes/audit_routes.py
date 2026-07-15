@@ -452,7 +452,15 @@ async def get_open_recs(
     current_user: dict = Depends(get_current_user),
 ):
     await _verify_session_owner(session_id, current_user)
-    recs = await get_open_recommendations(session_id)
+    # include_acknowledged: EVERY still-unresolved item (contamination warnings,
+    # field-QA items, and SQS recs) re-appears on the pre-download modal and the
+    # post-download checklist on EVERY download, any number of times, until it is
+    # actually fixed (resolved) or explicitly dismissed. A prior "Download Anyway"
+    # acknowledges but does not suppress. This route is the sole feeder of the
+    # download preflight (frontend AcordModal), so the change is scoped to the
+    # download flow; the non-download callers of get_open_recommendations keep the
+    # default (action IS NULL) behavior.
+    recs = await get_open_recommendations(session_id, include_acknowledged=True)
     return JSONResponse({"success": True, "open_recommendations": recs, "count": len(recs)})
 
 

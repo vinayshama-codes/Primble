@@ -73,7 +73,12 @@ export default function PDFJsViewer({
   const [applySigStage, setApplySigStage] = useState("idle");
   const [loadingStage,  setLoadingStage]  = useState("idle");
   const [pdfRefreshKey, setPdfRefreshKey] = useState(0);
-  const [highlightCounts, setHighlightCounts] = useState({ pink: 0, yellow: 0, green: 0 });
+  const [highlightCounts, setHighlightCounts] = useState({ verified: 0, review: 0, yellow: 0, green: 0 });
+  const [showLegend, setShowLegend] = useState(false);
+  // Hover to open on devices that support hover (desktop); tap/click always works
+  // (mobile/tablet). Gating hover on matchMedia stops a mobile tap from firing a
+  // phantom mouseenter that would fight the click.
+  const canHover = typeof window !== "undefined" && !!window.matchMedia && window.matchMedia("(hover: hover)").matches;
 
   useEffect(() => { clientFilledRef.current = clientFilledFields; }, [clientFilledFields]);
   useEffect(() => { editModeRef.current = editMode; }, [editMode]);
@@ -103,7 +108,7 @@ export default function PDFJsViewer({
     clearedSigFieldsRef.current = new Set();
     manuallyRenderedRef.current = { doc: null, pageNum: -1 };
     renderScaleRef.current = 1;
-    setHighlightCounts({ pink: 0, yellow: 0, green: 0 });
+    setHighlightCounts({ verified: 0, review: 0, yellow: 0, green: 0 });
   }, [formId]);
 
   // Load PDF
@@ -248,7 +253,7 @@ export default function PDFJsViewer({
   }, [sessionId, formId]); // eslint-disable-line
 
   const updateHighlightCounts = (fieldList, confLabels, clientFilled, vals) => {
-    let pink = 0, yellow = 0, green = 0;
+    let verified = 0, review = 0, yellow = 0, green = 0;
     fieldList.forEach(f => {
       const name = f.name;
       const val  = (vals[name] || f.value || "").toString().trim();
@@ -256,9 +261,10 @@ export default function PDFJsViewer({
       if (clientFilled.includes(name) || conf === "client_arq") { green++; return; }
       if (YELLOW_REQUIRED.has(name) && (!val || val === "null" || val === "None")) { yellow++; return; }
       if ((conf === "missing_required" || conf === "extraction_error") && (!val || val === "null" || val === "None")) { yellow++; return; }
-      if (conf === "low_confidence" && val && val !== "null" && val !== "None") pink++;
+      if (conf === "ai_verified" && val && val !== "null" && val !== "None") { verified++; return; }
+      if (conf === "low_confidence" && val && val !== "null" && val !== "None") review++;
     });
-    setHighlightCounts({ pink, yellow, green });
+    setHighlightCounts({ verified, review, yellow, green });
   };
 
   const handleRefresh = async () => {
@@ -291,7 +297,8 @@ export default function PDFJsViewer({
       if (!v || v === "null" || v === "None") return "yellow";
       return null;
     }
-    if (conf === "low_confidence" && v && v !== "null" && v !== "None") return "pink";
+    if (conf === "ai_verified" && v && v !== "null" && v !== "None") return "verified";
+    if (conf === "low_confidence" && v && v !== "null" && v !== "None") return "review";
     if ((conf === "missing_required" || conf === "extraction_error") && (!v || v === "null" || v === "None")) return "yellow";
     return null;
   };
@@ -299,7 +306,8 @@ export default function PDFJsViewer({
   const _highlightBg = (hl, curEdit) => {
     if (hl === "green") return "rgb(187,247,208)";
     if (hl === "yellow") return "rgb(254,243,199)";
-    if (hl === "pink") return "rgb(254,226,226)";
+    if (hl === "verified") return "rgb(254,226,226)";  // pink — AI-filled, found in docs
+    if (hl === "review") return "rgb(254,215,170)";    // orange — AI-filled, verify
     return curEdit ? "rgba(255,255,255,0.97)" : "transparent";
   };
 
@@ -552,9 +560,39 @@ export default function PDFJsViewer({
           <span title={formName} style={{ color: "#e8eaf2", fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, maxWidth: 420 }}>{formName}</span>
           {fieldsLoaded && (
             <>
-              {highlightCounts.yellow > 0 && <span style={{ background: "rgba(254,243,199,0.9)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.yellow} Required</span>}
-              {highlightCounts.pink   > 0 && <span style={{ background: "rgba(254,226,226,0.9)", color: "#991b1b", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.pink} Review</span>}
-              {highlightCounts.green  > 0 && <span style={{ background: "rgba(187,247,208,0.9)", color: "#166534", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.green} Client</span>}
+              {highlightCounts.yellow  > 0 && <span title="Required fields that are still empty - fill before sending." style={{ background: "rgb(254,243,199)", color: "#92400e", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.yellow} Required</span>}
+              {highlightCounts.review  > 0 && <span title="AI-filled but NOT found in your uploaded documents - verify before download." style={{ background: "rgb(254,215,170)", color: "#9a3412", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.review} Verify</span>}
+              {highlightCounts.verified > 0 && <span title="AI-filled and confirmed present in your uploaded documents." style={{ background: "rgb(254,226,226)", color: "#991b1b", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.verified} AI-OK</span>}
+              {highlightCounts.green   > 0 && <span title="Filled by your client via the questionnaire." style={{ background: "rgb(187,247,208)", color: "#166534", fontSize: 10, padding: "1px 7px", borderRadius: 10, border: "none", fontWeight: 600 }}>{highlightCounts.green} Client</span>}
+              {(highlightCounts.yellow + highlightCounts.review + highlightCounts.verified + highlightCounts.green) > 0 && (
+                <span
+                  style={{ position: "relative", display: "inline-flex" }}
+                  onMouseEnter={canHover ? () => setShowLegend(true) : undefined}
+                  onMouseLeave={canHover ? () => setShowLegend(false) : undefined}
+                >
+                  <span
+                    onClick={() => setShowLegend(v => !v)}
+                    role="button"
+                    aria-label="What do the highlight colors mean?"
+                    style={{ cursor: "pointer", width: 15, height: 15, borderRadius: "50%", border: "1px solid #4a5578", color: "#9aa4bf", fontSize: 10, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", userSelect: "none", lineHeight: 1 }}
+                  >?</span>
+                  {showLegend && (
+                    <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 60, background: "#1e2436", border: "1px solid #2a3047", borderRadius: 8, padding: "8px 10px", width: 236, boxShadow: "0 6px 20px rgba(0,0,0,0.35)" }} onClick={() => setShowLegend(false)}>
+                      {[
+                        ["rgb(254,243,199)", "Required", "Empty required field - fill it"],
+                        ["rgb(254,215,170)", "Verify", "AI-filled, NOT found in your documents"],
+                        ["rgb(254,226,226)", "AI-OK", "AI-filled and found in your documents"],
+                        ["rgb(187,247,208)", "Client", "Filled by your client"],
+                      ].map(([c, label, desc]) => (
+                        <div key={label} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "3px 0" }}>
+                          <span style={{ width: 11, height: 11, borderRadius: 2, background: c, flexShrink: 0, marginTop: 2 }} />
+                          <span style={{ fontSize: 10, lineHeight: 1.35 }}><b style={{ color: "#e8eaf2" }}>{label}</b> <span style={{ color: "#9aa4bf" }}>{desc}</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </span>
+              )}
             </>
           )}
         </div>
@@ -599,9 +637,10 @@ export default function PDFJsViewer({
       {editMode && (
         <div className="pdfviewer-edit-hint" style={{ padding: "5px 14px", background: "rgba(245,158,11,0.06)", borderBottom: "1px solid rgba(245,158,11,0.15)", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ color: "#f59e0b", fontSize: 11 }}>Click any field to edit - "Done Editing" saves all changes</span>
-          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,243,199,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Required field</span></span>
-          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(254,226,226,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Low confidence</span></span>
-          {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgba(187,247,208,0.9)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Client-filled</span></span>}
+          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,243,199)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Required field</span></span>
+          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,215,170)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Verify (not found in docs)</span></span>
+          <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(254,226,226)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>AI-OK (found in docs)</span></span>
+          {highlightCounts.green > 0 && <span style={{ fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 11, height: 11, background: "rgb(187,247,208)", border: "none", borderRadius: 2, display: "inline-block" }} /><span style={{ color: "#9aa4bf" }}>Client-filled</span></span>}
         </div>
       )}
 

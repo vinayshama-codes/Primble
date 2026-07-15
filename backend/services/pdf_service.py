@@ -17,6 +17,7 @@ from utils.helpers import _parse_address
 from typing import NamedTuple
 from services.extraction_service import _fv, ACTIVE_MODEL
 from services.fact_registry import FACT_REGISTRY
+from services.normalization import detect_no_loss_assertion
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,31 @@ _PII_EXCLUDE_KEYS: frozenset = frozenset({
     "physical_address",  # full street address — decomposed by Pass 1
 })
 
+# Per-row PII sub-keys stripped from schedule list facts (e.g. auto_drivers)
+# before they reach an LLM prompt, rather than excluding the whole list. DOB
+# and license number are the sensitive identifiers; they are already
+# deterministically stamped onto the form by _resolve_schedule_row (Pass 1),
+# so gap-fill never needs to see them. Other row fields (name, hire_date,
+# experience_years, vehicle_use_percent) are left in case a legitimate
+# narrative gap-fill question needs them (e.g. "describe the driver
+# experience program").
+_SCHEDULE_ROW_PII_SUBKEYS: Dict[str, frozenset] = {
+    "auto_drivers": frozenset({"dob", "license_number"}),
+}
+
+
+def _redact_schedule_rows(list_key: str, rows: Any) -> Any:
+    """Strip _SCHEDULE_ROW_PII_SUBKEYS[list_key] from every row dict. Returns
+    ``rows`` unchanged if list_key has no registered PII sub-keys or rows
+    isn't a list."""
+    subkeys = _SCHEDULE_ROW_PII_SUBKEYS.get(list_key)
+    if not subkeys or not isinstance(rows, list):
+        return rows
+    return [
+        {k: v for k, v in row.items() if k not in subkeys} if isinstance(row, dict) else row
+        for row in rows
+    ]
+
 # ── Canonical valid fact-key set (full registry, not just current document) ───
 # Used to validate GPT-returned new_mappings keys and reject hallucinations.
 # A key absent from the CURRENT document's facts is still a valid structural
@@ -109,11 +135,23 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     "Vehicle_GaragingAddress":       _ScheduleDef("auto_garaging_addresses", None),
 
     # ── Drivers (ACORD 127) ─────────────────────────────────────────────────
-    "Driver_FullName":               _ScheduleDef("auto_drivers", "name"),
-    "Driver_GivenName":              _ScheduleDef("auto_drivers", "name"),
-    "Driver_BirthDate":              _ScheduleDef("auto_drivers", "dob"),
-    "Driver_LicenseNumber":          _ScheduleDef("auto_drivers", "license_number"),
-    "Driver_LicenseStateOrProvince": _ScheduleDef("auto_drivers", "license_state"),
+    # NOTE: "Driver_FullName" is a DIFFERENT real schema field used by ACORD 133
+    # (Driver_FullName_A/B/C) — kept as-is, do not repoint it. ACORD 127 itself
+    # has no "Driver_FullName" field; it splits the name into GivenName/Surname,
+    # so those two resolve via the "_name_given"/"_name_surname" sentinel
+    # sub-keys (see _resolve_schedule_row) instead of both taking the raw
+    # "name" string. LicenseNumber/LicenseStateOrProvince below were pointed at
+    # base names that don't exist in ACORD_127_schema.json (the real fields are
+    # *Identifier/*Code) and so silently never stamped; fixed to the real names.
+    "Driver_FullName":                    _ScheduleDef("auto_drivers", "name"),
+    "Driver_GivenName":                   _ScheduleDef("auto_drivers", "_name_given"),
+    "Driver_Surname":                     _ScheduleDef("auto_drivers", "_name_surname"),
+    "Driver_BirthDate":                   _ScheduleDef("auto_drivers", "dob"),
+    "Driver_LicenseNumberIdentifier":     _ScheduleDef("auto_drivers", "license_number"),
+    "Driver_LicensedStateOrProvinceCode": _ScheduleDef("auto_drivers", "license_state"),
+    "Driver_HiredDate":                   _ScheduleDef("auto_drivers", "hire_date"),
+    "Driver_ExperienceYearCount":         _ScheduleDef("auto_drivers", "experience_years"),
+    "Driver_Vehicle_UsePercent":          _ScheduleDef("auto_drivers", "vehicle_use_percent"),
 
     # ── WC Class Codes (ACORD 130) ──────────────────────────────────────────
     "WorkersCompensation_ClassCode":        _ScheduleDef("wc_class_codes", "code"),
@@ -176,6 +214,47 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     "PropertyLocation_ConstructionType": _ScheduleDef("property_locations", "construction_type"),
     "PropertyLocation_YearBuilt":        _ScheduleDef("property_locations", "year_built"),
 
+    # ── Premises / Location Schedule (Beta Report Figure 27) ─────────────────
+    # These are ACORD's own shared field concepts — the SAME base field names
+    # (CommercialStructure_*/BusinessInformation_*/BuildingOccupancy_*) appear
+    # on ACORD 125, 131, 140, 160 and 186 to mean the same thing: "location A's
+    # / B's / ... address, ownership, and occupancy detail." Registering them
+    # once here (mirroring the LossHistory_*/PriorCoverage_* pattern above)
+    # binds every one of those forms' A/B/C/D premises rows to the SAME
+    # canonical, deduplicated `property_locations` list instead of each row
+    # falling through to an ungrounded per-field GPT guess.
+    # "LOC #" - tooltip: "The location number for the premises." Was already
+    # in the required-field set (pre-existing) but never had a data source,
+    # so it stayed blank/yellow on every row. Sourced from the consolidated
+    # list's own position, matching the row it's actually stamped into.
+    "CommercialStructure_Location_ProducerIdentifier":        _ScheduleDef("property_locations", "location_number"),
+    "CommercialStructure_PhysicalAddress_LineOne":            _ScheduleDef("property_locations", "address_line1"),
+    "CommercialStructure_PhysicalAddress_CityName":           _ScheduleDef("property_locations", "address_city"),
+    "CommercialStructure_PhysicalAddress_StateOrProvinceCode":_ScheduleDef("property_locations", "address_state"),
+    "CommercialStructure_PhysicalAddress_PostalCode":         _ScheduleDef("property_locations", "address_zip"),
+    "CommercialStructure_RiskLocation_InsideCityLimitsIndicator":  _ScheduleDef("property_locations", "is_inside_city_limits"),
+    "CommercialStructure_RiskLocation_OutsideCityLimitsIndicator": _ScheduleDef("property_locations", "is_outside_city_limits"),
+    "CommercialStructure_InsuredInterest_OwnerIndicator":     _ScheduleDef("property_locations", "is_owner"),
+    "CommercialStructure_InsuredInterest_TenantIndicator":    _ScheduleDef("property_locations", "is_tenant"),
+    "CommercialStructure_AnnualRevenueAmount":                _ScheduleDef("property_locations", "annual_revenue"),
+    "BusinessInformation_FullTimeEmployeeCount":              _ScheduleDef("property_locations", "full_time_employees"),
+    "BusinessInformation_PartTimeEmployeeCount":              _ScheduleDef("property_locations", "part_time_employees"),
+    "BuildingOccupancy_OccupiedArea":                         _ScheduleDef("property_locations", "occupied_area"),
+    "BuildingOccupancy_OpenToPublicArea":                     _ScheduleDef("property_locations", "open_to_public_area"),
+    "BuildingOccupancy_OperationsDescription":                _ScheduleDef("property_locations", "operations_description"),
+    # "Total Building Area" (whole building's sq ft) - a DISTINCT field from
+    # occupied_area (the space the insured occupies). Missed on the first
+    # pass; caught during manual re-verification because it was left
+    # unregistered, fell to ungated GPT gap-fill, and got silently filled
+    # with a copy of occupied_area instead of staying blank.
+    "Construction_BuildingArea":                              _ScheduleDef("property_locations", "total_building_area"),
+    # Owner/Tenant/Other are mutually exclusive. Registering "Other" too
+    # (sourced from the SAME deterministic ownership derivation as Owner/
+    # Tenant) stops it from being independently, ungated-ly re-guessed by
+    # GPT and contradicting an already-resolved Owner/Tenant answer.
+    "CommercialStructure_InsuredInterest_OtherIndicator":     _ScheduleDef("property_locations", "is_other_interest"),
+    "CommercialStructure_InsuredInterest_OtherDescription":   _ScheduleDef("property_locations", "other_interest_description"),
+
     # ── GL Class Codes (ACORD 126 schedule of hazards) ───────────────────────
     # NOTE: the real ACORD 126 field names are `GeneralLiability_Hazard_*_A/_B/_C`
     # (see ACORD_126_schema.json). The former "GL_ClassCode" / "GL_Location" keys
@@ -190,6 +269,43 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
 }
 
 _SCHED_ROW_RE = re.compile(r"^(.+)_([A-N])$")
+
+
+def repeating_group_key(field_name: str, tooltip: Optional[str]):
+    """Repeating-group identity for a gap-fill slot field: ``(base, tooltip)``.
+
+    Two ``_A/_B/...`` siblings belong to the SAME repeating group only when they
+    share BOTH the base name AND the tooltip. ACORD reuses one base for genuinely
+    DIFFERENT roles distinguished only by the "As used here..." tooltip note - on
+    ACORD 127, ``AdditionalInterest_FullName_A/B`` are the additional-interest
+    (lienholder) schedule while ``_C/_D`` are "the name of the other owner of the
+    vehicle". Keying on the base alone merged all four into one ordinal
+    "find N distinct values" block, so the gap-fill LLM filled the first role and
+    left the owner boxes (_C/_D) empty. Splitting by tooltip gives each role its
+    own block. Returns ``None`` when the field has no row suffix (not a slot).
+    Module-level + pure so the grouping is unit-testable against the real schemas.
+    """
+    m = _SCHED_ROW_RE.match(field_name or "")
+    if not m:
+        return None
+    return (m.group(1), (tooltip or "").strip())
+
+
+# Sentinel sub_keys handled specially by _resolve_schedule_row: the "name"
+# sub-key holds one full-name string per driver, but ACORD 127 splits that
+# into separate GivenName/Surname boxes. Last whitespace token = surname;
+# everything before it = given name. A single-token name has no surname.
+_NAME_GIVEN_KEY = "_name_given"
+_NAME_SURNAME_KEY = "_name_surname"
+
+
+def _split_driver_name(full: Optional[str]):
+    if not full or not str(full).strip():
+        return None, None
+    parts = str(full).strip().split()
+    if len(parts) == 1:
+        return parts[0], None
+    return " ".join(parts[:-1]), parts[-1]
 
 
 def _resolve_schedule_row(field_name: str, facts: dict):
@@ -234,7 +350,11 @@ def _resolve_schedule_row(field_name: str, facts: dict):
     if defn.sub_key is None:
         return str(item) if item is not None else None
     if isinstance(item, dict):
-        val = item.get(defn.sub_key)
+        if defn.sub_key in (_NAME_GIVEN_KEY, _NAME_SURNAME_KEY):
+            given, surname = _split_driver_name(item.get("name"))
+            val = given if defn.sub_key == _NAME_GIVEN_KEY else surname
+        else:
+            val = item.get(defn.sub_key)
         if isinstance(val, bool):
             return "Yes" if val else "No"
         return str(val) if val is not None else None
@@ -597,9 +717,19 @@ _ACORD_FIELD_RULES = [
 
     # ── Contractors ──────────────────────────────────────────────────────────
     ("Contractors_WorkSubcontractedPercent",               "percent_subcontracted"),
-    ("Contractors_SubcontractorsPaidAmount",               "total_revenue"),
+    # NOT total_revenue - this field is "dollar amount paid TO subcontractors",
+    # a distinct (usually much smaller) figure than annual gross revenue.
+    # No dedicated extraction fact exists for it, so leave unmatched -> gap-fill
+    # LLM reads the real number from raw text if the document states it;
+    # otherwise it stays blank instead of silently showing total revenue.
+    ("Contractors_SubcontractorsPaidAmount",               None),
     ("Contractors_FullTimeEmployeeCount",                  "num_employees"),
-    ("Contractors_PartTimeEmployeeCount",                  "num_employees"),
+    # NOT num_employees - that would duplicate the full-time count into this
+    # field verbatim (no dedicated part-time extraction fact exists). Leave
+    # unmatched -> gap-fill LLM reads the real part-time figure from raw text
+    # when the document states one distinctly; otherwise stays blank instead
+    # of silently repeating the full-time number.
+    ("Contractors_PartTimeEmployeeCount",                  None),
     ("Contractors_Question_",                              None),
     ("ProductAndCompletedOperations_AnnualGrossSalesAmount","total_revenue"),
     ("ProductAndCompletedOperations_UnitCount",            None),
@@ -877,9 +1007,14 @@ def _fill_and_highlight(arr, data: dict, confidence: dict, counter: list, pdf: p
 def _collect_field_rects_for_highlight(pdf: pikepdf.Pdf, confidence: dict, data: dict) -> dict:
     """Return {page_idx: [(x1,y1,x2,y2, color_rgb), ...]} for fields needing highlights."""
     # color tuples: pink=low_confidence+has_value, yellow=missing_required, green=client_arq_filled
-    COLOR_PINK   = (1.00, 0.89, 0.89)   # rgba(254,226,226) — very light pink
-    COLOR_YELLOW = (1.00, 0.95, 0.78)   # rgba(254,243,199) — very light yellow
-    COLOR_GREEN  = (0.73, 0.97, 0.82)   # rgba(187,247,208) — very light green
+    # Two AI tiers, deliberately distinct colors:
+    #   PINK   = AI-filled AND confirmed present in the uploaded documents (AI-OK)
+    #   ORANGE = AI-filled but NOT confirmed (verify) — never reads as the yellow
+    #            "Required" highlight.
+    COLOR_PINK   = (1.00, 0.89, 0.89)   # rgba(254,226,226) — light pink (AI-OK, verified)
+    COLOR_ORANGE = (1.00, 0.84, 0.67)   # rgba(254,215,170) — light orange (Verify)
+    COLOR_YELLOW = (1.00, 0.95, 0.78)   # rgba(254,243,199) — very light yellow (Required)
+    COLOR_GREEN  = (0.73, 0.97, 0.82)   # rgba(187,247,208) — very light green (Client)
     page_rects: dict = {}
     for page_idx, page in enumerate(pdf.pages):
         raw_annots = page.get("/Annots")
@@ -917,8 +1052,10 @@ def _collect_field_rects_for_highlight(pdf: pikepdf.Pdf, confidence: dict, data:
                     color = COLOR_GREEN
                 elif conf == "missing_required":
                     color = COLOR_YELLOW
-                elif conf == "low_confidence" and has_val:
+                elif conf == "ai_verified" and has_val:
                     color = COLOR_PINK
+                elif conf == "low_confidence" and has_val:
+                    color = COLOR_ORANGE
                 else:
                     color = None
                 if color:
@@ -1242,6 +1379,29 @@ def _derive_indicator(field_name: str, facts: dict) -> Optional[str]:
     return None
 
 
+# ── Gap-fill field-spec clarifications ────────────────────────────────────────
+# Bug fix (found via GL test suite): the gap-fill LLM answered
+# Contractors_SubcontractorsPaidAmount_A ($15) from a document that only ever
+# stated "15% of work is subcontracted" - it reused the percentage's digits as
+# a dollar figure for an adjacent, easily-confused field instead of returning
+# null. Rule 4 in the prompt ("Dollar amounts: include $ and commas as found")
+# combined with this field's own tooltip ("total dollar amount... paid to
+# subcontractors") pushed it to force an answer rather than admit absence.
+# Keyed by field name so this only adds prompt text when the field is actually
+# being asked about, and is a plain dict so more confusable-field pairs can be
+# added later without growing the global prompt skeleton.
+_FIELD_SPEC_CLARIFICATIONS = {
+    "Contractors_SubcontractorsPaidAmount_A": (
+        " CAUTION: this is a DOLLAR AMOUNT paid to subcontractors, NOT the "
+        "subcontracted-work PERCENTAGE (that is the separate field "
+        "Contractors_WorkSubcontractedPercent_A). Only fill this if the "
+        "document states an explicit dollar figure for this. Never derive a "
+        "dollar amount from a percentage - if only a percentage is stated, "
+        "return null for this field."
+    ),
+}
+
+
 # ── GL schedule-of-hazards structured fill (ACORD 126) ───────────────────────
 # Maps each broker-fillable hazard column to its key inside a row of the
 # `gl_class_code_schedule` fact (list of dicts). Kept separate from the generic
@@ -1287,11 +1447,145 @@ def _resolve_gl_hazard_row(field_name: str, facts: dict):
     return "UNMATCHED"
 
 
+_SUBJECT_OF_INSURANCE_RE = re.compile(
+    r"^CommercialProperty_Premises_(SubjectOfInsuranceCode|LimitAmount)_([A-Z])$"
+)
+# Building = subject slot 0, BPP = subject slot 1, within each premises's own
+# 6-letter block (see _resolve_subject_of_insurance_row). Slots 2-4 (e.g.
+# Business Income) have no structured source in the current fact model.
+_SUBJECT_OF_INSURANCE_SLOTS = (
+    ("Building", "building_value"),
+    ("Business Personal Property", "bpp_value"),
+)
+
+
+def _resolve_subject_of_insurance_row(field_name: str, facts: dict):
+    """Resolve a per-premises Subject-of-Insurance data cell (the Building /
+    BPP amount grid on ACORD 140/141) from the canonical `property_locations`
+    list.
+
+    This grid's row-lettering is NOT the simple "letter = premises index"
+    scheme used elsewhere on the same form (address, revenue, employee
+    count, ...). Confirmed directly against ACORD_140_schema.json:
+    CommercialStructure_PhysicalAddress_LineOne_A is premises 1's address and
+    _B is premises 2's - but CommercialProperty_Premises_LimitAmount jumps
+    from _E straight to _G for premises 2's first subject row, skipping _F.
+    Each premises gets its OWN 6-letter block (5 real subject rows + 1 unused
+    spacer): premises 1 = A-F, premises 2 = G-L, premises 3 = M-R, etc.
+
+    Without this, these fields were entirely unregistered and fell to
+    ungated GPT gap-fill with no per-premises grounding, which mixed dollar
+    figures from DIFFERENT locations into a single premises block's grid.
+
+    Returns
+    -------
+    _SCHED_SKIP  — not a subject-of-insurance field; caller continues normally.
+    None         — this premises doesn't exist (fewer real locations than
+                   letter-blocks) - an authoritative blank, not sent to GPT.
+    "UNMATCHED"  — a real premises, but no structured value for this subject
+                   slot yet → gap-fill may still try from raw text.
+    str          — the resolved value.
+    """
+    m = _SUBJECT_OF_INSURANCE_RE.match(field_name)
+    if m is None:
+        return _SCHED_SKIP
+    col, letter = m.group(1), m.group(2)
+    letter_idx = _ROW_LETTER_TO_IDX.get(letter)
+    if letter_idx is None:
+        return _SCHED_SKIP
+    loc_idx, slot_idx = divmod(letter_idx, 6)
+    if slot_idx == 5:
+        return _SCHED_SKIP  # the unused spacer letter (F, L, R, ...) - not a real row
+
+    locations = _fv(facts, "property_locations")
+    if not isinstance(locations, list) or loc_idx >= len(locations):
+        return None
+    loc = locations[loc_idx]
+    if not isinstance(loc, dict) or slot_idx >= len(_SUBJECT_OF_INSURANCE_SLOTS):
+        return "UNMATCHED"
+
+    label, value_key = _SUBJECT_OF_INSURANCE_SLOTS[slot_idx]
+    value = loc.get(value_key)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return "UNMATCHED"
+    return label if col == "SubjectOfInsuranceCode" else str(value)
+
+
+_NO_LOSS_INDICATOR_FIELDS = {"LossHistory_NoPriorLossesIndicator_A"}
+
+
+def _resolve_no_loss_indicator(field_name: str, facts: dict, raw_text: str = ""):
+    """Deterministically resolve the ACORD 'Check if none' loss-history
+    checkbox from the SAME signal the SQS scorer uses, instead of an
+    independent per-field GPT judgment call.
+
+    Previously the checkbox was decided purely by a Pass-2 GPT per-field
+    guess, disconnected from the facts/flags the SQS panel scores against. A
+    submission could come back with the checkbox CHECKED ("Yes" - reads to a
+    broker as confirmed/done) while the SQS panel simultaneously scored the
+    identical submission as only a narrative assertion, "weaker than an
+    attestation, please confirm" - the PDF and the report contradicting each
+    other about the same finding.
+
+    Every real caller (process_single_form, compute_form_gaps) already merges
+    session flags into the facts dict it passes in (`facts_with_flags = {
+    **session["facts"], **session["flags"]}` - see form_service.py), the same
+    pattern already relied on for other checkboxes like has_general_liability.
+    So `narrative_states_no_losses` / `no_prior_losses` here are the EXACT
+    flag values calculate_p4_loss_history() and _get_loss_history_state() in
+    sqs_service.py read - not a re-derived approximation, the same booleans.
+    That makes the checkbox and the SQS state impossible to disagree by
+    construction. A raw-text scan (detect_no_loss_assertion) is kept only as
+    a defensive fallback for a caller that didn't merge flags in.
+
+    Returns
+    -------
+    _SCHED_SKIP  — not this field; caller continues normally.
+    "No"         — real claim data is present. Never attest "none" above a
+                   populated claims table on the same form - that would be
+                   its own internal contradiction.
+    "Yes"        — a no-loss assertion was found with no contradicting claims.
+    "UNMATCHED"  — neither signal fired → gap-fill may still try from raw text.
+    """
+    if field_name not in _NO_LOSS_INDICATOR_FIELDS:
+        return _SCHED_SKIP
+
+    def _has_positive_amount(key: str) -> bool:
+        v = _fv(facts, key)
+        if v is None:
+            return False
+        try:
+            return float(re.sub(r"[^\d.]", "", str(v)) or 0) > 0
+        except Exception:
+            return False
+
+    if _has_positive_amount("num_claims") or _has_positive_amount("total_incurred"):
+        return "No"
+    if bool(_fv(facts, "narrative_states_no_losses")) or bool(_fv(facts, "no_prior_losses")):
+        return "Yes"
+    npl = _fv(facts, "loss_history_no_prior_losses_indicator")
+    if str(npl or "").strip().lower() in ("yes", "y", "true", "1"):
+        return "Yes"
+    if detect_no_loss_assertion(raw_text or ""):
+        return "Yes"
+    return "UNMATCHED"
+
+
 def _deterministic_map(field_name: str, facts: dict):
+    # ── Loss-history no-loss checkbox (single source of truth with SQS) ─────
+    no_loss = _resolve_no_loss_indicator(field_name, facts)
+    if no_loss is not _SCHED_SKIP:
+        return no_loss  # "Yes"/"No", or "UNMATCHED" → gap-fill from raw text
+
     # ── GL schedule-of-hazards structured cells (highest priority) ───────────
     gl_haz = _resolve_gl_hazard_row(field_name, facts)
     if gl_haz is not _SCHED_SKIP:
         return gl_haz  # value string, or "UNMATCHED" → gap-fill from raw text
+
+    # ── Subject-of-Insurance per-premises structured cells ───────────────────
+    soi = _resolve_subject_of_insurance_row(field_name, facts)
+    if soi is not _SCHED_SKIP:
+        return soi  # value string, None (no such premises), or "UNMATCHED"
 
     # ── Schedule row resolution (highest priority) ───────────────────────────
     sched = _resolve_schedule_row(field_name, facts)
@@ -1336,6 +1630,20 @@ def _deterministic_map(field_name: str, facts: dict):
             if fact_key is None:
                 return None
             if fact_key.startswith("_"):
+                # "_addr_*" (mailing_address) is only a real fact for the NAMED
+                # INSURED - extraction never captures a separate Producer /
+                # AdditionalInterest / CertificateHolder address. Reusing the
+                # insured's mailing_address for those (previous behavior)
+                # silently stamped the WRONG entity's address onto the form -
+                # a direct "producer details must be exact" violation. Only
+                # resolve _addr_* for NamedInsured_* fields; everything else
+                # falls through to gap-fill, which reads the correctly-labelled
+                # address for that entity directly from the raw document text.
+                # "_loc_*" (physical_address) is unaffected - both its users
+                # (NamedInsured_PhysicalAddress_* and CommercialStructure_
+                # PhysicalAddress_*) legitimately mean the insured's own premises.
+                if fact_key.startswith("_addr_") and not field_name.startswith("NamedInsured_"):
+                    return "UNMATCHED"
                 return _resolve_special(fact_key, facts, "_" + fact_key.split("_")[1]) or None
             val = _fv(facts, fact_key)   # unwrap OCR-confidence envelope
             if isinstance(val, list):
@@ -1540,10 +1848,56 @@ def apply_acord125_missing_field_highlights(
             f"BusinessInformation_FullTimeEmployeeCount_{row}",
             f"BusinessInformation_PartTimeEmployeeCount_{row}",
             f"BuildingOccupancy_OperationsDescription_{row}",
+            f"Construction_BuildingArea_{row}",
         }
         managed.update(location_fields)
-        if _acord125_row_started(field_state, "CommercialStructure", row) or _acord125_row_started(field_state, "BuildingOccupancy", row):
+        row_started = (
+            _acord125_row_started(field_state, "CommercialStructure", row)
+            or _acord125_row_started(field_state, "BuildingOccupancy", row)
+        )
+        if row_started:
             required_now.update(location_fields)
+
+        # Beta Report Figure 27: "clarify owned vs tenant" + "require
+        # occupancy/COPE details before property forms are considered
+        # complete." Owner/Tenant and Inside/Outside-City-Limits are
+        # COMPLEMENTARY checkbox pairs — exactly one is "Yes", the other is a
+        # deliberate, correct "No" (not a gap). _acord125_has_value() treats
+        # "No" as "no value" (the right behavior for the single yes/no
+        # QUESTIONS checked elsewhere in this function), which would wrongly
+        # flag the correctly-"No" half of a resolved pair as missing. So
+        # these two pairs are checked separately: require only that AT LEAST
+        # ONE half of each pair has an actual "Yes" answer, and flag only
+        # ONE field per pair — never both halves of an already-resolved
+        # answer.
+        owner_field  = f"CommercialStructure_InsuredInterest_OwnerIndicator_{row}"
+        tenant_field = f"CommercialStructure_InsuredInterest_TenantIndicator_{row}"
+        other_interest_field = f"CommercialStructure_InsuredInterest_OtherIndicator_{row}"
+        inside_field  = f"CommercialStructure_RiskLocation_InsideCityLimitsIndicator_{row}"
+        outside_field = f"CommercialStructure_RiskLocation_OutsideCityLimitsIndicator_{row}"
+        other_city_field = f"CommercialStructure_RiskLocation_OtherIndicator_{row}"
+        managed.update({owner_field, tenant_field, other_interest_field, inside_field, outside_field})
+        if row_started:
+            # "Other" is now ALSO a deterministic resolution (see the
+            # InsuredInterest_OtherIndicator registration above), so it must
+            # count as "resolved" here too - otherwise a genuine Other answer
+            # would leave Owner sitting at missing_required forever.
+            if not (
+                _acord125_is_yes(field_state, owner_field)
+                or _acord125_is_yes(field_state, tenant_field)
+                or _acord125_is_yes(field_state, other_interest_field)
+            ):
+                required_now.add(owner_field)
+            # City-limits "Other" (unincorporated) stays GPT-eligible - there is
+            # no deterministic "unincorporated" signal in the extracted facts -
+            # but it must still count as a resolution so a GPT-filled "Other"
+            # doesn't leave Inside/Outside falsely flagged missing.
+            if not (
+                _acord125_is_yes(field_state, inside_field)
+                or _acord125_is_yes(field_state, outside_field)
+                or _acord125_is_yes(field_state, other_city_field)
+            ):
+                required_now.add(inside_field)
 
         for trigger, dependent in (
             (f"CommercialStructure_RiskLocation_OtherIndicator_{row}", f"CommercialStructure_RiskLocation_OtherDescription_{row}"),
@@ -1577,6 +1931,16 @@ def apply_acord125_missing_field_highlights(
         if _acord125_is_yes(field_state, trigger):
             required_now.update(dependents)
 
+    # NOTE (deliberate, per product decision): the page-3 General Information
+    # Yes/No questions (CommercialPolicy_Question_*Code_*) are intentionally NOT
+    # forced to missing_required / yellow. They are not treated as required
+    # fields on the form. When the AI leaves one blank it is still surfaced for
+    # the broker via field_qa's "not_answered" review item (the pre-download
+    # modal) — just without a yellow highlight on the PDF itself. Do not
+    # re-add a loop that marks these codes required; that was tried and
+    # reverted because 16 yellow compliance boxes made a form read as alarmingly
+    # incomplete when most are edge-case questions.
+
     managed.update({"LossHistory_NoPriorLossesIndicator_A", "LossHistory_InformationYearCount_A"})
     loss_rows_started = any(_acord125_row_started(field_state, "LossHistory", row) for row in ("A", "B", "C"))
     if not _acord125_is_yes(field_state, "LossHistory_NoPriorLossesIndicator_A") and not loss_rows_started:
@@ -1594,6 +1958,53 @@ def apply_acord125_missing_field_highlights(
             confidence[field] = "missing_required"
         elif confidence.get(field) == "missing_required":
             confidence[field] = "filled" if _acord125_has_value(field_state, field) else "low_confidence"
+
+    return confidence
+
+
+# GL schedule-of-hazards columns (ACORD 126), mirrored from _GL_HAZARD_COL_TO_KEY
+# above so this stays in lockstep with the extraction-side mapping by
+# construction rather than duplicating the row-letter regex.
+_ACORD126_HAZARD_COLS = ("ClassCode", "Classification", "PremiumBasisCode", "Exposure", "TerritoryCode")
+_ACORD126_HAZARD_ROWS = tuple("ABCDEFGHIJKLMN")
+
+
+def apply_acord126_missing_field_highlights(
+    form_id: str,
+    facts: dict,
+    field_state: dict,
+    confidence: dict,
+) -> dict:
+    """
+    ACORD 126-only visual completeness layer for the GL schedule of hazards.
+
+    Every hazard column (`GeneralLiability_Hazard_*_A..N`) is marked
+    "required": false in the raw schema, so the generic confidence pass at the
+    bottom of map_facts_to_form never paints a blank cell yellow - a row with
+    ClassCode and Exposure filled but TerritoryCode left blank looks IDENTICAL
+    to an untouched row. That silently defeats the client's own requirement
+    that missing hazard/class data stay a visible high-priority gap: the data
+    pipeline (_resolve_gl_hazard_row) is careful never to fabricate a cell, but
+    nothing then flags the resulting gap on the rendered PDF. Mirrors
+    apply_acord125_missing_field_highlights: once a row has ANY hazard data
+    (i.e. the broker/extraction started that class-code row), every other
+    hazard column in that same row is forced missing_required (yellow) until
+    it has a value too.
+    """
+    if form_id != "ACORD_126":
+        return confidence
+
+    for row in _ACORD126_HAZARD_ROWS:
+        row_fields = [f"GeneralLiability_Hazard_{col}_{row}" for col in _ACORD126_HAZARD_COLS]
+        if not any(f in field_state or f in confidence for f in row_fields):
+            continue
+        if not any(_acord125_has_value(field_state, f) for f in row_fields):
+            continue  # row never started - an empty row is not a gap, just unused
+        for f in row_fields:
+            if not _acord125_has_value(field_state, f):
+                confidence[f] = "missing_required"
+            elif confidence.get(f) == "missing_required":
+                confidence[f] = "filled" if _acord125_has_value(field_state, f) else "low_confidence"
 
     return confidence
 
@@ -1837,13 +2248,13 @@ def _fill_unmatched_with_gpt(
       Structured-facts values always beat raw-text values.
     """
     if not unmatched_fields:
-        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": model or GPT_MODEL}
+        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "question_grounding": {}, "model_used": model or GPT_MODEL}
 
     try:
         _client = _get_openai_form_fill_client()
     except RuntimeError as _e:
         logger.warning("gpt_fill: %s — skipping GPT form fill pass", _e)
-        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": model or GPT_MODEL}
+        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "question_grounding": {}, "model_used": model or GPT_MODEL}
 
     llm_model = model or GPT_MODEL
 
@@ -1862,7 +2273,7 @@ def _fill_unmatched_with_gpt(
         )
     }
     if not eligible_fields:
-        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": llm_model}
+        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "question_grounding": {}, "model_used": llm_model}
 
     field_list = list(eligible_fields.keys())
     raw_text_used = bool(raw_text and raw_text.strip())
@@ -1872,19 +2283,28 @@ def _fill_unmatched_with_gpt(
     # Majority vote across chunks resolves conflicts between chunks.
     candidate_counts: Dict[str, Dict[str, int]] = {f: {} for f in field_list}
     all_raw_fields:   set                       = set()
+    all_question_grounding: Dict[str, str]      = {}
 
     # ── Partition eligible fields into singles and slot-groups ────────────────
     # Slot-groups: fields sharing the same base name with _A/_B/…/_N suffixes.
     # Singles:     everything else (no repeating siblings).
     _ROW_SUFFIX_RE = re.compile(r"^(.+)_([A-N])$")
 
-    _base_to_slots: Dict[str, List[str]] = {}
+    def _group_key(field: str):
+        """Repeating-group identity for ``field`` - delegates to the module-level
+        :func:`repeating_group_key` (pure + unit-tested) using this field's
+        schema tooltip. See that function for why grouping is (base, tooltip)."""
+        info = eligible_fields.get(field) or {}
+        tu = info.get("tu") if isinstance(info, dict) else None
+        return repeating_group_key(field, tu)
+
+    _base_to_slots: Dict[tuple, List[str]] = {}
     for _f in field_list:
-        _m = _ROW_SUFFIX_RE.match(_f)
-        if _m:
-            _base_to_slots.setdefault(_m.group(1), []).append(_f)
-    for _base in _base_to_slots:
-        _base_to_slots[_base].sort()          # _A, _B, _C, … always in order
+        _gk = _group_key(_f)
+        if _gk:
+            _base_to_slots.setdefault(_gk, []).append(_f)
+    for _gk in _base_to_slots:
+        _base_to_slots[_gk].sort()            # _A, _B, _C, … always in order
     _grouped_fields_set = {f for slots in _base_to_slots.values() for f in slots}
 
     _ORDINALS = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th",
@@ -1894,7 +2314,8 @@ def _fill_unmatched_with_gpt(
         """Spec line for a single (non-grouped) field."""
         info = eligible_fields.get(f) or {}
         info = info if isinstance(info, dict) else {}
-        tu   = info.get("tu", "")[:80]
+        full_tu = info.get("tu", "") or ""
+        tu   = full_tu[:80]
         ft   = info.get("ft", "")
         req  = " [REQUIRED]" if info.get("required") else ""
         spec = f"  - {f}{req}"
@@ -1904,22 +2325,38 @@ def _fill_unmatched_with_gpt(
             spec += " (dropdown)"
         elif "/Btn" in ft:
             spec += " (checkbox — Yes/No)"
+            if _is_high_impact_checkbox_field(f, full_tu, ft):
+                spec += " [HIGH-IMPACT — see rule 8]"
+        clarification = _FIELD_SPEC_CLARIFICATIONS.get(f)
+        if clarification:
+            spec += clarification
         return spec
 
-    def _slot_group_block(base: str, active_slots: List[str]) -> str:
+    def _slot_group_block(group_key, active_slots: List[str]) -> str:
         """Visual block for repeating-row siblings (_A/_B/_C …).
 
         Rendering all siblings in one block forces the LLM to reason about
         the full slot set before assigning values, preventing duplication
         caused by identical per-field descriptions.
+
+        ``group_key`` is (base, tooltip) - all slots in it share the same
+        meaning by construction (see _group_key), so a single shared
+        description is accurate.
         """
-        all_slots   = _base_to_slots.get(base, active_slots)
+        base        = group_key[0] if isinstance(group_key, tuple) else group_key
+        all_slots   = _base_to_slots.get(group_key, active_slots)
         n_total     = len(all_slots)
         info_a      = eligible_fields.get(active_slots[0]) or {}
         info_a      = info_a if isinstance(info_a, dict) else {}
-        tu          = info_a.get("tu", "")[:80]
+        full_tu     = info_a.get("tu", "") or ""
+        tu          = full_tu[:80]
         ft          = info_a.get("ft", "")
-        slot_labels = "/".join(f"_{chr(ord('A') + i)}" for i in range(n_total))
+        # Real row letters of THIS group (e.g. "_C/_D" for the split owner group),
+        # not a positional _A/_B/... which would mislabel a split-off group.
+        slot_labels = "/".join(
+            "_" + (_ROW_SUFFIX_RE.match(s).group(2) if _ROW_SUFFIX_RE.match(s) else "?")
+            for s in all_slots
+        )
 
         lines = [f"\n  ── REPEATING GROUP '{base}' ({n_total} slots: {slot_labels}) ──"]
         if tu:
@@ -1927,7 +2364,13 @@ def _fill_unmatched_with_gpt(
         if "/Ch" in ft:
             lines.append("  Type: dropdown")
         elif "/Btn" in ft:
-            lines.append("  Type: checkbox — return Yes/No for each slot")
+            lines.append(
+                "  Type: checkbox — return Yes/No for each slot; see rule 8: cite a "
+                "grounding quote in \"question_grounding\" keyed by that slot's exact "
+                "field name for each slot you answer Yes/No"
+            )
+            if _is_high_impact_checkbox_field(active_slots[0], full_tu, ft):
+                lines.append("  [HIGH-IMPACT — see rule 8]")
         lines.append(
             f"  RULE: Find up to {n_total} DISTINCT values in the document.\n"
             f"  Assign 1st distinct value → _A, 2nd → _B, and so on.\n"
@@ -1954,9 +2397,11 @@ def _fill_unmatched_with_gpt(
         "PRIMARY RULE: Fill EVERY field you can from either source. "
         "Copy values verbatim. Do not invent or paraphrase — if a value is not present in\n"
         "either source, return JSON null for that field.\n\n"
-        "Return exactly two keys:\n"
-        '  "values":          {FieldName: <string value> OR JSON null}\n'
-        '  "raw_text_sourced":[FieldName, ...]  (list only fields whose value came from raw text)\n\n'
+        "Return exactly three keys:\n"
+        '  "values":            {FieldName: <string value> OR JSON null}\n'
+        '  "raw_text_sourced":  [FieldName, ...]  (list only fields whose value came from raw text)\n'
+        '  "question_grounding":{FieldName: <short verbatim quote>}  (every Question-code field\n'
+        '                        and every checkbox — Yes/No field — see rule 8)\n\n'
         "ABSENCE PROTOCOL — read carefully:\n"
         "  When a field's value is not present in the document text, you MUST use JSON null "
         "(the unquoted literal null). You MUST NOT return any of the following strings as a "
@@ -1979,6 +2424,7 @@ def _fill_unmatched_with_gpt(
         "  2. Use JSON null (unquoted) when the value is genuinely absent. Never the string \"null\".\n"
         "  3. Checkbox/indicator fields (marked 'checkbox — Yes/No'): return \"Yes\" or \"No\" ONLY.\n"
         "     If the document does not say one way or the other, return null — do NOT default to \"No\".\n"
+        "     Every Yes/No you give here also needs a grounding quote in \"question_grounding\" — see rule 8.\n"
         "     Examples of how to fill checkboxes:\n"
         "     - Policy_Status_BoundIndicator: \"Yes\" if the document is a bound policy, else \"No\"\n"
         "     - Policy_Status_QuoteIndicator: \"Yes\" if document is a quote/application, else \"No\"\n"
@@ -1998,6 +2444,37 @@ def _fill_unmatched_with_gpt(
         "       d) If the document has fewer distinct values than slots, set the extras to JSON null.\n"
         "     Example: 3 slots for Insurer_FullName but only 2 insurer names found →\n"
         "       _A = \"Acme Insurance\", _B = \"Beta Insurance\", _C = null (unquoted).\n\n"
+        "  8. EVERY Yes/No answer needs a grounding quote. This covers THREE field shapes:\n"
+        "     - Question-code fields (name contains \"_Question_<code>Code_\"; the form's\n"
+        "       compliance Yes/No questions, e.g. \"...any exposure to radioactive materials\").\n"
+        "     - EVERY checkbox field marked 'checkbox — Yes/No' above, whatever it is named -\n"
+        "       auto ownership, building features, coverage accept/reject, entity type, line of\n"
+        "       business, anything else. One additionally marked [HIGH-IMPACT] is a field the\n"
+        "       client specifically flagged (auto ownership / hired-non-owned / leasing /\n"
+        "       hazardous-materials / maintenance) and deserves particular care, but the rule\n"
+        "       below applies equally to every checkbox, labeled or not.\n"
+        "     - Any other field whose own description says \"Enter Y for a Yes response... Input\n"
+        "       N for a No response\" (a plain text Yes/No field that is neither a checkbox nor a\n"
+        "       Question-code field, e.g. a spoilage or refrigeration-maintenance Y/N field).\n"
+        "       a) Answer \"Y\"/\"Yes\" or \"N\"/\"No\" ONLY when the document explicitly addresses\n"
+        "          that exact question. If the document never mentions the topic, return null for\n"
+        "          the field - do NOT answer from silence and do NOT default to \"N\"/\"No\".\n"
+        "       b) For EVERY such answer you give, add an entry to \"question_grounding\":\n"
+        "          {FieldName: quote}, where quote is a short VERBATIM excerpt copied from the\n"
+        "          document that is your specific basis for THAT answer.\n"
+        "          - When the document poses the question and states the answer beside it\n"
+        "            (e.g. \"Are any vehicles leased to others? No\" or \"Is there a vehicle\n"
+        "            maintenance program in operation? Yes\"), cite the WHOLE question-and-answer\n"
+        "            together, and you MUST INCLUDE the \"Yes\"/\"No\"/\"Y\"/\"N\" answer word itself\n"
+        "            inside the quote - the quote is not valid proof without it.\n"
+        "          - Otherwise, for a \"N\", the quote MUST be the sentence where the document\n"
+        "            denies the topic (e.g. \"has no prior cancellations\"); never cite an\n"
+        "            unrelated sentence just to have a quote.\n"
+        "          Do not reuse the same quote for more than one question.\n"
+        "       c) Whenever you answer \"Y\" and the form has a matching \"...Explanation\" or\n"
+        "          \"...OtherDescription\" field for that question, ALSO fill that field with the\n"
+        "          specific detail from the document (the same content as your grounding quote\n"
+        "          is fine).\n\n"
     )
     _SKELETON_CHARS = len(_PROMPT_SKELETON)
 
@@ -2015,6 +2492,8 @@ def _fill_unmatched_with_gpt(
                 _v = _v.get("value")
             if _v is None:
                 continue
+            if _k in _SCHEDULE_ROW_PII_SUBKEYS:
+                _v = _redact_schedule_rows(_k, _v)
             if isinstance(_v, str):
                 if not _v.strip():
                     continue
@@ -2055,21 +2534,29 @@ def _fill_unmatched_with_gpt(
         Grouped repeating-slot fields are rendered as visual GROUP blocks so
         the LLM can reason about all siblings at once before assigning values.
         """
-        # Separate active_fields into singles and per-base slot groups
-        active_groups: Dict[str, List[str]] = {}
+        # Separate active_fields into singles and per-base slot groups.
+        # Bug fix: ACORD's row-letter suffix convention means nearly every field
+        # ends in _A..._N even when it has no siblings (e.g. Contractors_
+        # SubcontractorsPaidAmount_A has no _B). Routing a true 1-slot field
+        # through _slot_group_block() renders it as a fake "REPEATING GROUP"
+        # ("find up to 1 distinct value...") instead of the plain field-spec
+        # line, which both bloats the prompt for no reason and skips any
+        # per-field clarification hook _field_spec() carries. Only real
+        # multi-row groups (>1 slot) need group-block treatment.
+        active_groups: Dict[tuple, List[str]] = {}
         active_singles: List[str] = []
         for f in active_fields:
-            _m = _ROW_SUFFIX_RE.match(f)
-            if _m and _m.group(1) in _base_to_slots:
-                active_groups.setdefault(_m.group(1), []).append(f)
+            _gk = _group_key(f)
+            if _gk and len(_base_to_slots.get(_gk, [])) > 1:
+                active_groups.setdefault(_gk, []).append(f)
             else:
                 active_singles.append(f)
-        for _base in active_groups:
-            active_groups[_base].sort()
+        for _gk in active_groups:
+            active_groups[_gk].sort()
 
         parts: List[str] = [_field_spec(f) for f in active_singles]
-        for _base, _slots in sorted(active_groups.items()):
-            parts.append(_slot_group_block(_base, _slots))
+        for _gk, _slots in sorted(active_groups.items()):
+            parts.append(_slot_group_block(_gk, _slots))
 
         fields_block = "\n".join(parts)
         facts_section = (
@@ -2085,7 +2572,7 @@ def _fill_unmatched_with_gpt(
             f"Fields to fill ({form_id}):\n{fields_block}"
             + facts_section
             + raw_section
-            + '\n\nReturn ONLY valid JSON: {"values": {...}, "raw_text_sourced": [...]}'
+            + '\n\nReturn ONLY valid JSON: {"values": {...}, "raw_text_sourced": [...], "question_grounding": {...}}'
         )
 
     # Kept under the old name for any external callers; new code should use
@@ -2128,6 +2615,10 @@ def _fill_unmatched_with_gpt(
                             "raw_text_sourced": {
                                 "type": "array",
                                 "items": {"type": "string"},
+                            },
+                            "question_grounding": {
+                                "type": "object",
+                                "additionalProperties": {"type": "string"},
                             },
                         },
                         "required": ["values"],
@@ -2185,6 +2676,7 @@ def _fill_unmatched_with_gpt(
     def _absorb(result: dict, sent: List[str], chunk_label: str = "1/1") -> None:
         values      = result.get("values",          {}) or {}
         raw_sourced = set(result.get("raw_text_sourced", []) or [])
+        grounding   = result.get("question_grounding", {}) or {}
 
         # DIAGNOSTIC: log first 30 entries of GPT response to understand what is returned
         _diag_sample = {k: v for i, (k, v) in enumerate(values.items()) if i < 30}
@@ -2214,6 +2706,9 @@ def _fill_unmatched_with_gpt(
             candidate_counts[field][vstr] = candidate_counts[field].get(vstr, 0) + 1
             if field in raw_sourced:
                 all_raw_fields.add(field)
+            _quote = grounding.get(field)
+            if _quote and str(_quote).strip():
+                all_question_grounding[field] = str(_quote).strip()
             filled_count += 1
 
         logger.info(
@@ -2268,7 +2763,7 @@ def _fill_unmatched_with_gpt(
     else:
         # No raw text available — skip GPT fill entirely
         logger.warning("gpt_fill: form=%s no raw_text provided — skipping GPT fill", form_id)
-        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "model_used": llm_model}
+        return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "question_grounding": {}, "model_used": llm_model}
 
     # ── Parallel chunk dispatch ────────────────────────────────────────────────
     # When there are multiple chunks, dispatch all LLM calls in parallel using a
@@ -2358,7 +2853,9 @@ def _fill_unmatched_with_gpt(
     # slots despite the GROUP block instructions. Walk each group in slot order
     # (_A first) and clear any slot whose value has already appeared in an
     # earlier sibling.  Comparison is case-insensitive and whitespace-normalised.
-    for _base, _slots in _base_to_slots.items():
+    # Groups are keyed by (base, tooltip), so different roles that share a base
+    # (e.g. lienholder rows vs vehicle-owner rows) are NOT cross-deduped.
+    for _gk, _slots in _base_to_slots.items():
         _seen: Dict[str, str] = {}  # normalised_value -> first slot that claimed it
         for _slot_field in _slots:  # already sorted _A, _B, _C, …
             _val = all_filled.get(_slot_field)
@@ -2389,10 +2886,11 @@ def _fill_unmatched_with_gpt(
         form_id, len(all_filled), len(eligible_fields), len(raw_chunks), llm_model,
     )
     return {
-        "filled_values":   all_filled,
-        "new_mappings":    {},
-        "raw_text_fields": all_raw_fields,
-        "model_used":      llm_model,
+        "filled_values":       all_filled,
+        "new_mappings":        {},
+        "raw_text_fields":     all_raw_fields,
+        "question_grounding":  {f: q for f, q in all_question_grounding.items() if f in all_filled},
+        "model_used":          llm_model,
     }
 
 
@@ -2421,6 +2919,15 @@ def _is_nonfillable_field(field: str) -> bool:
     # PremiumBasisCode in particular contains the substring "Premium", so this
     # override is required, not just a matter of dropping "Hazard_".
     if _GL_HAZARD_FILLABLE_RE.match(field):
+        return False
+    # Explicit allow: CommercialStructure_Location_ProducerIdentifier_{row} is
+    # a naming false-positive caught by the "ProducerIdentifier" substring
+    # below. Despite the name, its own schema tooltip is "the location number
+    # for the premises" (the visible "LOC #" box) - a plain sequential number
+    # derived from the canonical location list, not an agency-assigned code.
+    # The broad "ProducerIdentifier" block below stays as-is for the fields it
+    # was actually added for (Producer_CustomerIdentifier and similar).
+    if field.startswith("CommercialStructure_Location_ProducerIdentifier_"):
         return False
     _NONFILLABLE_SUBSTRINGS = (
         "Signature", "_Sig", "InsurerLetterCode",
@@ -2473,6 +2980,24 @@ def _first_rule_fact(field_name: str) -> Optional[str]:
     return None
 
 
+def _is_secondary_row(field_name: str) -> bool:
+    """True when ``field_name`` is a non-primary repeating row (_B, _C, ... - a
+    SECOND/additional named insured, premises, interest, etc.), False for a
+    primary (_A) or non-row field.
+
+    A secondary row is architecturally a DIFFERENT entity, not a repeat of the
+    primary row's value - this is the same principle _enforce_post_fill_guards'
+    row-dedup guard already relies on ("NamedInsured_FullName_B ... must not
+    echo the row-A value"). A scalar fact (e.g. mailing_address) has exactly one
+    value, so it can only ever be the SOURCE for the primary row; matching it to
+    a secondary row too - as a plain substring match does - manufactures a false
+    "value disagrees with source" report whenever that secondary row legitimately
+    holds a different (or independently gap-filled) value.
+    """
+    m = _SCHED_ROW_RE.match(field_name)
+    return bool(m and _ROW_LETTER_TO_IDX[m.group(2)] >= 1)
+
+
 @lru_cache(maxsize=64)
 def fact_to_form_fields(fact_key: str) -> Dict[str, Tuple[str, ...]]:
     """Map an extraction fact key to the ACORD form fields that DETERMINISTICALLY
@@ -2504,6 +3029,8 @@ def fact_to_form_fields(fact_key: str) -> Dict[str, Tuple[str, ...]]:
                 for field, canonical in alias_map.items():
                     if canonical not in canon_keys or _is_nonfillable_field(field):
                         continue
+                    if _is_secondary_row(field):
+                        continue
                     # Skip fields a Pass-1 rule deterministically claims for a
                     # DIFFERENT fact (alias only runs on Pass-1 leftovers).
                     rf = _first_rule_fact(field)
@@ -2517,12 +3044,67 @@ def fact_to_form_fields(fact_key: str) -> Dict[str, Tuple[str, ...]]:
     if any(fk == fact_key for _, fk in _ACORD_FIELD_RULES):
         for form_id, schema in _all_form_schemas().items():
             for field in schema:
-                if _is_nonfillable_field(field):
+                if _is_nonfillable_field(field) or _is_secondary_row(field):
                     continue
                 if _first_rule_fact(field) == fact_key:
                     result.setdefault(form_id, set()).add(field)
 
+    # ── Pass 1 special-prefix address path ───────────────────────────────────
+    # NamedInsured mailing-address sub-fields (LineOne/City/State/Zip) don't map
+    # to "mailing_address" directly - _resolve_special() derives them from it at
+    # fill-time via the "_addr_*" pseudo-key (see _resolve_special above), and
+    # "_loc_*" derives from "physical_address" the same way. Without this, a
+    # caller asking fact_to_form_fields("mailing_address") - e.g. field_qa's
+    # value-vs-source check - would see NO address fields at all, leaving the
+    # single most safety-critical field family (client feedback: "address...
+    # must be exact") unchecked. Map the pseudo-key family back to its real
+    # source fact so those fields are included like any other.
+    #
+    # "_addr_*" is scoped to NamedInsured_* fields only, mirroring the same
+    # restriction in _deterministic_map: Producer / AdditionalInterest /
+    # CertificateHolder addresses are NOT captured as a "mailing_address" fact
+    # (they're a different entity's address) and are gap-filled from raw text
+    # instead - including them here would compare their correct, independently-
+    # sourced value against the NAMED INSURED's address and manufacture a false
+    # mismatch. "_loc_*" has no such restriction: both its users
+    # (NamedInsured_PhysicalAddress_* and CommercialStructure_PhysicalAddress_*)
+    # legitimately mean the insured's own premises.
+    for _prefix, _source_fact in (("_addr", "mailing_address"), ("_loc", "physical_address")):
+        if fact_key != _source_fact:
+            continue
+        for form_id, schema in _all_form_schemas().items():
+            for field in schema:
+                if _is_nonfillable_field(field) or _is_secondary_row(field):
+                    continue
+                if _prefix == "_addr" and not field.startswith("NamedInsured_"):
+                    continue
+                rf = _first_rule_fact(field)
+                if rf and rf.startswith(_prefix + "_"):
+                    result.setdefault(form_id, set()).add(field)
+
     return {fid: tuple(sorted(fields)) for fid, fields in result.items()}
+
+
+def expected_value_for_field(field_name: str, fact_key: str, source_value: Any) -> Any:
+    """The piece of ``source_value`` a QA/consistency check should compare
+    ``field_name`` against, given the source fact it was included in
+    ``fact_to_form_fields(fact_key)`` for.
+
+    For an ordinary (non-address) field this is ``source_value`` unchanged. For
+    an address sub-field (LineOne/City/State/Zip, routed through the "_addr_*"
+    / "_loc_*" special-prefix mechanism - see ``_resolve_special``) the field
+    only ever receives ONE piece of the full address, so comparing it against
+    the WHOLE address string would manufacture a false mismatch on every
+    address field (e.g. stamped "Aurora" vs full "7740 Foundry Ln, Aurora, CO
+    80011" would never match as address text). Parses ``source_value`` the same
+    way ``_resolve_special`` does and returns the matching piece so a value
+    check compares like-for-like.
+    """
+    rf = _first_rule_fact(field_name)
+    if not rf or not any(rf.startswith(p + "_") for p in _SPECIAL_PREFIXES):
+        return source_value
+    suffix = rf.split("_")[-1]
+    return _parse_address(str(source_value or "")).get(suffix, "")
 
 
 def forms_consuming_fact(fact_key: str) -> List[str]:
@@ -2628,7 +3210,7 @@ def combined_gap_fill(
 
     Returns
     -------
-    Dict[form_id, {"filled_values": dict, "raw_text_fields": set, "model_used": str}]
+    Dict[form_id, {"filled_values": dict, "raw_text_fields": set, "question_grounding": dict, "model_used": str}]
         Per-form fill results, distributed from the shared LLM output. Each form
         only receives values for fields *it* asked for.
 
@@ -2646,6 +3228,7 @@ def combined_gap_fill(
     empty_result_for = lambda: {                      # noqa: E731
         "filled_values": {},
         "raw_text_fields": set(),
+        "question_grounding": {},
         "model_used": model or GPT_MODEL,
     }
     per_form: Dict[str, dict] = {fid: empty_result_for() for fid in forms_to_unmatched}
@@ -2693,6 +3276,7 @@ def combined_gap_fill(
 
     all_filled_values: dict = {}
     all_raw_text_fields: set = set()
+    all_question_grounding: dict = {}
     used_model = model or GPT_MODEL
 
     import time as _time
@@ -2713,6 +3297,7 @@ def combined_gap_fill(
             continue
         all_filled_values.update(gpt_result.get("filled_values", {}) or {})
         all_raw_text_fields.update(gpt_result.get("raw_text_fields", set()) or set())
+        all_question_grounding.update(gpt_result.get("question_grounding", {}) or {})
         used_model = gpt_result.get("model_used", used_model)
 
     filled_values   = all_filled_values
@@ -2728,6 +3313,10 @@ def combined_gap_fill(
     for field_name in raw_text_fields:
         for form_id in field_to_forms.get(field_name, []):
             per_form[form_id]["raw_text_fields"].add(field_name)
+
+    for field_name, quote in all_question_grounding.items():
+        for form_id in field_to_forms.get(field_name, []):
+            per_form[form_id]["question_grounding"][field_name] = quote
 
     for form_id in per_form:
         per_form[form_id]["model_used"] = used_model
@@ -2786,12 +3375,210 @@ def _looks_like_number_or_date(s: str) -> bool:
     return bool(re.fullmatch(r"[\s\d.,/$%()\-:+#]+", s or ""))
 
 
+# ── Guard 4 similarity helpers (paraphrased-boilerplate detection) ──────────
+_BOILERPLATE_SIMILARITY_THRESHOLD = 0.75
+_BOILERPLATE_MIN_SHARED_TOKENS = 4
+
+
+def _sim_tokens(s: str) -> frozenset:
+    """Lowercased word-tokens (len >= 3) used for near-duplicate comparison —
+    order-insensitive, so a reworded/reordered sentence still matches."""
+    return frozenset(t for t in re.findall(r"[a-z0-9]+", s.lower()) if len(t) >= 3)
+
+
+def _is_near_duplicate_text(a: frozenset, b: frozenset) -> bool:
+    """True when two token sets are similar enough to be the same boilerplate
+    idea paraphrased, not merely two answers that happen to share a few common
+    words. Requires both a minimum absolute token overlap and a high Jaccard
+    ratio, so two short, topically-adjacent-but-distinct answers don't collide."""
+    if len(a) < _BOILERPLATE_MIN_SHARED_TOKENS or len(b) < _BOILERPLATE_MIN_SHARED_TOKENS:
+        return False
+    inter = a & b
+    if len(inter) < _BOILERPLATE_MIN_SHARED_TOKENS:
+        return False
+    union = a | b
+    return (len(inter) / len(union)) >= _BOILERPLATE_SIMILARITY_THRESHOLD
+
+
+_AFFIRMATIVE_VALUES = frozenset({"yes", "y", "true", "1", "on"})
+_NEGATIVE_VALUES    = frozenset({"no", "n", "false", "0", "off"})
+
+# Narrative answers that justify/explain a prior Yes/No or "Other" selection.
+# "…Explanation" is the dominant ACORD naming convention (117 fields across the
+# 17 schemas), but "…OtherDescription" ("Other" box checked -> please specify,
+# 62 fields) and "…ResolutionDescription" (a compliance follow-up: foreclosure /
+# lien / fire-code violation -> how was it resolved) are the same shape of
+# field under a different suffix. Deliberately NOT "Description" alone - most
+# Description fields (OperationsDescription, ItemDescription, AlarmDescription,
+# ...) are core required content, not a Yes/No justification, and evidence-
+# gating those would wrongly blank legitimate broker-needed data.
+_EVIDENCE_REQUIRED_TOKENS = ("Explanation", "OtherDescription", "ResolutionDescription")
+
+# Matches the Yes/No "…Question_<code>Code_<row>" convention used for compliance
+# questions across ACORD 125/126/127/130/131/141/160/186 (e.g.
+# "WorkersCompensationLineOfBusiness_Question_ABFCode_A").
+_QUESTION_CODE_RE = re.compile(r"_Question_[A-Za-z0-9]+Code_[A-N]$")
+
+# The ACORD schema's own boilerplate for a Yes/No TEXT field that does NOT use
+# the "_Question_<code>Code_" name convention at all - verified byte-identical
+# on every "_Question_<code>Code_" field AND on plain Y/N fields that don't
+# follow that naming (e.g. ACORD 140's CommercialProperty_Spoilage_YesNoCode_A /
+# …RefrigeratorMaintenanceCode_A, ACORD 25's equivalents). This is the schema
+# itself TELLING us the field is Yes/No, independent of what it's named.
+_YES_NO_TOOLTIP_PREFIX = "Enter Y for a “Yes” response."
+
+
+def _is_yes_no_field(field: str, schema: dict) -> bool:
+    """True when `field` is structurally a Yes/No answer - covering every ACORD
+    naming convention for one across all 17 forms, not just the compliance
+    "_Question_<code>Code_" family (client requirement: "in all the forms...
+    certain fields where Y/N/Yes/No to be filled"). Three independent,
+    schema-driven signals - any one is sufficient:
+      1. The "_Question_<code>Code_<row>" name pattern (compliance questions).
+      2. ft == "/Btn" - a checkbox is structurally boolean by PDF form design,
+         whatever it's named: coverage accept/reject (sink hole, mine
+         subsidence), building features, LOB selection, entity type, auto
+         ownership/HNOA, ...
+      3. The field's own tooltip carries the ACORD "Enter Y for a Yes
+         response..." boilerplate - the same Yes/No convention on a plain
+         /Tx field that uses neither of the above.
+    Deliberately structural (field type / tooltip metadata already in the
+    schema), never a guess from the field's semantic name - matching the
+    project's standing rule against topic/keyword-overlap heuristics (see
+    _question_explanation_pairs and the evidence-gate design notes).
+    """
+    if _QUESTION_CODE_RE.search(field):
+        return True
+    meta = schema.get(field)
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("ft") == "/Btn":
+        return True
+    tu = meta.get("tu")
+    return bool(tu) and str(tu).startswith(_YES_NO_TOOLTIP_PREFIX)
+
+
+def _is_high_impact_checkbox_field(field: str, tooltip: Optional[str], ft: Optional[str]) -> bool:
+    """True for a checkbox (``/Btn``) field that is high-impact (Figure 33: auto
+    ownership / HNOA / leasing / hazardous-materials / maintenance) but does NOT
+    already follow the ``_Question_<code>Code_`` naming convention the evidence
+    gate recognizes by field name alone.
+
+    Found in audit: ACORD 137_CA/137_CO/138_CA/138_CO express their HNOA-
+    equivalent question as a checkbox pair (``Vehicle_HiredBorrowed_YesIndicator_A``
+    / ``_NoIndicator_A``, ``Vehicle_TruckersHiredBorrowed_*``) or an opaque numeric
+    symbol box (``Vehicle_GarageAndDealersSymbol_TwentyEightIndicator_A`` = hired
+    auto). None of these match ``_QUESTION_CODE_RE``, so — before this — a
+    hallucinated "Yes" on one of them was never blanked by the evidence gate,
+    only soft-flagged for review via ``is_high_impact_field`` + low_confidence.
+    That is weaker than the "never inferred loosely" the client asked for.
+
+    SHARED by the gap-fill prompt builder (``_fill_unmatched_with_gpt``, which
+    marks the field so the model must cite a grounding quote) and
+    ``map_facts_to_form``'s evidence gate (which enforces it) so the two can
+    never silently drift apart — same pattern as ``is_value_contaminated`` /
+    ``detect_field_mapping_contamination`` sharing ``_classify_value``.
+    """
+    if "/Btn" not in (ft or ""):
+        return False
+    if _QUESTION_CODE_RE.search(field or ""):
+        return False  # already covered by the name-shape rule
+    try:
+        from services.field_mapping_integrity import is_high_impact_field
+    except Exception:                              # noqa: BLE001
+        return False
+    return is_high_impact_field(field, tooltip)
+
+
 def _is_evidence_required_field(field: str) -> bool:
-    """Narrative answers to Yes/No application questions (the "…Explanation"
-    fields — e.g. ACORD 126 claims-made / employee-benefits sections). Under
-    ENABLE_EVIDENCE_GATED_FILL these are stamped only when the gap-fill LLM
-    copied them from the document, never when inferred (client Figure 30)."""
-    return "Explanation" in field
+    """Narrative answers to Yes/No application questions (the "…Explanation" /
+    "…OtherDescription" / "…ResolutionDescription" fields — e.g. ACORD 126
+    claims-made / employee-benefits sections). Under ENABLE_EVIDENCE_GATED_FILL
+    these are stamped only when the gap-fill LLM copied them from the document,
+    never when inferred (client Figure 30)."""
+    return any(token in field for token in _EVIDENCE_REQUIRED_TOKENS)
+
+
+def _question_explanation_pairs(schema: dict) -> Dict[str, str]:
+    """Map each Yes/No field to its own paired "…Explanation"/"…OtherDescription"/
+    "…ResolutionDescription" field, using the ACORD layout convention that the
+    question immediately precedes its own explanation in the form (and
+    therefore in the schema, whose key order mirrors the source PDF). A pair
+    is accepted ONLY when the very next schema field actually contains one of
+    those tokens - never inferred from position alone - so an unrelated
+    neighboring field (another question, a table header, a producer-
+    identifier column) is never mistaken for this answer's justification.
+    Confirmed against ACORD_130/127/160: most Question codes pair this way;
+    the ones that don't (no adjacent Explanation) are simply excluded, which
+    is the safe default.
+
+    Eligible LEFT-side fields are "_Question_<code>Code_" text fields OR any
+    /Btn checkbox (audited across all 17 schemas: this is exactly the shape of
+    the extremely common "…OtherIndicator_<row>" checkbox -> "…OtherDescription
+    _<row>" text pair - "Other" is checked, please specify - present on 10+
+    forms and previously invisible to this function entirely). Deliberately
+    NOT the broader _is_yes_no_field tooltip-convention signal here: auditing
+    all 17 schemas found two cases where a plain Y/N /Tx field happens to sit
+    directly before an unrelated Explanation field from a different section
+    (ACORD 126 PropertyItem_ItemDetail_InstructionGivenCode_A ->
+    ...MachineryOrEquipmentLoanedRentedOthersExplanation_B; ACORD 141
+    BuildingProtection_DoubleCylinderDoorLockCode_A -> CrimeInformation_
+    OtherDescription_A) - real coincidental adjacency, not a real pair. A
+    checkbox's own PDF layout position is a stronger structural signal than an
+    arbitrarily-ordered Y/N text field, so pairing trusts /Btn but not the
+    tooltip-only signal; _is_yes_no_field is still used for gating the
+    checkbox/text field's OWN answer regardless of whether it pairs."""
+    keys = list(schema.keys())
+    pairs: Dict[str, str] = {}
+    for i, k in enumerate(keys):
+        if i + 1 >= len(keys) or not any(t in keys[i + 1] for t in _EVIDENCE_REQUIRED_TOKENS):
+            continue
+        meta = schema.get(k)
+        is_pairable = _QUESTION_CODE_RE.search(k) or (isinstance(meta, dict) and meta.get("ft") == "/Btn")
+        if is_pairable:
+            pairs[k] = keys[i + 1]
+    return pairs
+
+
+# ── Non-adjacent companion fields (Figure 33 audit finding, live test 2026-07-15) ─
+# ACORD 127's vehicle-ownership question is "explained" not by a single adjacent
+# free-text field (the _question_explanation_pairs convention above) but by the
+# "Name of Other Owner" schedule (AdditionalInterest_FullName_C/_D - see
+# repeating_group_key's own note on why these are a SEPARATE role from _A/_B's
+# lienholder schedule). A Vehicle_ProducerIdentifier_AA field sits between the
+# question and the first owner-name slot in the real schema, so the adjacency
+# check above never finds it - the question was permanently treated as
+# "unpaired" (no Explanation field at all), relying solely on its own
+# grounding quote even when the owner-name box was independently, correctly
+# filled with a real name. Explicit and narrow by design (same pattern as
+# _INDICATOR_RULES / _FIELD_SPEC_CLARIFICATIONS elsewhere in this file) rather
+# than a generalized non-adjacent-pairing mechanism, since this specific
+# mismatch was checked by hand against the real schema, not inferred.
+_NONADJACENT_QUESTION_COMPANIONS: Dict[str, tuple] = {
+    "CommercialVehicleLineOfBusiness_Question_AAJCode_A": (
+        "AdditionalInterest_FullName_C", "AdditionalInterest_FullName_D",
+    ),
+}
+
+
+# ── Non-adjacent DEPENDENT fields (Figure 33 audit finding, live test 2026-07-15) ─
+# The inverse relationship from _NONADJACENT_QUESTION_COMPANIONS above: ACORD
+# 127's "any car modified / special equipment?" question (AAGCode) has its own
+# per-vehicle DESCRIPTION/COST sub-fields (Vehicle_Question_
+# ModifiedEquipmentDescription_A/_B, ...CostAmount_A/_B) - plain free-text
+# fields with no "Explanation"/"OtherDescription" suffix, so they are neither
+# gated by the evidence gate nor covered by Guard 5's adjacent-Explanation
+# check (_enforce_post_fill_guards). Found in audit: the gap-fill LLM filled
+# DESCRIPTION with a sentence lifted from a DIFFERENT vehicle's ownership note
+# even though the question itself correctly stayed blank/ungrounded - these
+# dependent fields must never carry a value when their own parent question
+# isn't a genuine "Yes" (enforced by Guard 6).
+_NONADJACENT_DEPENDENT_FIELDS: Dict[str, tuple] = {
+    "CommercialVehicleLineOfBusiness_Question_AAGCode_A": (
+        "Vehicle_Question_ModifiedEquipmentDescription_A", "Vehicle_Question_ModifiedEquipmentCostAmount_A",
+        "Vehicle_Question_ModifiedEquipmentDescription_B", "Vehicle_Question_ModifiedEquipmentCostAmount_B",
+    ),
+}
 
 
 # ── ACORD 101 overflow routing (Figure 29) ───────────────────────────────────
@@ -2866,8 +3653,11 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict) -> None:
 
     Guard 2 - Repeating-row de-duplication: non-schedule repeating rows
               (NamedInsured_FullName_B, premises rows, etc.) must not echo the
-              row-A value. Schedule / GL-hazard fields are exempt - two vehicles
-              can share a model year. Only collapses an exact duplicate of row A.
+              row-A value. Schedule / GL-hazard / subject-of-insurance fields
+              are exempt - two vehicles can share a model year, and two
+              different locations can both have a "Building" subject at
+              genuinely different dollar amounts. Only collapses an exact
+              duplicate of row A.
 
     Guard 3 - Wrong-type value rejection: prose dropped into a checkbox or a
               numeric/date cell (e.g. a contractor description in a per-claim
@@ -2877,6 +3667,23 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict) -> None:
               into 3+ unrelated field families is boilerplate, not data. Keep
               only the field(s) whose own deterministic rule produces that value
               and blank the rest (Figure 30).
+
+    Guard 5 - Explanation without a "Yes": every ACORD Question/Explanation
+              pair's own field text reads "an explanation IF [X]" - the
+              explanation only applies when the paired question is Yes. A
+              filled Explanation whose paired Question is anything else (No,
+              or any other non-affirmative answer) is answering a question
+              that was never asked - blank it. This is a structural check,
+              independent of ENABLE_EVIDENCE_GATED_FILL: even a verbatim,
+              document-grounded sentence is wrong here if it's attached to a
+              "No".
+
+    Guard 6 - Non-adjacent dependent field without a "Yes": the same
+              invariant as Guard 5, for a dependent field the adjacency-based
+              pairing can't find (see _NONADJACENT_DEPENDENT_FIELDS - e.g. a
+              plain "...Description"/"...CostAmount" sub-field, not
+              "...Explanation"-suffixed). Also fires on a BLANK question, not
+              just an explicit "No".
     """
     # ── Guard 1: legal-entity mutual exclusion ───────────────────────────────
     # Group entity indicator fields present in this schema by their row letter.
@@ -2945,8 +3752,8 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict) -> None:
         base, letter = m.group(1), m.group(2)
         if _ROW_LETTER_TO_IDX[letter] < 1:
             continue  # row A is the canonical row — never blanked
-        if _is_schedule_field(field) or _GL_HAZARD_ROW_RE.match(field):
-            continue  # schedule / GL hazard rows may legitimately repeat values
+        if _is_schedule_field(field) or _GL_HAZARD_ROW_RE.match(field) or _SUBJECT_OF_INSURANCE_RE.match(field):
+            continue  # schedule / GL hazard / subject-of-insurance rows may legitimately repeat values
         # Checkbox/indicator rows legitimately share Yes/No across distinct entities
         # (two LLCs both have LLC=Yes; two locations can both be "inside city limits").
         # De-duplication must only collapse free-text VALUE rows (names, addresses).
@@ -2985,31 +3792,305 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict) -> None:
     # ── Guard 4: cross-field boilerplate bleed ───────────────────────────────
     # The same generic sentence pasted into several UNRELATED fields is boilerplate
     # bleed, not real data (Figure 30). Group non-trivial free-text values; when one
-    # value spans 3+ distinct field families, keep only the field(s) whose own
-    # deterministic rule legitimately produces that value (e.g. the real operations
-    # description field) and blank the rest.
-    value_to_fields: Dict[str, List[str]] = {}
+    # value spans 2+ distinct field families ("multiple unrelated fields" per the
+    # requirement), keep only the field(s) whose own deterministic rule legitimately
+    # produces that value (e.g. the real operations description field) and blank
+    # the rest.
+    #
+    # Grouping is exact-match FIRST (identical strings always cluster, regardless
+    # of length) and near-duplicate SECOND: the more common LLM failure mode is
+    # not verbatim copy-paste but the same idea paraphrased into several fields, so
+    # values are also clustered by token-Jaccard similarity against the first
+    # member of each cluster. A cluster's representative tokens are fixed at its
+    # first member deliberately — cheap, and sufficient to catch the paraphrase-
+    # bleed pattern without O(n^2) pairwise recomputation.
+    candidates: List[Tuple[str, str]] = []
     for field, val in mapped.items():
         if not isinstance(val, str):
             continue
         s = val.strip()
         if len(s) < 20 or " " not in s or _looks_like_number_or_date(s):
             continue
-        value_to_fields.setdefault(s.lower(), []).append(field)
+        candidates.append((field, s))
 
-    for val_l, fields in value_to_fields.items():
+    clusters: List[List[Tuple[str, str]]] = []
+    cluster_tokens: List[frozenset] = []
+    for field, s in candidates:
+        s_l = s.lower()
+        toks = _sim_tokens(s)
+        for ci, rep_tokens in enumerate(cluster_tokens):
+            if s_l == clusters[ci][0][1].lower() or _is_near_duplicate_text(toks, rep_tokens):
+                clusters[ci].append((field, s))
+                break
+        else:
+            clusters.append([(field, s)])
+            cluster_tokens.append(toks)
+
+    # An explanation currently paired to a kept (affirmative) Question-code
+    # answer already went through the evidence gate's own grounding check
+    # (Figure 30 Pass A - see map_facts_to_form) — it is a CONFIRMED answer,
+    # not a guess. Without this exemption, Guard 4 silently undoes that
+    # verification whenever the model reused the same real citation as its
+    # (wrong) grounding for OTHER unrelated Yes/No questions in the same
+    # batch: every field sharing that text gets blanked here, INCLUDING the
+    # one it was actually true for, which reintroduces a bare "Yes" with no
+    # explanation - exactly the failure Pass A exists to prevent. Found via
+    # live test 2026-07-13 (MVR question kept "Y", explanation wiped).
+    _exp_to_kept_q = {exp: q for q, exp in _question_explanation_pairs(schema).items()}
+
+    for cluster in clusters:
+        fields = [f for f, _ in cluster]
         families = {
             (_SCHED_ROW_RE.match(f).group(1) if _SCHED_ROW_RE.match(f) else f)
             for f in fields
         }
-        if len(families) < 3:
+        if len(families) < 2:
             continue  # not a broad enough spread to be confident it's bleed
-        for f in fields:
+        for f, s in cluster:
             det = _deterministic_map(f, facts)
-            legit_owner = isinstance(det, str) and det.strip().lower() == val_l
-            if not legit_owner:
+            legit_owner = isinstance(det, str) and det.strip().lower() == s.lower()
+            paired_q = _exp_to_kept_q.get(f)
+            is_confirmed_yes_explanation = (
+                paired_q is not None
+                and str(mapped.get(paired_q) or "").strip().lower() in _AFFIRMATIVE_VALUES
+            )
+            if not legit_owner and not is_confirmed_yes_explanation:
                 mapped[f] = None
                 logger.info("post_fill_guard boilerplate_bleed blanked=%s", f)
+
+    # ── Guard 5: explanation without a "Yes" ──────────────────────────────────
+    for q_field, exp_field in _question_explanation_pairs(schema).items():
+        exp_val = mapped.get(exp_field)
+        if not (isinstance(exp_val, str) and exp_val.strip()):
+            continue
+        q_val = str(mapped.get(q_field) or "").strip().lower()
+        if q_val and q_val not in _AFFIRMATIVE_VALUES:
+            mapped[exp_field] = None
+            logger.info(
+                "post_fill_guard explanation_without_yes blanked=%s (question=%s answer=%r)",
+                exp_field, q_field, q_val,
+            )
+
+    # ── Guard 6: non-adjacent dependent field without a "Yes" ─────────────────
+    # See _NONADJACENT_DEPENDENT_FIELDS - the same "no Yes, no supporting
+    # content" invariant as Guard 5, for dependent fields the adjacency-based
+    # _question_explanation_pairs can't find (a plain "...Description"/
+    # "...CostAmount" field, not "...Explanation"-suffixed). Unlike Guard 5,
+    # this also fires when the question is BLANK (not just an explicit "No") -
+    # a dependent description/cost has no legitimate standalone meaning
+    # without its own parent question being a genuine "Yes".
+    for q_field, dep_fields in _NONADJACENT_DEPENDENT_FIELDS.items():
+        if q_field not in schema:
+            continue
+        q_val = str(mapped.get(q_field) or "").strip().lower()
+        if q_val in _AFFIRMATIVE_VALUES:
+            continue
+        for dep_field in dep_fields:
+            if mapped.get(dep_field) is not None:
+                mapped[dep_field] = None
+                logger.info(
+                    "post_fill_guard dependent_without_yes blanked=%s (question=%s answer=%r)",
+                    dep_field, q_field, q_val,
+                )
+
+
+# Values the AI can produce that are never literally present in the document
+# text (they are reasoned out, not copied) — a presence check is meaningless for
+# them, so they are treated as "not verifiable" rather than falsely flagged.
+_VERIFY_SKIP_TOKENS = {
+    "yes", "no", "y", "n", "true", "false", "on", "off", "x",
+    "null", "none", "n/a", "na",
+}
+
+
+def _normalize_for_search(text: str) -> str:
+    """Fold text to a punctuation/case/whitespace-insensitive form for literal
+    presence checks. Any run of non-alphanumerics becomes a single space, so
+    "$6,150,000" → "6 150 000", "4/1/2026" → "4 1 2026", and OCR line breaks
+    collapse. Both the document text and the value are folded the SAME way, so
+    formatting differences never break a match."""
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def _value_in_raw_text(value: str, haystack_norm: str) -> bool:
+    """True when `value` (as the AI produced it) actually appears in the uploaded
+    document text (already normalized via `_normalize_for_search`).
+
+    Deliberately conservative — biased AWAY from false "not found" flags: a
+    word-subset fallback treats a lightly reworded value (dropped suffix,
+    reordered tokens) as present. Yes/No answers and very short values are not
+    meaningfully verifiable by presence and return False (they are handled by the
+    existing confidence logic, not painted "verified")."""
+    raw = (value or "").strip()
+    if not raw or raw.lower() in _VERIFY_SKIP_TOKENS:
+        return False
+    needle = _normalize_for_search(raw)
+    if len(needle.replace(" ", "")) < 4:
+        return False
+    if needle and needle in haystack_norm:
+        return True
+    # Word-subset fallback: every significant token (len >= 3) present.
+    tokens = [t for t in needle.split(" ") if len(t) >= 3]
+    return bool(tokens) and all(t in haystack_norm for t in tokens)
+
+
+# ── Stricter verification for LLM-authored "grounding quotes" ───────────────
+# _value_in_raw_text's word-subset fallback exists to forgive a lightly
+# REWORDED real value (dropped suffix, reordered tokens on an address/name).
+# It is too permissive for a "grounding quote" the LLM writes freely (Figure
+# 30 Question-code proof, see question_grounding): with only common short
+# words required to each appear SOMEWHERE in the document independently, a
+# model can pass a sentence it invented outright, so long as its individual
+# words happen to be scattered across an unrelated business document (bug
+# found 2026-07-12, live ACORD 126 test: fabricated "products under label of
+# others: N" and "products of others sold: N" both survived on quotes whose
+# words matched this way despite the document never mentioning either topic).
+# A quote is proof only when the model's claimed excerpt actually occurs as
+# a contiguous phrase, OR (found in live audit testing 2026-07-15: a genuine,
+# clearly-documented "Yes" on ACORD 127's vehicle-maintenance question was
+# wiped, along with its explanation, because the model's own paraphrase of the
+# real sentence wasn't a byte-for-byte match) most of the quote's own words are
+# covered by ONE specific real sentence in the document. The fallback is
+# scoped per-SENTENCE and measured as COVERAGE OF THE QUOTE (not a symmetric
+# Jaccard ratio against the whole sentence) - Guard 4's symmetric ratio under-
+# counts here because a real sentence is often a long run-on containing lots
+# of unrelated content around the part actually being quoted (e.g. a company-
+# description clause bundled into the same sentence as the maintenance detail),
+# which dilutes a symmetric ratio even for a faithful paraphrase.
+#
+# This does NOT reopen the 2026-07-12 bug this strictness was built to close:
+# that bug worked by scattering common words ACROSS THE WHOLE DOCUMENT, in
+# unrelated sentences, with no requirement that they co-occur anywhere. Here,
+# the matching words must cluster inside ONE bounded, real sentence - a
+# fabricated quote about an undiscussed topic would need to coincidentally
+# share most of its words with some single real sentence to pass, which is a
+# materially higher bar.
+_QUOTE_COVERAGE_THRESHOLD = 0.75
+_QUOTE_MIN_SHARED_TOKENS = 3
+
+
+def _quote_covered_by_sentence(quote_tokens: frozenset, sentence_tokens: frozenset) -> bool:
+    """True when `sentence_tokens` covers most of `quote_tokens` - directional
+    (relative to the QUOTE only), unlike _is_near_duplicate_text's symmetric
+    Jaccard ratio. See _quote_grounds_claim for why direction matters here."""
+    if len(quote_tokens) < _QUOTE_MIN_SHARED_TOKENS:
+        return False
+    shared = quote_tokens & sentence_tokens
+    if len(shared) < _QUOTE_MIN_SHARED_TOKENS:
+        return False
+    return (len(shared) / len(quote_tokens)) >= _QUOTE_COVERAGE_THRESHOLD
+
+
+def _quote_grounds_claim(quote: str, haystack_norm: str, sentences: Optional[List[str]] = None) -> bool:
+    raw = (quote or "").strip()
+    if not raw:
+        return False
+    needle = _normalize_for_search(raw)
+    if len(needle.replace(" ", "")) < 12:   # too short to be a real excerpt, not a value
+        return False
+    if needle in haystack_norm:
+        return True
+    if not sentences:
+        return False
+    q_tokens = _sim_tokens(raw)
+    return any(_quote_covered_by_sentence(q_tokens, _sim_tokens(s)) for s in sentences)
+
+
+# ── Explanation must be genuine per-question content, not reused boilerplate ─
+# (found in audit, live test 2026-07-15): "operations_description" answers a
+# BROAD question - "what does the business do" - and is core content meant for
+# its own dedicated field(s) (see _EVIDENCE_REQUIRED_TOKENS's design note:
+# "OperationsDescription... core required content, not a Yes/No
+# justification"). The gap-fill LLM, unable to find real content for a
+# specific compliance question (e.g. "do operations involve transporting
+# hazardous material?"), grabbed this same generic sentence and reused it
+# verbatim as the "explanation" - _present() saw it was genuinely IN the
+# document and accepted it, with no check that it actually ANSWERS this
+# question rather than a different one entirely.
+#
+# This is the single-occurrence counterpart to Guard 4's cross-field
+# boilerplate-bleed detection (_enforce_post_fill_guards), which only fires
+# when the SAME text repeats across 2+ MAPPED fields - it never saw this
+# case because the sentence appeared in exactly one field on this form. This
+# check compares against the FACT itself (a known, single, well-defined value
+# with an established DIFFERENT purpose), so it is a value-IDENTITY check,
+# not a keyword or topic-overlap heuristic - it does not revisit the standing
+# rule against those (see _is_yes_no_field's design note; also
+# evidence-gate-design memory: "do NOT reintroduce topic-keyword matching").
+_BOILERPLATE_FACT_KEYS = ("operations_description",)
+
+
+def _is_generic_boilerplate_reuse(
+    field: Optional[str], text: str, facts: dict,
+    reserved_values: Optional[Dict[str, str]] = None,
+) -> bool:
+    """True when `text` is the applicant's generic operations_description fact
+    (verbatim or a near-duplicate paraphrase of it), UNLESS `field` is itself
+    the field that legitimately holds that fact deterministically (mirrors
+    Guard 4's own "legit_owner" exemption - the same fact is always allowed to
+    sit in the ONE field it actually belongs to).
+
+    `reserved_values` (optional): {other_field: its_value} for values ALREADY
+    assigned as the specific, correct companion answer to a DIFFERENT question
+    on this same form (see _NONADJACENT_QUESTION_COMPANIONS). A candidate
+    explanation that CONTAINS one of these reserved values verbatim is the
+    same document fact being double-counted for two different, unrelated
+    questions - found in audit (live test 2026-07-15): ACORD 127's "leased to
+    others" question came back "Yes", explained by the same vehicle-lease
+    paragraph that correctly names the OTHER owner for the SEPARATE ownership
+    question. A value-CONTAINMENT check against a KNOWN reserved value, not a
+    keyword/topic heuristic."""
+    if not field or not text or not str(text).strip():
+        return False
+    s = str(text).strip()
+    s_lower = s.lower()
+    s_tokens = _sim_tokens(s)
+    for fact_key in _BOILERPLATE_FACT_KEYS:
+        fact_val = _fv(facts, fact_key)
+        if not fact_val or not str(fact_val).strip():
+            continue
+        f_tokens = _sim_tokens(str(fact_val))
+        if s_lower != str(fact_val).strip().lower() and not _is_near_duplicate_text(s_tokens, f_tokens):
+            continue
+        det = _deterministic_map(field, facts)
+        if isinstance(det, str) and det.strip().lower() == s_lower:
+            return False   # this field IS the legitimate home for the fact
+        return True
+    for other_field, other_val in (reserved_values or {}).items():
+        if other_field == field or not other_val:
+            continue
+        ov = str(other_val).strip()
+        if len(ov) >= 8 and ov.lower() in s_lower:
+            return True
+    return False
+
+
+# ── "Proof of No" verification (bug found 2026-07-12, live ACORD 125 test) ───
+# _quote_grounds_claim confirms a grounding quote is genuinely PRESENT in the
+# document, but not that it actually PROVES a NEGATIVE answer. The model,
+# required to cite a quote for every Question-code answer, would grab any real
+# sentence from the document (e.g. "Ironclad Fabrication & Welding LLC is a
+# metal fabrication and welding contractor") as "proof" that the applicant is
+# NOT a subsidiary / has NO fire-code violations / etc. A presence-only check
+# kept the bogus "No" - the exact symptom the client reported (every General
+# Information Y/N stamped "No" from a document that never addresses any of
+# those questions). The distinguishing property of a genuine proof-of-No is
+# simple and reliable: it EXPRESSES a negative (contains a negation cue). A
+# positive descriptive sentence does not, so requiring one on the negative
+# branch drops the bogus "No" while keeping a documented explicit "No" (e.g.
+# "no prior cancellations"). Its failure mode is safe - a real "No" phrased
+# without any negation word is rare and merely left blank for ARQ.
+_NEGATION_CUE_RE = re.compile(
+    r"\b(no|not|none|never|without|nor|neither|nil|cannot|lack|absence|"
+    r"free|clear|clean)\b|n't\b|-free\b"
+)
+
+
+def _quote_expresses_negative(quote: str) -> bool:
+    """True when the quote contains an explicit negation cue - the hallmark of
+    a real 'the document says NO' statement, as opposed to a positive
+    descriptive sentence the model grabbed at random."""
+    return bool(_NEGATION_CUE_RE.search((quote or "").lower()))
 
 
 def map_facts_to_form(
@@ -3123,6 +4204,7 @@ def map_facts_to_form(
 
     gpt_raw_fields: set = set()
     gpt_filled_set: set = set()
+    gpt_question_grounding: Dict[str, str] = {}
 
     if unmatched and pre_filled_gpt is not None:
         # Combined gap-fill path: consume pre-computed values from the cross-form
@@ -3130,6 +4212,7 @@ def map_facts_to_form(
         # ran over the union of unmatched fields across all selected forms.
         gpt_values     = pre_filled_gpt.get("filled_values", {}) or {}
         gpt_raw_fields = pre_filled_gpt.get("raw_text_fields", set()) or set()
+        gpt_question_grounding = pre_filled_gpt.get("question_grounding", {}) or {}
         gpt_filled_set = {f for f in unmatched if f in gpt_values}
 
         for field in unmatched:
@@ -3150,6 +4233,7 @@ def map_facts_to_form(
         gpt_result     = _fill_unmatched_with_gpt(unmatched, facts, form_id, raw_text=raw_text)
         gpt_values     = gpt_result["filled_values"]
         gpt_raw_fields = gpt_result.get("raw_text_fields", set())
+        gpt_question_grounding = gpt_result.get("question_grounding", {}) or {}
         gpt_filled_set = set(gpt_values.keys())
 
         for field in unmatched:
@@ -3163,29 +4247,235 @@ def map_facts_to_form(
             form_id or "unknown", len(gpt_filled_set), len(unmatched), len(gpt_raw_fields),
         )
 
-    # ── Evidence-gated fill (opt-in, Figure 30) ──────────────────────────────
-    # Narrative answers to Yes/No application questions must be grounded in the
-    # document. Drop any "…Explanation" value the gap-fill LLM INFERRED rather
-    # than copied from raw text, so the field becomes a client/producer question
-    # instead of being over-filled with a generic description. Deterministic and
-    # raw-text-sourced values are untouched.
+    # ── Evidence-gated fill (opt-in, Figure 30 + Figure 33, generalized) ─────
+    # A single, uniform rule for EVERY Yes/No field on EVERY ACORD form (client
+    # requirement: "in all the forms... certain fields where Y/N/Yes/No to be
+    # filled... only fill if we found concrete evidence") - not just the
+    # compliance "_Question_<code>Code_" text-field family this gate started
+    # with, and not just the high-impact auto/ownership checkbox subset added
+    # afterward. See _is_yes_no_field for the full field-shape coverage: name
+    # pattern, /Btn checkbox type, or tooltip Y/N convention. The gap-fill
+    # model answers the field and cites its evidence (question_grounding); we
+    # KEEP the answer only when that evidence is genuinely present in the
+    # uploaded document. We do NOT second-guess the model's polarity or
+    # re-derive the topic with keyword matching — earlier attempts at that
+    # blanked legitimate documented answers ("not a subsidiary" -> wrongly
+    # dropped) and manufactured false ones (a "no claims" explanation ->
+    # wrongly flipped to "Yes"). The model reads the document and decides; our
+    # only job is to catch a hallucination, i.e. an answer whose cited evidence
+    # is not actually in the document.
+    #
+    #   * YES  - kept when its paired explanation OR its evidence quote is
+    #            present in the document. A kept "Yes" is always given an
+    #            explanation (backfilled from the evidence quote if the model
+    #            left the box empty), so a broker never sees a bare "Yes".
+    #   * NO   - kept when its evidence quote is present AND actually expresses a
+    #            negative (so a random positive sentence grabbed from the
+    #            document cannot masquerade as proof of a "No"). A "No" carries
+    #            no explanation.
+    #   * else - ungrounded answer -> blanked -> left for ARQ / manual entry.
+    #
+    # The gap-fill LLM's own "raw_text_sourced" self-report is NOT trusted (bug
+    # 2026-07-11: a model that fabricates content can falsely flag it verbatim).
+    # Deterministic (Pass 1 / alias) values never enter gpt_filled_set, so they
+    # are untouched here - a checkbox Pass 1 (or alias stamping) already filled
+    # from a real extracted fact is never re-litigated by this gate.
+    _evidence_hay = _normalize_for_search(raw_text) if raw_text else ""
+    # Per-sentence split for _quote_grounds_claim's paraphrase fallback - kept
+    # as ORIGINAL (unnormalized) text so _sim_tokens can tokenize each sentence
+    # independently. Split is intentionally simple (sentence-ending punctuation
+    # or a newline); a slightly-too-long or too-short "sentence" only affects
+    # the fallback's precision, never the exact-match path above it.
+    _evidence_sentences = (
+        [s for s in re.split(r"[.!?\n]+", raw_text) if s and s.strip()] if raw_text else []
+    )
     try:
         from config.settings import ENABLE_EVIDENCE_GATED_FILL
     except Exception:                              # noqa: BLE001
         ENABLE_EVIDENCE_GATED_FILL = False
     if ENABLE_EVIDENCE_GATED_FILL:
         _gated = 0
-        for field in gpt_filled_set:
-            if field in gpt_raw_fields:
+        _q_to_exp = _question_explanation_pairs(schema)
+        _exp_to_q = {exp: q for q, exp in _q_to_exp.items()}
+
+        # Values already assigned as the specific companion answer for a
+        # DIFFERENT question (see _NONADJACENT_QUESTION_COMPANIONS) - reserved
+        # so they can't ALSO be accepted as generic "explanation" content for
+        # an unrelated question (see _is_generic_boilerplate_reuse). Computed
+        # once here since companion fields are plain gap-fill text, already
+        # settled in `mapped` before this evidence-gate block runs.
+        _reserved_companion_values: Dict[str, str] = {
+            _c: mapped.get(_c)
+            for _companions in _NONADJACENT_QUESTION_COMPANIONS.values()
+            for _c in _companions
+            if isinstance(mapped.get(_c), str) and mapped.get(_c).strip()
+        }
+
+        def _is_gated_field(f: str) -> bool:
+            """Every ACORD Yes/No convention across all 17 forms - not just the
+            compliance-question naming pattern (Figure 30) or the high-impact
+            auto/ownership checkbox subset (Figure 33 audit finding: ACORD
+            137/138's HNOA-equivalent checkboxes have no "_Question_Code_"
+            name, so they were never reaching this gate). Delegates to
+            _is_yes_no_field, which is a strict superset: every high-impact
+            checkbox is a /Btn field, so nothing here regresses - it just also
+            now covers every OTHER checkbox (sink hole, mine subsidence,
+            building features, entity type, LOB selection, ...) and the plain
+            Y/N text-field convention (e.g. ACORD 140/25's "…YesNoCode_")."""
+            return _is_yes_no_field(f, schema)
+
+        # A quote cited as "proof" for 3+ different questions is boilerplate
+        # asserted as universal justification, not evidence of any one of them.
+        _quote_use_count: Dict[str, int] = {}
+        for _f in gpt_filled_set:
+            if not _is_gated_field(_f):
                 continue
-            if _is_evidence_required_field(field) and mapped.get(field) is not None:
-                mapped[field] = None
+            _q = gpt_question_grounding.get(_f)
+            if _q and str(_q).strip():
+                _qn = _normalize_for_search(str(_q))
+                if _qn:
+                    _quote_use_count[_qn] = _quote_use_count.get(_qn, 0) + 1
+
+        def _present(text, field: Optional[str] = None) -> bool:
+            """True when `text` is grounded in the uploaded document (independent
+            search; punctuation/case/whitespace-insensitive with a word-subset
+            fallback). With no document text to check against, nothing is
+            grounded - self-report is deliberately not trusted.
+
+            `field`: when given, also rejects `text` that is really the
+            generic operations_description fact, or another question's own
+            reserved companion value, reused as this field's explanation (see
+            _is_generic_boilerplate_reuse) - presence alone proves the text is
+            real, not that it answers THIS question."""
+            if text is None or not str(text).strip():
+                return False
+            if not (bool(_evidence_hay) and _value_in_raw_text(str(text), _evidence_hay)):
+                return False
+            return not _is_generic_boilerplate_reuse(field, text, facts, _reserved_companion_values)
+
+        def _evidence_supports(quote, *, negative: bool, allow_paraphrase: bool) -> bool:
+            """The model's cited evidence really backs its answer: a contiguous
+            phrase actually in the document, not reused as boilerplate, and -
+            for a NEGATIVE answer - one that actually states a denial rather
+            than an unrelated positive sentence.
+
+            `allow_paraphrase`: the per-sentence paraphrase fallback (see
+            _quote_grounds_claim) is enabled ONLY when this question has a real
+            paired Explanation field in the schema - i.e. the model had a
+            SECOND, independent place to demonstrate its answer and simply
+            didn't use it, which is a materially lower-risk gap to forgive than
+            a question with NO Explanation slot at all, where the quote is the
+            ONLY signal that exists. Found in audit (live test 2026-07-15):
+            without this restriction, a fabricated quote for an unpaired
+            question (ACORD 127's ICC/PUC filings question, "no explanation
+            needed" per the form itself) passed by reusing real words from an
+            UNRELATED sentence elsewhere in the document - exactly the
+            2026-07-12 bug class this file's strictness exists to prevent.
+            Unpaired questions keep the original exact-match-only bar."""
+            if not quote or not _evidence_hay or not _quote_grounds_claim(
+                quote, _evidence_hay, _evidence_sentences if allow_paraphrase else None
+            ):
+                return False
+            if _quote_use_count.get(_normalize_for_search(str(quote)), 0) > 2:
+                return False
+            if negative and not _quote_expresses_negative(quote):
+                return False
+            return True
+
+        # ── Pass A: validate each answered Yes/No field (see _is_gated_field) ──
+        for q_field in list(gpt_filled_set):
+            if not _is_gated_field(q_field):
+                continue
+            v = str(mapped.get(q_field) or "").strip().lower()
+            if not v:
+                continue
+            exp_field = _q_to_exp.get(q_field)
+            exp_val   = mapped.get(exp_field) if exp_field else None
+            quote     = gpt_question_grounding.get(q_field)
+
+            if v in _AFFIRMATIVE_VALUES:
+                exp_present   = _present(exp_val, exp_field)
+                quote_present = _evidence_supports(quote, negative=False, allow_paraphrase=exp_field is not None)
+                if not (exp_present or quote_present):
+                    mapped[q_field] = None            # ungrounded "Yes" -> blank
+                    if exp_field:
+                        mapped[exp_field] = None
+                    _gated += 1
+                    continue
+                # Keep the "Yes"; guarantee it carries a grounded explanation.
+                if exp_field and not exp_present:
+                    mapped[exp_field] = str(quote).strip() if quote_present else None
+            elif v in _NEGATIVE_VALUES:
+                if _evidence_supports(quote, negative=True, allow_paraphrase=exp_field is not None):
+                    if exp_field:
+                        mapped[exp_field] = None       # a "No" needs no explanation
+                else:
+                    mapped[q_field] = None             # ungrounded "No" -> blank
+                    if exp_field:
+                        mapped[exp_field] = None
+                    _gated += 1
+            else:
+                mapped[q_field] = None                 # not a valid Y/N token
+                if exp_field:
+                    mapped[exp_field] = None
                 _gated += 1
+
+        # ── Pass C: promote via non-adjacent companion fields ─────────────────
+        # Mirrors Pass B's "rescue a stranded grounded Yes" but for the
+        # _NONADJACENT_QUESTION_COMPANIONS pattern instead of the adjacent-
+        # Explanation pattern - covers BOTH (a) the model never attempted the
+        # question's own Y/N at all, and (b) it did, but Pass A above gated it
+        # to blank for lack of its own quote. Either way, a companion field
+        # (e.g. the "Name of Other Owner" box) that is independently, genuinely
+        # present in the document is real, on-topic proof the answer is "Y" -
+        # never overrides an explicit, already-kept "Yes" or gate-approved "No".
+        for _q_field, _companions in _NONADJACENT_QUESTION_COMPANIONS.items():
+            if _q_field not in schema:
+                continue
+            current = str(mapped.get(_q_field) or "").strip().lower()
+            if current in _AFFIRMATIVE_VALUES or current in _NEGATIVE_VALUES:
+                continue
+            for _companion in _companions:
+                if _present(mapped.get(_companion), _companion):
+                    mapped[_q_field] = "Y"
+                    break
+
+        # ── Pass B: narrative fields not owned by a kept "Yes" above ──────────
+        # An "…Explanation"/"…OtherDescription"/"…ResolutionDescription" value
+        # must be grounded in the document or it is AI-invented prose.
+        #   * Unpaired (standalone "Other, please specify") -> keep iff present.
+        #   * Paired to a Question code that is a kept "Yes" -> already handled.
+        #   * Paired but the question is blank -> if the explanation is a real,
+        #     document-present, AFFIRMATIVE statement, promote the question to
+        #     "Y" so genuine grounded info is not stranded; if it expresses a
+        #     negative (evidence for "No", not "Yes") or is ungrounded, blank it
+        #     - never manufacture a "Yes" from a negative (the live ACORD 125
+        #     "sexual-abuse claims = Y" bug).
+        for exp_field in list(gpt_filled_set):
+            if not _is_evidence_required_field(exp_field):
+                continue
+            val = mapped.get(exp_field)
+            if val is None or not str(val).strip():
+                continue
+            q_field = _exp_to_q.get(exp_field)
+            if q_field is None:
+                if not _present(val, exp_field):
+                    mapped[exp_field] = None
+                    _gated += 1
+                continue
+            if str(mapped.get(q_field) or "").strip().lower() in _AFFIRMATIVE_VALUES:
+                continue                               # owned by a kept "Yes"
+            q_blank = not str(mapped.get(q_field) or "").strip()
+            if q_blank and _present(val, exp_field) and not _quote_expresses_negative(val) \
+                    and not _is_nonfillable_field(q_field):
+                mapped[q_field] = "Y"                  # rescue a stranded grounded Yes
+            else:
+                mapped[exp_field] = None
+                _gated += 1
+
         if _gated:
-            logger.info(
-                "map_facts EVIDENCE_GATE form=%s | dropped_inferred=%d",
-                form_id or "unknown", _gated,
-            )
+            logger.info("map_facts EVIDENCE_GATE form=%s | dropped_ungrounded=%d",
+                        form_id or "unknown", _gated)
 
     # ── ACORD 101 overflow routing (opt-in, Figure 29) ───────────────────────
     # Oversized operations/classification narrative and accumulated remarks are
@@ -3204,6 +4494,58 @@ def map_facts_to_form(
     # legal-entity mutual exclusion and repeating-row de-duplication. Runs on the
     # merged result so it corrects values from any source (Pass 1, alias, GPT).
     _enforce_post_fill_guards(mapped, schema, facts)
+
+    # ── Raw-text verification (Figure 26 trust check — no LLM) ────────────────
+    # Confirm every value the AI filled actually appears in the uploaded document
+    # text. Runs on the PRE-canonicalization value so our own display formatting
+    # can never break the match. A value found in the documents is trusted (→
+    # "ai_verified", painted pink); a value the AI produced that is NOT present —
+    # a guess, or a "copied" claim we cannot locate — stays "low_confidence"
+    # (painted orange) for review. Deterministic (fact) and client values are
+    # never checked. Yes/No answers are skipped inside _value_in_raw_text.
+    _ai_verified_fields: set = set()
+    if raw_text and gpt_filled_set:
+        _hay = _normalize_for_search(raw_text)
+        for _f in gpt_filled_set:
+            _v = mapped.get(_f)
+            if _v is not None and _value_in_raw_text(str(_v), _hay):
+                _ai_verified_fields.add(_f)
+
+    # ── Owner/insured field contamination override (Figure 33 client feedback)
+    # An owner/insured NAME field must never be silently trusted just because
+    # it was filled by a deterministic rule, or because its value passed the
+    # generic raw-text check above - neither proves the value belongs in THIS
+    # field's ROLE. Values that look like carrier/policy data in an owner/
+    # insured slot are forced to low_confidence (reviewable, never blanked -
+    # values are never deleted here, only their trust label changes).
+    #
+    # Checks EVERY owner/insured field with a value, regardless of fill source
+    # (deterministic rule, alias stamp, or GPT). Originally scoped to GPT-
+    # filled fields only, on the theory that a deterministic rule is "trusted
+    # by construction" - reconsidered after a live test showed the gap
+    # concretely: CertificateHolder_FullName has its OWN deterministic rule
+    # (-> the "certificate_holder" fact, a different key from "carrier_name"),
+    # so when a document's extracted certificate_holder happens to equal its
+    # carrier, the field was filled deterministically and stayed fully
+    # trusted (no highlight) - correctly caught by the separate post-
+    # generation warning either way, but confusingly inconsistent with the
+    # orange highlight a GPT-filled equivalent would have gotten. Checking
+    # every source uniformly removes that inconsistency; the check itself
+    # (is_value_contaminated) is unchanged.
+    #
+    # No underwriting_confirmations here (not available at this call depth) -
+    # uses whichever carrier/applicant facts are already in `facts`. Never
+    # raises: a detector fault must never break generation.
+    _owner_field_contamination: set = set()
+    try:
+        from services.field_mapping_integrity import is_insured_owner_field, is_value_contaminated
+        for _f, _v in mapped.items():
+            if _v is None or not is_insured_owner_field(_f):
+                continue
+            if is_value_contaminated(_f, _v, facts):
+                _owner_field_contamination.add(_f)
+    except Exception as _cont_ex:
+        logger.warning("owner-field contamination check skipped (form=%s): %s", form_id, _cont_ex)
 
     # ── Display canonicalization (Beta feedback: stamp clean, standardized
     # values, not raw OCR strings) ───────────────────────────────────────────
@@ -3231,18 +4573,30 @@ def map_facts_to_form(
             logger.warning("display canonicalization skipped (form=%s): %s", form_id, _cex)
 
     # ── Confidence / highlight assignment ────────────────────────────────────
-    # A filled value is "confident" (no highlight) when it was either filled by
-    # the deterministic Pass 1, OR copied verbatim from the raw document text by
-    # GPT (raw_text_sourced flag). GPT-inferred values that were NOT sourced
-    # from raw text are marked low_confidence → pink, so the broker reviews.
+    # Deterministic (Pass 1 / alias, from facts) values are trusted with no
+    # highlight. AI-filled values are split by the raw-text verification above:
+    #   found in the documents   → "ai_verified"  → pink  (AI-OK)
+    #   NOT found (guess, or a
+    #   "copied" claim we can't
+    #   locate)                  → "low_confidence" → orange (verify)
+    # An owner/insured field flagged as contamination-shaped (checked just
+    # above) always forces low_confidence, even if it passed the generic
+    # raw-text check - a carrier name really is present in the document, just
+    # never in this field's role (Figure 33).
     for field, meta in schema.items():
         val       = mapped.get(field)
         has_value = val is not None and str(val).strip() not in ("", "null", "None")
         is_req    = meta.get("required", False) if isinstance(meta, dict) else False
 
         if has_value:
-            confident = (field in _deterministic_filled) or (field in gpt_raw_fields)
-            confidence[field] = "filled" if confident else "low_confidence"
+            if field in _owner_field_contamination:
+                confidence[field] = "low_confidence"
+            elif field in _deterministic_filled:
+                confidence[field] = "filled"
+            elif field in _ai_verified_fields:
+                confidence[field] = "ai_verified"
+            else:
+                confidence[field] = "low_confidence"
         elif is_req and not _is_nonfillable_field(field):
             # Paint yellow only for genuinely fillable required fields.
             confidence[field] = "missing_required"
@@ -3250,6 +4604,7 @@ def map_facts_to_form(
             confidence[field] = "low_confidence"
 
     confidence = apply_acord125_missing_field_highlights(form_id, facts, mapped, confidence)
+    confidence = apply_acord126_missing_field_highlights(form_id, facts, mapped, confidence)
 
     # Fill-rate denominator excludes non-fillable fields (signatures, premiums,
     # rate codes) so the reported coverage is meaningful.

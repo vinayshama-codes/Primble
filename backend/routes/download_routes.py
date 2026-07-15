@@ -53,49 +53,6 @@ def _enforce_integrity_gate(proc_session: dict) -> None:
 
 
 # ASYNC-SAFE
-def _enforce_field_mapping_gate(proc_session: dict, generated_forms: dict) -> None:
-    """Block a download while carrier/policy data sits in an insured/owner field
-    (Figure 33 client directive: "Block download if carrier/policy data is mapped
-    into insured/owner fields").
-
-    Detection is precise and read-only (services/field_mapping_integrity.py): it
-    fires only on a genuine contamination, so a clean package is never affected.
-    The producer resolves it by correcting the field (the existing field-edit
-    flow), after which detection passes and the download proceeds. Gated by
-    ENABLE_FIELD_MAPPING_GATE (default off) so behavior is unchanged unless the
-    guard is turned on. Never raises for its own internal errors - a detector
-    fault must never wedge a legitimate download shut.
-    """
-    try:
-        from config.settings import ENABLE_FIELD_MAPPING_GATE
-    except Exception:
-        return
-    if not ENABLE_FIELD_MAPPING_GATE or proc_session.get("field_mapping_overridden"):
-        return
-    try:
-        from services.field_mapping_integrity import detect_field_mapping_contamination
-        result = detect_field_mapping_contamination(
-            generated_forms or {},
-            merged_facts=proc_session.get("facts") or {},
-            confirmations=proc_session.get("underwriting_confirmations") or {},
-        )
-    except Exception as ex:                                # pragma: no cover
-        logger.warning("field-mapping gate skipped (detector error): %s", ex)
-        return
-    if result.get("review_required"):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error": "field_mapping_review_required",
-                "message": result.get("message")
-                or "Carrier or policy data appears in an insured/owner field. "
-                "Correct the field before downloading.",
-                "field_mapping": result,
-            },
-        )
-
-
-# ASYNC-SAFE
 @router.post("/api/acord/confirm-license")
 async def confirm_acord_license(
     request: Request,
@@ -246,11 +203,6 @@ async def download_pdf(
     # not just reliance on "forms can't have been generated while paused".
     _enforce_integrity_gate(proc_session)
     generated      = proc_session.get("generated_forms", {})
-    # Field-mapping integrity gate (Figure 33): refuse to serve THIS form while it
-    # has carrier/policy data in an insured/owner field.
-    _enforce_field_mapping_gate(
-        proc_session, {form_id: generated[form_id]} if form_id in generated else {}
-    )
     form_name      = generated.get(form_id, {}).get("form_name", form_id)
     user_signature = decrypt_field_soft(fresh.get("signature_data")) or None
     facts       = proc_session.get("facts") or {}
@@ -410,9 +362,6 @@ async def download_all(
     generated = proc_session.get("generated_forms", {})
     if not generated:
         raise HTTPException(400, "No forms generated yet")
-    # Field-mapping integrity gate (Figure 33): refuse to bundle the package while
-    # any generated form has carrier/policy data in an insured/owner field.
-    _enforce_field_mapping_gate(proc_session, generated)
 
     user_signature = decrypt_field_soft(fresh.get("signature_data")) or None
     acord_pdfs = {}

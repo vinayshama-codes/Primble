@@ -284,11 +284,27 @@ def _to_int(v) -> int | None:
 
 
 def _to_float(v) -> float | None:
-    """Parse a numeric string to float. Returns None on failure."""
+    """Parse a numeric string to float. Returns None on failure.
+
+    Bug fix (2026-07-11, found via loss-history test suite): must expand
+    magnitude shorthand ("$3.2M" -> 3,200,000) the same way _to_int does.
+    Every caller of this function reads a currency fact (total_revenue,
+    total_payroll, total_incurred, ...); a bare digit-strip on "$3.2M" was
+    silently truncating at the decimal and dropping the "M", parsing an
+    exposure of $3.2M as literally $3 - which then produced nonsense loss
+    frequency/ratio figures ("2 claims on $3 exposure").
+    """
     if v is None:
         return None
+    s = str(v).replace(",", "").replace("$", "").strip().lower()
+    _mag = re.match(r"([\d.]+)\s*(million|thousand|billion|mm|m|k|b)\b", s)
+    if _mag:
+        try:
+            return float(_mag.group(1)) * _MAGNITUDE_SUFFIXES[_mag.group(2)]
+        except Exception:
+            pass
     try:
-        return float(re.sub(r"[^\d.]", "", str(v)))
+        return float(re.sub(r"[^\d.]", "", s))
     except Exception:
         return None
 
@@ -1551,12 +1567,21 @@ def calculate_p4_loss_history(
     # on AFTER the base tier (below) and on the loss-runs-uploaded path. It is
     # deliberately NOT applied to the no-loss-run states (attests = 60, pending =
     # 70, no-info = 25), whose explicit recommended scores a -10 would contradict.
-    if years >= _LOSS_YEARS_FULL:
+    # Bug fix (2026-07-11, found via loss-history test suite): `years` is a raw
+    # extracted number with no document backing required. A Yes/No question's
+    # lookback window ("...in the past five (5) years?") or the ACORD form's own
+    # "FOR THE LAST ___ YEARS" boilerplate blank can populate loss_history_years
+    # with zero loss-run evidence attached, and this tier previously credited
+    # that the same as an actual multi-year loss run (100/80/40). Require
+    # has_loss_run_doc so a bare number can never outscore real documentation -
+    # an undocumented years value now falls through to the attestation/no-info
+    # tiers below instead.
+    if has_loss_run_doc and years >= _LOSS_YEARS_FULL:
         base_score = 100
-    elif years >= _LOSS_YEARS_PART:
+    elif has_loss_run_doc and years >= _LOSS_YEARS_PART:
         base_score = 80
         recs.append("3 years of loss runs provided - 5 years preferred for full credit")
-    elif years > 0:
+    elif has_loss_run_doc and years > 0:
         base_score = 40
         recs.append("Loss history incomplete - fewer than 3 years provided")
     elif has_loss_run_doc:
@@ -2473,6 +2498,52 @@ LOSS_HISTORY_STATE_LABELS: Dict[str, str] = {
     "loss_history_pending_validation": "Loss history pending validation",
 }
 
+# ── Client-facing 5-bucket loss-history vocabulary (Image 28 item 3) ──────────
+# The engine tracks the 11 fine-grained evidence states above; the client asked
+# for their exact 5-word vocabulary: none stated / none corroborated / loss runs
+# attached / losses extracted / unknown. This is a DERIVED view (same pattern as
+# the ARQ 3-bucket model) — every internal state maps to exactly one client
+# bucket, so the scorer and all existing consumers are untouched and the finer
+# states remain available. The narrative-vs-attestation split (none_stated vs
+# none_corroborated) is the one judgment call; it preserves the P4 score ordering
+# (narrative 45 < attestation 60) and is a single-line change if the client wants
+# a state re-bucketed.
+CLIENT_LOSS_STATE_LABELS: Dict[str, str] = {
+    "none_stated":        "None stated",
+    "none_corroborated":  "None corroborated",
+    "loss_runs_attached": "Loss runs attached",
+    "losses_extracted":   "Losses extracted",
+    "unknown":            "Unknown",
+}
+
+_LOSS_STATE_TO_CLIENT: Dict[str, str] = {
+    # No usable loss information yet (nothing on file, or runs merely requested).
+    "no_information":                  "unknown",
+    "loss_runs_pending":               "unknown",
+    # A "no losses" position mentioned in narrative prose, nothing more.
+    "narrative_states_no_losses":      "none_stated",
+    # A formal no-loss attestation that no loss-run document yet corroborates.
+    "user_states_no_losses":           "none_corroborated",
+    # Loss-run documents are attached (ownership confirmed, unconfirmed, or a
+    # mismatch) but claim data has not been extracted from them yet.
+    "loss_runs_uploaded":              "loss_runs_attached",
+    "loss_runs_match_insured":         "loss_runs_attached",
+    "loss_runs_do_not_match":          "loss_runs_attached",
+    "loss_history_pending_validation": "loss_runs_attached",
+    # Actual claim data has been extracted / reconciled (incl. a detected conflict
+    # between an attestation and the runs — the losses themselves were extracted).
+    "loss_runs_parsed":                "losses_extracted",
+    "loss_data_reconciled":            "losses_extracted",
+    "loss_history_conflicting":        "losses_extracted",
+}
+
+
+def _client_loss_state(internal_state: str) -> str:
+    """Map an internal 11-state loss-history state to the client's 5-bucket
+    vocabulary (Image 28 item 3). Any unmapped state falls back to 'unknown' so
+    the output is always one of the five client-approved values."""
+    return _LOSS_STATE_TO_CLIENT.get(internal_state, "unknown")
+
 
 def _get_loss_history_state(
     facts: dict,
@@ -2531,8 +2602,13 @@ def _get_loss_history_state(
             return "loss_runs_match_insured"
         return "loss_runs_uploaded"
 
-    if years > 0:
-        return "loss_data_reconciled"
+    # Bug fix (2026-07-11): every branch inside `if has_loss_run_doc:` above
+    # returns, so this was only ever reached with has_loss_run_doc=False - i.e.
+    # a "years" value with no loss-run document behind it (mirrors the
+    # calculate_p4_loss_history fix). Falling through to "loss_data_reconciled"
+    # let an undocumented years figure outrank a genuine no-loss attestation.
+    # Removed; an undocumented years value now falls through to the
+    # attestation/no-info checks below like it should.
     if no_loss_attested:
         return "user_states_no_losses"
     if narrative_no_loss:
@@ -3594,6 +3670,10 @@ def calculate_package_sqs(
         # §6 enrichment (additive)
         "umbrella_state":        _umbrella_state,
         "loss_history_state":    _loss_history_state,
+        # Client 5-bucket view (Image 28 item 3) — derived, additive.
+        "loss_history_state_client":       _client_loss_state(_loss_history_state),
+        "loss_history_state_client_label": CLIENT_LOSS_STATE_LABELS.get(
+            _client_loss_state(_loss_history_state), "Unknown"),
         "follow_form":           _follow_form,
         "umbrella_warnings":     _umbrella_warnings,
         "review_items":          review_items,
@@ -3908,15 +3988,21 @@ def calculate_sqs(
             })
 
     elif fid == "ACORD_126":
+        # GL class-code data may arrive in either the legacy location→codes fact
+        # or the richer schedule-of-hazards fact (class code + premium/exposure
+        # basis + exposure amount + subcontractor %). Either satisfies the gap.
+        _gl_class_present = bool(
+            _fv(facts, "gl_class_codes_by_location") or _fv(facts, "gl_class_code_schedule")
+        )
         chks = [
             bool(_fv(facts, "gl_limits") or _fv(facts, "gl_aggregate") or _fv(facts, "gl_each_occurrence")),
-            bool(_fv(facts, "gl_class_codes_by_location")),
+            _gl_class_present,
             bool(_fv(facts, "operations_description")),
             bool(_fv(facts, "total_payroll") or _fv(facts, "total_revenue")),
             bool(_fv(facts, "gl_form_type")),
         ]
         struct = int(sum(chks) / len(chks) * 100)
-        if not _fv(facts, "gl_class_codes_by_location"):
+        if not _gl_class_present:
             issues.append("GL class codes missing")
             recommendations.append({
                 "rec_id": "rec_gl_class_codes",
@@ -4693,6 +4779,10 @@ def calculate_sqs(
         # §6 additions
         "umbrella_state":      _umbrella_state,
         "loss_history_state":  _loss_state,
+        # Client 5-bucket view (Image 28 item 3) — derived, additive.
+        "loss_history_state_client":       _client_loss_state(_loss_state),
+        "loss_history_state_client_label": CLIENT_LOSS_STATE_LABELS.get(
+            _client_loss_state(_loss_state), "Unknown"),
         "follow_form":         _follow_form,
         "evidence_labels":     _ev_labels,
         "positive_signals":    _pos_signals,
