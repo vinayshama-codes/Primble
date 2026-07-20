@@ -91,7 +91,19 @@ CANONICAL_TO_EXTRACTION: Dict[str, str] = {
     "policy_automobile_liability_policy_number_identifier": "policy_number",
     "policy_automobile_liability_effective_date":          "effective_date",
     "policy_automobile_liability_expiration_date":         "expiration_date",
-    "policy_excess_liability_policy_number_identifier":    "policy_number",
+    # policy_excess_liability_policy_number_identifier is DELIBERATELY absent
+    # here (unlike its GL/Auto siblings above): a real ACORD 25 certificate
+    # commonly lists the excess/umbrella line with its OWN distinct policy
+    # number (confirmed on a live multi-carrier test certificate - GL, Auto,
+    # WC, and Excess each had their own policy number), so the "single policy
+    # -> same value on every line" assumption this block otherwise makes does
+    # NOT hold for Excess. Bridging it here silently duplicated the GL policy
+    # number onto the Excess row (confirmed live: same 'GL-4471029-25' on
+    # both). Left OUT of the bridge -> falls through to gap-fill, which
+    # already reads the real, distinct excess/umbrella policy number from raw
+    # text (same mechanism proven for the excess/umbrella policy PERIOD via
+    # pdf_service._fetch_umbrella_period and the Policy_ExcessLiability_
+    # EffectiveDate_A/ExpirationDate_A override).
     "policy_excess_liability_effective_date":              "effective_date",
     "policy_excess_liability_expiration_date":             "expiration_date",
 

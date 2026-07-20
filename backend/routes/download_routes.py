@@ -15,7 +15,8 @@ from repositories.session_repository import get_processing_session, upd_processi
 from repositories.audit_repository import write_audit_log
 from services.auth_service import get_current_user, is_acord_license_current
 from services.cover_service import generate_ai_cover_narrative, build_cover_page_pdf
-from services.pdf_service import regenerate_pdf_for_form
+from services.pdf_service import regenerate_pdf_for_form, apply_draft_watermark
+from services.field_qa import check_hard_block
 from services.stripe_service import evaluate_package_limit, create_overage_invoice_item
 from services.sqs_service import calculate_sqs
 from services.audit_service import get_unresolved_recommendations
@@ -50,6 +51,64 @@ def _enforce_integrity_gate(proc_session: dict) -> None:
                 "integrity": integrity,
             },
         )
+
+
+# ASYNC-SAFE
+def _enforce_completeness_gate(
+    proc_session: dict,
+    form_ids: list,
+    draft: bool,
+    override_reason: str,
+) -> list:
+    """Block a clean download when a stamped value is a leaked placeholder
+    (e.g. "1st distinct value") or a form-specific completeness gate is unmet
+    (currently ACORD 140 COPE fields) - Figure 35 client feedback: "This should
+    be a hard stop... If a draft is allowed, watermark or label it clearly as
+    incomplete."
+
+    Recomputes fresh from the live generated-forms state on every call
+    (services.field_qa.check_hard_block) rather than trusting any cached/DB
+    snapshot - this is the one place that actually enforces the gate; the
+    advisory "fieldqa_hardblock_..." rows written elsewhere only feed the
+    frontend's preflight display. Deliberately narrow in scope (see
+    field_qa._HARD_BLOCK_REASON_CODES): every OTHER existing advisory/soft
+    finding (SQS hard stops, ordinary missing_required, low_confidence, field-
+    mapping-integrity warnings, submission-integrity soft path) is completely
+    unaffected and stays exactly as click-through-able as it always was.
+
+    Returns the blocking items (possibly empty). Raises HTTP 409 unless the
+    caller explicitly opted into a watermarked draft with a non-blank reason -
+    the caller is then responsible for calling apply_draft_watermark() on the
+    resulting PDF bytes and logging the override distinctly.
+    """
+    generated = proc_session.get("generated_forms") or {}
+    facts = proc_session.get("facts") or {}
+    blocking = check_hard_block(generated, form_ids=form_ids, merged_facts=facts)
+    if not blocking:
+        return []
+    if draft and override_reason.strip():
+        return blocking
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "error": "download_incomplete",
+            "message": (
+                f"{len(blocking)} field(s) contain placeholder values or are missing "
+                "data required for this section. Fix them, or add a note and use "
+                "'Download Anyway' to get a clearly-watermarked incomplete copy."
+            ),
+            "blocking_items": [
+                {
+                    "form_id":     b.get("form_id"),
+                    "field":       b.get("field"),
+                    "field_label": b.get("field_label"),
+                    "reason_code": b.get("reason_code"),
+                    "message":     b.get("message"),
+                }
+                for b in blocking
+            ],
+        },
+    )
 
 
 # ASYNC-SAFE
@@ -176,6 +235,8 @@ async def download_pdf(
     form_id: str,
     request: Request,
     include_cover: bool = Query(True),
+    draft: bool = Query(False),
+    override_reason: str = Query(""),
     current_user: dict = Depends(get_current_user),
 ):
     await check_download_rate_limit(current_user["id"])
@@ -202,6 +263,12 @@ async def download_pdf(
     # a package still pending multi-insured review. Explicit server-side enforcement,
     # not just reliance on "forms can't have been generated while paused".
     _enforce_integrity_gate(proc_session)
+    # Completeness gate (Figure 35 client feedback): blocks a clean download when a
+    # placeholder value or a required COPE-style field remains, unless the caller
+    # explicitly asked for a watermarked draft with a typed reason.
+    blocking_items = _enforce_completeness_gate(proc_session, [form_id], draft, override_reason)
+    is_draft       = bool(blocking_items)
+    _file_suffix   = "DRAFT" if is_draft else "FILLED"
     generated      = proc_session.get("generated_forms", {})
     form_name      = generated.get(form_id, {}).get("form_name", form_id)
     user_signature = decrypt_field_soft(fresh.get("signature_data")) or None
@@ -236,7 +303,9 @@ async def download_pdf(
             _COVER_CACHE[_ck] = ai_content
             logger.debug(f"cover narrative cached for key {_ck[:8]}")
 
-        file_manifest, package_checksum = _compute_manifest({f"{form_id}_FILLED.pdf": pdf_bytes})
+        if is_draft:
+            pdf_bytes = await _loop.run_in_executor(None, apply_draft_watermark, pdf_bytes)
+        file_manifest, package_checksum = _compute_manifest({f"{form_id}_{_file_suffix}.pdf": pdf_bytes})
         hard_stops, soft_stops = _split_open_recs(unresolved_recs)
         cover_pdf = await _loop.run_in_executor(
             None, build_cover_page_pdf,
@@ -249,18 +318,20 @@ async def download_pdf(
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr("00_Primble_Cover_Page.pdf", cover_pdf)
-                zf.writestr(f"{form_id}_FILLED.pdf", pdf_bytes)
+                zf.writestr(f"{form_id}_{_file_suffix}.pdf", pdf_bytes)
             buf.seek(0)
             return buf
     else:
         # No cover — just the filled form PDF
         pdf_bytes = await _loop.run_in_executor(None, regenerate_pdf_for_form, proc_session, form_id, True, user_signature)
-        file_manifest, package_checksum = _compute_manifest({f"{form_id}_FILLED.pdf": pdf_bytes})
+        if is_draft:
+            pdf_bytes = await _loop.run_in_executor(None, apply_draft_watermark, pdf_bytes)
+        file_manifest, package_checksum = _compute_manifest({f"{form_id}_{_file_suffix}.pdf": pdf_bytes})
 
         def _build_zip():
             buf = io.BytesIO()
             with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.writestr(f"{form_id}_FILLED.pdf", pdf_bytes)
+                zf.writestr(f"{form_id}_{_file_suffix}.pdf", pdf_bytes)
             buf.seek(0)
             return buf
 
@@ -297,11 +368,23 @@ async def download_pdf(
         logger.info("download_pdf: already counted — skipping for user=%s session=%s form=%s", fresh["id"], session_id, form_id)
 
     _score_at_dl = (sqs_results.get(form_id) or {}).get("sqs_score")
-    await write_audit_log(
-        user=fresh, action="download", form_id=form_id, form_name=form_name,
-        session_id=session_id, ip_address=request.client.host if request.client else None,
-        sqs_score=_score_at_dl, unresolved_issues=unresolved_recs, file_checksum=package_checksum,
-    )
+    if is_draft:
+        # Distinct action + payload from a normal "download": logs exactly what
+        # was overridden and the producer's typed reason, never conflated with
+        # the ordinary soft-warning "Download Anyway" audit trail above.
+        await write_audit_log(
+            user=fresh, action="download_draft", form_id=form_id, form_name=form_name,
+            session_id=session_id, ip_address=request.client.host if request.client else None,
+            sqs_score=_score_at_dl,
+            unresolved_issues={"override_reason": override_reason.strip(), "blocking_items": blocking_items},
+            file_checksum=package_checksum,
+        )
+    else:
+        await write_audit_log(
+            user=fresh, action="download", form_id=form_id, form_name=form_name,
+            session_id=session_id, ip_address=request.client.host if request.client else None,
+            sqs_score=_score_at_dl, unresolved_issues=unresolved_recs, file_checksum=package_checksum,
+        )
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
@@ -322,10 +405,13 @@ async def download_pdf(
     if pkg_eval:
         extra_headers["X-Package-Status"]  = pkg_eval["status"]
         extra_headers["X-Package-Message"] = pkg_eval.get("message", "")
+    if is_draft:
+        extra_headers["X-Download-Draft"] = "true"
 
+    _zip_name = f"{form_id}_Package_DRAFT.zip" if is_draft else f"{form_id}_Package.zip"
     return Response(
         content=zip_buf.getvalue(), media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename={form_id}_Package.zip", **extra_headers},
+        headers={"Content-Disposition": f"attachment; filename={_zip_name}", **extra_headers},
     )
 
 
@@ -334,6 +420,8 @@ async def download_pdf(
 async def download_all(
     session_id: str,
     request: Request,
+    draft: bool = Query(False),
+    override_reason: str = Query(""),
     current_user: dict = Depends(get_current_user),
 ):
     await check_download_rate_limit(current_user["id"])
@@ -362,12 +450,19 @@ async def download_all(
     generated = proc_session.get("generated_forms", {})
     if not generated:
         raise HTTPException(400, "No forms generated yet")
+    # Completeness gate (Figure 35 client feedback): blocks a clean package download
+    # when any form has a placeholder value or an unmet required COPE-style field,
+    # unless the caller explicitly asked for a watermarked draft with a typed reason.
+    blocking_items = _enforce_completeness_gate(proc_session, list(generated.keys()), draft, override_reason)
+    is_draft       = bool(blocking_items)
+    _file_suffix   = "DRAFT" if is_draft else "FILLED"
 
     user_signature = decrypt_field_soft(fresh.get("signature_data")) or None
     acord_pdfs = {}
     for fid in generated.keys():
         try:
-            acord_pdfs[fid] = regenerate_pdf_for_form(proc_session, fid, force=True, user_signature=user_signature)
+            pb = regenerate_pdf_for_form(proc_session, fid, force=True, user_signature=user_signature)
+            acord_pdfs[fid] = apply_draft_watermark(pb) if is_draft else pb
         except Exception as ex:
             logger.error(f"Skipping {fid}: {ex}")
 
@@ -382,7 +477,7 @@ async def download_all(
     unresolved_recs = await get_unresolved_recommendations(session_id)
     hard_stops, soft_stops = _split_open_recs(unresolved_recs)
     file_manifest, package_checksum = _compute_manifest(
-        {f"{fid}_FILLED.pdf": pb for fid, pb in acord_pdfs.items()}
+        {f"{fid}_{_file_suffix}.pdf": pb for fid, pb in acord_pdfs.items()}
     )
 
     _ck = _cover_cache_key(facts, list(generated.keys()), sqs_results, flags)
@@ -399,7 +494,7 @@ async def download_all(
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("00_Primble_Cover_Page.pdf", cover_pdf)
         for fid, pb in acord_pdfs.items():
-            zf.writestr(f"{fid}_FILLED.pdf", pb)
+            zf.writestr(f"{fid}_{_file_suffix}.pdf", pb)
     zip_buf.seek(0)
 
     _ids_hash        = hashlib.md5((",".join(sorted(generated.keys()))).encode()).hexdigest()[:8]
@@ -435,13 +530,27 @@ async def download_all(
     _scores = [(v or {}).get("sqs_score") for v in sqs_results.values()]
     _scores = [s for s in _scores if s is not None]
     _avg_score = round(sum(_scores) / len(_scores), 1) if _scores else None
-    await write_audit_log(
-        user=fresh, action="download_zip",
-        form_id=", ".join(generated.keys()),
-        form_name=f"ZIP Bundle ({len(generated)} forms + cover page)",
-        session_id=session_id, ip_address=request.client.host if request.client else None,
-        sqs_score=_avg_score, unresolved_issues=unresolved_recs, file_checksum=package_checksum,
-    )
+    if is_draft:
+        # Distinct action + payload from a normal "download_zip": logs exactly what
+        # was overridden and the producer's typed reason, never conflated with the
+        # ordinary soft-warning "Download Anyway" audit trail below.
+        await write_audit_log(
+            user=fresh, action="download_zip_draft",
+            form_id=", ".join(generated.keys()),
+            form_name=f"ZIP Bundle DRAFT ({len(generated)} forms + cover page)",
+            session_id=session_id, ip_address=request.client.host if request.client else None,
+            sqs_score=_avg_score,
+            unresolved_issues={"override_reason": override_reason.strip(), "blocking_items": blocking_items},
+            file_checksum=package_checksum,
+        )
+    else:
+        await write_audit_log(
+            user=fresh, action="download_zip",
+            form_id=", ".join(generated.keys()),
+            form_name=f"ZIP Bundle ({len(generated)} forms + cover page)",
+            session_id=session_id, ip_address=request.client.host if request.client else None,
+            sqs_score=_avg_score, unresolved_issues=unresolved_recs, file_checksum=package_checksum,
+        )
 
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
@@ -462,10 +571,13 @@ async def download_all(
     if pkg_eval:
         extra_headers["X-Package-Status"]  = pkg_eval["status"]
         extra_headers["X-Package-Message"] = pkg_eval.get("message", "")
+    if is_draft:
+        extra_headers["X-Download-Draft"] = "true"
 
+    _zip_name = "ACORD_Package_Primble_DRAFT.zip" if is_draft else "ACORD_Package_Primble.zip"
     return Response(
         content=zip_buf.getvalue(), media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=ACORD_Package_Primble.zip", **extra_headers},
+        headers={"Content-Disposition": f"attachment; filename={_zip_name}", **extra_headers},
     )
 
 

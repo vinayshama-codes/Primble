@@ -22,8 +22,12 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=(os.cpu_count() or 2) * 2)
 logger = logging.getLogger(__name__)
 
 # ── Cache versioning (Fix 3) ──────────────────────────────────────────────────
-PROMPT_VERSION = "v9"
-SCHEMA_VERSION = "v9"
+# Bump BOTH whenever _EXTRACT_PROMPT_PREFIX or _EXTRACT_SCHEMA changes - this is
+# what forces a stale cached extraction to be discarded instead of silently
+# served forever. v10: added umbrella_effective_date/umbrella_expiration_date
+# to the schema and a RULE 1 umbrella-policy-namespace instruction to the prompt.
+PROMPT_VERSION = "v10"
+SCHEMA_VERSION = "v10"
 
 # ── Model context config ──────────────────────────────────────────────────────
 _MODEL_CHUNK_CHARS: Dict[str, int] = {
@@ -136,6 +140,7 @@ _EXTRACT_SCHEMA = (
     '  "wc_monopolistic_payroll": {"state": "amount"},\n'
     '  "umbrella_limit": string or null, "umbrella_sir": string or null,\n'
     '  "umbrella_attachment_point": string or null,\n'
+    '  "umbrella_effective_date": string or null, "umbrella_expiration_date": string or null,\n'
     '  "underlying_policies": [{"line": string, "limit": string, "carrier": string, "policy_no": string}],\n'
     '  "schedule_of_underlying_insurance": string or null,\n'
     '  "umbrella_follow_form": string or null,\n'
@@ -307,8 +312,16 @@ _EXTRACT_PROMPT_PREFIX = (
     'RULE 1 — Policy namespace separation:\n'
     '  • Current/active policy  → policy_number, effective_date, expiration_date\n'
     '  • Prior/previous policy  → prior_policy_number, prior_effective_date, prior_expiration_date, prior_carrier\n'
-    '  NEVER mix these two groups. If a document shows "Prior Policy: XYZ / 01/01/2023–01/01/2024" '
-    'and "Current Policy: ABC / 01/01/2024–01/01/2025", both sets must appear in their correct keys.\n\n'
+    '  • Umbrella/excess policy → umbrella_effective_date, umbrella_expiration_date\n'
+    '  NEVER mix these groups. If a document shows "Prior Policy: XYZ / 01/01/2023–01/01/2024" '
+    'and "Current Policy: ABC / 01/01/2024–01/01/2025", both sets must appear in their correct keys. '
+    'An umbrella/excess policy commonly runs its OWN separate effective/expiration period, distinct '
+    'from the underlying GL/Auto/WC policy period — if the document states an umbrella-specific '
+    'policy period (e.g. "Umbrella Policy Effective Date: 07/15/2025"), it belongs in '
+    'umbrella_effective_date/umbrella_expiration_date even when it differs from effective_date/'
+    'expiration_date. Do not collapse it into the current-policy dates just because both are present '
+    'in the same document — a differing umbrella period is a real, common attachment scenario, not '
+    'an error to normalize away.\n\n'
     'RULE 2 — Schedule tables: output ONE JSON object per row.\n'
     '  • Vehicle schedule      → one entry per vehicle in auto_vin_schedule\n'
     '  • WC class code table   → one entry per class code row in wc_class_codes\n'
@@ -1304,9 +1317,53 @@ def _validate_parsed(result: dict, context: str) -> dict:
 
                 # Deduplicate while preserving first-occurrence order.
                 # The LLM occasionally emits the same address multiple times
-                # across chunks; without this, Location2/Location3 stamp the
-                # same address as Location1 on every form that has those slots.
-                v = list(dict.fromkeys(x.strip() for x in v if x.strip()))
+                # across chunks - not always as the identical string. A bare
+                # street line ("4800 DAHLIA ST # D13") and a fuller line for
+                # the exact same location ("4800 Dahlia St # D13, Denver, CO
+                # 80216-3121") both normalize street-first (number, street,
+                # unit, then city/state/zip - addresses are always written in
+                # that order), so the short form's normalized tokens are
+                # always a PREFIX of the long form's, never a same-length
+                # variant. An exact-string dedup alone misses this and lets
+                # both survive as separate Location rows.
+                #
+                # Prefix-aware grouping catches it: two addresses are the same
+                # location if one's normalized token sequence is a prefix of
+                # the other's (or they're identical). The surviving display
+                # value per group is picked by the SAME structural-completeness
+                # scoring the cross-document identity-field picker already uses
+                # (ZIP+4 outranks a bare ZIP5, a present state outranks none,
+                # a leading street number outranks none) rather than a naive
+                # token-count or raw-length proxy, which a malformed/truncated
+                # ZIP ("80216-3", missing 3 digits) can fool into looking
+                # falsely "more complete" than a clean one.
+                from services.normalization import normalize_address
+                from services.underwriting_consistency import _value_completeness
+                _seen: List[tuple] = []   # [(norm_tokens, best_raw), ...] first-occurrence order
+                for _raw in v:
+                    _raw = _raw.strip()
+                    if not _raw:
+                        continue
+                    _norm = normalize_address(_raw)
+                    _tokens = tuple(_norm.split()) if _norm else (_raw.lower(),)
+                    _match_idx = None
+                    for _i, (_etoks, _) in enumerate(_seen):
+                        _shorter, _longer = (_tokens, _etoks) if len(_tokens) <= len(_etoks) else (_etoks, _tokens)
+                        if _longer[: len(_shorter)] == _shorter:
+                            _match_idx = _i
+                            break
+                    if _match_idx is None:
+                        _seen.append((_tokens, _raw))
+                    else:
+                        _etoks, _ebest = _seen[_match_idx]
+                        # An exact completeness tie keeps the first raw string seen,
+                        # so behavior for identical duplicates is unchanged.
+                        if _value_completeness("physical_address", "identity", _raw) > \
+                           _value_completeness("physical_address", "identity", _ebest):
+                            _seen[_match_idx] = (_tokens, _raw)
+                        else:
+                            _seen[_match_idx] = (_etoks, _ebest)
+                v = [_raw for _, _raw in _seen]
 
             # you can extend similar normalization for other weak fields later
         

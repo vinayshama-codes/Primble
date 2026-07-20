@@ -252,6 +252,31 @@ SESSION_TTL_H=8
 
 ## Critical Issues & Roadmap
 
+**TL;DR of the 2026-07-16 Yes/No evidence-gate work (read the full entries below before touching
+this area again):**
+1. ACORD 126/140/25 schemas had every field tooltip truncated to 80 chars — compliance
+   questions were cut off *before the actual question text*, so the AI was answering
+   questions it couldn't read. Fixed: removed the truncation, regenerated those 3 schemas'
+   tooltips from the template PDFs (tooltip text only, field definitions untouched).
+2. One gap-fill call carrying 200+ fields made the model answer only ~27% of them. Fixed:
+   field-level batching (`_FIELD_FILL_BATCH`=40).
+3. Yes/No compliance questions buried in that general batch made the model default to "N"
+   and borrow unrelated sentences as fake proof. Fixed: pulled them into their own dedicated
+   pass (`_COMPLIANCE_SYSTEM_PROMPT`) with small batches (`_COMPLIANCE_BATCH`=10) and a
+   Yes-only evidence-reuse cap (`_EVIDENCE_YES_QUOTE_REUSE_MAX`=1).
+4. That dedicated pass initially only recognized ONE of ACORD's three Yes/No field
+   conventions (a text-field tooltip shape), so it silently missed forms using a different
+   shape — e.g. ACORD 133 had 0 of 38 real disclosure questions covered. Fixed: `_is_
+   compliance_question` now recognizes all three (text-field, checkbox-pair, and
+   high-impact disclosure checkbox), verified per-form against the real schemas — 15 of 17
+   forms now route real questions through the dedicated pass (101 and 28 correctly have zero
+   — neither has any genuine Yes/No disclosure question, verified not assumed).
+- Net effect: false "N" flood and missed "Y" answers are fixed, generically across every
+  form that has Yes/No compliance questions, not just ACORD 126; blank stays blank when the
+  document doesn't address a question. Full details, exact numbers, and the one known
+  residual (~2-3 borrowed false "N"s per run, an LLM limitation, not a bug) are in
+  "Dedicated Compliance Yes/No Question Pass" and the two sections above it, below.
+
 ### Active Performance Bug (Priority #1)
 **Combined gap fill is slow (17+ minutes for 3 forms).**
 Three specific bugs in `backend/services/pdf_service.py`:
@@ -363,7 +388,196 @@ suite (556 tests) run before and after with zero new failures (2 pre-existing, u
 failures: an `openai`/`httpx` version conflict and an unrelated `normalize_general` gap).
 Regression tests added to `backend/tests/test_raw_text_verification.py`.
 
-### Gap-Fill Prompt Wraps Every Single-Row Field as a Fake "Repeating Group" (Priority #2 — perf/cost, not yet fixed)
+### Quote-Reuse Cap Missed Reworded Boilerplate — FIXED (2026-07-15), One Residual Limitation Accepted
+**Live client report:** a real ACORD 126 test document (which addresses only ~2-3 of ~22
+General Information Yes/No questions) came back with ~20 of 22 stamped "N", each "grounded"
+by the gap-fill model reusing one of the only 1-2 real negation sentences in the document.
+The evidence gate's reuse cap (`_quote_use_count` in `map_facts_to_form`) only ever counted
+**exact** normalized-string matches — sufficient when the model quotes the same sentence
+verbatim, but the model does not need to: reworded slightly each time ("no parking facilities
+owned or rented" vs "parking facilities are not owned or rented by the applicant" vs "the
+applicant does not own or rent any parking facilities"), each rewording hashed to a different
+key and never reached the reuse threshold. Reproduced directly against the real model to
+confirm the mechanism before touching any code.
+
+**Fix — `services/pdf_service.py`:** the reuse cap now clusters grounding quotes by
+token-Jaccard near-duplicate similarity (`_sim_tokens` / `_is_near_duplicate_text`) instead of
+exact string match — the same technique Guard 4 already uses for cross-field boilerplate
+bleed on mapped explanation *values*, applied here to grounding *quotes*. This compares
+quote-to-quote similarity, never quote-to-question topic, so it does not reopen the standing
+"no topic/keyword matching" rule (see evidence-gate-design memory). The threshold was also
+tightened from ">2 reuses allowed" to ">1" given the demonstrated severity — two different
+fields citing the identical quote is already more likely "one real answer plus one borrowed
+one" than two genuinely distinct facts sharing a citation, and per the standing "blank over
+wrong" product preference, collapsing a rare genuine double-use to blank/ARQ is the correct
+failure mode. Verified: a 5-variant reworded-reuse repro that previously let 3 of 5 survive
+now lets at most 1 through; a lone, genuinely unique, once-cited answer is confirmed
+unaffected (no new false negatives from the tightened threshold in isolation).
+
+**Residual, deliberately accepted limitation:** re-running the full real end-to-end
+reproduction after the fix (both ACORD 126 and 127, real model calls, not synthetic) confirmed
+a large improvement (126: ~26 of 30 Question-code fields now correctly blank, vs ~28 of 30
+wrongly answered before) but also surfaced a *different*, smaller failure mode the reuse cap
+cannot touch: in a large batch of similarly-shaped Yes/No questions, the model occasionally
+attaches a real, present, correctly-negation-shaped quote to the **wrong** question entirely
+(e.g. citing "none are leased or borrowed" as proof for "is there a vehicle maintenance
+program?" instead of "are any vehicles not solely owned by the applicant?"). The quote is
+genuine and grounded - the model just mis-attributed it. This cannot be detected without
+comparing the quote's *topic* to the *question's* topic, which is exactly the heuristic three
+prior sessions already tried and found causes worse regressions (blanking legitimate answers
+phrased differently from their question - see evidence-gate-design memory). Accepted as a
+known trade-off consistent with this codebase's established design philosophy, not silently
+ignored. A real fix would mean isolating each Yes/No question (or small groups) into its own
+LLM call so the model has less to conflate - a materially larger, costlier change that cuts
+against the already-documented Active Performance Bug priority (fewer calls, not more) and
+was deliberately left for a separate decision rather than bundled into this fix.
+
+Full backend suite (576 tests) run before and after with zero new failures (same 2
+pre-existing, unrelated failures as above). Regression tests added to
+`backend/tests/test_raw_text_verification.py`.
+
+**UPDATE 2026-07-16 — the reuse cap's `>1` threshold was REVERSED to a generous,
+env-tunable `_EVIDENCE_QUOTE_REUSE_MAX` (default 12).** The aggressive `>1` cap was
+compensating for the tooltip-truncation root cause below; once that was fixed the cap
+began blanking *correct* answers and was relaxed. See the next section — read it first.
+
+### ACORD 126/140/25 Came Back Blank/Wrong Because Their Schema Tooltips Were Truncated to 80 Chars — FIXED (2026-07-16)
+**This was the real root cause behind "lots of N/blank/broken" on ACORD 126 Yes/No fields —
+not the evidence gate, which several prior sessions kept tuning.** Schema extraction
+(`_collect_fields_pikepdf`, `pdf_service.py`) truncated every field's `/TU` tooltip to
+`[:80]` chars, and that truncated text was baked into the cached
+`forms_schemas/ACORD_126_schema.json` (also 140 and 25 — the three forms whose JSON
+`max_tu` == 80). The compliance-question tooltip format is
+`"Enter Y for a "Yes" response. Input N for "No" response. The response to the question,
+"<ACTUAL QUESTION>"?"` — the boilerplate preamble alone is ~85 chars, so an 80-char cut
+severed the tooltip **before the actual question text ever began**. The gap-fill LLM was
+being asked to answer compliance questions it literally could not read (it saw only
+"…The response to the que"), so it guessed — mostly "N", or wrong. The ACORD template PDFs
+themselves hold the full text (max /TU ~300-570 chars); only our extraction dropped it.
+A SECOND truncation compounded it: the prompt builder (`_field_spec` / `_slot_group_block`)
+re-cut every tooltip to `[:80]` even for the 14 forms whose JSON *had* full tooltips, so
+those forms' question text never reached the model either.
+
+**Fix — three parts:**
+1. `_collect_fields_pikepdf` now stores the full tooltip (cap `_SCHEMA_TOOLTIP_MAX`=1000).
+2. The prompt builder now shows up to `_PROMPT_TOOLTIP_MAX`=500 chars (was 80), so the
+   full question text reaches the model for **all** forms.
+3. Regenerated `ACORD_126/140/25_schema.json` from their template PDFs, updating **only**
+   the `tu` values (field set, order, `ft`, `required` preserved byte-for-byte; 100% field
+   match, verified). This is a data *repair* of a generation-time truncation, not a change
+   to ACORD field definitions — the "never modify forms_schemas" rule is about the field
+   structure, which is untouched.
+
+**Second fix — field-level batching for completion (`_fill_unmatched_with_gpt`).** Even
+with readable tooltips, a single gap-fill call carrying 200+ heterogeneous fields made the
+model answer only ~27% of them (it silently drops fields it *could* fill). The field list
+is now split into focused sub-batches of `_FIELD_FILL_BATCH` (40), dispatched with bounded
+parallelism (`_FIELD_BATCH_POOL`=4, llm_limiter is the TPM backstop); each sub-batch owns
+local accumulators and merges cleanly (sub-batches are disjoint). `_absorb` was refactored
+to take its accumulators as params for thread-safety. The old within-call parallel-chunk
+machinery (`_chunk_pool_size`/`_is_combined_batch`) is replaced by this; raw-text chunks
+within a sub-batch stay sequential (progressive narrowing preserved).
+
+**Result (real model, full 255-field ACORD-126-alone pipeline, not synthetic):** grounded
+Yes/No completion went from ~0 correct → **13 of 15** representative watch questions correct
+(install=Y+explanation, R&D=N, guarantees=Y+explanation, blasting=N, medical=N,
+radioactive=N, hazmat=Y+explanation, watercraft=N, parking=N, recreation=N, day care=N,
+safety=Y+explanation). Raw model completion rose 33 → ~90+ of 205 fields. Two residual
+edge cases (NOT systemic): one question got a wrong "Yes" from a model misreading a quote
+that actually supports "No" (a model-comprehension error, undetectable without the forbidden
+quote-topic matching), and one legitimate "No" whose only proof is a positively-phrased
+requirement ("subcontractors are *required* to submit a COI" → answer to "allowed *without*
+COI?" is No) is blanked by the negation-cue check — the safe direction (blank over wrong),
+left for ARQ.
+
+### Dedicated Compliance Yes/No Question Pass — ADDED (2026-07-16)
+**The general 200-field fill prompt buried the ~40 Yes/No underwriting questions among
+hundreds of heterogeneous fields, so the model defaulted them to "N" and borrowed unrelated
+negative sentences as fake proof (the false-"N" flood reported on real ACORD 126 tests).**
+Yes/No questions (tooltip begins with the ACORD "Enter Y for a Yes response…" convention —
+Question-code fields + …YesNoCode_ text fields; generic /Btn checkboxes are excluded) are
+now pulled OUT of the general fill and answered by a dedicated pass in
+`_fill_unmatched_with_gpt`:
+- `_COMPLIANCE_SYSTEM_PROMPT` — a focused prompt whose entire job is answer-or-omit, with
+  hard rules: silence≠"N", never borrow a subject-A sentence for a subject-B question, every
+  Y/N needs a quote specifically about THAT subject, never reuse a quote, detect YES by
+  meaning (fixed the hazmat case that used to come back "N" with a hazmat explanation), read
+  negatively-phrased questions carefully.
+- **Small batches** (`_COMPLIANCE_BATCH`=10, bounded-parallel): all ~40 in one call makes the
+  model rush and borrow; ~10 per call it reads each carefully and omits the unaddressed ones.
+  This was the single biggest lever against false "N"s.
+- **Yes-only reuse cap** (`_EVIDENCE_YES_QUOTE_REUSE_MAX`=1): a genuine "Yes" has its own
+  unique sentence; a "Yes" whose quote is shared with another question is a borrow → blanked.
+  The shared quote's other use is usually a "No", so this kills false "Yes"es (foreign
+  products, vendors coverage) with zero collateral on legitimate ones. Negatives keep the
+  generous `_EVIDENCE_QUOTE_REUSE_MAX` (a broad negation may truly answer several exposures).
+- **Gate is not authoritative over the pass:** Pass B "rescue a stranded grounded Yes" no
+  longer promotes a compliance question the pass deliberately left blank to "Y" from a stray
+  explanation the general fill wrote (that had manufactured a false "Yes").
+
+**UPDATE 2026-07-16 — generalized to all 17 forms, not just ACORD 126 (client explicitly
+asked: "i need it generic").** Initial ship only recognized the "Enter Y for a Yes
+response…" TEXT-field convention, so it silently covered only the forms happening to use
+that shape. Audited every form's actual schema (not assumed) and found two more real gaps,
+both now fixed in `_is_compliance_question` inside `_fill_unmatched_with_gpt`:
+1. **Checkbox-PAIR compliance questions** — same convention, expressed as two `/Btn` fields
+   (`..._Question_<code>YesIndicator_A` / `..._NoIndicator_A`) with tooltip "Check the box
+   (if applicable): Indicates a "Yes"/"No" response to the question, "<Q>"". Present on
+   125/126/127/130/131/**133**/141/160/186 — ACORD 133 specifically had ZERO fields caught
+   by the text-field convention (0 of 121 unmatched fields) despite having 38 genuine
+   disclosure questions (prior WC coverage, unpaid premium disputes) that were reaching the
+   general fill completely unprotected. Detected via the tooltip marker `"response to the
+   question,"`, which is present in both the text and checkbox-pair shapes.
+2. **High-impact disclosure checkboxes without that tooltip wording** — hired/non-owned
+   auto, leasing, hazardous materials, maintenance program on ACORD 137/138 (already
+   detected via the existing `_is_high_impact_checkbox_field`, now wired into the pass
+   selector too, not just the gate).
+   Deliberately NOT extended to every `/Btn` checkbox: audited a real checkbox-heavy form
+   (ACORD 137_CA, 391 unmatched fields, 192 of them `/Btn`) and found only 46 are genuine
+   disclosure questions — the rest are coverage-SELECTION checkboxes ("which auto symbol
+   applies", "is this agreed-amount valuation") that are a different risk category (usually
+   Pass-1/alias-resolved, and not what caused the false-N bug); routing all 192 would waste
+   ~14 extra LLM calls per form for zero benefit.
+
+`_compliance_question_text` was also tightened to stop at the question's own "?" — the
+checkbox-pair tooltip often has trailing instructional text about A DIFFERENT field
+immediately after the question ("...state?". As used here, if there was no prior coverage,
+indicate why by checking..."), which must not be presented to the model as part of the
+question itself.
+
+**Coverage after the fix, form-by-form (unmatched fields routed to the dedicated pass vs
+total unmatched, computed from the real schemas with `compute_form_gaps`):**
+125=21, **126=48**, 127=44, 130=24, 131=22, **133=38 (was 0)**, 137_CA=46, 137_CO=46,
+138_CA=7, 138_CO=7, 140=8, 141=50, 160=48, 186=88, 25=12. **101=0 and 28=0 are correct, not
+gaps** — 101 is a narrative "no loss" statement form with no Y/N questions at all; 28's
+`/Btn` fields are 100% coverage-existence/election flags ("does Building Coverage apply"),
+not disclosure questions, same category as the auto-symbol selections above.
+
+Verified end-to-end against the real model on ACORD 133 (a workers-comp form, structurally
+unrelated to 126) with a fresh scenario (never previously carried WC coverage, no premium
+disputes) — both checkbox-pair questions answered "No" correctly with no Yes/No
+contradiction on either pair. Full backend suite (582 tests) green before and after (same 2
+pre-existing unrelated failures).
+
+**Result (real model, full ACORD 126, temp 0):** all "Yes" answers correct with no false
+positives; hazmat correctly "Y"; the ~10 completely-unaddressed questions the client listed
+(excavation, joint ventures, labor interchange, demolition, social events, operations sold,
+products recalled, …) now correctly BLANK instead of false "N". **Residual, honestly
+documented:** ~2-3 borrowed false "N"s still slip through per run (the model cites a real
+negation sentence about a different subject; a "No" sharing a broad negation is
+indistinguishable from a borrow without the forbidden quote-topic matching), and they jitter
+run-to-run because the real API is not perfectly deterministic at temp 0. A couple correct
+"No"s are also blanked by the negation-cue check or omitted by the model. Knobs to tune:
+`COMPLIANCE_BATCH`, `EVIDENCE_QUOTE_REUSE_MAX`, `EVIDENCE_YES_QUOTE_REUSE_MAX`. A future
+LLM-as-judge verification pass could cut the residual borrows further at the cost of one
+extra call — deliberately not added yet (diminishing returns vs added latency/complexity).
+
+### Gap-Fill Prompt Wraps Every Single-Row Field as a Fake "Repeating Group" — FIXED (already in code)
+NOTE (2026-07-16): this is **already implemented** — `_build_user_prompt` routes a field
+through `_slot_group_block()` only when `len(_base_to_slots[base]) > 1`; singletons fall
+through to `_field_spec()`. The "not yet fixed" note below is stale; kept for history.
+
+### Gap-Fill Prompt Wraps Every Single-Row Field as a Fake "Repeating Group" (Priority #2 — perf/cost, HISTORICAL)
 `_ROW_SUFFIX_RE` in `pdf_service.py::_fill_unmatched_with_gpt()` matches any field ending
 in `_A`–`_N` and renders it via `_slot_group_block()` — "REPEATING GROUP … RULE: find N
 distinct values … leave null if fewer distinct values exist than expected" — even when

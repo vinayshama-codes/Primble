@@ -321,12 +321,22 @@ def _check_umbrella_attachment_stack(
 ) -> List[dict]:
     """
     Umbrella (ACORD 131) attachment checks:
-    1. GL/Auto underlying limits must meet umbrella attachment minimum.
-    2. Umbrella policy period must align with underlying GL/Auto/WC periods.
-    3. SIR must be >= GL deductible (coverage gap if SIR < deductible).
-    4. WC Employers Liability limits must be present when umbrella attaches over WC.
+    1. SIR must be >= GL deductible (coverage gap if SIR < deductible).
+    2. WC Employers Liability limits must be present when umbrella attaches over WC.
+    3. Umbrella policy period must align with underlying GL/Auto/WC periods.
+
+    GL/Auto underlying MINIMUM LIMIT checks are NOT in this function - they live
+    in the sibling checks `_check_umbrella_gl_minimum_limits` and
+    `_check_umbrella_auto_minimum_limits` (both registered in _RULE_FUNCTIONS
+    directly after this one, so run_cross_form_validation still covers them).
+    Kept separate because they're independently unit-tested and the GL check
+    needed to ship ahead of the Auto one - do not re-merge them here without
+    updating both call sites and their tests.
 
     Spec: "Verify GL/Auto limits meet umbrella minimums. If not → hard stop."
+    (See _check_umbrella_gl_minimum_limits / _check_umbrella_auto_minimum_limits
+    for that half of the spec - Client Q1 downgraded "hard stop" to a soft
+    warning + score reduction, since carrier attachment requirements vary.)
     """
     issues: List[dict] = []
 

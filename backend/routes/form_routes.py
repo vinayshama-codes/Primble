@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import logging
 import os
 import time
@@ -985,21 +986,21 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                 async def _compute_gaps_one(form_id: str):
                     form_meta = next((f for f in session["all_forms"] if f["form_id"] == form_id), None)
                     if not form_meta:
-                        return form_id, None, None
+                        return form_id, None, None, None
                     try:
                         tpl = safe_join(TEMPLATE_DIR, form_meta["template_file"])
                     except ValueError:
-                        return form_id, None, None
+                        return form_id, None, None, None
                     if not os.path.exists(tpl):
-                        return form_id, None, None
+                        return form_id, None, None, None
                     schema = await loop.run_in_executor(
                         _FORM_EXECUTOR, extract_form_schema, tpl, form_id,
                     )
                     facts_with_flags = {**session["facts"], **session.get("flags", {})}
-                    _mapped, unmatched, _det = await loop.run_in_executor(
+                    mapped, unmatched, _det = await loop.run_in_executor(
                         _FORM_EXECUTOR, compute_form_gaps, form_id, schema, facts_with_flags,
                     )
-                    return form_id, schema, unmatched
+                    return form_id, schema, unmatched, mapped
 
                 gap_previews = await asyncio.gather(
                     *[_compute_gaps_one(fid) for fid in req.form_ids],
@@ -1007,28 +1008,43 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                 )
 
                 forms_to_unmatched: dict = {}
+                forms_to_mapped: dict = {}
                 for item in gap_previews:
                     if isinstance(item, Exception):
                         logger.warning("combined_gap_fill: gap preview exception: %s", item)
                         continue
-                    fid, _schema, unmatched = item
+                    fid, _schema, unmatched, mapped = item
                     if unmatched:
                         forms_to_unmatched[fid] = unmatched
+                    if mapped:
+                        forms_to_mapped[fid] = mapped
 
                 if forms_to_unmatched:
                     raw_text = " ".join(d.get("text", "") for d in session.get("docs", []))
                     facts_with_flags = {**session["facts"], **session.get("flags", {})}
+                    logger.info(
+                        "combined_gap_fill: forms_to_unmatched=%d forms_to_mapped=%d "
+                        "total_mapped_fields=%d",
+                        len(forms_to_unmatched), len(forms_to_mapped),
+                        sum(len(v) for v in forms_to_mapped.values()),
+                    )
                     per_form_pre_filled = await loop.run_in_executor(
                         _FORM_EXECUTOR,
-                        combined_gap_fill,
-                        forms_to_unmatched, facts_with_flags, raw_text,
+                        functools.partial(
+                            combined_gap_fill,
+                            forms_to_unmatched, facts_with_flags, raw_text,
+                            forms_to_mapped=forms_to_mapped,
+                        ),
                     )
                 else:
                     logger.info("combined_gap_fill: no gaps after Pass 1 + 1.5 — skipping shared GPT pass")
             except Exception as ex:
                 # Any failure in the combined path falls back to the historic
                 # per-form GPT path (process_single_form with pre_filled_gpt=None).
-                logger.error("combined_gap_fill: fatal error, falling back per-form: %s", ex)
+                # exc_info=True: a silent fallback here means already_filled
+                # context never reaches gap-fill at all - this must be visible
+                # in the logs, not just a one-line message with no traceback.
+                logger.error("combined_gap_fill: fatal error, falling back per-form: %s", ex, exc_info=True)
                 per_form_pre_filled = {}
 
         async def _generate_one(form_id: str):

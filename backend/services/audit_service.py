@@ -444,6 +444,50 @@ async def get_dismissed_recommendations(session_id: str) -> List[dict]:
         return []
 
 
+# ASYNC-SAFE
+async def get_download_audit_log(session_id: str) -> List[dict]:
+    """"Download anyway" override notes for this session (download_audit table),
+    oldest first. Read-only counterpart to log_download_with_open_recs()."""
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT override_note, open_rec_count, downloaded_at
+                   FROM download_audit
+                   WHERE session_id=$1
+                   ORDER BY downloaded_at ASC""",
+                session_id,
+            )
+        return [dict(r) for r in rows]
+    except Exception as ex:
+        logger.error(f"Failed to get download audit log: {ex}")
+        return []
+
+
+# ASYNC-SAFE
+async def get_audit_trail_export(session_id: str) -> dict:
+    """Bundle every producer-supplied "reason" on this submission - the
+    package-level marketing reason (Figure 6) plus every individual dismissed
+    recommendation, issue-status override, and download-anyway note - into one
+    payload the producer can download for their own E&O record.
+
+    Per client clarification (2026-07-17): this does not need to be pushed to
+    underwriters/reviewers; it just needs to be retrievable on demand by the
+    user. Purely a read aggregation of existing audit tables - writes no new
+    data and does not touch scoring, dismiss-credit, or generation.
+    """
+    marketing_reason = await get_marketing_reason(session_id)
+    dismissed = await get_dismissed_recommendations(session_id)
+    issue_statuses = [s for s in await get_issue_statuses(session_id) if s.get("reason")]
+    downloads = await get_download_audit_log(session_id)
+    return {
+        "session_id": session_id,
+        "marketing_reason": marketing_reason,
+        "dismissed_recommendations": dismissed,
+        "issue_status_overrides": issue_statuses,
+        "download_anyway_log": downloads,
+    }
+
+
 # ── Issue-rail resolution status ───────────────────────────────────────────────
 # Pure work-tracking for the issue rail. Writing a status here NEVER touches SQS
 # scoring or dismiss-credit - it only records that a broker marked an issue

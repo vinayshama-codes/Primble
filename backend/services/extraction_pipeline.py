@@ -378,6 +378,42 @@ async def _finalize_pipeline(
         ):
             mflags["has_umbrella"] = True
 
+    # ── Dedicated umbrella-period pass (Umbrella / Excess period-alignment) ──
+    # umbrella_effective_date / umbrella_expiration_date feed the cross-form
+    # period-misalignment checks (cross_form_validator._check_umbrella_
+    # attachment_stack, sqs_service.evaluate_stops) below and MUST be present
+    # in merged_facts before those run - the main extraction prompt asks for
+    # both (extraction_service.py RULE 1 + _EXTRACT_SCHEMA) but has been
+    # observed on real documents to drop them under the weight of ~150 other
+    # requested fields, even reading the umbrella's stated date correctly into
+    # an adjacent field (a retroactive date) instead. One small, standalone
+    # question - same fix already proven for map_facts_to_form's per-form
+    # stamping of Policy_EffectiveDate_A/Policy_ExpirationDate_A on ACORD 131 -
+    # closes the same gap here, one call for the whole document instead of
+    # duplicating it per form. Gated on has_umbrella so a non-umbrella
+    # submission never spends the call; only fills a fact the extraction
+    # genuinely missed (never overrides one it got right); any failure is
+    # logged and swallowed - this is advisory, must never block the pipeline.
+    if mflags.get("has_umbrella"):
+        from services.pdf_service import _fetch_umbrella_period, _is_empty_llm_value
+        _has_umb_eff = not _is_empty_llm_value(merged_facts.get("umbrella_effective_date"))
+        _has_umb_exp = not _is_empty_llm_value(merged_facts.get("umbrella_expiration_date"))
+        if not (_has_umb_eff and _has_umb_exp):
+            _umb_text = " ".join(
+                str(d.get("text", "") or "") for d in active_docs if not d.get("excluded")
+            )
+            if _umb_text.strip():
+                try:
+                    _umb_dates = await _fetch_umbrella_period(_umb_text)
+                except Exception as exc:                          # noqa: BLE001 — advisory only
+                    logger.warning("_finalize_pipeline: umbrella-period pass failed — %s", exc)
+                    _umb_dates = None
+                if _umb_dates:
+                    if not _has_umb_eff and _umb_dates.get("umbrella_effective_date"):
+                        merged_facts["umbrella_effective_date"] = _umb_dates["umbrella_effective_date"]
+                    if not _has_umb_exp and _umb_dates.get("umbrella_expiration_date"):
+                        merged_facts["umbrella_expiration_date"] = _umb_dates["umbrella_expiration_date"]
+
     # ── Wire loss-history flags that the scoring pillars depend on ───────────
     # Fix: no_prior_losses / narrative_states_no_losses were never set by the
     # pipeline — root cause of "score didn't move" after loss remediation (§6.4).

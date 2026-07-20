@@ -60,6 +60,19 @@ CARRIER_FIELDS = frozenset({
     "wc_prior_carrier",
 })
 FEIN_FIELDS = frozenset({"fein", "fein_ssn", "tax_id"})
+# `valuation_method` is normalized to "RCV"/"ACV" (the industry 3-letter term)
+# at extraction time, but the real ACORD 140/141 ValuationCode field's own
+# tooltip documents a SINGLE-LETTER code (A/R/V/M) - pdf_service now
+# translates to that code when it stamps the field deterministically. Without
+# a dedicated normalizer here, field_qa's value-vs-source check compared the
+# stamped "R" against the untranslated fact "RCV" and flagged a false
+# mismatch (confirmed live 2026-07-17) - a SEPARATE bug from the "RCV" vs "R"
+# display inconsistency that prompted the stamping fix in the first place.
+# Deliberately its OWN explicit field set rather than added to the generic
+# _GENERAL_SYNONYMS table: "R"/"A" are single letters that would collide with
+# unrelated fields' legitimate values (a grade, a class code, an initial) if
+# expanded as a context-free global synonym.
+VALUATION_METHOD_FIELDS = frozenset({"valuation_method"})
 
 # Curated name-like keys that hold an organization name but do NOT end in
 # "_name" (holder / payee style). Extend here if new such keys appear.
@@ -439,6 +452,28 @@ def normalize_carrier(value: Any) -> str:
     return trimmed or s
 
 
+_VALUATION_METHOD_CANON = {
+    "rcv": "rcv", "r": "rcv", "replacement cost": "rcv", "replacement cost value": "rcv",
+    "acv": "acv", "a": "acv", "actual cash value": "acv",
+    "agreed amount": "agreed_amount", "v": "agreed_amount",
+    "market value": "market_value", "m": "market_value",
+}
+
+
+def normalize_valuation_method(value: Any) -> str:
+    """Canonical valuation-method key - "RCV"/"R"/"Replacement Cost" (and the
+    ACV/Agreed-Amount/Market-Value equivalents) all collapse to the same
+    comparison key, regardless of whether the value came from the extraction-
+    normalized 3-letter industry term or the ACORD schema's own single-letter
+    code convention. See VALUATION_METHOD_FIELDS for why this is its own
+    narrow, field-scoped normalizer rather than a generic synonym expansion.
+    """
+    s = _basic(value)
+    if not s:
+        return ""
+    return _VALUATION_METHOD_CANON.get(s, s)
+
+
 def normalize_fein(value: Any) -> str:
     """Digits-only FEIN. Returns '' unless exactly 9 digits (a complete US FEIN).
 
@@ -516,6 +551,8 @@ def normalize_value(field: str, value: Any) -> str:
         return normalize_carrier(value)
     if field in FEIN_FIELDS:
         return normalize_fein(value)
+    if field in VALUATION_METHOD_FIELDS:
+        return normalize_valuation_method(value)
     # 2. Shape-based inference for keys outside the explicit sets (Beta Report §5:
     #    normalization must be generic for any document, not only canonical keys).
     category = _infer_field_category(field)

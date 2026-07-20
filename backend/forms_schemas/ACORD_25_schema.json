@@ -1,7 +1,7 @@
 {
   "Form_EditionIdentifier_A": {
     "ft": "/Tx",
-    "tu": "The edition identifier of the form including the form number and edition (the da",
+    "tu": "The edition identifier of the form including the form number and edition (the date is typically formatted YYYY/MM).",
     "required": false
   },
   "Form_CompletionDate_A": {
@@ -11,7 +11,7 @@
   },
   "Producer_FullName_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The full name of the producer / agency. ",
+    "tu": "Enter text: The full name of the producer. ",
     "required": false
   },
   "Producer_MailingAddress_LineOne_A": {
@@ -31,7 +31,7 @@
   },
   "Producer_MailingAddress_StateOrProvinceCode_A": {
     "ft": "/Tx",
-    "tu": "Enter code: The mailing address state or province code of the producer / agency.",
+    "tu": "Enter code: The mailing address state or province code of the producer / agency. ",
     "required": false
   },
   "Producer_MailingAddress_PostalCode_A": {
@@ -41,12 +41,12 @@
   },
   "Producer_ContactPerson_FullName_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The name of the individual at the producer's establishment that is t",
+    "tu": "Enter text: The name of the individual at the producer's establishment that is the primary contact. ",
     "required": false
   },
   "Producer_ContactPerson_PhoneNumber_A": {
     "ft": "/Tx",
-    "tu": "Enter number: The producer's contact person's phone number.  If applicable, incl",
+    "tu": "Enter number: The phone number of the individual at the producer's establishment that is the primary contact.  If applicable, include the area code and extension. ",
     "required": false
   },
   "Producer_FaxNumber_A": {
@@ -56,12 +56,12 @@
   },
   "Producer_ContactPerson_EmailAddress_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The producer's contact person's e-mail address. ",
+    "tu": "Enter text: The e-mail address of the individual at the producer's establishment that is the primary contact. ",
     "required": false
   },
   "NamedInsured_FullName_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarat",
+    "tu": "Enter text: The named insured(s) as it / they will appear on the policy declarations page. ",
     "required": false
   },
   "NamedInsured_MailingAddress_LineOne_A": {
@@ -91,62 +91,62 @@
   },
   "Insurer_FullName_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy o",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. As used here, this is Insurer A.",
     "required": false
   },
   "Insurer_NAICCode_A": {
     "ft": "/Tx",
-    "tu": "Enter code: The identification code assigned to the insurer by the National Asso",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). As used here, this is Insurer A.",
     "required": false
   },
   "Insurer_FullName_B": {
     "ft": "/Tx",
-    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy o",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. As used here, this is Insurer B.",
     "required": false
   },
   "Insurer_NAICCode_B": {
     "ft": "/Tx",
-    "tu": "Enter code: The identification code assigned to the insurer by the National Asso",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). As used here, this is Insurer B.",
     "required": false
   },
   "Insurer_FullName_C": {
     "ft": "/Tx",
-    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy o",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. As used here, this is Insurer C.",
     "required": false
   },
   "Insurer_NAICCode_C": {
     "ft": "/Tx",
-    "tu": "Enter code: The identification code assigned to the insurer by the National Asso",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). As used here, this is Insurer C.",
     "required": false
   },
   "Insurer_FullName_D": {
     "ft": "/Tx",
-    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy o",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. As used here, this is Insurer D.",
     "required": false
   },
   "Insurer_NAICCode_D": {
     "ft": "/Tx",
-    "tu": "Enter code: The identification code assigned to the insurer by the National Asso",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). As used here, this is Insurer D.",
     "required": false
   },
   "Insurer_FullName_E": {
     "ft": "/Tx",
-    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy o",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. As used here, this is Insurer E.",
     "required": false
   },
   "Insurer_NAICCode_E": {
     "ft": "/Tx",
-    "tu": "Enter code: The identification code assigned to the insurer by the National Asso",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). As used here, this is Insurer E.",
     "required": false
   },
   "Insurer_FullName_F": {
     "ft": "/Tx",
-    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy o",
+    "tu": "Enter text: The insurer's full legal company name(s) as found in the file copy of the policy.  Use the actual name of the company within the group to which the policy has been issued.  This is not the insurer's group name or trade name. As used here, this is Insurer F.",
     "required": false
   },
   "Insurer_NAICCode_F": {
     "ft": "/Tx",
-    "tu": "Enter code: The identification code assigned to the insurer by the National Asso",
+    "tu": "Enter code: The identification code assigned to the insurer by the National Association of Insurance Commissioners (NAIC). As used here, this is Insurer F.",
     "required": false
   },
   "CertificateOfInsurance_CertificateNumberIdentifier_A": {
@@ -161,157 +161,157 @@
   },
   "GeneralLiability_InsurerLetterCode_A": {
     "ft": "/Tx",
-    "tu": "Enter code: The Company Letter of the insurer, as identified in the \"Insurer(s) ",
+    "tu": "Enter code: The Company Letter of the insurer, as identified in the \"Insurer(s) Affording Coverage\" form section, associated with the general liability policy. ",
     "required": false
   },
   "GeneralLiability_CoverageIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the claims made or occurrence option ap",
+    "tu": "Check the box (if applicable): Indicates the claims made or occurrence option applies for the general liability policy. ",
     "required": false
   },
   "GeneralLiability_ClaimsMadeIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the \"claims made\" option applies on the",
+    "tu": "Check the box (if applicable): Indicates the \"claims made\" option applies on the general liability policy. ",
     "required": false
   },
   "GeneralLiability_OccurrenceIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the general liability policy, occurrenc",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, occurrence basis applies. ",
     "required": false
   },
   "GeneralLiability_OtherCoverageIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates other coverage not found on the form ex",
+    "tu": "Check the box (if applicable): Indicates other coverage not found on the form exists for the general liability policy. ",
     "required": false
   },
   "GeneralLiability_OtherCoverageDescription_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The description of other coverage (not the limit) on the general lia",
+    "tu": "Enter text: The description of other coverage (not the limit) on the general liability policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
     "required": false
   },
   "GeneralLiability_OtherCoverageIndicator_B": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates other coverage not found on the form ex",
+    "tu": "Check the box (if applicable): Indicates other coverage not found on the form exists for the general liability policy. ",
     "required": false
   },
   "GeneralLiability_OtherCoverageDescription_B": {
     "ft": "/Tx",
-    "tu": "Enter text: The description of other coverage (not the limit) on the general lia",
+    "tu": "Enter text: The description of other coverage (not the limit) on the general liability policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
     "required": false
   },
   "GeneralLiability_GeneralAggregate_LimitAppliesPerPolicyIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the general liability policy, general a",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, general aggregate limit applies per policy. ",
     "required": false
   },
   "GeneralLiability_GeneralAggregate_LimitAppliesPerProjectIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the general liability policy, general a",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, general aggregate limit applies per project. ",
     "required": false
   },
   "GeneralLiability_GeneralAggregate_LimitAppliesPerLocationIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the general liability policy, general a",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, general aggregate limit applies per location. ",
     "required": false
   },
   "GeneralLiability_GeneralAggregate_LimitAppliesToOtherIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the general liability policy, general a",
+    "tu": "Check the box (if applicable): Indicates the general liability policy, general aggregate limit applies to option is other than those listed on the form. ",
     "required": false
   },
   "GeneralLiability_GeneralAggregate_LimitAppliesToCode_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The description of the other option to which the general liability p",
+    "tu": "Enter text: The description of the other option to which the general liability policy, general aggregate limit applies. ",
     "required": false
   },
   "CertificateOfInsurance_GeneralLiability_AdditionalInsuredCode_A": {
     "ft": "/Tx",
-    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the certif",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the certificate holder has been named as an additional insured on the general liability policy. ",
     "required": false
   },
   "Policy_GeneralLiability_SubrogationWaivedCode_A": {
     "ft": "/Tx",
-    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if subrogatio",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if subrogation has been waived on the general liability policy. ",
     "required": false
   },
   "Policy_GeneralLiability_PolicyNumberIdentifier_A": {
     "ft": "/Tx",
-    "tu": "Enter identifier: The identifier assigned by the insurer to the general liabilit",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the general liability policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols. If required for self-insurance, the self-insured license or contract number. ",
     "required": false
   },
   "Policy_GeneralLiability_EffectiveDate_A": {
     "ft": "/Tx",
-    "tu": "Enter date: The effective date of the general liability policy.  The date that t",
+    "tu": "Enter date: The effective date of the general liability policy.  The date that the terms and conditions of the policy commence. ",
     "required": false
   },
   "Policy_GeneralLiability_ExpirationDate_A": {
     "ft": "/Tx",
-    "tu": "Enter date: The date on which the terms and conditions of the general liability ",
+    "tu": "Enter date: The date on which the terms and conditions of the general liability policy will expire. ",
     "required": false
   },
   "GeneralLiability_EachOccurrence_LimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The general liability, each occurrence limit amount.  Any questions",
+    "tu": "Enter limit: The general liability, each occurrence limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The general liability, damage to rented premises each occurrence li",
+    "tu": "Enter limit: The general liability, damage to rented premises each occurrence limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "GeneralLiability_MedicalExpense_EachPersonLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The general liability, medical expense each person limit amount.  A",
+    "tu": "Enter limit: The general liability, medical expense each person limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The general liability, personal and advertising injury limit amount",
+    "tu": "Enter limit: The general liability, personal and advertising injury limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "GeneralLiability_GeneralAggregate_LimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The general liability, general aggregate limit amount.  Any questio",
+    "tu": "Enter limit: The general liability, general aggregate limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The general liability, products and completed operations aggregate ",
+    "tu": "Enter limit: The general liability, products and completed operations aggregate limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "GeneralLiability_OtherCoverageLimitDescription_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The description of other coverage (not the limit) on the general lia",
+    "tu": "Enter text: The description of other coverage (not the limit) on the general liability policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
     "required": false
   },
   "GeneralLiability_OtherCoverageLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The general liability, other coverage limit amount.  Any questions ",
+    "tu": "Enter limit: The general liability, other coverage limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
     "required": false
   },
   "Vehicle_InsurerLetterCode_A": {
     "ft": "/Tx",
-    "tu": "Enter code: The Company Letter of the insurer, as identified in the \"Insurer(s) ",
+    "tu": "Enter code: The Company Letter of the insurer, as identified in the \"Insurer(s) Affording Coverage\" form section, associated with the policy. ",
     "required": false
   },
   "Vehicle_AnyAutoIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the commercial vehicle policy covers an",
+    "tu": "Check the box (if applicable): Indicates the commercial vehicle policy covers any auto. As used here, complete this section only if you are certifying automobile liability.  Check all appropriate boxes to correspond with the covered auto symbols found on the policy declarations page.  If the certificate is being issued to the owner of a leased vehicle, DO NOT USE THIS FORM.  Use  ACORD 23, Vehicle or Equipment Certificate of Insurance.",
     "required": false
   },
   "Vehicle_AllOwnedAutosIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the commercial vehicle policy covers ow",
+    "tu": "Check the box (if applicable): Indicates the commercial vehicle policy covers owned autos only. ",
     "required": false
   },
   "Vehicle_HiredAutosIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the vehicle policy covers hired autos o",
+    "tu": "Check the box (if applicable): Indicates the vehicle policy covers hired autos only. ",
     "required": false
   },
   "Vehicle_OtherCoveredAutoIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the vehicle policy covers autos other t",
+    "tu": "Check the box (if applicable): Indicates the vehicle policy covers autos other than those listed. ",
     "required": false
   },
   "Vehicle_OtherCoveredAutoDescription_A": {
@@ -321,17 +321,17 @@
   },
   "Vehicle_ScheduledAutosIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the vehicle policy covers scheduled aut",
+    "tu": "Check the box (if applicable): Indicates the vehicle policy covers scheduled autos. ",
     "required": false
   },
   "Vehicle_NonOwnedAutosIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the vehicle policy covers non-owned aut",
+    "tu": "Check the box (if applicable): Indicates the vehicle policy covers non-owned autos only. ",
     "required": false
   },
   "Vehicle_OtherCoveredAutoIndicator_B": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the vehicle policy covers autos other t",
+    "tu": "Check the box (if applicable): Indicates the vehicle policy covers autos other than those listed. ",
     "required": false
   },
   "Vehicle_OtherCoveredAutoDescription_B": {
@@ -341,47 +341,47 @@
   },
   "CertificateOfInsurance_AutomobileLiability_AdditionalInsuredCode_A": {
     "ft": "/Tx",
-    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the certif",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the certificate holder has been named as an additional insured on the automobile liability policy. ",
     "required": false
   },
   "Policy_AutomobileLiability_SubrogationWaivedCode_A": {
     "ft": "/Tx",
-    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if subrogatio",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if subrogation has been waived on the automobile policy. ",
     "required": false
   },
   "Policy_AutomobileLiability_PolicyNumberIdentifier_A": {
     "ft": "/Tx",
-    "tu": "Enter identifier: The identifier assigned by the insurer to the automobile liabi",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the automobile liability policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols. If required for self-insurance, the self-insured license or contract number. ",
     "required": false
   },
   "Policy_AutomobileLiability_EffectiveDate_A": {
     "ft": "/Tx",
-    "tu": "Enter date: The effective date of the automobile liability policy.  The date tha",
+    "tu": "Enter date: The effective date of the automobile liability policy.  The date that the terms and conditions of the policy commence. ",
     "required": false
   },
   "Policy_AutomobileLiability_ExpirationDate_A": {
     "ft": "/Tx",
-    "tu": "Enter date: The date on which the terms and conditions of the automobile liabili",
+    "tu": "Enter date: The date on which the terms and conditions of the automobile liability policy will expire. ",
     "required": false
   },
   "Vehicle_CombinedSingleLimit_EachAccidentAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The vehicle combined single limit liability each accident amount.  ",
+    "tu": "Enter limit: The vehicle combined single limit liability each accident amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "Vehicle_BodilyInjury_PerPersonLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The vehicle policy, bodily injury per person limit amount.  Any que",
+    "tu": "Enter limit: The vehicle policy, bodily injury per person limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "Vehicle_BodilyInjury_PerAccidentLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The vehicle policy, bodily injury per accident limit amount.  Any q",
+    "tu": "Enter limit: The vehicle policy, bodily injury per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
     "required": false
   },
   "Vehicle_PropertyDamage_PerAccidentLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The vehicle policy, property damage per accident limit amount.  Any",
+    "tu": "Enter limit: The vehicle policy, property damage per accident limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "Vehicle_OtherCoverage_CoverageDescription_A": {
@@ -396,152 +396,152 @@
   },
   "ExcessUmbrella_InsurerLetterCode_A": {
     "ft": "/Tx",
-    "tu": "Enter code: The Company Letter of the insurer, as identified in the \"Insurer(s) ",
+    "tu": "Enter code: The Company Letter of the insurer, as identified in the \"Insurer(s) Affording Coverage\" form section, associated with the commercial excess or umbrella liability policy. ",
     "required": false
   },
   "Policy_PolicyType_UmbrellaIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the type of policy is umbrella.  As use",
+    "tu": "Check the box (if applicable): Indicates the type of policy is umbrella.  As used here, if evidencing an umbrella coverage, underlying policy number(s), term(s) and line(s) of business may be listed on an ACORD 101.",
     "required": false
   },
   "Policy_PolicyType_ExcessIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the type of policy is excess.  As used ",
+    "tu": "Check the box (if applicable): Indicates the type of policy is excess.  As used here, if evidencing an excess coverage, underlying policy number(s), term(s) and line(s) of business may be listed on an ACORD 101.",
     "required": false
   },
   "ExcessUmbrella_OccurrenceIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates \"coverage trigger\" is on an occurrence ",
+    "tu": "Check the box (if applicable): Indicates \"coverage trigger\" is on an occurrence basis on an excess or umbrella liability policy. ",
     "required": false
   },
   "ExcessUmbrella_ClaimsMadeIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates the \"coverage trigger\" is on a claims-m",
+    "tu": "Check the box (if applicable): Indicates the \"coverage trigger\" is on a claims-made basis on an excess or umbrella liability policy. ",
     "required": false
   },
   "ExcessUmbrella_DeductibleIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates a deductible amount applies to the exce",
+    "tu": "Check the box (if applicable): Indicates a deductible amount applies to the excess or umbrella liability policy. ",
     "required": false
   },
   "ExcessUmbrella_RetentionIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates a retention amount applies to the exces",
+    "tu": "Check the box (if applicable): Indicates a retention amount applies to the excess or umbrella liability policy. ",
     "required": false
   },
   "ExcessUmbrella_Umbrella_DeductibleOrRetentionAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter deductible: The excess or umbrella liability deductible or retention amoun",
+    "tu": "Enter deductible: The excess or umbrella liability deductible or retention amount. ",
     "required": false
   },
   "CertificateOfInsurance_ExcessLiability_AdditionalInsuredCode_A": {
     "ft": "/Tx",
-    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the certif",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the certificate holder has been named as an additional insured on the umbrella/excess liability policy.  Place a \"Y\" next to each coverage where an additional insured endorsement has been issued or for umbrella / excess where there is an additional insured on the underlying primary policy and this umbrella / excess is follow form. ",
     "required": false
   },
   "Policy_ExcessLiability_SubrogationWaivedCode_A": {
     "ft": "/Tx",
-    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if subrogatio",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if subrogation has been waived on the excess policy.  For umbrella / excess, place a \"Y\" next to each coverage where subrogation has been waived on the underlying primary policy and this umbrella / excess is follow form. ",
     "required": false
   },
   "Policy_ExcessLiability_PolicyNumberIdentifier_A": {
     "ft": "/Tx",
-    "tu": "Enter identifier: The identifier assigned by the insurer to the excess liability",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the excess liability policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols. If required for self-insurance, the self-insured license or contract number. ",
     "required": false
   },
   "Policy_ExcessLiability_EffectiveDate_A": {
     "ft": "/Tx",
-    "tu": "Enter date: The effective date of the excess liability policy.  The date that th",
+    "tu": "Enter date: The effective date of the excess liability policy.  The date that the terms and conditions of the policy commence. ",
     "required": false
   },
   "Policy_ExcessLiability_ExpirationDate_A": {
     "ft": "/Tx",
-    "tu": "Enter date: The date on which the terms and conditions of the excess liability p",
+    "tu": "Enter date: The date on which the terms and conditions of the excess liability policy will expire. ",
     "required": false
   },
   "ExcessUmbrella_Umbrella_EachOccurrenceAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The excess or umbrella liability each occurrence limit. As used her",
+    "tu": "Enter limit: The excess or umbrella liability each occurrence limit. As used here, the limit should be listed as a whole dollar amount, as governed by the policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s).",
     "required": false
   },
   "ExcessUmbrella_Umbrella_AggregateAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The excess or umbrella liability aggregate limit should be listed a",
+    "tu": "Enter limit: The excess or umbrella liability aggregate limit should be listed as whole dollar amount, as governed by the policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
     "required": false
   },
   "ExcessUmbrella_OtherCoverageDescription_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The description of other coverage (not the limit) on the excess or u",
+    "tu": "Enter text: The description of other coverage (not the limit) on the excess or umbrella liability policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
     "required": false
   },
   "ExcessUmbrella_OtherCoverageLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The excess or umbrella liability other coverage limit should be lis",
+    "tu": "Enter limit: The excess or umbrella liability other coverage limit should be listed as a whole dollar amount, as governed by the policy.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
     "required": false
   },
   "WorkersCompensationEmployersLiability_InsurerLetterCode_A": {
     "ft": "/Tx",
-    "tu": "Enter code: The Company Letter of the insurer, as identified in the \"Insurer(s) ",
+    "tu": "Enter code: The Company Letter of the insurer, as identified in the \"Insurer(s) Affording Coverage\" form section, associated with the commercial workers compensation and employers liability policy. ",
     "required": false
   },
   "WorkersCompensationEmployersLiability_AnyPersonsExcludedIndicator_A": {
     "ft": "/Tx",
-    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates whether the w",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates whether the workers compensation and employers liability policy excludes any proprietor, partner, executive officer, or member. As used here, the DESCRIPTION OF OPERATIONS section is available, if needed, to provide details of any \"Yes\" response.  In NH, if \"Yes\" response is indicated, it is mandatory to provide corresponding details in the DESCRIPTION OF OPERATIONS section.",
     "required": false
   },
   "Policy_WorkersCompensation_SubrogationWaivedCode_A": {
     "ft": "/Tx",
-    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if subrogatio",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if subrogation has been waived on the workers compensation policy. ",
     "required": false
   },
   "Policy_WorkersCompensationAndEmployersLiability_PolicyNumberIdentifier_A": {
     "ft": "/Tx",
-    "tu": "Enter identifier: The identifier assigned by the insurer to the workers' compens",
+    "tu": "Enter identifier: The identifier assigned by the insurer to the workers' compensation and employers liability policy, or submission, being referenced exactly as it appears on the policy, including prefix and suffix symbols.  If required for self-insurance, the self-insured license or contract number. ",
     "required": false
   },
   "Policy_WorkersCompensationAndEmployersLiability_EffectiveDate_A": {
     "ft": "/Tx",
-    "tu": "Enter date: The effective date of the workers' compensation and employers liabil",
+    "tu": "Enter date: The effective date of the workers' compensation and employers liability policy.  The date that the terms and conditions of the policy commence. .",
     "required": false
   },
   "Policy_WorkersCompensationAndEmployersLiability_ExpirationDate_A": {
     "ft": "/Tx",
-    "tu": "Enter date: The date on which the terms and conditions of the workers' compensat",
+    "tu": "Enter date: The date on which the terms and conditions of the workers' compensation and employers liability policy will expire. ",
     "required": false
   },
   "WorkersCompensationEmployersLiability_WorkersCompensationStatutoryLimitIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates that workers compensation coverage is p",
+    "tu": "Check the box (if applicable): Indicates that workers compensation coverage is per statute. ",
     "required": false
   },
   "WorkersCompensationEmployersLiability_OtherCoverageIndicator_A": {
     "ft": "/Btn",
-    "tu": "Check the box (if applicable): Indicates that additional coverage above the work",
+    "tu": "Check the box (if applicable): Check the box (if applicable): Indicates that additional coverage above the workers compensation statutory limits applies (permitted in some states). ",
     "required": false
   },
   "WorkersCompensationEmployersLiability_OtherCoverageDescription_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The description of other coverage (not the limit) on the workers com",
+    "tu": "Enter text: The description of other coverage (not the limit) on the workers compensation and employers liability policy. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the DESCRIPTION OF OPERATIONS section is available if more space is required.",
     "required": false
   },
   "WorkersCompensationEmployersLiability_EmployersLiability_EachAccidentLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The workers compensation and employers liability policy, employers ",
+    "tu": "Enter limit: The workers compensation and employers liability policy, employers liability each accident limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
     "required": false
   },
   "WorkersCompensationEmployersLiability_EmployersLiability_DiseaseEachEmployeeLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The workers compensation and employers liability policy, employers ",
+    "tu": "Enter limit: The workers compensation and employers liability policy, employers liability disease each employee limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s).  As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "WorkersCompensationEmployersLiability_EmployersLiability_DiseasePolicyLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The workers compensation and employers liability policy, employers ",
+    "tu": "Enter limit: The workers compensation and employers liability policy, employers liability disease policy limit amount.  Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). ",
     "required": false
   },
   "OtherPolicy_InsurerLetterCode_A": {
     "ft": "/Tx",
-    "tu": "Enter code: The Company Letter of the insurer, as identified in the \"Insurer(s) ",
+    "tu": "Enter code: The Company Letter of the insurer, as identified in the \"Insurer(s) Affording Coverage\" form section, associated with the other policy. ",
     "required": false
   },
   "OtherPolicy_OtherPolicyDescription_A": {
@@ -551,27 +551,27 @@
   },
   "CertificateOfInsurance_OtherPolicy_AdditionalInsuredCode_A": {
     "ft": "/Tx",
-    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the certif",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates if the certificate holder has been named as an additional insured on the other policy. ",
     "required": false
   },
   "OtherPolicy_SubrogationWaivedCode_A": {
     "ft": "/Tx",
-    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates subrogation h",
+    "tu": "Enter Y for a \u201cYes\u201d response. Input N for \u201cNo\u201d response. Indicates subrogation has been waived on the other policy. ",
     "required": false
   },
   "OtherPolicy_PolicyNumberIdentifier_A": {
     "ft": "/Tx",
-    "tu": "Enter identifier: The other policy number exactly as it appears on the policy, i",
+    "tu": "Enter identifier: The other policy number exactly as it appears on the policy, including prefix and suffix symbols. ",
     "required": false
   },
   "OtherPolicy_PolicyEffectiveDate_A": {
     "ft": "/Tx",
-    "tu": "Enter date: The date on which the terms and conditions of the other policy comme",
+    "tu": "Enter date: The date on which the terms and conditions of the other policy commence. ",
     "required": false
   },
   "OtherPolicy_PolicyExpirationDate_A": {
     "ft": "/Tx",
-    "tu": "Enter date: The date on which the terms and conditions of the other policy expir",
+    "tu": "Enter date: The date on which the terms and conditions of the other policy expires. ",
     "required": false
   },
   "OtherPolicy_CoverageCode_A": {
@@ -581,7 +581,7 @@
   },
   "OtherPolicy_CoverageLimitAmount_A": {
     "ft": "/Tx",
-    "tu": "Enter limit: The other policy, coverage limit amount. Any questions about approp",
+    "tu": "Enter limit: The other policy, coverage limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "OtherPolicy_CoverageCode_B": {
@@ -591,7 +591,7 @@
   },
   "OtherPolicy_CoverageLimitAmount_B": {
     "ft": "/Tx",
-    "tu": "Enter limit: The other policy, coverage limit amount. Any questions about approp",
+    "tu": "Enter limit: The other policy, coverage limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "OtherPolicy_CoverageCode_C": {
@@ -601,12 +601,12 @@
   },
   "OtherPolicy_CoverageLimitAmount_C": {
     "ft": "/Tx",
-    "tu": "Enter limit: The other policy, coverage limit amount. Any questions about approp",
+    "tu": "Enter limit: The other policy, coverage limit amount. Any questions about appropriate limits or applicable policy coverage(s) should be answered by the issuing insurer(s). As used here, the limit should be listed as a whole dollar amount, as governed by the policy.",
     "required": false
   },
   "CertificateOfLiabilityInsurance_ACORDForm_RemarkText_A": {
     "ft": "/Tx",
-    "tu": "Enter text: The Certificate Of Liability Insurance general remarks.  The additio",
+    "tu": "Enter text: The Certificate Of Liability Insurance general remarks.  The additional comments or special conditions that may exist upon the policy.  ACORD 101, Additional Remarks Schedule, may be attached if more space is required. As used here, records information necessary to identify the operations, locations and vehicles for which the certificate was issued.",
     "required": false
   },
   "CertificateHolder_FullName_A": {
@@ -641,7 +641,7 @@
   },
   "Producer_AuthorizedRepresentative_Signature_A": {
     "ft": "/Tx",
-    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., pr",
+    "tu": "Sign here: Accommodates the signature of the authorized representative (e.g., producer, agent, broker, etc.) of the company(ies) listed on the document.  This is required in most states. ",
     "required": false
   }
 }

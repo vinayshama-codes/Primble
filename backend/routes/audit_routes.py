@@ -24,6 +24,7 @@ from services.audit_service import (
     get_marketing_reason,
     set_issue_status,
     get_issue_statuses,
+    get_audit_trail_export,
 )
 from services.auth_service import get_current_user
 from services.sqs_service import SQS_MODEL_VERSION, generate_sqs_narrative
@@ -554,6 +555,22 @@ async def audit_summary(
     await _verify_session_owner(session_id, current_user)
     summary = await get_audit_summary(session_id)
     return JSONResponse({"success": True, **summary})
+
+
+@router.get("/api/audit/export/{session_id}")
+async def export_audit_trail(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """E&O audit record: the package-level marketing reason plus every
+    individual dismissed-recommendation / issue-status / download-anyway
+    reason on this submission, bundled for the producer to download for their
+    own records. Per client clarification (Figure 6, 2026-07-17): this is not
+    pushed to underwriters - it only needs to be available on demand to the
+    user who owns the session."""
+    await _verify_session_owner(session_id, current_user)
+    export = await get_audit_trail_export(session_id)
+    return JSONResponse({"success": True, **export})
 
 
 @router.get("/api/sqs/narrative/{session_id}")

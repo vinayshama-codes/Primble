@@ -593,25 +593,73 @@ def _rec_id(*parts: str) -> str:
     return f"fieldmap_{slug.strip('_')[:80]}"
 
 
+# A trailing single- or double-letter row suffix (_A, _B, ... _AA, _AB, ...) -
+# ACORD's repeating-schedule convention (e.g. AdditionalInterest_FullName_A/B/
+# C/D, a WC officer schedule with up to 4 slots). Used ONLY to GROUP findings
+# for display when the SAME bad value repeats across several slots of the
+# SAME underlying field; never affects detection itself.
+_ROW_SUFFIX_STRIP_RE = re.compile(r"_[A-Z]{1,2}$")
+
+
+def _base_field_for_grouping(field: str) -> str:
+    return _ROW_SUFFIX_STRIP_RE.sub("", field or "")
+
+
 def to_recommendation_rows(result: Optional[dict]) -> List[dict]:
     """Translate a :func:`detect_field_mapping_contamination` result into rows
     for the existing pre-download / post-download review (the same
-    sqs_recommendation_audit channel field_qa already uses). Each contamination
-    finding is surfaced INDIVIDUALLY (never rolled into a summary count) since a
-    carrier/policy value sitting in an insured/owner field is exactly the kind of
-    specific, actionable item a producer needs to see and fix before sending the
-    package to a carrier - never blocking, always visible.
+    sqs_recommendation_audit channel field_qa already uses). Each DISTINCT
+    contamination finding is surfaced INDIVIDUALLY (never rolled into a
+    summary count) since a carrier/policy value sitting in an insured/owner
+    field is exactly the kind of specific, actionable item a producer needs to
+    see and fix before sending the package to a carrier - never blocking,
+    always visible.
+
+    Findings sharing the same form + underlying field (row suffix stripped) +
+    reason + contaminated VALUE merge into a single row with a count (client
+    feedback 2026-07-16: "don't want to see a flood of notifications") - this
+    is the genuine "same bad value repeated across N repeating slots" case
+    (e.g. one carrier name bleeding into AdditionalInterest_FullName_A AND
+    _B). Findings that differ in VALUE stay separate rows even on the same
+    base field, since each names a different specific problem the producer
+    must independently review - collapsing those would hide which field holds
+    which bad value, the opposite of what this channel exists to surface.
     """
     if not result:
         return []
     rows: List[dict] = []
+    groups: Dict[tuple, dict] = {}
+    order: List[tuple] = []
     for f in result.get("findings") or []:
+        form_id = f.get("form_id")
+        key = (form_id, _base_field_for_grouping(f.get("field")), f.get("reason_code"), f.get("value"))
+        if key not in groups:
+            order.append(key)
+            groups[key] = {"fields": [], "sample": f}
+        groups[key]["fields"].append(f.get("field"))
+
+    for key in order:
+        form_id, base_field, reason_code, value = key
+        grp = groups[key]
+        fields = grp["fields"]
+        n = len(fields)
+        sample = grp["sample"]
+        if n == 1:
+            message = sample.get("message")
+        else:
+            label = sample.get("field_label") or _humanize_field(base_field)
+            form_label = _form_label(form_id)
+            message = (
+                f"{label} on {form_label}: the same value \"{value}\" appears in {n} "
+                "insured/owner fields. Review and correct each before sending the "
+                "package to a carrier."
+            )
         rows.append({
-            "rec_id":       _rec_id(f.get("form_id"), f.get("field"), f.get("reason_code")),
-            "message":      f.get("message"),
+            "rec_id":       _rec_id(form_id, base_field, reason_code, value, "grp" if n > 1 else ""),
+            "message":      message,
             "type":         "suggestion",
-            "field":        f.get("field"),
-            "component":    f.get("form_id"),
+            "field":        fields[0] if n == 1 else None,
+            "component":    form_id,
             "score_impact": None,
         })
     return rows

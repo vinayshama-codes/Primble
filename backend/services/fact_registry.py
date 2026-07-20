@@ -690,6 +690,20 @@ FACT_REGISTRY: dict[str, dict] = {
         "validate":    None,
         "format_hint": None,
     },
+    "umbrella_effective_date": {
+        "forms":       {"ACORD_131"},
+        "question":    "What date does your umbrella/excess liability policy start? (MM/DD/YYYY)",
+        "tier": None, "required": False,
+        "validate":    _is_date,
+        "format_hint": "Date in MM/DD/YYYY format",
+    },
+    "umbrella_expiration_date": {
+        "forms":       {"ACORD_131"},
+        "question":    "What date does your umbrella/excess liability policy end? (MM/DD/YYYY)",
+        "tier": None, "required": False,
+        "validate":    _is_date,
+        "format_hint": "Date in MM/DD/YYYY format",
+    },
 
     # ── Property — ACORD 140 ────────────────────────────────────────────────
     "property_building_value": {

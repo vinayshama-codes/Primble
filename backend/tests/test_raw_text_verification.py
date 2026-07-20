@@ -987,6 +987,32 @@ def test_evidence_gate_keeps_a_real_on_topic_explanation():
     assert mapped.get(exp_field) == on_topic
 
 
+# ── additional_remarks_text carries the same reuse risk (audit 2026-07-16) ───
+# The same broad-narrative-fact risk as operations_description: a catch-all
+# remarks fact that could equally get recycled as an unrelated question's
+# "explanation". Safe to gate - its only legitimate destination (ACORD 101's
+# overflow remarks) runs strictly after this check and overwrites regardless.
+
+def test_evidence_gate_rejects_additional_remarks_text_reused_as_unrelated_explanation():
+    import config.settings as settings
+    settings.ENABLE_EVIDENCE_GATED_FILL = True
+    from services.pdf_service import map_facts_to_form
+    q_field = "CommercialVehicleLineOfBusiness_Question_AAFCode_A"
+    exp_field = "CommercialVehicleLineOfBusiness_OperationInvolveTransportingHazardousMaterialsExplanation_A"
+    schema = {q_field: {"required": False}, exp_field: {"required": False}}
+    remarks = "Note: this account has a pending name change and a recent ownership transfer, effective next quarter."
+    facts = {"additional_remarks_text": remarks}
+    pre = {
+        "filled_values": {q_field: "Y", exp_field: remarks},
+        "raw_text_fields": set(),
+        "question_grounding": {},
+    }
+    mapped, _ = map_facts_to_form(facts=facts, schema=schema, form_id="ACORD_127",
+                                  raw_text=remarks, pre_filled_gpt=pre)
+    assert mapped.get(q_field) is None
+    assert mapped.get(exp_field) is None
+
+
 # ── Non-adjacent companion promotion (live test 2026-07-15) ───────────────────
 # ACORD 127's ownership question (AAJCode) is "explained" by the Name-of-
 # Other-Owner schedule (AdditionalInterest_FullName_C/_D), not an adjacent
@@ -1160,3 +1186,262 @@ def test_modified_equipment_description_kept_with_genuine_parent_yes():
                                   raw_text=raw, pre_filled_gpt=pre)
     assert mapped.get(desc_field) == "Custom ladder rack mounted on roof."
     assert mapped.get(cost_field) == "$450"
+
+
+# ── Quote-reuse cap: near-duplicate clustering + generous threshold ──────────
+# The cap counts how many DISTINCT Yes/No fields cite the same (near-duplicate)
+# grounding quote and blanks all of them once that exceeds
+# _EVIDENCE_QUOTE_REUSE_MAX. Two properties are tested here:
+#   1. MECHANISM — reworded copies of one sentence are clustered TOGETHER (via
+#      token-Jaccard, the same technique Guard 4 uses on values), so reuse is
+#      counted correctly even when the model paraphrases its "proof" per field.
+#   2. THRESHOLD — moderate reuse SURVIVES (a broad negation legitimately
+#      answers several exposure questions "No" once the model can actually read
+#      them — root cause was the 80-char tooltip truncation, fixed 2026-07-16),
+#      while pathological one-quote-for-everything reuse is still blanked.
+
+def _fill_bare_questions(q_fields, quotes, raw_text, form_id="ACORD_126", answer="No"):
+    import json, os
+    import config.settings as settings
+    settings.ENABLE_EVIDENCE_GATED_FILL = True
+    from services.pdf_service import map_facts_to_form
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    schema = json.load(open(os.path.join(backend_dir, "forms_schemas", f"{form_id}_schema.json"),
+                             encoding="utf-8"))
+    sub_schema, filled, grounding = {}, {}, {}
+    for qf, quote in zip(q_fields, quotes):
+        sub_schema[qf] = schema[qf]      # bare question, no adjacent explanation
+        filled[qf] = answer
+        grounding[qf] = quote
+    pre = {"filled_values": filled, "raw_text_fields": set(), "question_grounding": grounding}
+    mapped, _ = map_facts_to_form(facts={}, schema=sub_schema, form_id=form_id,
+                                  raw_text=raw_text, pre_filled_gpt=pre)
+    return {q: mapped.get(q) for q in q_fields}
+
+
+def _gl_question_fields(n):
+    import json, os, re
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    schema = json.load(open(os.path.join(backend_dir, "forms_schemas", "ACORD_126_schema.json"),
+                             encoding="utf-8"))
+    qcode = re.compile(r"_Question_[A-Za-z0-9]+Code_[A-N]$")
+    return [k for k in schema if qcode.search(k)][:n]
+
+
+def test_quote_reuse_cap_allows_moderate_legitimate_reuse():
+    # Five distinct exposure questions all answered "No", all citing the SAME
+    # broad negation sentence (a narrow-operations applicant legitimately has
+    # none of these exposures). Under the pre-tooltip-fix aggressive cap this
+    # blanked every one; now moderate reuse (<= _EVIDENCE_QUOTE_REUSE_MAX)
+    # survives so real "No" answers are not thrown away.
+    qs = _gl_question_fields(5)
+    quote = "No parking facilities are owned or rented by the applicant"
+    raw = ("No parking facilities are owned or rented by the applicant; "
+           "employees park on the public street.")
+    result = _fill_bare_questions(qs, [quote] * len(qs), raw)
+    kept = sum(1 for v in result.values() if v is not None)
+    assert kept == len(qs), f"expected all {len(qs)} kept, got {kept}: {result}"
+
+
+def test_quote_reuse_cap_still_blanks_pathological_reuse():
+    # Backstop intact: one quote cited as "proof" for far more questions than
+    # _EVIDENCE_QUOTE_REUSE_MAX is boilerplate-for-everything, not evidence of
+    # any one — all uses are blanked. (Bare/unpaired questions require exact
+    # grounding, so a single verbatim quote is used for all of them: it grounds
+    # cleanly and forms one cluster whose count exceeds the cap.)
+    from services.pdf_service import _EVIDENCE_QUOTE_REUSE_MAX
+    n = _EVIDENCE_QUOTE_REUSE_MAX + 3
+    qs = _gl_question_fields(n)
+    assert len(qs) == n, "need enough real question fields for this test"
+    quote = "No parking facilities are owned or rented by the applicant"
+    raw = ("No parking facilities are owned or rented by the applicant; "
+           "employees park on the public street.")
+    result = _fill_bare_questions(qs, [quote] * n, raw)
+    kept = sum(1 for v in result.values() if v is not None)
+    assert kept == 0, f"expected all blanked past the cap, got {kept}: {result}"
+
+
+def test_quote_reuse_near_duplicate_clustering_counts_rewordings_together():
+    # MECHANISM unit check: reworded copies of one sentence are recognised as
+    # the SAME quote by token-Jaccard similarity, so they share a reuse count
+    # (exact-string counting would treat each as distinct and undercount).
+    from services.pdf_service import _sim_tokens, _is_near_duplicate_text
+    a = _sim_tokens("No parking facilities are owned or rented by the applicant")
+    b = _sim_tokens("Parking facilities are not owned or rented by the applicant")
+    c = _sim_tokens("The applicant leases a fabrication unit with no on-site parking lot")
+    assert _is_near_duplicate_text(a, b) is True    # rewording of the same claim
+    assert _is_near_duplicate_text(a, c) is False   # a genuinely different sentence
+
+
+def test_quote_reuse_cap_does_not_punish_a_lone_unique_answer():
+    # Regression guard: a genuinely unique quote, cited for exactly ONE
+    # question and never reused anywhere else, must survive - the cap targets
+    # REUSE, not first-time legitimate grounding.
+    qf = "GeneralLiabilityLineOfBusiness_Question_ACACode_A"
+    quote = "The applicant confirms it has no exposure to radioactive or nuclear materials of any kind"
+    raw = "The applicant confirms it has no exposure to radioactive or nuclear materials of any kind."
+    result = _fill_bare_questions([qf], [quote], raw)
+    assert result[qf] == "No"
+
+
+# ── A "Yes" must cite evidence unique to it (borrowed-Yes guard, 2026-07-16) ──
+# A genuine "Yes" exposure has its OWN specific sentence in the document. A "Yes"
+# whose grounding quote is SHARED with another question is almost always a borrow
+# (the model reused a sentence meant for a different question, e.g. citing
+# "manufactures to customer specifications" as proof of "foreign products used as
+# components"). Affirmatives use a tight reuse cap (_EVIDENCE_YES_QUOTE_REUSE_MAX,
+# default 1); negatives keep the generous cap because one broad negation may
+# genuinely answer several exposure questions "No".
+
+def test_yes_answer_with_shared_quote_is_blanked():
+    # Two "Yes" answers citing the SAME sentence -> both blanked (a real Yes has
+    # its own specific evidence; a shared quote is a borrow).
+    qs = _gl_question_fields(2)
+    quote = "the applicant installs and calibrates custom rack systems on customer sites"
+    raw = ("After larger installations, the applicant installs and calibrates custom "
+           "rack systems on customer sites prior to final acceptance.")
+    result = _fill_bare_questions(qs, [quote, quote], raw, answer="Y")
+    assert all(v is None for v in result.values()), result
+
+
+def test_yes_answer_with_unique_quote_is_kept():
+    # A single "Yes" with its own unique, document-present quote survives.
+    qf = _gl_question_fields(1)[0]
+    quote = "the applicant installs and calibrates custom rack systems on customer sites"
+    raw = ("After larger installations, the applicant installs and calibrates custom "
+           "rack systems on customer sites prior to final acceptance.")
+    result = _fill_bare_questions([qf], [quote], raw, answer="Y")
+    assert result[qf] == "Y", result
+
+
+def test_no_answers_sharing_a_broad_negation_are_not_hit_by_the_yes_cap():
+    # The tight cap is Yes-ONLY. Several "No" answers may legitimately share one
+    # broad negation sentence — they must survive (this is the fabrication-shop
+    # "we have none of these exposures" case).
+    qs = _gl_question_fields(3)
+    quote = "No parking facilities are owned or rented by the applicant"
+    raw = ("No parking facilities are owned or rented by the applicant; "
+           "employees park on the public street.")
+    result = _fill_bare_questions(qs, [quote] * 3, raw, answer="No")
+    assert all(v is not None for v in result.values()), result
+
+
+# ── Compliance question-text extraction ──────────────────────────────────────
+
+def test_compliance_question_text_extraction():
+    from services.pdf_service import _compliance_question_text
+    # Question-code shape: pull the actual question out of the boilerplate.
+    tu1 = ('Enter Y for a “Yes” response. Input N for “No” response. The response to the '
+           'question, "Does applicant install, service or demonstrate products?". ')
+    assert _compliance_question_text(tu1) == "Does applicant install, service or demonstrate products?"
+    # …YesNoCode_ shape (ACORD 140/25): no "the question," clause.
+    tu2 = ('Enter Y for a “Yes” response. Input N for “No” response. Indicates if spoilage '
+           'coverage applies. ')
+    assert _compliance_question_text(tu2) == "Indicates if spoilage coverage applies"
+
+
+# ── Compliance pass is authoritative: gate never manufactures a "Yes" ─────────
+# for a compliance question the pass left blank, even if the general field-fill
+# happened to write a grounded value into its paired Explanation field.
+
+def test_gate_does_not_promote_blank_compliance_question_to_yes():
+    import json, os
+    import config.settings as settings
+    settings.ENABLE_EVIDENCE_GATED_FILL = True
+    from services.pdf_service import map_facts_to_form
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    schema = json.load(open(os.path.join(backend_dir, "forms_schemas", "ACORD_126_schema.json"),
+                             encoding="utf-8"))
+    q_field   = "GeneralLiabilityLineOfBusiness_Question_ABFCode_A"   # products of others under label
+    exp_field = "GeneralLiabilityLineOfBusiness_ProductsOfOthersSoldUnderApplicantLabelExplanation_A"
+    # The compliance pass left the question blank; the general fill wrote a
+    # grounded (but off-topic) sentence into the explanation. The gate must NOT
+    # promote the question to "Y" — it must blank the stray explanation instead.
+    raw = "Every subcontractor is required to submit a certificate of insurance before work."
+    pre = {"filled_values": {exp_field: "Every subcontractor is required to submit a certificate of insurance"},
+           "raw_text_fields": set(), "question_grounding": {}}
+    sub_schema = {q_field: schema[q_field], exp_field: schema[exp_field]}
+    mapped, _ = map_facts_to_form(facts={}, schema=sub_schema, form_id="ACORD_126",
+                                  raw_text=raw, pre_filled_gpt=pre)
+    assert mapped.get(q_field) is None, mapped.get(q_field)
+    assert mapped.get(exp_field) is None, mapped.get(exp_field)
+
+
+# ── Pairing fallback for Description/Cost-shaped dependent fields ────────────
+# (audit finding 2026-07-16): a Question-code field with no adjacent
+# "...Explanation" field can still have a genuine dependent detail field
+# immediately next, just named "...Description"/"...Cost" instead. Confirmed
+# by hand against the REAL question text on every real occurrence across all
+# 17 schemas: 6 genuine, 1 confirmed coincidental adjacency (excluded).
+
+def test_pairing_fallback_recognizes_all_confirmed_genuine_cases():
+    import json
+    from services.pdf_service import _question_explanation_pairs
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _pairs_for(fname):
+        schema = json.load(open(os.path.join(backend_dir, "forms_schemas", fname), encoding="utf-8"))
+        return _question_explanation_pairs(schema)
+
+    p126 = _pairs_for("ACORD_126_schema.json")
+    assert p126.get("GeneralLiabilityLineOfBusiness_Question_KABCode_A") == "AthleticTeam_SportDescription_A"
+
+    p141 = _pairs_for("ACORD_141_schema.json")
+    assert p141.get("CrimeLineOfBusiness_Question_KAUCode_A") == \
+        "AuditInformation_PhysicalInventory_FrequencyDescription_A"
+
+    p160 = _pairs_for("ACORD_160_schema.json")
+    assert p160.get("BusinessOwnersLineOfBusiness_Question_AADCode_A") == "AthleticTeam_SportDescription_A"
+    assert p160.get("BusinessOwnersLineOfBusiness_Question_KADCode_A") == \
+        "PropertyItem_ItemDetail_ItemDescription_A"
+
+    p186 = _pairs_for("ACORD_186_schema.json")
+    assert p186.get("Contractors_Question_ACFCode_A") == "Contractors_Question_KABExposureDescription_A"
+    assert p186.get("Contractors_Question_ADDCode_A") == "Contractors_Question_ACCDescription_A"
+
+
+def test_pairing_fallback_excludes_confirmed_coincidental_adjacency():
+    import json
+    from services.pdf_service import _question_explanation_pairs
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    schema = json.load(open(os.path.join(backend_dir, "forms_schemas", "ACORD_141_schema.json"),
+                             encoding="utf-8"))
+    pairs = _question_explanation_pairs(schema)
+    # "Is physical access to the computer room restricted?" has nothing to do
+    # with "the complete description of the property including merchandise
+    # and stock" - real coincidental adjacency, must stay excluded.
+    assert pairs.get("CrimeLineOfBusiness_Question_KBJCode_A") != "CrimeInformation_PropertyDescription_A"
+
+
+def _fill_hazmat_abatement(exp_value, raw):
+    import config.settings as settings
+    settings.ENABLE_EVIDENCE_GATED_FILL = True
+    from services.pdf_service import map_facts_to_form
+    q_field = "Contractors_Question_ACFCode_A"
+    exp_field = "Contractors_Question_KABExposureDescription_A"
+    schema = {q_field: {"ft": "/Tx", "required": False}, exp_field: {"ft": "/Tx", "required": False}}
+    pre = {"filled_values": {exp_field: exp_value}, "raw_text_fields": set(), "question_grounding": {}}
+    mapped, _ = map_facts_to_form(facts={}, schema=schema, form_id="ACORD_186",
+                                  raw_text=raw, pre_filled_gpt=pre)
+    return mapped.get(q_field), mapped.get(exp_field)
+
+
+def test_acord186_hazmat_abatement_blanked_when_description_is_fabricated():
+    # Same bug class as ACORD 127's modified-equipment question, on a
+    # different form: before this fix, this field had NO gate at all, so a
+    # value with zero basis in the document would have been stamped verbatim.
+    # (Note: like every Explanation-paired field in this codebase, the gate
+    # verifies the text is genuinely GROUNDED, not that it's topically
+    # on-point for this exact question - that stronger check is a documented,
+    # deliberate trade-off this project has already made elsewhere, not
+    # something this fix newly promises.)
+    raw = "The applicant performs general contracting and framing work on residential properties."
+    q, exp = _fill_hazmat_abatement(
+        "invented asbestos abatement claim with zero basis in the document", raw)
+    assert q is None and exp is None
+
+
+def test_acord186_hazmat_abatement_promoted_when_description_is_genuine():
+    raw = "The applicant occasionally performs asbestos abatement work in older commercial buildings."
+    q, exp = _fill_hazmat_abatement("asbestos abatement work in older commercial buildings", raw)
+    assert q == "Y" and exp == "asbestos abatement work in older commercial buildings"

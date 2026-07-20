@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional
 from services.normalization import normalize_value
 from services.fact_registry import FACT_REGISTRY, SCHEDULE_ROW_RULES, validate_schedule_rows
 from services.field_mapping_integrity import is_high_impact_field
+from services.placeholder_detector import is_placeholder_value
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +49,27 @@ FIELD_QA_MODEL_VERSION = "1.0.0"
 #   filled / client_arq -> deterministic rule, verbatim-from-doc, or user
 #                          confirmed              -> pass
 #   low_confidence       -> AI-inferred, not verbatim -> review
-#   missing_required     -> required + fillable + empty -> fail
+#   missing_required     -> required + fillable + empty -> fail (soft; advisory only)
+#   missing_required_gate -> form-specific completeness gate (currently just ACORD
+#                          140 COPE fields, see pdf_service.
+#                          apply_acord140_missing_field_highlights) -> fail (HARD;
+#                          see _HARD_BLOCK_REASON_CODES / check_hard_block below)
 _CONF_VERDICT = {
     "filled": "pass",
     "client_arq": "pass",
     "ai_verified": "pass",       # AI value confirmed present in the documents
     "low_confidence": "review",
     "missing_required": "fail",
+    "missing_required_gate": "fail",
 }
+
+# reason_codes a download gate MUST treat as blocking (see check_hard_block()).
+# Deliberately a narrow, explicit allowlist: pre-existing "missing_required" /
+# "low_confidence" fails remain exactly as advisory as they always were - only a
+# genuine placeholder value, or the new form-specific completeness gate (ACORD
+# 140 COPE fields today), blocks a download. This is what keeps the hard-block
+# purely additive and non-breaking for every field/form that isn't part of it.
+_HARD_BLOCK_REASON_CODES = frozenset({"placeholder_value", "missing_required_gate"})
 
 
 # ── Value helpers ─────────────────────────────────────────────────────────────
@@ -199,6 +213,35 @@ def run_field_qa(
             _tu = (schema.get(field) or {}).get("tu") if isinstance(schema.get(field), dict) else None
             high_impact = is_high_impact_field(field, _tu)
 
+            # (0) Placeholder check: a stamped value that is leaked instruction text
+            # or a template placeholder (e.g. "1st distinct value") is always wrong,
+            # regardless of its confidence label or whether it happens to also
+            # satisfy the value-vs-source check below. Checked first and highest
+            # priority for that reason.
+            if has_val:
+                _is_ph, _ph_reason = is_placeholder_value(val)
+                if _is_ph:
+                    checked += 1
+                    fail += 1
+                    results.append({
+                        "form_id":     form_id,
+                        "field":       field,
+                        "field_label": _humanize_field(field),
+                        "fact_key":    None,
+                        "verdict":     "fail",
+                        "reason_code": "placeholder_value",
+                        "high_impact": high_impact,
+                        "message": (
+                            f"{_humanize_field(field)} on {form_id.replace('ACORD_', 'ACORD ')} "
+                            f"contains a placeholder value (\"{val}\"), not real data. "
+                            "Fix: Re-generate the form or enter the correct value manually - "
+                            "this blocks a clean download."
+                        ),
+                        "stamped":  str(val),
+                        "expected": None,
+                    })
+                    continue
+
             # (1) Value-vs-source: a stamped value that materially disagrees with
             # its source fact is a fail regardless of confidence label. Address
             # sub-fields (LineOne/City/State/Zip) only ever hold ONE piece of the
@@ -239,17 +282,24 @@ def run_field_qa(
             if verdict == "fail":
                 checked += 1
                 fail += 1
+                _is_gate = conf == "missing_required_gate"
                 results.append({
                     "form_id":     form_id,
                     "field":       field,
                     "field_label": _humanize_field(field),
                     "fact_key":    None,
                     "verdict":     "fail",
-                    "reason_code": "missing_required",
+                    "reason_code": "missing_required_gate" if _is_gate else "missing_required",
                     "high_impact": high_impact,
                     "message": (
                         f"{_humanize_field(field)} on {form_id.replace('ACORD_', 'ACORD ')} "
-                        "is required but empty. Fix: Provide a value before sending."
+                        + (
+                            "is required for this section (a related field was already "
+                            "filled) but empty. Fix: Provide a value before sending - this "
+                            "blocks a clean download."
+                            if _is_gate else
+                            "is required but empty. Fix: Provide a value before sending."
+                        )
                     ),
                     "stamped":  None,
                     "expected": None,
@@ -433,7 +483,25 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
 
     for item in qa_result.get("results") or []:
         code = item.get("reason_code")
-        if code == "value_mismatch":
+        if code in _HARD_BLOCK_REASON_CODES:
+            # Surfaced individually (never rolled into the summary) and tagged with
+            # a "hardblock_" marker inside the rec_id so the frontend preflight
+            # modal can identify these specifically: this is what requires an
+            # explicit "Generate Draft Anyway" override + reason instead of the
+            # ordinary, always-available "Download Anyway". Still writes
+            # recommendation_type 'suggestion' - the sqs_recommendation_audit CHECK
+            # constraint is unchanged; the actual block is enforced independently,
+            # fresh, at download time (see check_hard_block below), never trusting
+            # this DB snapshot.
+            rows.append({
+                "rec_id":       _rec_id("hardblock", item.get("form_id"), item.get("field"), code),
+                "message":      item.get("message"),
+                "type":         "suggestion",
+                "field":        item.get("field"),
+                "component":    item.get("form_id"),
+                "score_impact": None,
+            })
+        elif code == "value_mismatch":
             rows.append({
                 "rec_id":       _rec_id(item.get("form_id"), item.get("field"), "mismatch"),
                 "message":      item.get("message"),
@@ -524,3 +592,34 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
             "score_impact": None,
         })
     return rows
+
+
+# ── Download-time hard-block gate ───────────────────────────────────────────
+
+def check_hard_block(
+    generated_forms: Optional[dict],
+    form_ids: Optional[List[str]] = None,
+    merged_facts: Optional[dict] = None,
+    confirmations: Optional[dict] = None,
+) -> List[dict]:
+    """Return the list of field_qa findings that MUST block a clean download:
+    placeholder values (any form) and form-specific completeness-gate fails
+    (currently ACORD 140 COPE fields). Empty list means nothing blocks.
+
+    This is DELIBERATELY independent of the DB-backed recommendation snapshot
+    (sqs_recommendation_audit / to_recommendation_rows) that only feeds the
+    frontend's advisory preflight display - a download-time gate must never
+    trust a possibly-stale DB row, so this recomputes fresh from the actual
+    generated-forms state on every call. Callers (routes/download_routes.py)
+    are expected to call this directly at request time, not read it from a
+    table.
+
+    ``form_ids``, if given, restricts the check to that subset of
+    ``generated_forms`` (e.g. a single-form download only needs to gate that
+    one form, not the whole package).
+    """
+    generated_forms = generated_forms or {}
+    if form_ids is not None:
+        generated_forms = {fid: fr for fid, fr in generated_forms.items() if fid in form_ids}
+    qa = run_field_qa(generated_forms, merged_facts=merged_facts, confirmations=confirmations)
+    return [r for r in (qa.get("results") or []) if r.get("reason_code") in _HARD_BLOCK_REASON_CODES]

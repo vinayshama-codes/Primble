@@ -554,6 +554,67 @@ def test_rows_rec_id_stable_and_collision_safe():
     assert rows1[0]["rec_id"] == rows2[0]["rec_id"]
 
 
+# ── Repeating-slot merge (client feedback 2026-07-16: "don't want to see a
+# flood of notifications") ────────────────────────────────────────────────────
+# The SAME contaminated value repeated across several slots of the SAME
+# underlying field (e.g. a WC officer schedule with up to 4 rows, or
+# AdditionalInterest_FullName_A/B/C/D) must merge into one row with a count -
+# but findings with DIFFERENT values on the same base field must NOT merge,
+# since each names a distinct, independently-actionable problem.
+
+def test_same_contaminated_value_across_repeating_slots_merges_into_one_row():
+    gen = _forms({
+        "AdditionalInterest_FullName_A": "Employers Mutual Casualty Company",
+        "AdditionalInterest_FullName_B": "Employers Mutual Casualty Company",
+        "AdditionalInterest_FullName_C": "Employers Mutual Casualty Company",
+    }, form_id="ACORD_130")
+    result = detect_field_mapping_contamination(
+        gen, merged_facts={"carrier_name": "Employers Mutual Casualty Company"},
+    )
+    assert len(result["findings"]) == 3   # detection itself is untouched - still 3 real findings
+    rows = to_recommendation_rows(result)
+    assert len(rows) == 1
+    assert "3 insured/owner fields" in rows[0]["message"]
+    assert "Employers Mutual Casualty Company" in rows[0]["message"]
+    assert rows[0]["type"] == "suggestion"
+    assert rows[0]["rec_id"].startswith("fieldmap_")
+
+
+def test_different_contaminated_values_on_same_base_field_stay_separate_rows():
+    # Mirrors the exact ACORD 127 report scenario - two DIFFERENT carrier
+    # names in two owner slots must both stay individually visible.
+    gen = _forms({
+        "AdditionalInterest_FullName_A": "EMCASCO Insurance Company",
+        "AdditionalInterest_FullName_B": "EMPLOYERS MUTUAL CASUALTY COMPANY",
+    })
+    result = detect_field_mapping_contamination(gen, merged_facts={})
+    rows = to_recommendation_rows(result)
+    assert len(rows) == 2
+    fields = {r["field"] for r in rows}
+    assert fields == {"AdditionalInterest_FullName_A", "AdditionalInterest_FullName_B"}
+
+
+def test_same_value_on_different_forms_stays_separate_rows():
+    gen130 = _forms({"AdditionalInterest_FullName_A": "Employers Mutual Casualty Company"}, form_id="ACORD_130")
+    gen127 = _forms({"AdditionalInterest_FullName_A": "Employers Mutual Casualty Company"}, form_id="ACORD_127")
+    combined = {**gen130, **gen127}
+    result = detect_field_mapping_contamination(
+        combined, merged_facts={"carrier_name": "Employers Mutual Casualty Company"},
+    )
+    rows = to_recommendation_rows(result)
+    assert len(rows) == 2
+    assert {r["component"] for r in rows} == {"ACORD_130", "ACORD_127"}
+
+
+def test_single_finding_keeps_original_message_unmerged():
+    gen = _forms({"AdditionalInterest_FullName_C": "EMCASCO Insurance Company"})
+    result = detect_field_mapping_contamination(gen, merged_facts={})
+    rows = to_recommendation_rows(result)
+    assert len(rows) == 1
+    assert rows[0]["message"] == result["findings"][0]["message"]
+    assert rows[0]["field"] == "AdditionalInterest_FullName_C"
+
+
 # ── Exhaustive sweep: every real field on every real form (not a sample) ─────
 # Loads forms_schemas/*.json directly - the classifier must never crash on any
 # real field name/tooltip across all 17 forms, and every form the client's

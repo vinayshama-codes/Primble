@@ -377,6 +377,24 @@ const MARKETING_ADVERSE_REASONS = new Set([
   "Coverage concerns",
 ]);
 
+// ── Dismiss-reason controlled list (individual issues) ─────────────────────
+// Figure 6 engineering note: "reason codes as structured metadata on the
+// package AND on individual issues... controlled list for reporting, allow
+// free-text notes." The package side already has this (MARKETING_REASON_
+// OPTIONS above); this is the same pattern applied to dismissing a single
+// hard stop / warning. Sent as one string (the option, or "Other: <text>")
+// into the EXISTING override_reason field - no backend/schema change, so
+// dismiss-credit and the audit export both keep working unmodified.
+const DISMISS_REASON_OPTIONS = [
+  "Confirmed accurate - no correction needed",
+  "Not applicable to this submission",
+  "Client will provide before binding",
+  "Broker/underwriter accepted as-is",
+  "Will resolve in a follow-up submission",
+  "Duplicate or already addressed elsewhere",
+  "Other",
+];
+
 // ── Workstream 6 §9.1 - package status → corner-notification {title, body} ────
 // Maps the live package state (integrity review / hard stops / warnings / clean)
 // to a precise status so a notification never announces a bare "Ready" while
@@ -1071,6 +1089,7 @@ function answerResultLabel(r) {
 // ── Side panel recommendation row - own local state avoids shared-state race ──
 function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer }) {
   const [reason, setReason] = useState("");
+  const [otherReason, setOtherReason] = useState("");
   const [busy, setBusy]     = useState(false);
   const [result, setResult] = useState(null);
   const [errMsg, setErrMsg] = useState("");
@@ -1084,6 +1103,12 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer }) {
   // "Submit" to the producer-answer flow; every other rec keeps the exact prior
   // dismiss-with-reason (waiver) behavior, so nothing regresses.
   const answerable = isObj && !!rec.field && typeof onAnswer === "function";
+  // Dismiss-reason (waiver) path only: `reason` holds the picked controlled option;
+  // "Other" reveals a free-text field whose value is folded into one string on
+  // submit. The answerable path is untouched - there `reason` is the typed answer.
+  const dismissReasonValue = reason === "Other"
+    ? (otherReason.trim() ? `Other: ${otherReason.trim()}` : "")
+    : reason;
 
   const submitAnswer = async () => {
     if (busy) return;
@@ -1096,7 +1121,7 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer }) {
     else setErrMsg(out?.error || "Could not apply answer.");
   };
   // Submit: answer the gap (answerable) or the legacy waiver-with-reason otherwise.
-  const submit  = answerable ? submitAnswer : (() => onDismiss(rec, sqsScore, reason));
+  const submit  = answerable ? submitAnswer : (() => onDismiss(rec, sqsScore, dismissReasonValue));
   const dismiss = () => onDismiss(rec, sqsScore, "");
 
   return (
@@ -1115,15 +1140,37 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer }) {
       ) : isObj && (
         <>
           <div style={{ marginTop: 7, display: "flex", gap: 5, alignItems: "center" }}>
-            <input
-              placeholder={answerable ? "Type your answer…" : "Add a reason (optional)…"}
-              value={reason}
-              onChange={e => { setReason(e.target.value); if (errMsg) setErrMsg(""); }}
-              onKeyDown={e => { if (e.key === "Enter") submit(); }}
-              disabled={busy}
-              style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
-            />
-            {reason.trim() && (
+            {answerable ? (
+              <input
+                placeholder="Type your answer…"
+                value={reason}
+                onChange={e => { setReason(e.target.value); if (errMsg) setErrMsg(""); }}
+                onKeyDown={e => { if (e.key === "Enter") submit(); }}
+                disabled={busy}
+                style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
+              />
+            ) : (
+              <select
+                value={reason}
+                onChange={e => { setReason(e.target.value); setOtherReason(""); if (errMsg) setErrMsg(""); }}
+                disabled={busy}
+                style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0, background: "#fff", color: reason ? "#0f172a" : "#94a3b8" }}
+              >
+                <option value="">Select a reason (optional)…</option>
+                {DISMISS_REASON_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            )}
+            {!answerable && reason === "Other" && (
+              <input
+                placeholder="Describe why…"
+                value={otherReason}
+                onChange={e => { setOtherReason(e.target.value); if (errMsg) setErrMsg(""); }}
+                onKeyDown={e => { if (e.key === "Enter") submit(); }}
+                disabled={busy}
+                style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
+              />
+            )}
+            {(answerable ? reason.trim() : dismissReasonValue.trim()) && (
               <button
                 disabled={busy}
                 onMouseDown={e => { e.preventDefault(); submit(); }}
@@ -1147,9 +1194,18 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer }) {
 }
 
 // ── Download Pre-flight Modal ──────────────────────────────────────────────
-function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrideChange, onProceed, onCancel, loading }) {
-  const hardRecs = openRecs.filter(r => r.recommendation_type === "hard_stop");
-  const softRecs = openRecs.filter(r => r.recommendation_type !== "hard_stop");
+function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrideChange, onProceed, onCancel, loading, hasHardBlock }) {
+  // Hard-block items (placeholder values / required COPE-style fields, Figure 35
+  // client feedback) still 409 server-side unless the request explicitly carries a
+  // typed reason (services/field_qa.py's "hardblock_" rec_id marker), but the
+  // display is deliberately UNIFIED with the ordinary Hard Stops box - same title,
+  // same box, same "Download Anyway" label - so this doesn't read as a new/
+  // different feature to the producer.
+  const hardBlockItems = openRecs.filter(r => (r.rec_id || "").includes("hardblock_"));
+  const hardRecs = openRecs.filter(r => r.recommendation_type === "hard_stop" && !(r.rec_id || "").includes("hardblock_"));
+  const softRecs = openRecs.filter(r => r.recommendation_type !== "hard_stop" && !(r.rec_id || "").includes("hardblock_"));
+  const allHardRecs = [...hardBlockItems, ...hardRecs];
+  const reasonRequired = hasHardBlock && !overrideReason.trim();
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.75)", backdropFilter: "blur(6px)", zIndex: 99999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ background: "#fff", borderRadius: 16, padding: "28px 28px 24px", maxWidth: 520, width: "100%", boxShadow: "0 24px 60px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column", gap: 0, maxHeight: "88vh", overflow: "hidden" }}>
@@ -1160,10 +1216,10 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
           </div>
         </div>
         <div style={{ flex: 1, overflowY: "auto", marginBottom: 16 }}>
-          {hardRecs.length > 0 && (
+          {allHardRecs.length > 0 && (
             <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>Hard Stops ({hardRecs.length})</div>
-              {hardRecs.map((r, i) => (
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>Hard Stops ({allHardRecs.length})</div>
+              {allHardRecs.map((r, i) => (
                 <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0" }}>• {r.message}{r.score_impact ? <span style={{ color: "#dc2626", fontWeight: 700 }}> (–{r.score_impact} pts)</span> : ""}</div>
               ))}
             </div>
@@ -1209,6 +1265,11 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
               {loading ? <><span style={{ width: 11, height: 11, border: "2px solid rgba(255,255,255,0.5)", borderTopColor: "#fff", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />Processing…</> : "Download Anyway"}
             </button>
           </div>
+          {reasonRequired && (
+            <div style={{ fontSize: 11, color: "#991b1b", marginTop: 8 }}>
+              Add a note above before proceeding - required for the items in Hard Stops.
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1796,6 +1857,7 @@ const AcordModal = forwardRef(function AcordModal({
   const [liteSqsData, setLiteSqsData] = useState(null);
   const [liteGenerating, setLiteGenerating] = useState(false);
   const [liteCoverLoading, setLiteCoverLoading] = useState(false);
+  const [auditExportLoading, setAuditExportLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 900);
 
   // ── SQS enhancement state ──────────────────────────────────────────────────
@@ -1818,6 +1880,7 @@ const AcordModal = forwardRef(function AcordModal({
   const [dismissedRecDetails, setDismissedRecDetails] = useState(new Map());
   const [showDownloadPreflight, setShowDownloadPreflight] = useState(false);
   const [preflightRecs, setPreflightRecs] = useState([]);
+  const [preflightHardBlock, setPreflightHardBlock] = useState(false);
   const [preflightOverrideReason, setPreflightOverrideReason] = useState("");
   const [preflightCallback, setPreflightCallback] = useState(null);
   const [sqsNarrative, setSqsNarrative] = useState("");
@@ -2112,7 +2175,7 @@ const AcordModal = forwardRef(function AcordModal({
   const _resetSqsState = () => {
     setPackageSqs(null);
     setDismissedRecs(new Set()); setDismissedRecDetails(new Map()); setShowDownloadPreflight(false);
-    setPreflightRecs([]); setPreflightOverrideReason(""); setPreflightCallback(null);
+    setPreflightRecs([]); setPreflightHardBlock(false); setPreflightOverrideReason(""); setPreflightCallback(null);
     setSqsNarrative("");
   };
 
@@ -2216,15 +2279,20 @@ const AcordModal = forwardRef(function AcordModal({
     finally { setVertaforeLoading(false); }
   };
 
-  const _doDownloadOneNoSummary = async formId => {
+  const _doDownloadOneNoSummary = async (formId, draftOpts = {}) => {
     setLoading(true); setShowDownloadOverlay(true);
     try {
-      const res = await fetch(`${API_BASE}/api/download-pdf/${sessionId}/${formId}?include_cover=false`, { credentials: "include" });
+      const qs = draftOpts.draft
+        ? `?include_cover=false&draft=true&override_reason=${encodeURIComponent(draftOpts.overrideReason || "")}`
+        : `?include_cover=false`;
+      const res = await fetch(`${API_BASE}/api/download-pdf/${sessionId}/${formId}${qs}`, { credentials: "include" });
       if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.payment_locked) { setError("Account payment overdue."); return; } if (d.upgrade_required) { onShowUpgrade(); return; } setError(d.message || "Download blocked"); return; }
+      if (res.status === 409) { const d = await res.json().catch(() => ({})); setError(d.detail?.message || "This package has unresolved required fields. Please review and try again."); return; }
       if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.detail?.message || d.message || "Download failed"); return; }
+      const isDraft = res.headers.get("X-Download-Draft") === "true";
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
       const blob = await res.blob(); const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `${formId}_Package.zip`;
+      const a = document.createElement("a"); a.href = url; a.download = isDraft ? `${formId}_Package_DRAFT.zip` : `${formId}_Package.zip`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       await refreshUser();
       if (pkgStatus) { setPkgStatusMsg(pkgMsg); setPkgStatusType(pkgStatus); setTimeout(() => setPkgStatusMsg(""), 12000); }
@@ -2233,7 +2301,7 @@ const AcordModal = forwardRef(function AcordModal({
     finally { setLoading(false); setShowDownloadOverlay(false); }
   };
 
-  const handleDownloadOneNoSummary = formId => gatedDownload(() => _runPreflightThenDownload(() => _doDownloadOneNoSummary(formId)));
+  const handleDownloadOneNoSummary = formId => gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadOneNoSummary(formId, draftOpts)));
 
   const gatedDownload = action => {
     if (user?.acord_license_confirmed) { action(); return; }
@@ -2251,15 +2319,20 @@ const AcordModal = forwardRef(function AcordModal({
     finally { setAcordModalLoading(false); }
   };
 
-  const _doDownloadOne = async formId => {
+  const _doDownloadOne = async (formId, draftOpts = {}) => {
     setLoading(true); setShowDownloadOverlay(true);
     try {
-      const res = await fetch(`${API_BASE}/api/download-pdf/${sessionId}/${formId}`, { credentials: "include" });
+      const qs = draftOpts.draft
+        ? `?draft=true&override_reason=${encodeURIComponent(draftOpts.overrideReason || "")}`
+        : "";
+      const res = await fetch(`${API_BASE}/api/download-pdf/${sessionId}/${formId}${qs}`, { credentials: "include" });
       if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.payment_locked) { setError("Account payment overdue."); return; } if (d.upgrade_required) { onShowUpgrade(); return; } setError(d.message || "Download blocked"); return; }
+      if (res.status === 409) { const d = await res.json().catch(() => ({})); setError(d.detail?.message || "This package has unresolved required fields. Please review and try again."); return; }
       if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.detail?.message || d.message || "Download failed"); return; }
+      const isDraft = res.headers.get("X-Download-Draft") === "true";
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
       const blob = await res.blob(); const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = `${formId}_Package.zip`;
+      const a = document.createElement("a"); a.href = url; a.download = isDraft ? `${formId}_Package_DRAFT.zip` : `${formId}_Package.zip`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       await refreshUser();
       if (pkgStatus) { setPkgStatusMsg(pkgMsg); setPkgStatusType(pkgStatus); setTimeout(() => setPkgStatusMsg(""), 12000); }
@@ -2268,15 +2341,20 @@ const AcordModal = forwardRef(function AcordModal({
     finally { setLoading(false); setShowDownloadOverlay(false); }
   };
 
-  const _doDownloadAll = async () => {
+  const _doDownloadAll = async (draftOpts = {}) => {
     setLoading(true); setShowDownloadOverlay(true);
     try {
-      const res = await fetch(`${API_BASE}/api/download-all/${sessionId}`, { credentials: "include" });
+      const qs = draftOpts.draft
+        ? `?draft=true&override_reason=${encodeURIComponent(draftOpts.overrideReason || "")}`
+        : "";
+      const res = await fetch(`${API_BASE}/api/download-all/${sessionId}${qs}`, { credentials: "include" });
       if (res.status === 403) { const d = await res.json().catch(() => ({})); if (d.payment_locked) { setError("Account payment overdue."); return; } if (d.upgrade_required) { onShowUpgrade(); return; } setError(d.message || "Download blocked"); return; }
+      if (res.status === 409) { const d = await res.json().catch(() => ({})); setError(d.detail?.message || "This package has unresolved required fields. Please review and try again."); return; }
       if (!res.ok) { const d = await res.json().catch(() => ({})); setError(d.detail?.message || d.message || "Download failed"); return; }
+      const isDraft = res.headers.get("X-Download-Draft") === "true";
       const pkgStatus = res.headers.get("X-Package-Status") || ""; const pkgMsg = res.headers.get("X-Package-Message") || "";
       const blob = await res.blob(); const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = "ACORD_Package_Primble.zip";
+      const a = document.createElement("a"); a.href = url; a.download = isDraft ? "ACORD_Package_Primble_DRAFT.zip" : "ACORD_Package_Primble.zip";
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
       await refreshUser();
       if (pkgStatus) { setPkgStatusMsg(pkgMsg); setPkgStatusType(pkgStatus); setTimeout(() => setPkgStatusMsg(""), 12000); }
@@ -3278,28 +3356,51 @@ const AcordModal = forwardRef(function AcordModal({
       // Keep the post-download checklist in sync with the current package, even when
       // nothing is flagged, so a previously-flagged package can't leave stale items behind.
       setPreflightRecs(openRecs);
-      if (openRecs.length === 0) { downloadFn(); return; }
+      // "hardblock" items (placeholder values / required COPE-style fields, Figure 35
+      // client feedback) are a DIFFERENT class from every other soft/advisory rec here:
+      // they cannot be waved through with the ordinary "Download Anyway" - the server
+      // will 409 unless the request explicitly asks for a watermarked draft with a
+      // reason. Identified by the "hardblock_" marker services.field_qa.
+      // to_recommendation_rows puts in rec_id - see backend/services/field_qa.py.
+      const hasHardBlock = openRecs.some(r => (r.rec_id || "").includes("hardblock_"));
+      setPreflightHardBlock(hasHardBlock);
+      if (openRecs.length === 0) { downloadFn({}); return; }
       setPreflightOverrideReason("");
       setPreflightCallback(() => downloadFn);
       setShowDownloadPreflight(true);
-    } catch (_) { downloadFn(); }
+    } catch (_) { downloadFn({}); }
     finally { setDownloadPreflightLoading(false); }
   };
 
   const handlePreflightProceed = () => {
+    const reason = preflightOverrideReason.trim();
+    // The button always reads "Download Anyway" and is never grayed out (Hard
+    // Stops display identically to every other hard stop) - but a hard-block item
+    // still requires a typed note before it can actually proceed, since the server
+    // will 409 without one. A no-op click here (with the inline hint already
+    // visible) is safer than round-tripping to the server just to show the same
+    // message back.
+    if (preflightHardBlock && !reason) return;
     setShowDownloadPreflight(false);
-    // Fire audit log in background - don't block the download
+    if (preflightHardBlock) {
+      // The server re-verifies independently and returns a watermarked, clearly-
+      // labeled draft PDF - this is never silently the same as a clean download.
+      if (preflightCallback) preflightCallback({ draft: true, overrideReason: reason });
+      return;
+    }
+    // Ordinary soft recs: fire the existing advisory audit log in background - don't
+    // block the download.
     fetch(`${API_BASE}/api/audit/download-anyway`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, override_reason: preflightOverrideReason.trim() }),
+      body: JSON.stringify({ session_id: sessionId, override_reason: reason }),
     }).catch(() => {});
-    if (preflightCallback) preflightCallback();
+    if (preflightCallback) preflightCallback({});
   };
 
-  const handleDownloadOne = formId => gatedDownload(() => _runPreflightThenDownload(() => _doDownloadOne(formId)));
-  const handleDownloadAll = () => gatedDownload(() => _runPreflightThenDownload(() => _doDownloadAll()));
+  const handleDownloadOne = formId => gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadOne(formId, draftOpts)));
+  const handleDownloadAll = () => gatedDownload(() => _runPreflightThenDownload(draftOpts => _doDownloadAll(draftOpts)));
 
   const handleLiteCoverSheet = async () => {
     setLiteCoverLoading(true); setShowDownloadOverlay(true);
@@ -3313,6 +3414,71 @@ const AcordModal = forwardRef(function AcordModal({
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     } catch { setError("Download failed. Please try again."); }
     finally { setLiteCoverLoading(false); setShowDownloadOverlay(false); }
+  };
+
+  // E&O audit record (Figure 6 client clarification, 2026-07-17): not pushed to
+  // underwriters - just a plain-text export of every reason the producer gave
+  // on this submission (marketing reason + dismissed items + issue overrides +
+  // download-anyway notes), downloadable on demand. Never gated by open
+  // recommendations - it's most useful exactly when there are open items.
+  const handleDownloadAuditRecord = async () => {
+    if (!sessionId) return;
+    setAuditExportLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/audit/export/${sessionId}`, { credentials: "include" });
+      if (!res.ok) { setError("Failed to generate audit record."); return; }
+      const d = await res.json();
+      const lines = [];
+      lines.push("PRIMBLE - SUBMISSION AUDIT RECORD");
+      lines.push(`Session: ${sessionId}`);
+      lines.push(`Generated: ${new Date().toISOString()}`);
+      lines.push("");
+      lines.push("WHY THIS ACCOUNT IS BEING MARKETED");
+      if (d.marketing_reason) {
+        lines.push(`  Reason: ${d.marketing_reason.reason_code}`);
+        if (d.marketing_reason.reason_note) lines.push(`  Note: ${d.marketing_reason.reason_note}`);
+        lines.push(`  Recorded: ${d.marketing_reason.updated_at}`);
+      } else {
+        lines.push("  (none recorded)");
+      }
+      lines.push("");
+      lines.push("DISMISSED ITEMS");
+      if (d.dismissed_recommendations?.length) {
+        for (const r of d.dismissed_recommendations) {
+          lines.push(`  - ${r.message}`);
+          lines.push(`    Reason: ${r.override_reason || "(none given)"}`);
+          lines.push(`    Form: ${r.form_id || "-"}  |  Dismissed: ${r.action_at}`);
+        }
+      } else {
+        lines.push("  (none)");
+      }
+      lines.push("");
+      lines.push("ISSUE STATUS OVERRIDES");
+      if (d.issue_status_overrides?.length) {
+        for (const s of d.issue_status_overrides) {
+          lines.push(`  - ${s.message || s.issue_id} [${s.status}]`);
+          lines.push(`    Reason: ${s.reason}`);
+          lines.push(`    Updated: ${s.updated_at}`);
+        }
+      } else {
+        lines.push("  (none)");
+      }
+      lines.push("");
+      lines.push("DOWNLOADED WITH OPEN ITEMS");
+      if (d.download_anyway_log?.length) {
+        for (const dl of d.download_anyway_log) {
+          lines.push(`  - ${dl.override_note || "(no note given)"}  (${dl.open_rec_count} open at the time)`);
+          lines.push(`    Downloaded: ${dl.downloaded_at}`);
+        }
+      } else {
+        lines.push("  (none)");
+      }
+      const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = `Primble_Audit_Record_${sessionId}.txt`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch { setError("Failed to generate audit record."); }
+    finally { setAuditExportLoading(false); }
   };
 
   return (
@@ -3395,6 +3561,7 @@ const AcordModal = forwardRef(function AcordModal({
           onProceed={handlePreflightProceed}
           onCancel={() => { setShowDownloadPreflight(false); setPreflightCallback(null); }}
           loading={loading}
+          hasHardBlock={preflightHardBlock}
         />
       )}
       {jobToasts.length > 0 && (
@@ -5336,6 +5503,18 @@ const AcordModal = forwardRef(function AcordModal({
                               onMouseLeave={e => { e.currentTarget.style.background = "#fce7f3"; }}>
                               <span>{liteCoverLoading ? "Generating…" : "Submission Brief"}</span>
                               {liteCoverLoading && <span style={{ width: 9, height: 9, border: "2px solid #f9a8d4", borderTopColor: "#be185d", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />}
+                            </button>
+
+                            {/* Audit Record - E&O record of every reason given on this submission */}
+                            <button
+                              onClick={handleDownloadAuditRecord}
+                              disabled={auditExportLoading}
+                              title="Download a record of the marketing reason and every dismissed/overridden item's reason, for your own E&amp;O records"
+                              style={{ width: "100%", padding: "7px 10px", borderRadius: 7, border: "1px solid #f9a8d4", background: "#fce7f3", color: "#9d174d", fontSize: 11, fontWeight: 600, cursor: auditExportLoading ? "wait" : "pointer", opacity: auditExportLoading ? 0.6 : 1, fontFamily: "inherit", transition: "all 0.15s", textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                              onMouseEnter={e => { if (!auditExportLoading) e.currentTarget.style.background = "#f9a8d4"; }}
+                              onMouseLeave={e => { e.currentTarget.style.background = "#fce7f3"; }}>
+                              <span>{auditExportLoading ? "Generating…" : "Audit Record"}</span>
+                              {auditExportLoading && <span style={{ width: 9, height: 9, border: "2px solid #f9a8d4", borderTopColor: "#be185d", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />}
                             </button>
                           </div>
                         )}
