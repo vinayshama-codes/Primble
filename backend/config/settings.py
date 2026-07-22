@@ -88,17 +88,24 @@ SUPPORTED_IMG = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"}
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(FORMS_SCHEMAS_DIR, exist_ok=True)
 
+# ---------------------------------------------------------------------------
+# Permanently-enabled pipeline features.
+#
+# The seven flags below are part of the shipped pipeline and are enabled in
+# code, NOT via the environment - so no deployment has to set them and no
+# environment can accidentally turn them off. The legacy "off" paths they used
+# to guard are retained in the call sites only as import-failure fallbacks.
+# ---------------------------------------------------------------------------
+
 # Alias-based deterministic stamping (Pass 1.5 in map_facts_to_form).
-# When true, fields left empty by _ACORD_FIELD_RULES are looked up via the
-# per-form alias maps in forms_aliases/ before being sent to GPT, reducing
-# LLM calls. Default off → behavior identical to the prior pipeline.
-ENABLE_ALIAS_STAMPING: bool = os.getenv("ENABLE_ALIAS_STAMPING", "false").lower() == "true"
+# Fields left empty by _ACORD_FIELD_RULES are looked up via the per-form alias
+# maps in forms_aliases/ before being sent to GPT, reducing LLM calls.
+ENABLE_ALIAS_STAMPING: bool = True
 
 # Combined cross-form gap fill (Stages 4-6 of the extraction architecture).
-# When true, /api/select-forms-bulk runs ONE shared LLM gap-fill across the
-# union of unmatched fields from ALL selected forms, instead of one GPT call
-# per form. Default off → behavior identical to the prior pipeline.
-ENABLE_COMBINED_GAP_FILL: bool = os.getenv("ENABLE_COMBINED_GAP_FILL", "false").lower() == "true"
+# /api/select-forms-bulk runs ONE shared LLM gap-fill across the union of
+# unmatched fields from ALL selected forms, instead of one GPT call per form.
+ENABLE_COMBINED_GAP_FILL: bool = True
 
 # Display canonicalization (Beta Report Sec 5 follow-up / Figure 26 trust
 # feedback). When true, values are cleaned to a consistent DISPLAY format before
@@ -106,18 +113,16 @@ ENABLE_COMBINED_GAP_FILL: bool = os.getenv("ENABLE_COMBINED_GAP_FILL", "false").
 # abbreviated, currency grouped, state -> 2-letter, casing standardized) while
 # PRESERVING all content (entity suffix, unit number, ZIP+4). The raw value
 # stays in the fact envelope. This is NON-destructive and distinct from the
-# comparison normalizer in services/normalization.py. Default off -> the raw
-# extracted value is stamped exactly as before.
-ENABLE_DISPLAY_CANONICALIZATION: bool = os.getenv("ENABLE_DISPLAY_CANONICALIZATION", "false").lower() == "true"
+# comparison normalizer in services/normalization.py.
+ENABLE_DISPLAY_CANONICALIZATION: bool = True
 
-# Form-level field QA (Figure 26 client feedback). When true, every mapped ACORD
-# field is checked against its source fact + confidence threshold after
-# generation; fields that fail (empty-required, or stamped value disagrees with
-# the source fact) or need review (AI-inferred) are surfaced in the existing
-# pre-download review so the producer sees them before a clean download. Advisory
-# only - it never blocks the download or alters a value. Default off -> no QA
-# rows are produced and behavior is identical to the prior pipeline.
-ENABLE_FIELD_QA: bool = os.getenv("ENABLE_FIELD_QA", "false").lower() == "true"
+# Form-level field QA (Figure 26 client feedback). Every mapped ACORD field is
+# checked against its source fact + confidence threshold after generation;
+# fields that fail (empty-required, or stamped value disagrees with the source
+# fact) or need review (AI-inferred) are surfaced in the existing pre-download
+# review so the producer sees them before a clean download. Advisory only - it
+# never blocks the download or alters a value.
+ENABLE_FIELD_QA: bool = True
 
 # Note: field-mapping integrity (Figure 33 client feedback - carrier/policy data
 # mapped into an insured/owner field) has no feature flag. It always runs after
@@ -127,29 +132,27 @@ ENABLE_FIELD_QA: bool = os.getenv("ENABLE_FIELD_QA", "false").lower() == "true"
 # blocks the download.
 
 # Full-field cross-document reconciliation (Beta Report Sec 4.3 "and similar
-# fields" -> generalized to every field, per client). When true, the underwriting
+# fields" -> generalized to every field, per client). The underwriting
 # consistency picker covers EVERY scalar fact that disagrees across documents,
 # not just the curated set - so no field is silently merged. Auto-discovered
 # fields are non-blocking (never a hard stop or a generation block) and use the
-# shared normalizer, so formatting-only differences never surface. Default off ->
-# only the curated RECONCILABLE_FIELDS are reconciled, exactly as before.
-ENABLE_FULL_FIELD_RECONCILIATION: bool = os.getenv("ENABLE_FULL_FIELD_RECONCILIATION", "false").lower() == "true"
+# shared normalizer, so formatting-only differences never surface.
+ENABLE_FULL_FIELD_RECONCILIATION: bool = True
 
 # Evidence-gated fill for narrative answer fields (Figure 30 client feedback).
-# When true, free-text "…Explanation" answers produced by the gap-fill LLM are
-# stamped ONLY if the model marked them as copied from the document text
-# (raw_text_sourced). Inferred/boilerplate answers are dropped and left blank so
-# the field becomes a client/producer question instead of being over-filled.
-# Default off → behavior identical to the prior pipeline.
-ENABLE_EVIDENCE_GATED_FILL: bool = os.getenv("ENABLE_EVIDENCE_GATED_FILL", "false").lower() == "true"
+# Free-text "…Explanation" answers produced by the gap-fill LLM are stamped ONLY
+# if the model marked them as copied from the document text (raw_text_sourced).
+# Inferred/boilerplate answers are dropped and left blank so the field becomes a
+# client/producer question instead of being over-filled.
+ENABLE_EVIDENCE_GATED_FILL: bool = True
 
-# ACORD 101 overflow routing (Figure 29 client feedback). When true, oversized
+# ACORD 101 overflow routing (Figure 29 client feedback). Oversized
 # operations/classification narrative that exceeds a form field's practical
 # capacity is ALSO routed in full to the ACORD 101 "Additional Remarks" section
 # (lossless — the originating form field is never truncated), and the ACORD 101
 # RemarkText fields are stamped deterministically from the remarks fact instead
-# of relying on the gap-fill LLM. Default off → behavior identical to prior.
-ENABLE_ACORD101_OVERFLOW: bool = os.getenv("ENABLE_ACORD101_OVERFLOW", "false").lower() == "true"
+# of relying on the gap-fill LLM.
+ENABLE_ACORD101_OVERFLOW: bool = True
 
 # Producer-entered answers on the recommendation cards (Fig 13). When true, the
 # "Submit" action on a recommendation writes the typed value into the session as

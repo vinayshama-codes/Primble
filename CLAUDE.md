@@ -95,19 +95,20 @@ This stage runs ONCE regardless of how many forms are selected.
 `pdf_service.py → map_facts_to_form()` applies `_ACORD_FIELD_RULES` substring matching.
 Fills fields directly from the extracted facts dict. No LLM call.
 
-### Stage 3 (Pass 1.5) — Alias Stamping  ← NEW (feature-flagged)
+### Stage 3 (Pass 1.5) — Alias Stamping
 `services/alias_stamper.py` loads 17 alias maps from `backend/forms_aliases/`.
 Each alias map: `{ACORD_field_name: canonical_snake_case_name}`.
 A bridge dict (`CANONICAL_TO_EXTRACTION`, 24 entries) maps canonical names → extraction fact keys.
-Fills additional fields deterministically. Gated by `ENABLE_ALIAS_STAMPING=true`.
+Fills additional fields deterministically. `ENABLE_ALIAS_STAMPING` is hardcoded `True`.
 
-### Stage 4-6 (Pass 2) — Combined Gap Fill  ← NEW (feature-flagged)
+### Stage 4-6 (Pass 2) — Combined Gap Fill
 `pdf_service.py → combined_gap_fill()` + `compute_form_gaps()`.
 Deduplicates unmatched fields across ALL selected forms, runs ONE shared LLM pass,
-distributes results back to each form. Gated by `ENABLE_COMBINED_GAP_FILL=true`.
+distributes results back to each form. `ENABLE_COMBINED_GAP_FILL` is hardcoded `True`.
 
-**Without flags:** Each form gets its own LLM gap-fill call (old behavior, still works).
-**With flags:** Shared extraction → alias stamp → one combined gap fill.
+**Effective pipeline:** shared extraction → alias stamp → one combined gap fill.
+The legacy per-form gap-fill path still exists in code but is no longer reachable
+via configuration.
 
 ### Known Performance Issue in Combined Gap Fill (not yet fixed)
 - 1531 fields × ~400 chars/field = 612k char fields block → only 33k chars left for raw text → 22 chunks
@@ -208,13 +209,10 @@ OPENAI_MAX_CONCURRENT=8
 OCR_PROVIDER=google   # google | google_vision | vision (all mean Google Cloud Vision)
 
 # Feature flags (new pipeline)
-ENABLE_ALIAS_STAMPING=true             # Pass 1.5 deterministic alias fill
-ENABLE_COMBINED_GAP_FILL=true          # Stages 4-6 shared LLM gap fill
-ENABLE_DISPLAY_CANONICALIZATION=true   # Clean/standardized display formatting
-ENABLE_FIELD_QA=true                   # Post-generation per-field QA + review surfacing
-ENABLE_FULL_FIELD_RECONCILIATION=true  # Cross-document conflict picker for every field
-ENABLE_EVIDENCE_GATED_FILL=true        # Figure 30/33: drop ungrounded Y-N/narrative answers, all forms
-ENABLE_ACORD101_OVERFLOW=true          # Figure 29: overflow narrative to ACORD 101
+# NOTE: the 7 new-pipeline features (alias stamping, combined gap fill, display
+# canonicalization, field QA, full-field reconciliation, evidence-gated fill,
+# ACORD 101 overflow) are NO LONGER env vars — they are hardcoded `True` in
+# backend/config/settings.py. Nothing to set in any environment.
 ENABLE_SCHEDULE_CAPTURE=true           # Figure 15: bulk vehicle/driver/location/loss tables
 
 # Job queue
@@ -235,21 +233,30 @@ SESSION_TTL_H=8
 
 ## Feature Flags Reference
 
+### Always on — hardcoded in `backend/config/settings.py`, NOT env-configurable
+
+These seven are part of the shipped pipeline. They are set to `True` in code so
+no deployment has to configure them and no environment can turn them off. Their
+legacy "off" paths survive at the call sites only as import-failure fallbacks.
+
+| Constant | Effect |
+|------|-----------------|
+| `ENABLE_ALIAS_STAMPING` | Activates Pass 1.5: fills fields from alias maps without LLM |
+| `ENABLE_COMBINED_GAP_FILL` | Stages 4-6: one shared gap fill instead of per-form LLM calls |
+| `ENABLE_DISPLAY_CANONICALIZATION` | Standardizes date/currency/address/name/state display formatting on stamped values (non-destructive; raw value stays in the fact envelope) |
+| `ENABLE_FIELD_QA` | Runs post-generation per-field QA (confidence threshold + source-fact agreement); surfaces fail/review items in the pre-download modal. Advisory only, never blocks or mutates |
+| `ENABLE_FULL_FIELD_RECONCILIATION` | Extends the underwriting cross-document conflict picker to every scalar fact, not just the curated set |
+| `ENABLE_EVIDENCE_GATED_FILL` | Figure 30/33, generalized: gates **every** gap-fill Yes/No answer on every form (compliance "…Question_*Code_*" fields, every `/Btn` checkbox regardless of topic, and any other field whose tooltip is the ACORD Y/N-entry convention) plus their paired "…Explanation"/"…OtherDescription"/"…ResolutionDescription" narrative, dropping either when not grounded in the uploaded document text |
+| `ENABLE_ACORD101_OVERFLOW` | Figure 29: routes oversized operations/classification narrative + accumulated remarks in full to ACORD 101's Additional Remarks rows (lossless) |
+
+### Still env-configurable
+
 | Flag | Default | Effect when true |
 |------|---------|-----------------|
-| `ENABLE_ALIAS_STAMPING` | false | Activates Pass 1.5: fills fields from alias maps without LLM |
-| `ENABLE_COMBINED_GAP_FILL` | false | Stages 4-6: one shared gap fill instead of per-form LLM calls |
-| `ENABLE_DISPLAY_CANONICALIZATION` | false | Standardizes date/currency/address/name/state display formatting on stamped values (non-destructive; raw value stays in the fact envelope) |
-| `ENABLE_FIELD_QA` | false | Runs post-generation per-field QA (confidence threshold + source-fact agreement); surfaces fail/review items in the pre-download modal. Advisory only, never blocks or mutates |
-| `ENABLE_FULL_FIELD_RECONCILIATION` | false | Extends the underwriting cross-document conflict picker to every scalar fact, not just the curated set |
-| `ENABLE_EVIDENCE_GATED_FILL` | false | Figure 30/33, generalized: gates **every** gap-fill Yes/No answer on every form (compliance "…Question_*Code_*" fields, every `/Btn` checkbox regardless of topic, and any other field whose tooltip is the ACORD Y/N-entry convention) plus their paired "…Explanation"/"…OtherDescription"/"…ResolutionDescription" narrative, dropping either when not grounded in the uploaded document text |
-| `ENABLE_ACORD101_OVERFLOW` | false | Figure 29: routes oversized operations/classification narrative + accumulated remarks in full to ACORD 101's Additional Remarks rows (lossless) |
 | `ENABLE_PRODUCER_ANSWERS` | true | "Submit" on a recommendation card writes a producer-provenance fact and re-runs SQS/cross-form rules, instead of only dismissing. Set false to fall back to dismiss-only |
 | `ENABLE_SCHEDULE_CAPTURE` | true | Figure 15: repeating-row fields (vehicles, drivers, locations, loss runs) collapse into ONE table question per schedule with CSV/XLSX import, row validation, duplicate detection and VIN decode - instead of one ordinal-labelled card per field. Default ON because the prior behaviour is the reported defect; set false to restore legacy per-field questions |
 | `ENABLE_ASYNC_PROCESSING` | false | Returns 202 + runs jobs in worker.py background process |
 | `DEV_ROUTES_ENABLED` | false | Enables dev/test endpoints |
-
-**All 5 flags above marked default `false` but effectively on in this deployment are set `true` in `backend/.env`** (see the env var block above) — the table default is what a fresh environment gets without that file.
 
 ---
 
@@ -770,7 +777,10 @@ Fix (surgical, not yet applied): in the `active_groups` partition inside
 
 - **Never modify `forms_schemas/*.json`** — these are permanent ACORD field definitions.
 - **`forms_aliases/` was generated** by `scripts/generate_alias_maps.py` — do not hand-edit.
-- **Feature flags default to false** — old pipeline behavior is always the fallback.
+- **The 7 new-pipeline feature constants are hardcoded `True`** in `config/settings.py` —
+  they are not env vars, so don't add them to any `.env` or deployment config.
+  Remaining flags (`ENABLE_SCHEDULE_CAPTURE`, `ENABLE_PRODUCER_ANSWERS`,
+  `ENABLE_ASYNC_PROCESSING`, `DEV_ROUTES_ENABLED`) are still env-driven.
 - **Data is sensitive:** PII, insurance claims, financial data, signed documents.
   Any change touching facts, form output, or signatures needs a security review.
 - **Ask Brent** about compliance requirements before any data-handling changes.
