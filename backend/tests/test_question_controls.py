@@ -359,9 +359,29 @@ def test_insurer_info_is_agency_but_underwriter_stays_carrier():
 
 def test_submission_strategy_is_agency():
     # "Submission goal / market selection / coverage intent" == producer strategy.
-    for f in ("carrier_marketing_reason", "submission_urgency"):
+    # (submission_urgency was moved OUT of this set - see
+    # test_submission_urgency_is_client_and_preselected below: a deadline the
+    # client knows about is not the same thing as the agent's marketing strategy.)
+    for f in ("carrier_marketing_reason",):
         tax = classify_question(f, ["ACORD_125"], is_curated_client=True)
         assert tax["bucket"] == BUCKET_AGENCY, f
+
+
+def test_submission_urgency_is_client_and_preselected():
+    # Figure 16 (2026-07-21): the "upcoming deadlines or urgency" question is a
+    # client-answerable fact, not agent strategy - it must route to the Client
+    # bucket as Important priority, AND be pre-selected by default (a deliberate
+    # exception to "Important = suggested, not pre-selected" - see
+    # _FORCE_PRESELECT_FIELDS in question_classifier.py).
+    tax = classify_question("submission_urgency", ["ACORD_125"], is_curated_client=True)
+    assert tax["bucket"] == BUCKET_CLIENT
+    assert tax["audience"] == AUDIENCE_CLIENT
+    assert tax["priority"] == PRIORITY_IMPORTANT
+
+    q = {"field_name": "submission_urgency", **tax}
+    apply_default_selection([q])
+    assert q["default_selected"] is True
+    assert q["suggested"] is True
 
 
 def test_desired_limits_stay_client_not_agency():

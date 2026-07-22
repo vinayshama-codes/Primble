@@ -5,6 +5,8 @@ import { gradeColor, barColor, sqsGradeFromScore } from "../../utils/formatters"
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
 import UploadProgressOverlay from "../overlays/UploadProgressOverlay";
 import PDFJsViewer from "./PDFJsViewer";
+import ScheduleTable from "../arq/ScheduleTable";
+import ARQReceiptModal from "../arq/ARQReceiptModal";
 
 const SQS_LABELS = {
   structural_completeness: "Structural Completeness",
@@ -669,6 +671,126 @@ function ScoreImpactBadges({ q }) {
   );
 }
 
+// ── Producer schedule pre-load (Figure 15) ────────────────────────────────
+// The agent usually already has the fleet / driver / location list in a
+// spreadsheet. Loading it here BEFORE sending means the client opens a
+// populated table to check rather than a blank one to fill. Saved rows land in
+// the same session facts the client's submission writes to, so whichever side
+// fills it first, the other edits on top.
+function SchedulePreload({ sessionId }) {
+  const [schedules, setSchedules] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [savingKey, setSavingKey] = useState("");
+  const [savedKey, setSavedKey] = useState("");
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    // Cookie auth, matching every other authenticated call in this file.
+    fetch(`${API_BASE}/api/arq/schedules/${sessionId}`, { credentials: "include" })
+      .then(r => r.json())
+      .then(d => { if (!cancelled && d.success) setSchedules(d.schedules || []); })
+      .catch(() => { if (!cancelled) setSchedules([]); });
+    return () => { cancelled = true; };
+  }, [sessionId]);
+
+  const setRows = (key, rows) => {
+    setSchedules(prev => prev.map(s => (s.schedule_key === key ? { ...s, rows } : s)));
+    setSavedKey("");
+  };
+
+  const save = async (sched) => {
+    setSavingKey(sched.schedule_key);
+    setErr("");
+    try {
+      const res = await fetch(`${API_BASE}/api/arq/schedules/${sessionId}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ schedule_key: sched.schedule_key, rows: sched.rows || [] }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.detail || "Could not save.");
+      setRows(sched.schedule_key, data.rows || []);
+      setSavedKey(sched.schedule_key);
+    } catch (ex) {
+      setErr(ex?.message || "Could not save that schedule.");
+    } finally {
+      setSavingKey("");
+    }
+  };
+
+  if (!schedules || schedules.length === 0) return null;
+
+  return (
+    <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, marginBottom: 14, background: "#fff" }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "10px 12px", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit",
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>
+          Fill schedules yourself <span style={{ color: "#94a3b8", fontWeight: 400 }}>(optional)</span>
+        </span>
+        <span style={{ fontSize: 11, color: "#64748b" }}>
+          {schedules.map(s => `${s.row_count} ${s.schedule_singular}${s.row_count === 1 ? "" : "s"}`).join(" · ")}
+          {" "}{open ? "▲" : "▼"}
+        </span>
+      </button>
+
+      {open && (
+        <div style={{ padding: "0 12px 12px" }}>
+          <p style={{ fontSize: 11.5, color: "#64748b", margin: "0 0 10px" }}>
+            Upload or paste what you already have. Anything you save here is pre-filled for the
+            client, so they only confirm or top up the rest.
+          </p>
+          {err && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "7px 10px", marginBottom: 10, color: "#dc2626", fontSize: 11.5 }}>{err}</div>
+          )}
+          {schedules.map(s => (
+            <div key={s.schedule_key} style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
+                  {s.schedule_label}
+                  {s.forms && <span style={{ color: "#94a3b8", fontWeight: 400 }}> · ACORD {s.forms}</span>}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => save(s)}
+                  disabled={savingKey === s.schedule_key}
+                  style={{
+                    padding: "5px 12px", fontSize: 11.5, fontWeight: 600, borderRadius: 7,
+                    border: "none", cursor: "pointer",
+                    background: savedKey === s.schedule_key ? "#10b981" : "#E61B84", color: "#fff",
+                    opacity: savingKey === s.schedule_key ? 0.6 : 1,
+                  }}
+                >
+                  {savingKey === s.schedule_key ? "Saving..." : savedKey === s.schedule_key ? "Saved" : "Save"}
+                </button>
+              </div>
+              <ScheduleTable
+                compact
+                columns={s.columns || []}
+                rows={s.rows || []}
+                onChange={(rows) => setRows(s.schedule_key, rows)}
+                label={s.schedule_label}
+                singular={s.schedule_singular}
+                dedupKeys={s.dedup_keys || []}
+                vinDecode={!!s.vin_decode}
+                rowCapacity={s.row_capacity || 0}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ARQ Modal ─────────────────────────────────────────────────────────────
 function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) {
   const [clientEmail, setClientEmail] = useState("");
@@ -732,7 +854,33 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
     if (!canSend) return;
     setEmailTouched(true);
     setSending(true); setError("");
-    const selectedList = questions.filter(q => selectedQuestions[q.field_name]);
+    let selectedList = questions.filter(q => selectedQuestions[q.field_name]);
+
+    // Figure 15 fix: `questions` is a prop fetched ONCE when this modal opened
+    // (before the producer may have used "Fill schedules yourself" below to
+    // import a CSV, look up VINs, or edit rows). That save writes straight to
+    // the session's facts, but never touched this prop, so a schedule
+    // question's `current_rows` here can be stale - the client would get
+    // whatever was extracted from the document, not what the producer just
+    // saved. Pull the live schedules right before sending so whatever is
+    // currently saved is always what actually reaches the client.
+    if (selectedList.some(q => q.field_type === "schedule")) {
+      try {
+        const schedRes = await fetch(`${API_BASE}/api/arq/schedules/${sessionId}`, { credentials: "include" });
+        const schedData = await schedRes.json();
+        const bySchedKey = {};
+        (schedData.schedules || []).forEach(s => { bySchedKey[s.schedule_key] = s.rows; });
+        selectedList = selectedList.map(q => (
+          q.field_type === "schedule" && bySchedKey[q.schedule_key]
+            ? { ...q, current_rows: bySchedKey[q.schedule_key] }
+            : q
+        ));
+      } catch {
+        // Best-effort: fall back to whatever current_rows the modal already has
+        // rather than blocking the send entirely.
+      }
+    }
+
     try {
       const res = await fetch(`${API_BASE}/api/arq/send`, {
         method: "POST",
@@ -779,7 +927,20 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
             {/* §6.3 item 2/3 - the narrative already answers this, so it isn't auto-sent to the client */}
             {q.suppressed_reason === "stated_in_narrative" && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#1d4ed8", background: "#eff6ff", padding: "1px 6px", borderRadius: 10 }}>Stated in narrative</span>}
           </div>
-          <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#0f172a", lineHeight: 1.45 }}>{q.question}</p>
+          {/*
+            Engineering note (Figure 14): the producer sees the rule-oriented
+            label ("Annual gross payroll - rating basis"); the client sees the
+            plain-language wording. Falls back to the client wording when no
+            producer label exists for the field.
+          */}
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: "#0f172a", lineHeight: 1.45 }}>
+            {q.producer_label || q.question}
+          </p>
+          {q.producer_label && (
+            <p style={{ margin: "2px 0 0", fontSize: 11, color: "#64748b", lineHeight: 1.4 }}>
+              Client sees: {q.question}
+            </p>
+          )}
           {q.current_value && <p style={{ margin: "3px 0 0", fontSize: 11, color: "#94a3b8" }}>Current: {q.current_value}</p>}
           <ScoreImpactBadges q={q} />
         </div>
@@ -862,6 +1023,8 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: "0 28px 4px" }}>
+          {/* Figure 15: optional agent-side bulk fill before sending. */}
+          <SchedulePreload sessionId={sessionId} />
           {/* Contextual hint when nothing is pre-selected */}
           {hasTaxonomy && selectedCount === 0 && clientQuestions.length > 0 && (() => {
             const hasCritical = clientQuestions.some(q => q.priority === "critical");
@@ -999,6 +1162,8 @@ const _ARQ_REMEDIATION_LABEL = {
 
 function ARQStatusPanel({ arqSessions, token, onRefresh, scoreImprovement, hideTitle }) {
   const [reminding, setReminding] = useState(null);
+  // Figure 21: which submitted questionnaire's response receipt is open.
+  const [receiptFor, setReceiptFor] = useState(null);
   const handleRemind = async (arq_id) => {
     setReminding(arq_id);
     try { await fetch(`${API_BASE}/api/arq/remind/${arq_id}`, { method: "POST", credentials: "include" }); onRefresh(); } catch (_) {}
@@ -1045,6 +1210,13 @@ function ARQStatusPanel({ arqSessions, token, onRefresh, scoreImprovement, hideT
                       Submission score improved +{scoreImprovement} pts after questionnaire
                     </div>
                   )}
+                  {/* Figure 21: the immutable record of exactly what the client
+                      sent. Until this, the panel showed counts and follow-up
+                      lists but never the answers themselves. */}
+                  <button onClick={() => setReceiptFor(arq)}
+                    style={{ alignSelf: "flex-start", fontSize: 10, fontWeight: 600, color: "#0f172a", background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: 5, padding: "2px 8px", cursor: "pointer" }}>
+                    View response receipt
+                  </button>
                 </div>
               )}
               {arq.status === "pending" && !isExpired && (
@@ -1063,6 +1235,14 @@ function ARQStatusPanel({ arqSessions, token, onRefresh, scoreImprovement, hideT
           );
         })}
       </div>
+
+      {receiptFor && (
+        <ARQReceiptModal
+          arqId={receiptFor.id}
+          clientLabel={receiptFor.client_name ? `${receiptFor.client_name} (${receiptFor.email})` : receiptFor.email}
+          onClose={() => setReceiptFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1084,6 +1264,93 @@ function answerResultLabel(r) {
     case "still_missing":                return "Recorded";
     default:                             return `Answer recorded${arrow}${d}`;
   }
+}
+
+// ── Post-remediation diff band (Fig 24) ───────────────────────────────────────
+// What the client's answers actually changed: resolved / got worse / new, plus
+// how many areas are still open. Renders nothing until a questionnaire has come
+// back, and nothing when that questionnaire moved nothing. Grouped by cluster,
+// so these rows line up 1:1 with the issue cards below. House style: no em-dashes.
+// `compact` renders it for the editor's narrow side panel (where Figure 24's
+// questionnaire list lives); the default renders it for the wide
+// recommendations step.
+function RemediationDiffBand({ diff, compact = false }) {
+  if (!diff) return null;
+  const resolved = diff.resolved || [];
+  const worsened = diff.worsened || [];
+  const added    = diff.new || [];
+  const updated  = diff.updated || [];
+  const stillOpen = diff.still_open || [];
+  if (!resolved.length && !worsened.length && !added.length && !updated.length) return null;
+
+  // Everything still blocking after the answers: areas that were already hard
+  // stops and stayed, plus any the answers newly created.
+  const hardRemaining = [...stillOpen, ...added]
+    .filter(i => i.severity === "hard_stop").length;
+
+  const groups = [
+    { key: "resolved", label: "Resolved",  items: resolved, color: "#166534", bg: "#dcfce7", border: "#86efac" },
+    // "Updated" = still open, but the detail changed (e.g. a rule that listed
+    // three missing fields now lists one). Without it, a client who answered
+    // several questions without fully clearing any single rule reads as
+    // "0 resolved", i.e. as if the questionnaire accomplished nothing.
+    { key: "updated",  label: "Updated",   items: updated,  color: "#1e40af", bg: "#dbeafe", border: "#93c5fd" },
+    { key: "worsened", label: "Got worse", items: worsened, color: "#9a3412", bg: "#ffedd5", border: "#fdba74" },
+    { key: "new",      label: "New",       items: added,    color: "#9f1239", bg: "#ffe4e6", border: "#fda4af" },
+  ].filter(g => g.items.length > 0);
+
+  const chip = (text, color, bg, border) => (
+    <span style={{ fontSize: 10.5, fontWeight: 700, color, background: bg, border: `1px solid ${border}`, borderRadius: 20, padding: "2px 9px", whiteSpace: "nowrap" }}>
+      {text}
+    </span>
+  );
+
+  const body = (
+      <div style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: 8, padding: compact ? "8px 10px" : "10px 12px", background: "#f8fafc", marginTop: compact ? 8 : 0 }}>
+        <div style={{ fontSize: compact ? 10 : 11.5, fontWeight: 700, color: compact ? "#94a3b8" : "#334155", letterSpacing: compact ? "0.06em" : 0, textTransform: compact ? "uppercase" : "none", marginBottom: 2 }}>
+          Since client answers
+        </div>
+        {/* These counts span the WHOLE submission (field-level checks included),
+            while the Cross-Form Validation panel lists cross-form issues only.
+            Saying so stops the two numbers reading as a contradiction. */}
+        <div style={{ fontSize: 9.5, color: "#94a3b8", marginBottom: 8 }}>
+          Across the whole submission
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {/* Chip counts ISSUES that moved, not areas: an area can hold several
+              issues and only one of them changed. `changed` carries that number;
+              older payloads without it fall back to one per entry. */}
+          {groups.map(g => (
+            <span key={g.key}>{chip(
+              `${g.items.reduce((n, i) => n + (i.changed || 1), 0)} ${g.label.toLowerCase()}`,
+              g.color, g.bg, g.border,
+            )}</span>
+          ))}
+          {chip(`${stillOpen.length} area${stillOpen.length === 1 ? "" : "s"} still open`, "#475569", "#e2e8f0", "#cbd5e1")}
+          {/* The engineering note asks for remaining HARD STOPS specifically, not
+              just a total: a blocker and an advisory are not the same news. */}
+          {hardRemaining > 0 && chip(`${hardRemaining} hard stop${hardRemaining === 1 ? "" : "s"} remaining`, "#7f1d1d", "#fee2e2", "#fca5a5")}
+        </div>
+        {groups.map(g => (
+          <div key={g.key} style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#64748b", letterSpacing: 0.3, textTransform: "uppercase" }}>
+              {g.label}
+            </div>
+            {g.items.map((it, i) => (
+              <div key={i} style={{ fontSize: 11.5, color: "#334155", padding: "2px 0" }}>
+                {it.cluster}
+                {/* Show how many issues MOVED here, not how many the area holds -
+                    "(3)" next to an area that merely contains 3 issues, one of
+                    which changed, overstates what the client's answers did. */}
+                {(it.changed || 0) > 1 && <span style={{ color: "#64748b" }}> ({it.changed})</span>}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+  );
+
+  return compact ? body : <div className="stops-row">{body}</div>;
 }
 
 // ── Side panel recommendation row - own local state avoids shared-state race ──
@@ -1766,6 +2033,8 @@ const AcordModal = forwardRef(function AcordModal({
   // Figures 4/5: clustered + tiered view of hardStops/softStops (grouped_issues
   // from the backend). Purely presentational - never affects SQS capping.
   const [groupedIssues, setGroupedIssues] = useState(null);
+  // Fig 24: what the last client questionnaire resolved / worsened / left open.
+  const [issueDiff, setIssueDiff] = useState(null);
   const [tier2Score, setTier2Score] = useState(null);
   const [tier2Missing, setTier2Missing] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
@@ -1820,6 +2089,9 @@ const AcordModal = forwardRef(function AcordModal({
   // Figure 10: close any open provenance popover when the active form changes.
   useEffect(() => { setProvCard(null); }, [activeFormId]);
   const [crossIssues, setCrossIssues] = useState([]);
+  // Fig 24: same cross-form issues, clustered + tiered for display. Null falls
+  // back to the flat crossIssues list.
+  const [crossGrouped, setCrossGrouped] = useState(null);
   // Durable-issue-id -> { status, reason } for the rail's resolution status.
   // Work-tracking only; never affects the SQS score.
   const [issueStatuses, setIssueStatuses] = useState(new Map());
@@ -1937,6 +2209,7 @@ const AcordModal = forwardRef(function AcordModal({
       setAvailableDocTypes(data.available_doc_types || []);
       setHardStops(data.hard_stops || []); setSoftStops(data.soft_stops || []); setNormalizedDiffs(data.normalized_differences || []);
       setGroupedIssues(data.grouped_issues || null);
+      setIssueDiff(data.issue_diff || null);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
       setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
@@ -2005,6 +2278,8 @@ const AcordModal = forwardRef(function AcordModal({
           setSessionId(resumeSessionId); setStep("lite");
         } else if (!isEssentials && data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
           setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
+          setCrossGrouped(data.grouped_cross_issues || null);
+          setIssueDiff(data.issue_diff || null);
           if (data.package_sqs) setPackageSqs(data.package_sqs);
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
@@ -2150,6 +2425,8 @@ const AcordModal = forwardRef(function AcordModal({
         }
         if (sessD?.package_sqs != null) setPackageSqs(sessD.package_sqs);
         if (Array.isArray(sessD?.cross_issues)) setCrossIssues(sessD.cross_issues);
+        if (sessD?.grouped_cross_issues !== undefined) setCrossGrouped(sessD.grouped_cross_issues || null);
+        if (sessD?.issue_diff !== undefined) setIssueDiff(sessD.issue_diff || null);
       } catch { /* non-fatal */ }
     }
     try {
@@ -2185,10 +2462,10 @@ const AcordModal = forwardRef(function AcordModal({
     setCanProceedWithWarning(false); setWarningStops([]);
     setTier2Score(null); setTier2Missing([]); setRecommendations([]); setAccountProfile(null);
     setAllAvailableForms([]); setCheckedFormIds(new Set());
-    setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setIssueStatuses(new Map());
+    setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setCrossGrouped(null); setIssueStatuses(new Map());
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
-    setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0);
+    setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0); setIssueDiff(null);
     _resetSqsState();
   };
 
@@ -2197,10 +2474,10 @@ const AcordModal = forwardRef(function AcordModal({
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]); setGroupedIssues(null);
     setTier2Score(null); setTier2Missing([]); setRecommendations([]); setAccountProfile(null);
     setAllAvailableForms([]); setCheckedFormIds(new Set());
-    setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setIssueStatuses(new Map());
+    setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setCrossGrouped(null); setIssueStatuses(new Map());
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
-    setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0);
+    setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0); setIssueDiff(null);
     _resetSqsState();
   };
 
@@ -2216,6 +2493,8 @@ const AcordModal = forwardRef(function AcordModal({
         const isEssentials = user?.subscription_tier === "essentials";
         if (!isEssentials && data && data.generated_forms && Object.keys(data.generated_forms).length > 0) {
           setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
+          setCrossGrouped(data.grouped_cross_issues || null);
+          setIssueDiff(data.issue_diff || null);
           if (data.package_sqs) setPackageSqs(data.package_sqs);
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
@@ -2662,6 +2941,7 @@ const AcordModal = forwardRef(function AcordModal({
       const d = r.ok ? await r.json() : null;
       if (d && d.generated_forms && Object.keys(d.generated_forms).length > 0) {
         setGeneratedForms(d.generated_forms); setCrossIssues(d.cross_issues || []);
+        setCrossGrouped(d.grouped_cross_issues || null);
         if (d.package_sqs) setPackageSqs(d.package_sqs);
         const firstId = Object.keys(d.generated_forms)[0]; setActiveFormId(firstId);
         const readyMap = {}; Object.keys(d.generated_forms).forEach(fid => { readyMap[fid] = false; });
@@ -3117,13 +3397,14 @@ const AcordModal = forwardRef(function AcordModal({
         const sessRes = await fetch(`${API_BASE}/api/session/${sessionId}`, { credentials: "include" });
         if (!sessRes.ok) { setError("Form generation failed. Please try again."); return; }
         const sessData = await sessRes.json();
-        data = { success: true, generated: sessData.generated_forms, form_ids: Object.keys(sessData.generated_forms || {}), cross_issues: sessData.cross_issues, package_sqs: sessData.package_sqs || null };
+        data = { success: true, generated: sessData.generated_forms, form_ids: Object.keys(sessData.generated_forms || {}), cross_issues: sessData.cross_issues, grouped_cross_issues: sessData.grouped_cross_issues, package_sqs: sessData.package_sqs || null };
       } else {
         data = await res.json();
       }
       if (!data.success) { setError(data.detail || data.message || "Form generation failed"); return; }
       _notifyJobDone("generate", true);
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
+      setCrossGrouped(data.grouped_cross_issues || null);
       if (data.package_sqs) setPackageSqs(data.package_sqs);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");
       const readyMap = {}; (data.form_ids || []).forEach(fid => { readyMap[fid] = false; }); setPdfLoading(readyMap);
@@ -4522,6 +4803,8 @@ const AcordModal = forwardRef(function AcordModal({
               </div>
             )}
 
+            <RemediationDiffBand diff={issueDiff} />
+
             {(hardStops.length > 0 || softStops.length > 0) && (
               <div className="stops-row">
                 {hardStops.length > 0 && (
@@ -5315,30 +5598,74 @@ const AcordModal = forwardRef(function AcordModal({
                     {/* Cross-Form Validation - now in the same flow so its gap matches the sections above. */}
                     {crossIssues.length > 0 && (
                       <CollapsibleSection resetKey={activeFormId} title="Cross-Form Validation" tooltip="Checks that data agrees across the different ACORD forms.">
-                        {/* Each validation is its own numbered row with the form chip(s) it affects. */}
-                        {crossIssues.map((iss, i) => (
-                          <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "5px 0", borderBottom: i < crossIssues.length - 1 ? "1px solid #f1f5f9" : "none" }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#E61B84", width: 16, flexShrink: 0, lineHeight: 1.5 }}>{i + 1}</span>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              {Array.isArray(iss.forms) && iss.forms.length > 0 && (
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 3 }}>
-                                  {iss.forms.map((f, fi) => (
-                                    <span key={fi} style={{ fontSize: 9, fontWeight: 700, color: "#9d174d", background: "#fce7f3", border: "1px solid #f9a8d4", borderRadius: 10, padding: "0 6px", whiteSpace: "nowrap" }}>{String(f).replace(/_/g, " ")}</span>
-                                  ))}
-                                </div>
-                              )}
-                              <div style={{ fontSize: 12, color: "#000", lineHeight: 1.4 }}>{iss.message}</div>
-                              {(() => { const iid = issueIdOf(iss); return (
-                                <IssueStatusControl
-                                  issueId={iid}
-                                  status={issueStatuses.get(iid)?.status}
-                                  meta={{ form_id: Array.isArray(iss.forms) ? iss.forms[0] : null, rule_code: iss.code, message: iss.message }}
-                                  onSet={setIssueStatus}
-                                />
-                              ); })()}
+                        {(() => {
+                          // One validation row. Shared by the grouped path and the
+                          // flat fallback so the two can never drift apart.
+                          const row = (iss, key, divider) => (
+                            <div key={key} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "5px 0", borderBottom: divider ? "1px solid #f1f5f9" : "none" }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                {Array.isArray(iss.forms) && iss.forms.length > 0 && (
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 3 }}>
+                                    {iss.forms.map((f, fi) => (
+                                      <span key={fi} style={{ fontSize: 9, fontWeight: 700, color: "#9d174d", background: "#fce7f3", border: "1px solid #f9a8d4", borderRadius: 10, padding: "0 6px", whiteSpace: "nowrap" }}>{String(f).replace(/_/g, " ")}</span>
+                                    ))}
+                                  </div>
+                                )}
+                                <div style={{ fontSize: 12, color: "#000", lineHeight: 1.4 }}>{iss.message}</div>
+                                {(() => { const iid = issueIdOf(iss); return (
+                                  <IssueStatusControl
+                                    issueId={iid}
+                                    status={issueStatuses.get(iid)?.status}
+                                    meta={{ form_id: Array.isArray(iss.forms) ? iss.forms[0] : null, rule_code: iss.code, message: iss.message }}
+                                    onSet={setIssueStatus}
+                                  />
+                                ); })()}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+
+                          // Fallback: the flat list this panel always rendered, used
+                          // only if the server could not group them.
+                          if (!crossGrouped) {
+                            return crossIssues.map((iss, i) => row(iss, i, i < crossIssues.length - 1));
+                          }
+
+                          // Sequenced: blocking clusters first, then Required /
+                          // Recommended / Binder follow-up. Deduplicated: repeats of
+                          // one underlying problem collapse into a single cluster
+                          // instead of N separately numbered lines.
+                          const sections = [
+                            { key: "hard", label: "Blocking - fix first", clusters: crossGrouped.hard_stops || [], color: "#b91c1c" },
+                            ...["required", "recommended", "binder_followup"].map(t => ({
+                              key: t,
+                              label: (crossGrouped.tier_labels || {})[t] || t,
+                              clusters: (crossGrouped.warnings || {})[t] || [],
+                              color: "#64748b",
+                            })),
+                          ].filter(s => s.clusters.length > 0);
+
+                          if (sections.length === 0) {
+                            return crossIssues.map((iss, i) => row(iss, i, i < crossIssues.length - 1));
+                          }
+
+                          return sections.map(sec => (
+                            <div key={sec.key} style={{ marginTop: 8 }}>
+                              <div style={{ fontSize: 9.5, fontWeight: 700, color: sec.color, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                                {sec.label} ({sec.clusters.length})
+                              </div>
+                              {sec.clusters.map((c, ci) => (
+                                <div key={c.cluster || ci} style={{ marginBottom: 6 }}>
+                                  {c.count > 1 && (
+                                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "#334155", marginBottom: 2 }}>
+                                      {c.cluster} ({c.count})
+                                    </div>
+                                  )}
+                                  {(c.items || []).map((it, ii) => row(it, `${c.cluster}-${ii}`, ii < (c.items || []).length - 1))}
+                                </div>
+                              ))}
+                            </div>
+                          ));
+                        })()}
                       </CollapsibleSection>
                     )}
 
@@ -5371,6 +5698,9 @@ const AcordModal = forwardRef(function AcordModal({
                     {arqSessions?.length > 0 && (
                       <CollapsibleSection resetKey={activeFormId} title="Sent Questionnaires" tooltip="Client questionnaires you've sent and their responses.">
                         <ARQStatusPanel hideTitle arqSessions={arqSessions} token={token} onRefresh={refreshArqData} scoreImprovement={(() => { const _base = packageSqs?.sqs_history?.find(h => h?.stage === "initial_extract") || packageSqs?.sqs_history?.[0]; const _arq = packageSqs?.sqs_history?.find(h => h?.stage === "arq_remediated"); return (_base?.score != null && _arq?.score != null) ? _arq.score - _base.score : null; })()} />
+                        {/* Fig 24: what those answers actually changed. Sits with the
+                            questionnaire list because that is the question it answers. */}
+                        <RemediationDiffBand compact diff={issueDiff} />
                       </CollapsibleSection>
                     )}
 
@@ -5553,6 +5883,7 @@ const AcordModal = forwardRef(function AcordModal({
                   }));
                   if (extras?.packageSqs) setPackageSqs(extras.packageSqs);
                   if (Array.isArray(extras?.crossIssues)) setCrossIssues(extras.crossIssues);
+                  if (extras?.groupedCrossIssues !== undefined) setCrossGrouped(extras.groupedCrossIssues || null);
                 }}
               />
             </div>

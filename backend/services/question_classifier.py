@@ -122,6 +122,15 @@ TOPIC_ORDER = [
 # can always add more manually.
 DEFAULT_SELECT_CAP = 28
 
+# Client requirement (Figure 16, 2026-07-21): the "upcoming deadlines or
+# urgency" question is pre-checked by default even though its priority is
+# Important, not Critical - the approved mockup shows it selected because a
+# binding deadline changes how the whole submission is prioritized. This is a
+# deliberate, single-field exception to the priority-based policy below; do
+# not add more fields here without a product decision, since silently
+# pre-selecting Important questions defeats the purpose of the cap.
+_FORCE_PRESELECT_FIELDS = {"submission_urgency"}
+
 # ── Critical / important field sets — sourced from the SQS tiers so the
 # questionnaire's notion of "important" never drifts from the scorer's. ────────
 try:  # pragma: no cover - exercised at import in the running app
@@ -230,7 +239,7 @@ _AGENCY_PATTERNS = (
     "policy_number", "policynumber", "policy_no",
     "insurer",                       # insurer name / policy / phone / address
     "carrier_marketing", "carriermarketing",
-    "submission_urgency", "submission_goal",
+    "submission_goal",
     "market_selection", "coverage_intent",
     "acord_edition", "form_edition", "formedition", "edition_",
     # Umbrella underlying-schedule / follow-form evidence — the producer supplies
@@ -676,9 +685,14 @@ def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP
             selected += 1
             counts["default_selected"] += 1
         elif is_client and priority == PRIORITY_IMPORTANT:
-            q["default_selected"] = False
             q["suggested"] = True
             counts["suggested"] += 1
+            if q.get("field_name") in _FORCE_PRESELECT_FIELDS and selected < cap:
+                q["default_selected"] = True
+                selected += 1
+                counts["default_selected"] += 1
+            else:
+                q["default_selected"] = False
         else:
             q["default_selected"] = False
             q["suggested"] = False

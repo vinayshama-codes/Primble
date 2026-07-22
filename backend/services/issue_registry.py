@@ -57,10 +57,14 @@ CLUSTER_MAP: Dict[str, str] = {
     # Property COPE
     "minimum_viable_cope_missing": "Property COPE completeness",
     "carrier_grade_cope_incomplete": "Property COPE quality",
+    # Some (not all) locations lack construction type / values - a completeness
+    # gap in the same family as the package-level COPE check above.
+    "per_location_cope_incomplete": "Property COPE completeness",
     # Property deductibles
     "peril_deductible_referenced_but_undefined": "Property deductible completeness",
     "property_aop_deductible_missing": "Property deductible completeness",
     "property_peril_deductible_incomplete": "Property deductible completeness",
+    "property_deductible_basis_missing": "Property deductible completeness",
     # Property valuation
     "property_valuation_method_missing": "Property valuation method",
     "acv_high_value_building": "Property valuation advisories",
@@ -162,6 +166,8 @@ TIER_MAP: Dict[str, str] = {
     "claims_made_missing_prior_acts": "recommended",
     "property_aop_deductible_missing": "recommended",
     "property_peril_deductible_incomplete": "recommended",
+    "property_deductible_basis_missing": "recommended",
+    "per_location_cope_incomplete": "recommended",
     "property_coinsurance_missing": "recommended",
     "property_coinsurance_unreasonable": "recommended",
     "bi_coverage_no_limit": "recommended",
@@ -360,6 +366,7 @@ def build_grouped_view(
     structured_issues: List[dict],
     hard_stops: List[str],
     soft_stops: List[str],
+    cross_issues: Optional[List[dict]] = None,
 ) -> dict:
     """Group structured issues into clustered Hard Stop / tiered Warning
     sections plus a top-3 "fix this first" list.
@@ -371,9 +378,25 @@ def build_grouped_view(
     as a warning. Issues whose message isn't found in either list (this
     only happens for `advisory`-severity issues, which are never added to
     hard_stops/soft_stops in the first place) keep their original severity.
+
+    `cross_issues` is the session's cross_form_validator output
+    (``cross_issues_last``). Nothing ever copies those into the persisted
+    ``structured_issues``, so pass them here or every cross-form issue falls
+    into the uncoded safety net below and collapses into one "Other
+    validations" bucket. Injecting them here rather than persisting them keeps
+    a single source of truth and makes double-counting structurally impossible.
     """
     hard_stops = hard_stops or []
     soft_stops = soft_stops or []
+
+    if cross_issues:
+        _seen_msgs = {
+            (i.get("message") or "").strip() for i in (structured_issues or [])
+        }
+        structured_issues = list(structured_issues or []) + [
+            i for i in build_structured_from_sources(cross_issues=cross_issues)
+            if (i.get("message") or "").strip() not in _seen_msgs
+        ]
 
     def _present_in(message: str, final_list: List[str]) -> bool:
         # Exact match covers the common case. Prefix match covers callers that
@@ -481,4 +504,333 @@ def build_grouped_view(
         "hard_stops": hard_clusters,
         "warnings": warnings,
         "tier_labels": TIER_LABELS,
+    }
+
+
+def normalize_issue_type(issue_type: Optional[str]) -> str:
+    """Canonicalize an issue's severity string.
+
+    Two producers disagree on the spelling of a non-blocking issue:
+    cross_form_validator emits "soft_warning", while the older
+    sqs_service.cross_validate() emits "warning". Anything that filters on
+    severity must treat them as the same thing - a mismatch here silently drops
+    every legacy issue on the floor rather than failing loudly.
+    """
+    t = (issue_type or "soft_warning").strip()
+    return "soft_warning" if t == "warning" else t
+
+
+def build_structured_from_sources(
+    legacy_hard: Optional[List[str]] = None,
+    legacy_soft: Optional[List[str]] = None,
+    cross_issues: Optional[List[dict]] = None,
+    include_advisories: bool = False,
+) -> List[dict]:
+    """Build structured issues from the two RAW stop sources, keeping each one
+    tagged the way its own source allows.
+
+    Mirrors what extraction_pipeline._finalize_pipeline does inline, with one
+    addition: cross_form_validator issues are included here. They carry a real
+    ``code``, so they cluster through CLUSTER_MAP instead of falling into
+    build_grouped_view's uncoded safety net (which would collapse every one of
+    them into the single "Other validations" bucket).
+
+    Pass the sources SEPARATELY - i.e. ``legacy_hard`` must be evaluate_stops()'
+    own output, NOT the combined ``evaluate_stops + cross_form`` list. Passing
+    the combined list would classify each cross-form message twice (once by
+    code, once by legacy phrase match).
+
+    Advisory-severity cross-form issues are skipped by default: they are never
+    added to hard_stops/soft_stops, so counting them would report problems the
+    caller is not actually surfacing. Set `include_advisories` when building a
+    view that DISPLAYS the raw cross-form list, which does carry them - the
+    editor's Cross-Form Validation panel shows advisories such as
+    `auto_um_uim_not_specified` and `acord101_required`, and dropping them would
+    silently lose rows the flat list used to show.
+    """
+    structured: List[dict] = []
+    _allowed = ("hard_stop", "soft_warning", "advisory") if include_advisories \
+        else ("hard_stop", "soft_warning")
+
+    # Coded cross-form issues first, so a cluster that also collects a legacy
+    # message uses the coded entry as its primary_message.
+    for iss in cross_issues or []:
+        if not isinstance(iss, dict):
+            continue
+        itype = normalize_issue_type(iss.get("type"))
+        if itype not in _allowed:
+            continue
+        message = iss.get("message") or ""
+        code = iss.get("code")
+        if code:
+            structured.append(make_issue(code, itype, message, forms=iss.get("forms") or []))
+        else:
+            # sqs_service.cross_validate() predates rule codes and returns bare
+            # {type, message} dicts. Classify by message text, exactly like the
+            # legacy field-level stops below, so an uncoded issue can still reach
+            # a real cluster instead of defaulting into "Other validations".
+            _cluster, _tier = classify_legacy_message(message, itype)
+            structured.append(make_issue(
+                "cross_form_legacy", itype, message,
+                forms=iss.get("forms") or [], cluster=_cluster, tier=_tier,
+            ))
+
+    for _i, _msg in enumerate(legacy_hard or []):
+        _cluster, _tier = classify_legacy_message(_msg, "hard_stop")
+        structured.append(make_issue(
+            f"legacy_hard_{_i}", "hard_stop", _msg, cluster=_cluster, tier=_tier,
+        ))
+    for _i, _msg in enumerate(legacy_soft or []):
+        _cluster, _tier = classify_legacy_message(_msg, "soft_warning")
+        structured.append(make_issue(
+            f"legacy_soft_{_i}", "soft_warning", _msg, cluster=_cluster, tier=_tier,
+        ))
+    return structured
+
+
+def count_distinct_issues(
+    hard_stops: List[str],
+    soft_stops: List[str],
+    legacy_hard: Optional[List[str]] = None,
+    legacy_soft: Optional[List[str]] = None,
+    cross_issues: Optional[List[dict]] = None,
+) -> Dict[str, int]:
+    """Count DISTINCT remaining problems rather than raw message strings.
+
+    Two engines routinely report the SAME underlying deficiency in different
+    words - e.g. a property submission with incomplete COPE produces both
+    "Property Minimum Viable COPE incomplete - missing: ..." (sqs_service
+    .evaluate_stops) and "Property submission missing Minimum Viable COPE: ..."
+    (cross_form_validator). ``len(hard_stops)`` counts that one problem twice.
+    Both classify into the same cluster, so counting clusters reports it once,
+    which is also what the producer sees on screen (one card per cluster).
+
+    Read-only and purely additive: it never mutates or re-orders the stop
+    lists, and nothing about scoring, capping or dismiss-credit consults it.
+    """
+    structured = build_structured_from_sources(legacy_hard, legacy_soft, cross_issues)
+    grouped = build_grouped_view(structured, hard_stops or [], soft_stops or [])
+    return {
+        "hard": len(grouped["hard_stops"]),
+        "soft": sum(len(clusters) for clusters in grouped["warnings"].values()),
+    }
+
+
+# ── Post-remediation diff (Figure 24) ────────────────────────────────────────
+#
+# The diff runs at CLUSTER level, deliberately, not per raw message. Legacy
+# stop strings embed their own dynamic detail ("...missing: locations,
+# occupancy type"), so a client fixing ONE of several missing fields rewrites
+# the message, which at message level reads as "one issue resolved + one brand
+# new issue" when the truth is "same issue, still open, now smaller". The
+# cluster label is stable across that, and it is also exactly what the producer
+# sees on screen (one card per cluster), so a "3 resolved" badge always agrees
+# with the cards printed beneath it.
+
+# Structured-issue codes that a recalculation regenerates from scratch. Issues
+# from any OTHER source (doc conflicts, source conflicts, OCR confidence,
+# Tier-1 gaps) are preserved untouched, because recalculate_session_scores does
+# not re-run those detectors and therefore cannot know whether they cleared.
+_RECOMPUTED_CODE_PREFIXES = ("legacy_hard_", "legacy_soft_")
+
+
+def replace_recomputed_issues(
+    persisted: Optional[List[dict]], fresh: Optional[List[dict]],
+) -> List[dict]:
+    """Swap the structured issues a recalculation regenerates, keep the rest.
+
+    Without this, ``structured_issues`` keeps its extraction-time contents
+    forever: a hard stop the client actually resolved stays in the list, and
+    build_grouped_view's "not in either final list" branch keeps it at
+    hard_stop severity, so the producer goes on seeing a blocker that is gone.
+    """
+    kept = [
+        i for i in (persisted or [])
+        if not str(i.get("code") or "").startswith(_RECOMPUTED_CODE_PREFIXES)
+    ]
+    return kept + list(fresh or [])
+
+
+# extraction_pipeline emits one of these per critical field the OCR read with
+# low confidence, coded ocr_low_confidence_<fact_key> (the suffix is a canonical
+# fact key - see extraction_service._annotate_facts, which appends `k` itself).
+_OCR_ISSUE_PREFIX = "ocr_low_confidence_"
+
+
+def _is_human_supplied(fact: Any) -> bool:
+    """True when a person, not the extractor, is the source of this value.
+
+    Same test recalculate_session_scores uses to decide whether a field was
+    user-provided, kept identical on purpose so the two never disagree about
+    what counts as human input.
+    """
+    if not isinstance(fact, dict):
+        return False
+    return (
+        fact.get("source") in ("client_arq", "producer")
+        or fact.get("confidence") == "client_arq"
+    )
+
+
+def drop_confirmed_ocr_issues(
+    issues: Optional[List[dict]],
+    facts: Optional[dict] = None,
+    confirmed_keys=None,
+) -> List[dict]:
+    """Drop "confirm this field" OCR warnings for fields a human has since given.
+
+    These issues are preserved across a recalculation because nothing re-runs
+    OCR. But unlike the other preserved sources (doc/source conflicts, which
+    describe two DOCUMENTS disagreeing and cannot be settled by an answer), an
+    OCR-confidence warning asks for exactly one thing: a human to confirm the
+    value. The questionnaire asks the client for precisely these fields, so once
+    they answer, the warning is satisfied and must stop being reported as open.
+
+    Fail-safe by construction: an issue is dropped ONLY when its code resolves
+    to a fact key that is now human-supplied (or explicitly confirmed via the
+    Data Consistency picker). Anything unrecognised is kept, so the worst case
+    is the previous behaviour.
+    """
+    facts = facts or {}
+    confirmed = set(confirmed_keys or ())
+    out: List[dict] = []
+    for issue in issues or []:
+        code = str(issue.get("code") or "")
+        if code.startswith(_OCR_ISSUE_PREFIX):
+            field = code[len(_OCR_ISSUE_PREFIX):]
+            if field and (field in confirmed or _is_human_supplied(facts.get(field))):
+                continue
+        out.append(issue)
+    return out
+
+
+def index_clusters(grouped: dict) -> Dict[str, dict]:
+    """Flatten a grouped view to {cluster_label: cluster}, hard stops winning.
+
+    A cluster can hold both a hard stop and a warning (two engines reporting
+    the same area at different severities); the hard stop is the one that
+    governs, so it must not be overwritten by the warning entry.
+    """
+    index: Dict[str, dict] = {}
+    for c in grouped.get("hard_stops") or []:
+        index[c["cluster"]] = {**c, "severity": "hard_stop", "tier": "required"}
+    for tier, clusters in (grouped.get("warnings") or {}).items():
+        for c in clusters:
+            if c["cluster"] in index:
+                continue
+            index[c["cluster"]] = {**c, "severity": "soft_warning", "tier": tier}
+    return index
+
+
+def _slim_cluster(c: dict) -> dict:
+    """Trim a cluster to what the producer UI renders (drops `items`)."""
+    return {
+        "cluster":  c.get("cluster"),
+        "issue_id": c.get("issue_id"),
+        "message":  c.get("primary_message"),
+        "severity": c.get("severity"),
+        "tier":     c.get("tier"),
+        "forms":    c.get("forms") or [],
+        "count":    c.get("count", 1),
+    }
+
+
+def _cluster_issue_ids(cluster: dict) -> set:
+    """The durable ids of the individual issues inside a cluster.
+
+    issue_id is derived from the message text, so when a client fills in SOME of
+    a rule's missing fields the rule re-emits a shorter message and its id
+    changes. That id change is the only machine-readable trace that partial
+    progress happened.
+    """
+    return {
+        it.get("issue_id") for it in (cluster.get("items") or [])
+        if isinstance(it, dict) and it.get("issue_id")
+    }
+
+
+def diff_grouped_views(prior: dict, current: dict) -> dict:
+    """Compare two grouped views: what the client's answers fixed, broke, and left.
+
+    `worsened` is the "which got worse" signal: an area that was only a warning
+    before and is a hard stop now (e.g. answering "yes, we have prior losses"
+    turns an advisory into a blocker). An area that stays a hard stop is NOT
+    worsened, it is simply still open.
+
+    `updated` is partial progress: the cluster is still open, but what it
+    contains changed - typically a rule that listed three missing fields now
+    lists one. Without it a client who answered several questions but did not
+    fully clear any single rule shows up as "0 resolved", which reads as "the
+    questionnaire achieved nothing" when the opposite is true. It is
+    deliberately labelled "updated" and not "improved": a message can change
+    because a gap shrank OR because a new problem joined the same cluster, and
+    the two are not distinguishable from the text alone. Claiming improvement we
+    cannot prove is exactly the kind of overstatement this codebase avoids.
+
+    `worsened` and `updated` are disjoint, and both are subsets of `still_open`.
+    """
+    prior_idx   = index_clusters(prior or {})
+    current_idx = index_clusters(current or {})
+
+    resolved, newly, updated, worsened, still_open = [], [], [], [], []
+
+    def _entry(cluster: dict, changed: int) -> dict:
+        # `changed` is how many individual issues moved, which is NOT the
+        # cluster's total size. Showing the total next to "updated" implies more
+        # changed than actually did.
+        return {**_slim_cluster(cluster), "changed": changed}
+
+    def _size(cluster: dict) -> int:
+        return len(_cluster_issue_ids(cluster)) or int(cluster.get("count") or 1)
+
+    # A cluster that vanished entirely: every issue in it was cleared.
+    for k in prior_idx:
+        if k not in current_idx:
+            resolved.append(_entry(prior_idx[k], _size(prior_idx[k])))
+
+    for k in current_idx:
+        cur = current_idx[k]
+        if k not in prior_idx:
+            newly.append(_entry(cur, _size(cur)))
+            continue
+
+        pri = prior_idx[k]
+        still_open.append(_slim_cluster(cur))
+
+        # Escalation is the headline for this cluster; do not also describe the
+        # underlying text churn that came with it.
+        if pri["severity"] != "hard_stop" and cur["severity"] == "hard_stop":
+            worsened.append(_slim_cluster(cur))
+            continue
+
+        gone     = _cluster_issue_ids(pri) - _cluster_issue_ids(cur)
+        appeared = _cluster_issue_ids(cur) - _cluster_issue_ids(pri)
+
+        if gone and appeared:
+            # Churn: a rule re-emitted with different text (typically because
+            # the client filled in some, not all, of its missing fields). This
+            # is the case that must NOT read as "resolved + new".
+            updated.append(_entry(cur, max(len(gone), len(appeared))))
+        elif gone:
+            # Issues genuinely cleared, even though other issues keep the
+            # cluster open. The producer can see these disappear, so calling
+            # them anything other than resolved contradicts the screen.
+            resolved.append(_entry(pri, len(gone)))
+        elif appeared:
+            newly.append(_entry(cur, len(appeared)))
+
+    return {
+        "resolved":         resolved,
+        "new":              newly,
+        "worsened":         worsened,
+        "updated":          updated,
+        "still_open":       still_open,
+        # resolved / new / updated count ISSUES (what the producer sees appear
+        # and disappear); still_open counts AREAS, which is why the UI labels it
+        # differently.
+        "resolved_count":   sum(e["changed"] for e in resolved),
+        "new_count":        sum(e["changed"] for e in newly),
+        "updated_count":    sum(e["changed"] for e in updated),
+        "worsened_count":   len(worsened),
+        "still_open_count": len(still_open),
     }

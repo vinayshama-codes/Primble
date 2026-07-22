@@ -143,6 +143,7 @@ backend/
 │   ├── pdf_service.py            # Pass 1/1.5/2 field filling, PDF stamping, combined_gap_fill
 │   ├── form_service.py           # process_single_form(), schema loading
 │   ├── alias_stamper.py          # NEW: deterministic alias-map stamping (Pass 1.5)
+│   ├── naics_suggester.py        # NEW: NAICS/SIC candidate suggestion (Figure 20)
 │   ├── fact_registry.py          # FACT_REGISTRY: canonical fact schema (~80 keys)
 │   ├── cross_form_validator.py   # Cross-form business rule validation / hard stops
 │   ├── ocr_service.py            # OCR provider abstraction
@@ -214,6 +215,7 @@ ENABLE_FIELD_QA=true                   # Post-generation per-field QA + review s
 ENABLE_FULL_FIELD_RECONCILIATION=true  # Cross-document conflict picker for every field
 ENABLE_EVIDENCE_GATED_FILL=true        # Figure 30/33: drop ungrounded Y-N/narrative answers, all forms
 ENABLE_ACORD101_OVERFLOW=true          # Figure 29: overflow narrative to ACORD 101
+ENABLE_SCHEDULE_CAPTURE=true           # Figure 15: bulk vehicle/driver/location/loss tables
 
 # Job queue
 JOB_QUEUE_BACKEND=db          # db | memory | local_file | sqs
@@ -243,6 +245,7 @@ SESSION_TTL_H=8
 | `ENABLE_EVIDENCE_GATED_FILL` | false | Figure 30/33, generalized: gates **every** gap-fill Yes/No answer on every form (compliance "…Question_*Code_*" fields, every `/Btn` checkbox regardless of topic, and any other field whose tooltip is the ACORD Y/N-entry convention) plus their paired "…Explanation"/"…OtherDescription"/"…ResolutionDescription" narrative, dropping either when not grounded in the uploaded document text |
 | `ENABLE_ACORD101_OVERFLOW` | false | Figure 29: routes oversized operations/classification narrative + accumulated remarks in full to ACORD 101's Additional Remarks rows (lossless) |
 | `ENABLE_PRODUCER_ANSWERS` | true | "Submit" on a recommendation card writes a producer-provenance fact and re-runs SQS/cross-form rules, instead of only dismissing. Set false to fall back to dismiss-only |
+| `ENABLE_SCHEDULE_CAPTURE` | true | Figure 15: repeating-row fields (vehicles, drivers, locations, loss runs) collapse into ONE table question per schedule with CSV/XLSX import, row validation, duplicate detection and VIN decode - instead of one ordinal-labelled card per field. Default ON because the prior behaviour is the reported defect; set false to restore legacy per-field questions |
 | `ENABLE_ASYNC_PROCESSING` | false | Returns 202 + runs jobs in worker.py background process |
 | `DEV_ROUTES_ENABLED` | false | Enables dev/test endpoints |
 
@@ -276,6 +279,139 @@ this area again):**
   document doesn't address a question. Full details, exact numbers, and the one known
   residual (~2-3 borrowed false "N"s per run, an LLM limitation, not a bug) are in
   "Dedicated Compliance Yes/No Question Pass" and the two sections above it, below.
+
+### NAICS/SIC Help Text Showed The Same Roofing Example To Every Business - FIXED (2026-07-21)
+**Client report (Figure 20): the Form Assistant's answer about NAICS codes was praised for
+reducing friction ("you can leave it blank"), with one ask - "for future versions, add
+examples based on the detected business". Engineering note: "use retrieval/context to
+generate suggested NAICS/SIC candidates with confidence, but keep them clearly marked as
+suggestions until confirmed."**
+
+Two of the five sub-requirements were already satisfied (the assistant explains the code in
+plain English; the field is optional with a blank escape hatch). A third - the assistant
+knowing anything about the business - was closed separately by the Figure 19 active-field
+work (`_assistant_package_context` feeds it `BUSINESS` + `WHAT THE BUSINESS DOES`). The
+remaining two are what this entry covers:
+
+1. **The on-screen example was one hard-coded string.** `_FIELD_HINT_MAP["naics_code"]` read
+   "e.g. '238160' for roofing contractors" and was shown verbatim to every applicant - a
+   bakery, a law firm, a restaurant. Nothing was derived from the business.
+2. **There were no candidates at all.** No suggestion mechanism, no confidence, no
+   "unconfirmed until tapped" concept existed anywhere in the codebase.
+
+**Fix - `services/naics_suggester.py` (new) + `_attach_classification_suggestions` in
+`arq_service.py`, wired into all three question-generation paths.** A curated ~60-industry
+table scores the business's own operations text (`operations_description`, falling back to
+`certificate_description_of_operations` / `wc_description_of_operations` / `applicant_name` /
+`dba_name`) by strong keywords (name the trade, +3) and weak ones (only support it, +1),
+then ranks and rates confidence high/medium/low. The top candidate rewrites the hint to name
+THAT business's code; the candidate list rides the question as `suggestions` and renders as
+tappable chips in `ClientQuestionnaire.jsx`.
+
+**Deliberately deterministic, not an LLM.** A NAICS code drives class assignment and rate;
+a model inventing a plausible-but-nonexistent 6-digit code is exactly what the standing
+"blank over wrong" rule exists to prevent (see `user-prefers-blank-over-wrong` memory). No
+keyword match means NO suggestion - the fallback hint stays, reworded to be explicitly an
+illustration of the format rather than a claim about this business. It also costs zero
+tokens on an already-expensive path. Broadening coverage means adding rows to
+`_INDUSTRIES`, not adding a model.
+
+**Nothing is ever auto-filled.** The box ships empty; the client must tap a chip; tapping
+shows "not confirmed - your agent will check it"; the assistant is handed the candidates
+labelled `NOT confirmed` and is required to say they need agent confirmation. Verified live:
+asked "is that definitely my code?" the assistant answered "No, not definitely."
+
+**Two defects found during live testing, both fixed - read before touching this area:**
+- **A third question serializer silently dropped the candidates.** There are THREE whitelists
+  between generation and the client: `/generate` (passes questions whole), `send_arq` (line
+  ~244), and `client_view` (line ~396). `hint` is a plain string that survived all three, so
+  the personalized hint appeared on screen while the chips did not - the feature looked half
+  broken with every backend test green, because the tests only covered generation. `send_arq`
+  never copied `suggestions`, so nothing was ever stored. Both serializers now route it
+  through one shared `_sanitize_suggestions()` helper (it was briefly two inline copies -
+  that duplication is what caused the miss). `test_both_question_serializers_preserve_
+  suggestions` fails the build if any serializer stops carrying it.
+- **Keyword matching was blind to negation.** A full-service restaurant picked up a phantom
+  "Bar or drinking establishment" candidate purely from the sentence *disclaiming* one
+  ("There is no nightclub, no dance floor, and no live entertainment") - the word `nightclub`
+  scored as evidence FOR a bar. Serious here because ACORD applications describe a risk as
+  much by what they exclude ("no manufacturing is performed", "no vehicles are owned", "no
+  work above three stories"). `_strip_negated_clauses` now drops clauses whose subject is
+  negated, before scoring: clause-scoped (not sentence-scoped, since these disclaimers stack
+  inside one sentence), splitting on punctuation but never on "and" (that would sever real
+  multi-word trades like "heating and air conditioning"), with the cue required in the first
+  4 tokens. It only ever REMOVES text, so it can cost a match but can never invent one.
+  Confirmed a genuine bar ("operates a neighborhood bar and cocktail lounge serving liquor")
+  still matches 722410 high.
+
+**No feature flag.** Additive and fail-open at every layer: no match, no `suggestions` key,
+and the questionnaire renders exactly as it did before. Every enrichment step is wrapped so
+a failure can never break question generation.
+
+**Verified end-to-end against the live app with three documents** (not just unit tests):
+a roofing contractor (238160/1761, high), a full-service restaurant (722511/5812, high -
+the decisive test, since a roofing doc alone cannot distinguish "derived" from
+"hard-coded"), and an unrecognizable trade (mobile falconry-based bird abatement - correctly
+produced NO chips and no invented code). Tests: `backend/tests/test_naics_suggester.py` (43).
+Full suite 800 passed / 2 failed, the same two pre-existing unrelated failures
+(`test_arq_acord125_missing_only` - the known `httpx`/`openai` version conflict - and
+`test_normalization`), zero regressions.
+
+**Known limitation, accepted:** the table covers ~60 common commercial-lines industries.
+An obscure trade gets no suggestion by design. Ask Brent which trades matter to his book
+before extending `_INDUSTRIES`.
+
+### Fleet Questionnaire Exploded Into One Card Per Field - FIXED (2026-07-21)
+**Client report (Figure 15): the "Send to Client" list showed "Please provide the following
+details for this vehicle ... (141th vehicle)" repeated for the 141st, 142nd, 143rd ... entry.**
+Three separate defects, all fixed:
+
+1. **One question per repeating FIELD.** `generate_arq_questions` turned every empty
+   repeating-row field into its own question and labelled it with a running counter
+   (`_group_label` + `_ordinal`). The counter incremented per FIELD, not per vehicle, so
+   "141th vehicle" was really "the 141st vehicle-related box" - the number was meaningless as
+   well as unusable. Fixed by `services/schedule_capture.py` +
+   `_partition_schedule_fields` / `_build_schedule_questions`: schedule-backed fields are
+   pulled out of the per-field flow and replaced by ONE `field_type: "schedule"` question
+   carrying a column spec, rendered as an editable table
+   (`frontend/src/components/arq/ScheduleTable.jsx`) with CSV/XLSX import
+   (`frontend/src/utils/scheduleImport.js`, parsed in-browser via the existing `jszip` dep -
+   no new dependency, no upload endpoint), per-cell validation, composite duplicate
+   detection, and NHTSA vPIC VIN decode (proxied via `POST /api/arq/decode-vin`).
+2. **`_ordinal` was wrong above 10.** It held a literal list for 1-10 and fell back to
+   `f"{n}th"`, producing the "141th" in the screenshot. Now correct for any n.
+3. **The vehicle schedule could never stamp its identity columns.** `_SCHEDULE_REGISTRY`
+   mapped `Vehicle_VIN` / `Vehicle_Make` / `Vehicle_Model` / `Vehicle_BodyStyle` - base names
+   that exist in NO real ACORD schema. The names ACORD 127 actually uses
+   (`Vehicle_VINIdentifier`, `Vehicle_ManufacturersName`, `Vehicle_ModelName`,
+   `Vehicle_BodyCode`) were unmapped, so `extraction_service` extracted VIN/make/model into
+   `auto_vin_schedule` and they had nowhere to land - only `year` and `gvw` ever stamped.
+   This is the SAME class of bug already fixed for drivers (see
+   `tests/test_driver_schedule_mapping.py`); vehicles were missed. Fixed additively (the dead
+   aliases are retained, harmless).
+
+**Audit result worth knowing:** 50 of 87 `_SCHEDULE_REGISTRY` entries match no real schema
+field. Six schedules (`wc_class_codes`, `wc_officers`, `underlying_policies`,
+`prior_coverage_by_line`, `inland_marine_items`, `additional_named_insureds`) have ZERO live
+bindings, so a capture table for them would silently discard input. They are deliberately NOT
+defined in `SCHEDULE_DEFS`; only the four with live bindings are (vehicles, drivers,
+locations, loss history). `test_every_schedule_column_binds_to_a_live_acord_field` fails the
+build if a column is ever added without a real ACORD binding. Mapping the remaining six is
+the obvious follow-up.
+
+**Data path:** schedule answers ride the EXISTING answer pipeline as JSON under a reserved
+`schedule::<list_key>` key (no DB column, no new answer plumbing). `arq_routes._sanitize_answers`
+special-cases them so they escape the `str(v)[:500]` clamp that would have truncated a fleet
+to two vehicles. On apply they are written to `facts[list_key]` and stamped by the same
+resolver Pass 1 uses. The agent can pre-load a schedule before sending
+(`GET/PUT /api/arq/schedules/{session_id}`, provenance `producer`); the client edits on top
+(provenance `client_arq`). Rows beyond the form's 14-row physical capacity are retained in
+facts and surfaced as an overflow notice rather than silently dropped.
+
+Tests: `backend/tests/test_schedule_capture.py` (33). Full suite 672 passed / 3 failed, versus
+baseline 608 passed / 3 failed at HEAD - the same three pre-existing failures
+(`test_arq_acord125_missing_only`, `test_download_gate`, `test_normalization`), zero
+regressions.
 
 ### Active Performance Bug (Priority #1)
 **Combined gap fill is slow (17+ minutes for 3 forms).**

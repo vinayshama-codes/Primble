@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import re
 import secrets
 import uuid
 import logging
@@ -781,6 +782,7 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     response = {
         "id": current_user["id"], "email": current_user["email"],
         "full_name": current_user.get("full_name", ""),
+        "phone": current_user.get("phone", "") or "",
         "organization_name": current_user.get("organization_name", ""),
         "subscription_tier": sub,
         "billing_cycle": current_user.get("billing_cycle", "monthly") or "monthly",
@@ -816,6 +818,14 @@ async def update_profile(
         updates["full_name"] = req.full_name.strip()
     if req.organization_name is not None:
         updates["organization_name"] = req.organization_name.strip()
+    if req.phone is not None:
+        # Stored as free text (international formats vary) but constrained to
+        # phone-safe characters so nothing script-like can reach the client's
+        # "Contact Your Agent" card via a tel: link. Empty clears the value.
+        raw_phone = req.phone.strip()[:32]
+        if raw_phone and not re.fullmatch(r"[0-9+()\-.\s]{7,32}", raw_phone):
+            raise HTTPException(400, "Enter a valid phone number.")
+        updates["phone"] = raw_phone
     if not updates:
         raise HTTPException(400, "No fields to update.")
     set_clause = ", ".join(f"{k}=${i+1}" for i, k in enumerate(updates))

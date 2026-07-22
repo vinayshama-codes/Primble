@@ -1865,6 +1865,18 @@ def _is_ops_class_code_mismatch(facts: dict, flags: dict, coverage_type: str = "
     return code_ind != ops_ind
 
 
+# Two producers spell a non-blocking cross-form issue differently:
+# cross_form_validator.py emits "soft_warning"; the older cross_validate() in
+# this module emits "warning". Anything that filters cross issues by severity
+# MUST accept both - matching only one silently drops that producer's warnings
+# on the floor, which is how the P2 exposure penalty came to ignore every
+# cross-form warning on the paths already using cross_form_validator.
+# "advisory" is deliberately NOT included: advisories (UM/UIM not specified,
+# ACORD 101 recommended) are informational and have never carried a penalty.
+_CROSS_WARNING_TYPES = ("warning", "soft_warning")
+_CROSS_ISSUE_TYPES   = ("hard_stop",) + _CROSS_WARNING_TYPES
+
+
 def _calculate_exposure_consistency(
     facts: dict,
     flags: dict,
@@ -2269,7 +2281,7 @@ def _derive_evidence_labels(
     conflicting = {
         i.get("field", "")
         for i in (cross_issues or [])
-        if isinstance(i, dict) and i.get("field") and i.get("type") in ("hard_stop", "warning")
+        if isinstance(i, dict) and i.get("field") and i.get("type") in _CROSS_ISSUE_TYPES
     }
     narrative_keys: set = set(_flags.get("_narrative_fact_keys") or [])
 
@@ -3424,7 +3436,7 @@ def calculate_package_sqs(
             "message": "Building value differs across submitted documents - confirm the correct value before generating forms",
         }]
     hard_cross = [i for i in _cross if isinstance(i, dict) and i.get("type") == "hard_stop"]
-    warn_cross = [i for i in _cross if isinstance(i, dict) and i.get("type") == "warning"]
+    warn_cross = [i for i in _cross if isinstance(i, dict) and i.get("type") in _CROSS_WARNING_TYPES]
     p2, _exposure_subscores = _calculate_exposure_consistency(facts, flags, hard_cross, warn_cross)
 
     # P3 - Property Integrity

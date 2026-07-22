@@ -48,7 +48,7 @@ import os
 import threading
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +258,32 @@ class _LegacyShim:
 
     def __aexit__(self, exc_type, exc, tb):
         return self._cm.__aexit__(exc_type, exc, tb)
+
+
+@contextmanager
+def llm_slot_sync():
+    """Synchronous counterpart to `llm_slot()` for plain worker threads.
+
+    The form-fill gap pass runs its LLM calls on ThreadPoolExecutor threads that
+    have no event loop of their own. Those call sites previously wrapped an
+    ASYNC acquire in `asyncio.run()`, which spins up (and tears down) a fresh
+    event loop per call — the root cause of the cross-event-loop hang described
+    in `pdf_service._chat_json`.
+
+    This acquires the very same module-level `_thread_sem` that the async path
+    already uses for non-main threads (see `llm_slot`), so the global
+    concurrency cap is shared between sync and async callers — it is not a
+    second, independent budget.
+    """
+    acquired = _thread_sem.acquire(timeout=_ACQUIRE_TIMEOUT_S)
+    if not acquired:
+        raise TimeoutError(
+            f"llm_limiter: no slot available within {_ACQUIRE_TIMEOUT_S:.0f}s"
+        )
+    try:
+        yield
+    finally:
+        _thread_sem.release()
 
 
 def get_llm_semaphore() -> "_LegacyShim":

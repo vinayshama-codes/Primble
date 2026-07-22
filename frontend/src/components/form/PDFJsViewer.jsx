@@ -482,7 +482,7 @@ export default function PDFJsViewer({
             setFieldValues({ ...allValues }); originalFieldValuesRef.current = { ...allValues }; clearedSigFieldsRef.current = new Set();
             const allSigF = fieldsRef.current.filter(f => _isSigField(f.name)).map(f => f.name);
             if (allSigF.length > 0 && allSigF.every(n => clearedSigFields.includes(n))) setIsSignedLocal(false);
-            if (data?.sqs && onSqsUpdate) onSqsUpdate(formId, data.sqs, { packageSqs: data.package_sqs, crossIssues: data.cross_issues });
+            if (data?.sqs && onSqsUpdate) onSqsUpdate(formId, data.sqs, { packageSqs: data.package_sqs, crossIssues: data.cross_issues, groupedCrossIssues: data.grouped_cross_issues });
             // Sync confidence labels from backend so overlay reflects the post-save state
             // (e.g. user-edited fields become "filled", not "low_confidence").
             if (data?.confidence) {

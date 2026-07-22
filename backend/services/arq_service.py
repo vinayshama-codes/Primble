@@ -10,9 +10,12 @@ import httpx
 import openai
 
 from config.database import get_pool
-from config.settings import FRONTEND_URL, LLM_MODEL
+from config.settings import ENABLE_SCHEDULE_CAPTURE, FRONTEND_URL, LLM_MODEL
+from services import schedule_capture
 from services.question_classifier import (
     AUDIENCE_CLIENT,
+    BUCKET_CLIENT,
+    PRIORITY_IMPORTANT,
     apply_default_selection,
     classify_question,
     decorate_questions,
@@ -23,6 +26,30 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Answer format validators
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# "I'm not sure" (client-facing don't-know) support
+# ---------------------------------------------------------------------------
+# Client requirement (Figure 14): a client who cannot answer a question — SIC /
+# NAICS being the canonical example — must be able to say so explicitly and move
+# on, instead of abandoning the questionnaire.
+#
+# The sentinel is deliberately NOT a normal answer:
+#   * it is split out of `answers` at submit time and stored in the separate
+#     `not_sure_fields` column, so it can never be stamped into an ACORD field,
+#     never counts toward the answered/score totals, and never reaches the PDF;
+#   * it is distinguishable from "client never reached this question", which is
+#     the whole point — the producer gets an explicit follow-up list.
+#
+# It round-trips through `draft_answers` as a plain string, so a client can close
+# the tab and come back and their "not sure" selections are still shown.
+NOT_SURE_SENTINEL = "__NOT_SURE__"
+
+
+def is_not_sure_value(raw) -> bool:
+    """True when a submitted value is the explicit client 'I'm not sure' marker."""
+    return isinstance(raw, str) and raw.strip() == NOT_SURE_SENTINEL
+
 
 _VAL_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _VAL_PHONE_RE = re.compile(r"^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$")
@@ -42,6 +69,230 @@ def _field_format_type(field_name: str) -> str:
     if re.search(r"amount|limit|value|payroll|revenue|premium|deductible|aggregate|occurrence", fn):
         return "number"
     return "text"
+
+
+# ---------------------------------------------------------------------------
+# Structured input types + normalizers (Figure 18)
+# ---------------------------------------------------------------------------
+# Client requirement: "structured data types for currency, codes, dates,
+# yes/no, and schedules". yes/no (`checkbox`) and schedules already shipped;
+# currency / codes / dates are added here.
+#
+# `_FIELD_INPUT_TYPE` is a deliberately CURATED allowlist, NOT a name-regex
+# sweep. `_field_format_type` above matches substrings such as "limit" and
+# "value", which is fine for advisory validation but far too coarse to choose
+# an INPUT WIDGET: `gl_limits` legitimately holds "$1,000,000 per occurrence /
+# $2,000,000 aggregate" and `auto_liability_limit` holds "$1,000,000 combined
+# single limit". Forcing either into a single-amount box would make a CORRECT
+# answer untypeable. Only fields that genuinely hold one scalar are listed;
+# every other field keeps its existing free-text behaviour.
+_FIELD_INPUT_TYPE = {
+    # currency - exactly one dollar amount
+    "total_revenue":             "currency",
+    "total_payroll":             "currency",
+    "wc_payroll":                "currency",
+    "property_building_value":   "currency",
+    "property_bpp_value":        "currency",
+    "gl_each_occurrence":        "currency",
+    "gl_aggregate":              "currency",
+    "gl_deductible":             "currency",
+    "umbrella_limit":            "currency",
+    "umbrella_sir":              "currency",
+    "business_income_limit":     "currency",
+    "property_deductible_aop":   "currency",
+    "property_deductible_wind":  "currency",
+    "auto_deductible_comp":      "currency",
+    "auto_deductible_collision": "currency",
+    # date - exactly one calendar date
+    "effective_date":            "date",
+    "expiration_date":           "date",
+    "retro_date":                "date",
+    # code - fixed-width identifier
+    "naics_code":                "code",
+    "sic_code":                  "code",
+    "fein":                      "code",
+    # number - a plain count or year, never money
+    "num_employees":             "number",
+    "years_in_business":         "number",
+    "num_claims":                "number",
+    "loss_history_years":        "number",
+    "year_built":                "number",
+    "roof_year":                 "number",
+}
+
+# Expected digit width per code field. Drives the client-side input cap, the
+# submit-time normalizer, and nothing else - a wrong width is never rejected,
+# only flagged for producer review (see `_clean_answer`).
+_CODE_DIGITS = {"naics_code": 6, "sic_code": 4, "fein": 9}
+
+# Curated questions whose WORDING asks for more than one value, so they must
+# stay free text even though their underlying ACORD field is a single amount.
+# `gl_limits` is phrased "$1,000,000 per incident / $2,000,000 total" and
+# `auto_liability_limit` as "$1,000,000 combined single limit".
+_NEVER_STRUCTURED = frozenset({"gl_limits", "auto_liability_limit"})
+
+# Raw ACORD field names ending in `...Amount` are monetary by ACORD's own
+# convention - their tooltips literally begin "Enter amount:". Verified against
+# all 17 real schemas: 897 fields match, and every distinct trailing token is a
+# money term (LimitAmount, PremiumAmount, DeductibleAmount, RemunerationAmount,
+# CostNewAmount, AgreedOrStatedAmount, ...). The `$` anchor is what makes this
+# safe: it excludes the checkbox family `...StatedAmountIndicator`, which ends
+# in "Indicator" and is a /Btn, not a value.
+_ACORD_AMOUNT_RE = re.compile(r"Amount$", re.IGNORECASE)
+
+
+def _resolve_input_type(field_name: str, canonical_key: Optional[str] = None) -> str:
+    """Structured input type for a question, or "text".
+
+    Resolution mirrors `_resolve_producer_label`: canonical fact key first (so
+    a raw ACORD field name resolves through it), then the raw name, then the
+    instance-stripped base. The only inference fallback is DATE - a field named
+    `..._EffectiveDate` really is a date, whereas "limit"/"value" are not
+    reliably single amounts (see `_FIELD_INPUT_TYPE` above).
+    """
+    if canonical_key in _NEVER_STRUCTURED or field_name in _NEVER_STRUCTURED:
+        return "text"
+    for key in (canonical_key, field_name):
+        if key and key in _FIELD_INPUT_TYPE:
+            return _FIELD_INPUT_TYPE[key]
+    base = re.sub(r"[_\s]+[a-zA-Z]$", "", field_name or "")
+    base = re.sub(r"[_\s]+\d+$", "", base)
+    if base in _FIELD_INPUT_TYPE:
+        return _FIELD_INPUT_TYPE[base]
+    if field_name and _field_format_type(field_name) == "date":
+        return "date"
+    # Raw ACORD monetary fields (`..._EachAccidentLimitAmount_A`). Deliberately
+    # LAST, so a curated question always wins over the schema naming convention.
+    if base and _ACORD_AMOUNT_RE.search(base):
+        return "currency"
+    return "text"
+
+
+_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
+def _normalize_date(val: str) -> Optional[str]:
+    """Coerce a human-typed date to MM/DD/YYYY, or None if unparseable.
+
+    The prior behaviour accepted ONLY MM/DD/YYYY and YYYY-MM-DD and silently
+    DISCARDED anything else (see `_clean_answer`), so a client typing
+    "June 1, 2025" lost the answer and was shown a success screen. Nothing is
+    discarded now: an unparseable value is kept verbatim and flagged.
+    """
+    s = (val or "").strip()
+    if not s:
+        return None
+
+    # 2025-06-01
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", s)
+    if m:
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return _fmt_date(y, mo, d)
+
+    # 6/1/2025, 06-01-25, 6.1.2025
+    m = re.match(r"^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2}|\d{4})$", s)
+    if m:
+        mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if y < 100:                      # 2-digit year: 70-99 -> 19xx, else 20xx
+            y += 1900 if y >= 70 else 2000
+        return _fmt_date(y, mo, d)
+
+    # June 1, 2025  /  Jun 1 2025
+    m = re.match(r"^([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$", s)
+    if m:
+        mo = _MONTHS.get(m.group(1)[:3].lower())
+        if mo:
+            return _fmt_date(int(m.group(3)), mo, int(m.group(2)))
+
+    # 1 June 2025
+    m = re.match(r"^(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})$", s)
+    if m:
+        mo = _MONTHS.get(m.group(2)[:3].lower())
+        if mo:
+            return _fmt_date(int(m.group(3)), mo, int(m.group(1)))
+
+    return None
+
+
+def _fmt_date(y: int, mo: int, d: int) -> Optional[str]:
+    """MM/DD/YYYY for a real calendar date, else None (rejects 02/31 etc.)."""
+    try:
+        return datetime(y, mo, d).strftime("%m/%d/%Y")
+    except ValueError:
+        return None
+
+
+def _normalize_currency(val: str) -> Optional[str]:
+    """Coerce a typed amount to "$1,234,567", preserving any trailing
+    qualifier, or None if no amount can be read.
+
+    Trailing text is deliberately KEPT: `business_income_limit` is documented
+    to the client as "$20,000 per month", so dropping "per month" would lose
+    real meaning. Only the numeric part is reformatted.
+
+    Per the agreed decision the STORED value stays formatted display text -
+    exactly what lands on the ACORD PDF today - so PDF output is unchanged.
+    """
+    s = (val or "").strip()
+    if not s:
+        return None
+
+    m = re.match(r"^\$?\s*([\d,]*\.?\d+)\s*([kKmM])?\b(.*)$", s)
+    if not m:
+        return None
+
+    try:
+        amount = float(m.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+    suffix = (m.group(2) or "").lower()
+    if suffix == "k":
+        amount *= 1_000
+    elif suffix == "m":
+        amount *= 1_000_000
+
+    rest = (m.group(3) or "").strip(" ,;")
+    # A trailing token that is itself a number ("1,000,000 / 2,000,000") means
+    # this is a compound answer, not one amount - leave it completely alone.
+    if rest and re.match(r"^[/\-]?\s*\$?[\d,]", rest):
+        return None
+
+    body = f"${amount:,.2f}".replace(".00", "") if amount % 1 else f"${int(amount):,}"
+    return f"{body} {rest}".strip() if rest else body
+
+
+def _normalize_code(val: str, field_name: str) -> Tuple[Optional[str], bool]:
+    """Coerce an industry / tax code to digits.
+
+    Returns `(normalized_or_original, ok)`. `ok` is False when the digit count
+    does not match the expected width - the value is still KEPT (never
+    discarded), just flagged so the producer can confirm it.
+    """
+    s = (val or "").strip()
+    if not s:
+        return None, True
+
+    digits = re.sub(r"\D", "", s)
+    if not digits:
+        return s, False
+
+    expected = _CODE_DIGITS.get(field_name)
+    for key, width in _CODE_DIGITS.items():
+        if expected is None and key in field_name.lower():
+            expected = width
+            break
+
+    if expected is not None and len(digits) != expected:
+        return s, False
+
+    # FEIN is conventionally written XX-XXXXXXX on ACORD forms.
+    if expected == 9:
+        return f"{digits[:2]}-{digits[2:]}", True
+    return digits, True
 
 
 # ---------------------------------------------------------------------------
@@ -154,8 +405,13 @@ _FIELD_HINT_MAP = {
     "num_employees":            "Enter the total number of people currently employed, including part-time workers, e.g. '12'.",
     "operations_description":   "Describe what your business does in 2–3 sentences, e.g. 'We install residential roofing and gutters in the Austin metro area'.",
     "prior_carrier":            "Enter the name of your current or most recent insurance company, e.g. 'Hartford' or 'Travelers'. Write 'None' if you've never had coverage.",
-    "naics_code":               "This is a 6-digit industry code — leave blank if unsure, your agent can look it up, e.g. '238160' for roofing contractors.",
-    "sic_code":                 "This is a 4-digit older industry code — leave blank if unsure, e.g. '1761' for roofing.",
+    # Fallback wording only. When the uploaded documents describe the business
+    # well enough to match a trade, `_attach_classification_suggestions`
+    # (Figure 20) replaces this with a hint naming THAT business's likely code.
+    # The example below is deliberately labelled as an illustration of the
+    # shape, so a bakery is never shown a roofing code as if it were theirs.
+    "naics_code":               "This is a 6-digit industry code - leave blank if unsure, your agent can look it up. As an example of the format, a roofing contractor would use something like '238160'.",
+    "sic_code":                 "This is a 4-digit older industry code - leave blank if unsure. As an example of the format, a roofing contractor would use something like '1761'.",
     "years_in_business":        "Enter the number of years your business has been operating, e.g. '7'.",
     "gl_limits":                "Enter your desired coverage limits, e.g. '$1,000,000 per occurrence / $2,000,000 aggregate'. Your agent can advise if unsure.",
     "gl_each_occurrence":       "Enter the max payout for a single incident, e.g. '$1,000,000'.",
@@ -217,10 +473,225 @@ _PREFIX_HINT_MAP = {
     "item":             "Describe the item including make, model, serial number, and value, e.g. 'DeWalt Table Saw, Model DWE7491RS, Serial 123456, Value $600'.",
 }
 
-_ORDINALS = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"]
+# ---------------------------------------------------------------------------
+# Producer-facing labels (engineering note, Figure 14)
+# ---------------------------------------------------------------------------
+# "Separate producer-facing rule labels from client-facing wording. The same
+# missing field may require different wording depending on who is answering."
+#
+# `_FIELD_QUESTION_MAP` above is deliberately written FOR THE CLIENT - plain
+# language, no jargon. That reads poorly in the producer's send modal, where an
+# insurance professional wants the underwriting term and why the field matters.
+# This map supplies that short, rule-oriented label; the client wording is never
+# changed and never replaced.
+#
+# Resolution is best-effort: any field with no entry here falls back to the
+# client question text, so coverage gaps degrade gracefully instead of blanking
+# a row. The label is attached as `producer_label` and is stripped from the
+# client payload by the /client-view whitelist, so it can never leak.
+_FIELD_PRODUCER_LABEL_MAP = {
+    "applicant_name":           "Named Insured - full legal name",
+    "dba_name":                 "DBA / trade name",
+    "mailing_address":          "Mailing address",
+    "physical_address":         "Physical / premises address",
+    "contact_name":             "Primary contact - name",
+    "contact_phone":            "Primary contact - phone",
+    "contact_email":            "Primary contact - email",
+    "fein":                     "FEIN / Tax ID",
+    "entity_type":              "Legal entity type",
+    "effective_date":           "Policy effective date",
+    "expiration_date":          "Policy expiration date",
+    "policy_number":            "Policy number",
+    "lines_of_business":        "Lines of business requested",
+    "total_revenue":            "Annual revenue - rating basis",
+    "total_payroll":            "Annual gross payroll - rating basis",
+    "num_employees":            "Employee count",
+    "operations_description":   "Operations description - drives class assignment",
+    "prior_carrier":            "Prior / incumbent carrier",
+    "naics_code":               "NAICS classification code",
+    "sic_code":                 "SIC classification code",
+    "years_in_business":        "Years in business",
+    "gl_limits":                "GL limits - occurrence / aggregate",
+    "gl_each_occurrence":       "GL each-occurrence limit",
+    "gl_aggregate":             "GL general aggregate limit",
+    "gl_deductible":            "GL deductible",
+    "gl_class_codes":           "GL class code basis - operations detail",
+    "retro_date":               "Retroactive date - claims-made",
+    "additional_insured":       "Additional insured(s)",
+    "property_building_value":  "Building limit - replacement cost",
+    "property_bpp_value":       "Business personal property limit",
+    "construction_type":        "Construction type - COPE",
+    "occupancy_type":           "Occupancy - COPE",
+    "year_built":               "Year built - COPE",
+    "roof_year":                "Roof update year - COPE",
+    "sprinkler_system":         "Sprinklered - protection / COPE",
+    "fire_protection_class":    "Protection class - COPE",
+    "valuation_method":         "Valuation - RC vs ACV",
+    "coinsurance_percentage":   "Coinsurance %",
+    "business_income_limit":    "Business income limit",
+    "period_of_restoration":    "Period of restoration",
+    "property_deductible_aop":  "Property deductible - AOP",
+    "property_deductible_wind": "Property deductible - wind / hail",
+    "mortgagee_name":           "Mortgagee / loss payee",
+    "auto_liability_limit":     "Auto liability limit - CSL",
+    "auto_deductible_comp":     "Auto comprehensive deductible",
+    "auto_deductible_collision": "Auto collision deductible",
+    "wc_payroll":               "WC payroll - rating basis",
+    "wc_class_codes":           "WC class codes",
+    "wc_xmod":                  "Experience mod - EMOD / XMOD",
+    "wc_officer_exclusions":    "Officer inclusions / exclusions",
+    "umbrella_limit":           "Umbrella limit",
+    "umbrella_sir":             "Umbrella SIR",
+    "schedule_of_underlying_insurance": "Schedule of underlying insurance",
+    "umbrella_follow_form":     "Follow-form confirmation",
+    "percent_subcontracted":    "Subcontracted work %",
+    "subcontractor_pct_by_class_code": "Subcontracted % by class code",
+    "vehicles_return_to_premises": "Vehicle garaging / return-to-yard",
+    "num_claims":               "Claim count - last 3-5 years",
+    "loss_history_years":       "Loss history years available",
+    "loss_history_no_prior_losses_indicator": "No known losses attestation",
+    "certificate_holder":       "Certificate holder",
+    "carrier_marketing_reason": "Marketing reason - submission context",
+    "submission_urgency":       "Submission urgency / deadline",
+    "narrative_account_overview": "Narrative - account overview",
+    "narrative_management":       "Narrative - management experience",
+    "narrative_risk_controls":    "Narrative - risk controls",
+    "narrative_growth_trends":    "WC payroll breakdown by class code",
+    "narrative_target_markets":   "Experience mod detail - EMOD",
+}
+
+
+def _resolve_producer_label(field_name: str, canonical_key: Optional[str] = None) -> str:
+    """Short rule-oriented label for the PRODUCER, or "" to fall back to the
+    client wording. Tries the canonical fact key first (raw ACORD field names
+    resolve through it), then the raw name, then the instance-stripped base."""
+    for key in (canonical_key, field_name):
+        if key and key in _FIELD_PRODUCER_LABEL_MAP:
+            return _FIELD_PRODUCER_LABEL_MAP[key]
+    base = re.sub(r"[_\s]+[a-zA-Z]$", "", field_name or "")
+    base = re.sub(r"[_\s]+\d+$", "", base)
+    return _FIELD_PRODUCER_LABEL_MAP.get(base, "")
+
+
+def _attach_producer_labels(questions: List[dict]) -> None:
+    """Attach `producer_label` to every question, in place.
+
+    Runs BEFORE the `_canonical_key` cleanup pass so the canonical key is still
+    available for resolution. Purely additive - no existing key is modified.
+    """
+    for q in questions:
+        try:
+            q["producer_label"] = _resolve_producer_label(
+                q.get("field_name", ""), q.get("_canonical_key"),
+            )
+        except Exception:  # never let labelling break question generation
+            q["producer_label"] = ""
+
+
+def _attach_input_types(questions: List[dict]) -> None:
+    """Upgrade `field_type` from plain "text" to a structured type, in place.
+
+    Figure 18 ("structured data types for currency, codes, dates, yes/no, and
+    schedules"). Every question-building path used to hard-code
+    `"field_type": "text"`, so the renderer never learned that gross payroll is
+    money or that an effective date is a date - and the client-side validation
+    for those types, which already existed, could never fire.
+
+    ONLY questions still typed "text" are touched, so `checkbox`, `select` and
+    `schedule` questions are structurally incapable of being reclassified here.
+    Runs alongside `_attach_producer_labels`, i.e. before the `_canonical_key`
+    cleanup this resolves against.
+    """
+    for q in questions:
+        try:
+            if (q.get("field_type") or "text") != "text":
+                continue
+            resolved = _resolve_input_type(
+                q.get("field_name", ""), q.get("_canonical_key"),
+            )
+            if resolved != "text":
+                q["field_type"] = resolved
+                if resolved == "code":
+                    _digits = _CODE_DIGITS.get(q.get("_canonical_key") or "") \
+                        or _CODE_DIGITS.get(q.get("field_name", ""))
+                    if _digits:
+                        q["code_digits"] = _digits
+        except Exception:  # never let typing break question generation
+            continue
+
+
+def _attach_classification_suggestions(questions: List[dict], facts: dict) -> None:
+    """Attach NAICS / SIC candidates and a business-specific hint, in place.
+
+    Figure 20. Two defects this closes:
+      1. `_FIELD_HINT_MAP` carried ONE hard-coded roofing example, shown to every
+         applicant regardless of trade. The client asked for examples based on
+         the detected business.
+      2. There was no candidate mechanism at all, so the assistant could only
+         ever answer "a NAICS code is..." generically.
+
+    Purely additive and fail-open: a question with no confident match keeps its
+    existing hint and gains no `suggestions` key, so the renderer shows exactly
+    what it shows today. Nothing here fills an answer - `suggestions` is a list
+    the client must tap, and the hint says to confirm with their agent.
+    """
+    if not questions:
+        return
+    try:
+        from services import naics_suggester
+        from services.extraction_service import _fv
+    except Exception as ex:  # pragma: no cover - import guard only
+        logger.debug(f"classification suggestions unavailable: {ex}")
+        return
+
+    targets = [
+        q for q in questions
+        if (q.get("_canonical_key") or q.get("field_name", "")) in
+        (naics_suggester.NAICS_KEYS | naics_suggester.SIC_KEYS)
+    ]
+    if not targets:
+        return
+
+    try:
+        business_text = naics_suggester.business_text_from_facts(facts or {}, _fv)
+    except Exception as ex:
+        logger.debug(f"classification business text unavailable: {ex}")
+        return
+    if not business_text.strip():
+        return
+
+    for q in targets:
+        try:
+            key = q.get("_canonical_key") or q.get("field_name", "")
+            kind = "naics" if key in naics_suggester.NAICS_KEYS else "sic"
+            picks = naics_suggester.suggestions_for(kind, business_text)
+            if not picks:
+                continue
+            q["suggestions"] = picks
+            new_hint = naics_suggester.hint_for(kind, naics_suggester.suggest(business_text))
+            if new_hint:
+                q["hint"] = new_hint
+        except Exception:  # never let suggestion enrichment break generation
+            continue
+
 
 def _ordinal(n: int) -> str:
-    return _ORDINALS[n - 1] if 1 <= n <= len(_ORDINALS) else f"{n}th"
+    """English ordinal for any n ("1st", "2nd", "11th", "21st", "141st").
+
+    The previous implementation held a literal list for 1-10 and fell back to
+    f"{n}th" above that, which produced the "141th vehicle" seen in the client's
+    Figure 15 screenshot. Ordinals above 10 are now correct; the 11/12/13
+    exception is handled explicitly (11th, not 11st).
+    """
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return str(n)
+    if 11 <= (abs(n) % 100) <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(abs(n) % 10, "th")
+    return f"{n}{suffix}"
 
 _FIELD_PREFIX_MAP: list[tuple[str, str, str]] = [
     ("insurer_fullname",         "What is the full name of your insurance company?",                        "insurer"),
@@ -368,17 +839,25 @@ def _clean_duplicate_words(text: str) -> str:
     if not text:
         return text
 
+    # Collapse an adjacent repeated PHRASE, longest first, then repeated single
+    # words. ACORD field names routinely repeat a section name inside the field
+    # name itself - `WorkersCompensationEmployersLiability_EmployersLiability_
+    # EachAccidentLimitAmount` humanized to "...employers liability employers
+    # liability each accident..." and shipped to the CLIENT that way, because
+    # the old loop only compared each word with the one before it and no two
+    # ADJACENT words were equal. n=1 reproduces that original behaviour exactly.
     words = text.split()
-    cleaned = []
-    prev_word = None
+    for n in (4, 3, 2, 1):
+        i = 0
+        while i + 2 * n <= len(words):
+            first  = [w.lower() for w in words[i:i + n]]
+            second = [w.lower() for w in words[i + n:i + 2 * n]]
+            if first == second:
+                del words[i + n:i + 2 * n]
+            else:
+                i += 1
 
-    for word in words:
-        if prev_word and word.lower() == prev_word.lower():
-            continue
-        cleaned.append(word)
-        prev_word = word
-
-    text = ' '.join(cleaned)
+    text = ' '.join(words)
     text = re.sub(r'\s+a([\.\?\!]|$)', r'\1', text)
     text = re.sub(r'\b(policy)\s+\1\b', r'\1', text, flags=re.IGNORECASE)
     text = re.sub(r'\s+([\.\?\!,])', r'\1', text)
@@ -511,14 +990,68 @@ def _resolve_question(field_name: str) -> tuple[str, str | None]:
     return question, None
 
 
+def _blocks_submit(field_type: str, field_name: str) -> bool:
+    """True when a format error on this field must STOP the submission.
+
+    The client asked that a badly formatted answer never reach an ACORD box -
+    "sometime in December" was landing in PROPOSED EXP DATE and rendering
+    green, i.e. indistinguishable from a verified answer.
+
+    The hard rule here: only block on a check the CLIENT'S BROWSER also runs.
+    Blocking on anything else traps the client in a 422 they cannot see or
+    fix, which is far worse than the problem being solved. Two real traps this
+    guards against:
+
+      * `_field_format_type` matches "limit"/"value"/"amount" ANYWHERE in a
+        name, so a narrative field like `..._LimitDescription` resolves to
+        "number" server-side while rendering as a free-text box. Prose in it
+        would be rejected forever.
+      * The `"indicator" in name` checkbox branch expects Yes/No, but a raw
+        ACORD `..._SprinkleredIndicator_A` reaches the client as a TEXT box.
+
+    Both stay advisory - kept, flagged, surfaced to the producer, never
+    blocking. `field_type` is taken from the stored question, so this asks
+    exactly what the client was shown.
+    """
+    if (field_type or "") in ("date", "currency", "code", "number"):
+        return True
+    # Email / phone are validated in the browser by field NAME, using the same
+    # regexes as `_field_format_type` (see isEmailField / isPhoneField).
+    return _field_format_type(field_name) in ("email", "phone")
+
+
 def _clean_answer(raw: str, field_name: str) -> Optional[str]:
-    """Sanitize, validate format by field name, and return cleaned answer."""
+    """Backwards-compatible wrapper: cleaned value only, review flag dropped."""
+    val, _ = _clean_answer_ex(raw, field_name)
+    return val
+
+
+def _clean_answer_ex(raw: str, field_name: str) -> Tuple[Optional[str], str]:
+    """Sanitize + NORMALIZE an answer. Returns `(value, review_reason)`.
+
+    `review_reason` is "" when the value is clean or was normalized
+    successfully, otherwise a short client-safe explanation.
+
+    Behaviour change (Figure 18): this function previously returned None for
+    any value failing a format check, and `submit_arq_answers` then DROPPED
+    the field - so a client typing "June 1 2025" into a date question lost the
+    answer permanently and was still shown a success screen. Nothing typed by
+    a client is discarded any more. We normalize what we can recognise, keep
+    the raw text when we cannot, and flag the latter for producer review.
+    """
     if raw is None:
-        return None
+        return None, ""
     val = str(raw).strip()
 
+    # Defense in depth: the "I'm not sure" sentinel is split out before this
+    # function is reached (see submit_arq_answers). If it ever arrives here it
+    # must NEVER be treated as a real answer — returning None keeps it out of
+    # `answers`, out of the ACORD stamping path, and out of the score.
+    if is_not_sure_value(val):
+        return None, ""
+
     if not val or val.lower() in ("n/a", "na", "?", "unknown", "none", "null", "-", "--", "tbd", "unsure"):
-        return None
+        return None, ""
 
     val = re.sub(r"<[^>]*>", "", val).strip()
 
@@ -530,44 +1063,68 @@ def _clean_answer(raw: str, field_name: str) -> Optional[str]:
         val = val[:500].strip()
 
     if not val:
-        return None
+        return None, ""
 
-    fmt = _field_format_type(field_name)
+    fmt        = _field_format_type(field_name)
+    input_type = _resolve_input_type(field_name)
 
     if fmt == "checkbox" or field_name.lower().find("indicator") >= 0:
         yes_values = ("yes", "true", "1", "y", "on", "checked")
         no_values  = ("no", "false", "0", "n", "off", "unchecked")
 
         if val.lower() in yes_values:
-            return "Yes"
+            return "Yes", ""
         elif val.lower() in no_values:
-            return "No"
+            return "No", ""
         else:
-            logger.warning(f"ARQ answer rejected: field={field_name} expected=checkbox val={val!r}")
-            return None
+            # Kept, not discarded - a free-text reply to a Yes/No question is
+            # still information the producer can act on.
+            return val, "Expected Yes or No"
+
+    # Structured types first: these normalize, and only flag when they cannot.
+    if input_type == "code":
+        normalized, ok = _normalize_code(val, field_name)
+        if normalized is None:
+            return None, ""
+        if ok:
+            return normalized, ""
+        width = _CODE_DIGITS.get(field_name)
+        return normalized, (
+            f"Expected a {width}-digit code" if width else "Unrecognized code format"
+        )
+
+    if input_type == "currency":
+        normalized = _normalize_currency(val)
+        if normalized:
+            return normalized, ""
+        return val, "Could not read this as a dollar amount"
 
     if fmt == "email":
         if not _VAL_EMAIL_RE.match(val):
-            logger.warning(f"ARQ answer rejected: field={field_name} expected=email val={val!r}")
-            return None
+            return val, "Does not look like a valid email address"
 
     elif fmt == "phone":
         normalized = val.replace(" ", "").replace("-", "").replace(".", "").replace("(", "").replace(")", "")
         if not normalized.lstrip("+").isdigit() or len(normalized.lstrip("+")) < 7:
-            logger.warning(f"ARQ answer rejected: field={field_name} expected=phone/fax val={val!r}")
-            return None
+            return val, "Does not look like a valid phone or fax number"
 
-    elif fmt == "date":
-        if not _VAL_DATE_RE.match(val):
-            logger.warning(f"ARQ answer rejected: field={field_name} expected=date val={val!r}")
-            return None
+    elif fmt == "date" or input_type == "date":
+        if _VAL_DATE_RE.match(val):
+            # Already an accepted shape - still canonicalize 2025-06-01 to
+            # MM/DD/YYYY so every date reaching an ACORD field looks the same.
+            return _normalize_date(val) or val, ""
+        normalized = _normalize_date(val)
+        if normalized:
+            logger.info(f"ARQ answer date normalized: field={field_name} {val!r} -> {normalized!r}")
+            return normalized, ""
+        return val, "Could not read this as a date"
 
-    elif fmt == "number":
+    elif fmt == "number" or input_type == "number":
         clean_num = val.replace(" ", "").replace(",", "").replace("$", "")
         if not re.match(r"^\d+(\.\d+)?$", clean_num):
-            logger.info(f"ARQ answer number format unusual: field={field_name} val={val!r}")
+            return val, "Expected a number"
 
-    return val
+    return val, ""
 
 
 # ---------------------------------------------------------------------------
@@ -841,6 +1398,32 @@ def _backfill_and_resolve_present(generated: dict, facts: dict) -> Tuple[set, bo
         if has_value:
             present.add(canon)
         # else: no box carries it and none could be stamped -> ask the client.
+
+    # ── Second pass: facts the FORM already answers but `facts` never captured ─
+    # The loop above can only ever consider a fact that is present in the
+    # extracted `facts` dict. That misses everything the gap-fill (Pass 2) LLM
+    # read straight from the document and wrote into the form: gap-fill writes
+    # into the form's `field_state`, and never back into `facts`.
+    #
+    # Live finding (2026-07-20): the document plainly stated "Number of
+    # Employees: 41" and the ACORD 125 box showed 41, yet the client was still
+    # asked "How many people does your business employ?" - because structured
+    # extraction had missed `num_employees`, so the fact was never in `facts`
+    # and this function never looked at it. Same cause for SIC / NAICS.
+    #
+    # So: treat a fact as present whenever a form box that resolves to it
+    # actually carries a value, regardless of how it got there. This only ever
+    # ADDS to `present` (never un-suppresses), so no question that is currently
+    # suppressed can start being asked because of this.
+    for canon, fields in canon_fields.items():
+        if canon in present:
+            continue
+        for fid, sf in fields:
+            form_data = generated.get(fid) or {}
+            fs = form_data.get("field_state") or form_data.get("mapped", {})
+            if str(fs.get(sf) or "").strip() != "":
+                present.add(canon)
+                break
 
     return present, changed
 
@@ -1291,6 +1874,129 @@ def _maybe_inject_generic_client_questions(questions: List[dict], facts: dict, f
 
 
 # ---------------------------------------------------------------------------
+# Bulk schedule capture (Beta Report Figure 15)
+# ---------------------------------------------------------------------------
+
+def _schedule_key_for_question_field(field_name: str) -> Optional[str]:
+    """Which bulk schedule (if any) a missing field belongs to.
+
+    Two detection paths, because questions arrive from two generators:
+      1. a raw repeating ACORD schema field (`Vehicle_Year_B`), resolved through
+         `pdf_service._SCHEDULE_REGISTRY` so detection can never drift from the
+         stamping logic;
+      2. a curated `_FIELD_PREFIX_MAP` group (`vehicle_*`, `driver_*`, ...),
+         which is what produced the ordinal-labelled cards in the report.
+
+    Returns None for anything not schedule-backed, so non-schedule questions are
+    completely unaffected.
+    """
+    if not ENABLE_SCHEDULE_CAPTURE or not field_name:
+        return None
+    list_key = schedule_capture.schedule_list_key_for_field(field_name)
+    if list_key:
+        return list_key
+    _, group_label = _resolve_question(field_name)
+    if group_label:
+        candidate = schedule_capture.GROUP_LABEL_TO_LIST_KEY.get(group_label)
+        # Only claim the field when a capture table actually exists for it.
+        # Without this guard a group mapped to a schedule with no definition
+        # would be removed from `missing_fields` and then skipped by
+        # `_build_schedule_questions`, silently losing the question entirely.
+        if candidate and schedule_capture.get_def(candidate) is not None:
+            return candidate
+    return None
+
+
+def _partition_schedule_fields(missing_fields: dict, field_current_values: dict) -> dict:
+    """Remove schedule-backed fields from `missing_fields`, in place.
+
+    Returns {list_key: set(form_ids)} for the schedules that had at least one
+    missing field, so the caller can emit exactly ONE question per schedule.
+    """
+    schedule_forms: dict = {}
+    if not ENABLE_SCHEDULE_CAPTURE:
+        return schedule_forms
+    for field_name in list(missing_fields.keys()):
+        list_key = _schedule_key_for_question_field(field_name)
+        if not list_key:
+            continue
+        schedule_forms.setdefault(list_key, set()).update(missing_fields[field_name])
+        del missing_fields[field_name]
+        field_current_values.pop(field_name, None)
+    return schedule_forms
+
+
+def _build_schedule_questions(schedule_forms: dict, facts: dict) -> List[dict]:
+    """One table-style question per schedule, pre-loaded with known rows.
+
+    `current_rows` carries whatever extraction (or a producer pre-load) already
+    established, so the client edits/completes a partially-known fleet instead of
+    re-typing it. The column spec travels with the question so the questionnaire
+    renderer stays generic across all schedule types.
+    """
+    out: List[dict] = []
+    for list_key, form_ids in sorted(schedule_forms.items()):
+        defn = schedule_capture.get_def(list_key)
+        if defn is None:
+            continue
+        rows, _report = schedule_capture.validate_rows(
+            list_key, schedule_capture.rows_from_facts(list_key, facts),
+        )
+        nums = sorted({
+            str(f).replace("ACORD_", "").replace("ACORD ", "") for f in form_ids
+        })
+        out.append({
+            "field_name":        schedule_capture.answer_key(list_key),
+            "question":          schedule_capture.question_text(list_key),
+            "hint":              schedule_capture.hint_text(list_key),
+            "forms":             ", ".join(nums),
+            "form_ids":          sorted(form_ids),
+            "field_type":        "schedule",
+            "current_value":     "",
+            # Schedule-specific payload consumed by the ScheduleTable renderer.
+            "schedule_key":      list_key,
+            "schedule_label":    defn["label"],
+            "schedule_singular": defn["singular"],
+            "columns":           defn["columns"],
+            "dedup_keys":        defn["dedup_keys"],
+            "vin_decode":        bool(defn["vin_decode"]),
+            "row_capacity":      schedule_capture.ROW_CAPACITY,
+            "current_rows":      rows,
+            "_group_label":       None,
+            "_is_curated_client": True,
+            "_canonical_key":     list_key,
+        })
+    return out
+
+
+def _finalize_schedule_taxonomy(questions: List[dict]) -> None:
+    """Give schedule questions their taxonomy explicitly, after decoration.
+
+    `decorate_questions` judges a question by its field name / canonical key,
+    which for a synthetic `schedule::<key>` question would be guesswork. Two
+    behaviours specifically must not apply to a schedule:
+
+      * "already provided" suppression - a fleet where extraction found 5 of 143
+        vehicles is exactly when the client most needs the table, so a
+        partially-populated schedule must stay askable;
+      * accidental routing to the internal/producer panel via a substring match
+        on the synthetic key.
+
+    Schedules are Client + important, so they are surfaced and suggested but not
+    force-selected into the default send set.
+    """
+    for q in questions:
+        if q.get("field_type") != "schedule":
+            continue
+        q["audience"]          = AUDIENCE_CLIENT
+        q["bucket"]            = BUCKET_CLIENT
+        q["bucket_label"]      = "Client"
+        q["priority"]          = PRIORITY_IMPORTANT
+        q["suppressed"]        = False
+        q["suppressed_reason"] = ""
+
+
+# ---------------------------------------------------------------------------
 # Question generation
 # ---------------------------------------------------------------------------
 
@@ -1360,6 +2066,11 @@ async def generate_arq_questions(
                 if fk not in missing_fields:
                     missing_fields[fk] = set()
                     field_current_values[fk] = ""
+
+    # Figure 15: pull repeating-row fields OUT of the per-field flow so they are
+    # answered as ONE table per schedule. Done before the humanization pass below
+    # so we never spend an LLM call rewriting a field that is about to collapse.
+    schedule_forms = _partition_schedule_fields(missing_fields, field_current_values)
 
     questions = []
     seen_field_names = set()
@@ -1540,6 +2251,10 @@ async def generate_arq_questions(
     # to-yard, gated on GL / auto coverage. Optional client questions (opt-in).
     _maybe_inject_generic_client_questions(questions, facts, flags)
 
+    # Figure 15: ONE table question per repeating schedule, replacing the
+    # per-field cards removed by _partition_schedule_fields above.
+    questions.extend(_build_schedule_questions(schedule_forms, facts))
+
     # Curation layer (Beta Report §8): tag audience/priority/topic/score-impact,
     # then apply the curated default-selection policy.
     hard_stop_text = " ".join(str(s) for s in (hard_stops or []))
@@ -1550,7 +2265,21 @@ async def generate_arq_questions(
         narrative_components=_narrative_components_from_facts(facts, session_docs=session_docs, flags=flags),
         hard_stop_text=hard_stop_text,
     )
+    # Schedules own their taxonomy explicitly (see docstring): must run after
+    # decoration and before the default-selection pass reads priority/suppressed.
+    _finalize_schedule_taxonomy(questions)
     apply_default_selection(questions)
+
+    # Engineering note (Figure 14): give the producer a rule-oriented label while
+    # the client keeps the plain-language wording. Must run before the cleanup
+    # below, which drops the canonical key this resolves against.
+    _attach_producer_labels(questions)
+    # Figure 18: structured currency / date / code types. Same placement
+    # constraint as the labels above - needs `_canonical_key`.
+    _attach_input_types(questions)
+    # Figure 20: business-specific NAICS / SIC candidates. Same placement
+    # constraint again - resolves against `_canonical_key`.
+    _attach_classification_suggestions(questions, facts)
 
     for q in questions:
         q.pop("_group_label", None)
@@ -1595,6 +2324,10 @@ def generate_arq_questions_from_facts(
                 if field_name not in missing_fields:
                     missing_fields[field_name] = set()
                 missing_fields[field_name].add(fid)
+
+    # Figure 15: collapse repeating-row fields into one table question each,
+    # matching the form-aware generator above (no-op when none are present).
+    schedule_forms = _partition_schedule_fields(missing_fields, {})
 
     questions: List[dict] = []
     seen_field_names: set = set()
@@ -1658,6 +2391,9 @@ def generate_arq_questions_from_facts(
     # to-yard, gated on GL / auto coverage. Optional client questions (opt-in).
     _maybe_inject_generic_client_questions(questions, facts, flags)
 
+    # Figure 15: ONE table question per repeating schedule.
+    questions.extend(_build_schedule_questions(schedule_forms, facts))
+
     hard_stop_text = " ".join(str(s) for s in (hard_stops or []))
     decorate_questions(
         questions,
@@ -1665,7 +2401,19 @@ def generate_arq_questions_from_facts(
         narrative_components=_narrative_components_from_facts(facts, flags=flags),
         hard_stop_text=hard_stop_text,
     )  # session_docs not available on this path; uses the stored profile + facts
+    _finalize_schedule_taxonomy(questions)
     apply_default_selection(questions)
+
+    # Engineering note (Figure 14): give the producer a rule-oriented label while
+    # the client keeps the plain-language wording. Must run before the cleanup
+    # below, which drops the canonical key this resolves against.
+    _attach_producer_labels(questions)
+    # Figure 18: structured currency / date / code types. Same placement
+    # constraint as the labels above - needs `_canonical_key`.
+    _attach_input_types(questions)
+    # Figure 20: business-specific NAICS / SIC candidates. Same placement
+    # constraint again - resolves against `_canonical_key`.
+    _attach_classification_suggestions(questions, facts)
 
     for q in questions:
         q.pop("_group_label", None)
@@ -1917,6 +2665,10 @@ def generate_cross_form_arq_questions(
         present_fact_keys=_present_fact_keys(facts or {}),
         narrative_components=_narrative_components_from_facts(facts or {}, flags=flags),
     )
+    _attach_producer_labels(questions)
+    _attach_input_types(questions)
+    _attach_classification_suggestions(questions, facts or {})
+
     for q in questions:
         q.pop("_is_cross_form", None)
         q.pop("_is_curated_client", None)
@@ -1931,15 +2683,19 @@ def generate_cross_form_arq_questions(
 
 def _decode_arq_row(row: dict) -> dict:
     """Decode JSON string columns if not already parsed by asyncpg codec."""
-    for col in ("questions", "answers"):
+    # `not_sure_fields` is a LIST of field names; the other two are dict/list as
+    # before. Rows created before the column existed come back NULL, so each is
+    # coerced to its correct empty shape.
+    _empty = {"questions": [], "answers": {}, "not_sure_fields": [], "review_fields": []}
+    for col in ("questions", "answers", "not_sure_fields", "review_fields"):
         val = row.get(col)
         if isinstance(val, str):
             try:
                 row[col] = json.loads(val)
             except Exception:
-                pass
+                row[col] = _empty[col]
         elif val is None:
-            row[col] = {} if col == "answers" else []
+            row[col] = _empty[col]
     return row
 
 
@@ -2036,45 +2792,167 @@ async def submit_arq_answers(
     raw_answers: dict,
     processing_session_id: str,
     generated_forms: dict,
-) -> Tuple[bool, str, List[str]]:
+) -> Tuple[bool, str, List[str], dict]:
+    """Returns `(ok, message, updated_fields, field_errors)`.
+
+    `field_errors` is a {field_name: message} map. When it is non-empty the
+    submission is REJECTED and nothing is written - the client fixes the
+    format and resubmits (or marks the question "I'm not sure").
+    """
     arq = await get_arq_by_token(token)
     if not arq:
-        return False, "ARQ session not found.", []
+        return False, "ARQ session not found.", [], {}
 
     now     = datetime.now(timezone.utc)
     expires = datetime.fromisoformat(arq["expires_at"].replace("Z", "+00:00"))
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=timezone.utc)
     if now > expires:
-        return False, "This questionnaire link has expired.", []
+        return False, "This questionnaire link has expired.", [], {}
 
     if arq["status"] == "submitted":
-        return False, "This questionnaire has already been submitted.", []
+        return False, "This questionnaire has already been submitted.", [], {}
 
     questions      = arq["questions"]
     cleaned        = {}
     updated_fields = []
+    not_sure       = []
+    # A format error the CLIENT can see and fix - blocks the submission.
+    field_errors   = {}
+    # A format oddity the client's browser does NOT validate (see
+    # `_blocks_submit`). Kept, stored, and surfaced to the producer rather than
+    # blocking, because the client has no way to act on it.
+    review         = []
 
     for q in questions:
         field_name = q["field_name"]
         raw_val    = raw_answers.get(field_name, "")
-        if q.get("field_type") == "checkbox":
+
+        # Explicit client "I'm not sure" — recorded as a follow-up item, never as
+        # an answer. Iterating over `questions` (not over client-supplied keys)
+        # also bounds this list to fields that were actually sent, so a crafted
+        # payload cannot inject arbitrary field names here.
+        if is_not_sure_value(raw_val):
+            # Store the question text alongside the field name so the producer's
+            # follow-up panel can render it directly, with no extra lookup.
+            not_sure.append({
+                "field_name": field_name,
+                "question":   str(q.get("question", ""))[:300],
+            })
+            continue
+
+        if schedule_capture.is_schedule_answer_key(field_name):
+            # A schedule answer is a JSON list of rows, not a scalar string, so
+            # it must bypass `_clean_answer` (which would reject/truncate it).
+            # Validation is advisory here for the same reason it is in the UI: a
+            # partially-complete fleet is worth more than a refused submission,
+            # and the producer sees the flagged rows on their side.
+            _list_key = schedule_capture.list_key_from_answer_key(field_name)
+            _rows, _report = schedule_capture.validate_rows(
+                _list_key, schedule_capture.decode_answer(raw_val),
+            )
+            cleaned_val = schedule_capture.encode_answer(_rows) if _rows else None
+            if cleaned_val is not None and (_report["errors"] or _report["duplicates"]):
+                logger.info(
+                    "ARQ submit: schedule %s accepted with %d row error(s), %d duplicate(s)",
+                    _list_key, len(_report["errors"]), len(_report["duplicates"]),
+                )
+            review_reason = ""
+        elif q.get("field_type") == "checkbox":
             cleaned_val = raw_val if raw_val in ("Yes", "No", "true", "false") else None
+            review_reason = ""
         else:
-            cleaned_val = _clean_answer(raw_val, field_name)
+            cleaned_val, review_reason = _clean_answer_ex(raw_val, field_name)
 
         if cleaned_val is not None:
+            if review_reason and _blocks_submit(q.get("field_type"), field_name):
+                # Client-visible format error: refuse the submission so the
+                # value never reaches an ACORD box. They can correct it or tap
+                # "I'm not sure" - which is why this can never dead-end them.
+                field_errors[field_name] = review_reason
+                continue
             cleaned[field_name] = cleaned_val
             updated_fields.append(field_name)
+            if review_reason:
+                review.append({
+                    "field_name": field_name,
+                    "question":   str(q.get("question", ""))[:300],
+                    "value":      str(cleaned_val)[:200],
+                    "reason":     review_reason,
+                })
+
+    if field_errors:
+        # Nothing is written - not the answers, not the status. The client's
+        # draft is already saved server-side, so their work is safe while they
+        # fix the highlighted fields.
+        logger.info(
+            "ARQ submit rejected: %d field(s) failed format validation for token=%s…",
+            len(field_errors), token[:8],
+        )
+        return (
+            False,
+            "Some answers need a small correction before we can submit.",
+            [],
+            field_errors,
+        )
 
     now_iso = now.isoformat()
     async with get_pool().acquire() as conn:
-        await conn.execute(
-            "UPDATE arq_sessions SET answers=$1, status='submitted', submitted_at=$2 WHERE token=$3",
-            json.dumps(cleaned), now_iso, token,
+        try:
+            await conn.execute(
+                "UPDATE arq_sessions SET answers=$1, not_sure_fields=$2, review_fields=$3, "
+                "status='submitted', submitted_at=$4 WHERE token=$5",
+                json.dumps(cleaned), json.dumps(not_sure), json.dumps(review), now_iso, token,
+            )
+        except Exception as _review_ex:
+            # `review_fields` is the newest column; an instance that has not yet
+            # restarted through init_db() must still record the answers and the
+            # follow-up list exactly as before.
+            logger.warning(
+                "ARQ submit: review_fields update failed (%s); "
+                "falling back to the pre-Figure-18 write.", _review_ex,
+            )
+            await _submit_without_review(conn, cleaned, not_sure, now_iso, token)
+
+    if review:
+        logger.info(
+            "ARQ submit: %d answer(s) kept but flagged for producer review for token=%s…",
+            len(review), token[:8],
         )
 
-    return True, "Answers submitted successfully.", updated_fields
+    if not_sure:
+        logger.info(
+            "ARQ submit: client marked %d field(s) as 'not sure' for token=%s…",
+            len(not_sure), token[:8],
+        )
+
+    return True, "Answers submitted successfully.", updated_fields, {}
+
+
+async def _submit_without_review(conn, cleaned, not_sure, now_iso, token) -> None:
+    """Pre-Figure-18 submit write, used when `review_fields` is unavailable.
+
+    Preserves the original two-tier resilience exactly: try the answers plus
+    the follow-up list, and if even that column is missing, commit the answers
+    alone. A client's submission is terminal - it must never fail over a
+    reporting column.
+    """
+    try:
+        await conn.execute(
+            "UPDATE arq_sessions SET answers=$1, not_sure_fields=$2, status='submitted', "
+            "submitted_at=$3 WHERE token=$4",
+            json.dumps(cleaned), json.dumps(not_sure), now_iso, token,
+        )
+    except Exception as ex:
+        logger.error(
+            "ARQ submit: not_sure_fields update failed (%s); "
+            "committing answers without the follow-up list.", ex,
+        )
+        await conn.execute(
+            "UPDATE arq_sessions SET answers=$1, status='submitted', submitted_at=$2 "
+            "WHERE token=$3",
+            json.dumps(cleaned), now_iso, token,
+        )
 
 
 def _restamp_canonical_into_forms(
@@ -2144,6 +3022,81 @@ def _restamp_canonical_into_forms(
     return touched_forms
 
 
+def _restamp_schedule_into_forms(
+    generated: dict,
+    list_key: str,
+    facts: dict,
+) -> List[str]:
+    """Stamp a client-provided schedule into every form's repeating rows.
+
+    The schedule list has already been written to `facts[list_key]`, so this
+    replays the SAME resolver Pass 1 uses (`_resolve_schedule_row`) over each
+    form's schema and writes whatever it yields. Only fields bound to THIS
+    schedule are touched, so an unrelated form or column is never affected.
+
+    Rows beyond the form's physical capacity (A..N) resolve to None and are
+    simply not stamped - the full list still lives in facts, which is what
+    downstream scoring and any overflow attachment read.
+
+    A schedule-bound field is exclusively owned by its schedule - nothing else
+    ever writes to `Vehicle_VINIdentifier_F`, for example - so this function
+    must be authoritative, not just additive. If a row is deleted (the client
+    removed a duplicate, or the schedule simply got shorter), the field must be
+    CLEARED back to blank, not left holding the previous vehicle's stale value.
+    A prior version only wrote when a row produced a value and silently skipped
+    otherwise, so a deleted vehicle's old VIN/make/model kept printing on the
+    PDF forever - fixed by always resolving to either the row's value or "".
+    """
+    try:
+        from services.pdf_service import _SCHED_SKIP, _resolve_schedule_row
+    except Exception as ex:  # pragma: no cover - defensive
+        logger.warning(f"_restamp_schedule: pdf_service import failed: {ex}")
+        return []
+
+    touched_forms: List[str] = []
+    for fid, form_data in generated.items():
+        schema = form_data.get("schema", {}) or {}
+        if not schema:
+            continue
+        field_state = form_data.get("field_state") or form_data.get("mapped", {})
+        conf = form_data.get("confidence") or {}
+        cff = set(form_data.get("client_filled_fields", []))
+        form_touched = False
+
+        for schema_field in schema.keys():
+            if schedule_capture.schedule_list_key_for_field(schema_field) != list_key:
+                continue
+            val = _resolve_schedule_row(schema_field, facts)
+            if val is _SCHED_SKIP:
+                continue
+            val = "" if (val is None or str(val).strip() == "") else val
+
+            if str(field_state.get(schema_field) or "").strip() != str(val).strip():
+                field_state[schema_field] = val
+                form_touched = True
+
+            if val:
+                conf[schema_field] = "client_arq"
+                cff.add(schema_field)
+            else:
+                # Row removed: this box is no longer schedule-provided - drop
+                # its provenance too, so a cleared field doesn't keep reading
+                # as "client answered" once it's genuinely blank again.
+                conf.pop(schema_field, None)
+                cff.discard(schema_field)
+
+        if form_touched or cff != set(form_data.get("client_filled_fields", [])):
+            form_data["field_state"] = field_state
+            form_data["confidence"] = conf
+            form_data["client_filled_fields"] = list(cff)
+        if form_touched:
+            form_data["_pdf_cache_hash"] = ""
+            form_data["pdf_bytes"] = None
+            touched_forms.append(fid)
+
+    return touched_forms
+
+
 # ASYNC-SAFE
 async def apply_arq_answers_to_session(
     arq_id: str,
@@ -2182,6 +3135,32 @@ async def apply_arq_answers_to_session(
 
     for field_name, form_ids in field_to_forms.items():
         new_val = answers[field_name]
+
+        # Schedule answers carry a list of rows, not a scalar. They are written
+        # to `facts[list_key]` (the shape `_resolve_schedule_row` reads) and
+        # stamped into each form's repeating rows. This MUST short-circuit the
+        # scalar path below: that path writes `field_state[field_name] = value`
+        # for every form in `form_ids`, which would otherwise plant a raw JSON
+        # blob under the synthetic `schedule::<key>` name in the form state.
+        if schedule_capture.is_schedule_answer_key(field_name):
+            list_key = schedule_capture.list_key_from_answer_key(field_name)
+            rows, _report = schedule_capture.validate_rows(
+                list_key, schedule_capture.decode_answer(new_val),
+            )
+            facts[list_key] = schedule_capture.rows_for_facts(list_key, rows)
+            for _fid in _restamp_schedule_into_forms(generated, list_key, facts):
+                if _fid not in updated:
+                    updated.append(_fid)
+            if _report["overflow"]:
+                logger.info(
+                    "ARQ apply: schedule %s has %d row(s) beyond the form's "
+                    "%d-row capacity; full list retained in facts.",
+                    list_key, _report["overflow"], schedule_capture.ROW_CAPACITY,
+                )
+            if field_name not in updated:
+                updated.append(field_name)
+            continue
+
         for fid, form_data in generated.items():
             field_state = form_data.get("field_state") or form_data.get("mapped", {})
             schema      = form_data.get("schema", {})
@@ -2211,21 +3190,37 @@ async def apply_arq_answers_to_session(
                 "source":     "client_arq",
             }
             # Stamp this canonical answer into EVERY generated form whose schema
-            # carries it under a different (ACORD) field name. Curated client
-            # questions key on a canonical fact (e.g. `applicant_name`) that no
-            # ACORD schema names literally — without this the confirmed value
-            # reached SQS via facts above but never the PDFs, so the broker saw
-            # an empty Applicant Name on ACORD 125/130/… after the client
-            # answered it. We reuse the same deterministic rule engine that the
-            # initial fill used (_deterministic_map, no LLM), so the value lands
-            # in exactly the fields Pass 1 would have filled, across all forms.
-            if canon != field_name:
-                _stamped_forms = _restamp_canonical_into_forms(
-                    generated, canon, facts,
-                )
-                for _fid in _stamped_forms:
-                    if _fid not in updated:
-                        updated.append(_fid)
+            # carries it under an ACORD field name. Curated client questions and
+            # every `_maybe_inject_*` / coverage-guarantee question key on a
+            # canonical fact directly (e.g. `field_name == "num_employees"`) -
+            # no raw ACORD schema field is ever literally named that, so the PDF
+            # has nowhere for the direct field_state write below to land. We
+            # reuse the same deterministic rule engine that the initial fill
+            # used (_deterministic_map, no LLM), so the value lands in exactly
+            # the fields Pass 1 would have filled, across all forms.
+            #
+            # FIX (2026-07, live finding): this used to run only `if canon !=
+            # field_name`, on the assumption that `canon == field_name` meant
+            # field_name was already a real schema field. That assumption is
+            # false for every canonical-only injected question - confirmed live:
+            # a client answered "How many people does your business employ?"
+            # (field_name="num_employees", which IS its own canonical key), the
+            # answer updated `facts` and moved SQS, but the real ACORD 125 boxes
+            # (BusinessInformation_FullTimeEmployeeCount_A /
+            # PartTimeEmployeeCount_A) were never touched - the PDF stayed
+            # exactly as it was before the client answered anything.
+            #
+            # Always calling this is safe: `_restamp_canonical_into_forms` only
+            # writes when `_deterministic_map` produces a non-empty value and
+            # the box doesn't already show it, so a field_name that IS already a
+            # real schema field (the common case) is a harmless no-op re-stamp,
+            # not a double-write of different data.
+            _stamped_forms = _restamp_canonical_into_forms(
+                generated, canon, facts,
+            )
+            for _fid in _stamped_forms:
+                if _fid not in updated:
+                    updated.append(_fid)
             # §6.4: an affirmative "no prior losses" attestation must also set the
             # flag (not just a facts string) so the loss-history pillar moves. A
             # "No" answer means the client HAS losses — do not set the flag.
@@ -2259,6 +3254,126 @@ async def apply_arq_answers_to_session(
     await upd_processing_session(processing_session_id, _update_payload)
     logger.info(f"ARQ {arq_id}: applied {len(updated)} fields to session {processing_session_id}")
     return True, updated
+
+
+# ASYNC-SAFE
+async def get_session_schedules(processing_session_id: str) -> List[dict]:
+    """Every capturable schedule for a session, with its current rows.
+
+    Powers the producer-side pre-load table: the agent can paste or upload the
+    fleet/driver/location list BEFORE sending the questionnaire, and the client
+    then edits an already-populated table instead of starting from nothing.
+
+    A schedule is included when the session's selected forms actually have
+    repeating rows bound to it, OR when rows already exist for it - so the agent
+    is never shown a Workers Comp class-code table on a property-only package.
+    """
+    from repositories.session_repository import get_processing_session
+
+    try:
+        proc = await get_processing_session(processing_session_id)
+    except Exception as ex:
+        logger.error(f"get_session_schedules: cannot load {processing_session_id}: {ex}")
+        return []
+
+    facts     = proc.get("facts", {}) or {}
+    generated = proc.get("generated_forms", {}) or {}
+
+    relevant: dict = {}
+    for fid, form_data in generated.items():
+        for schema_field in (form_data.get("schema", {}) or {}).keys():
+            lk = schedule_capture.schedule_list_key_for_field(schema_field)
+            if lk:
+                relevant.setdefault(lk, set()).add(fid)
+
+    out: List[dict] = []
+    for list_key, defn in schedule_capture.SCHEDULE_DEFS.items():
+        rows, report = schedule_capture.validate_rows(
+            list_key, schedule_capture.rows_from_facts(list_key, facts),
+        )
+        form_ids = sorted(relevant.get(list_key, set()))
+        if not form_ids and not rows:
+            continue
+        out.append({
+            "schedule_key":      list_key,
+            "schedule_label":    defn["label"],
+            "schedule_singular": defn["singular"],
+            "columns":           defn["columns"],
+            "dedup_keys":        defn["dedup_keys"],
+            "vin_decode":        bool(defn["vin_decode"]),
+            "row_capacity":      schedule_capture.ROW_CAPACITY,
+            "rows":              rows,
+            "row_count":         report["row_count"],
+            "overflow":          report["overflow"],
+            "duplicates":        report["duplicates"],
+            "form_ids":          form_ids,
+            "forms": ", ".join(sorted({
+                f.replace("ACORD_", "").replace("ACORD ", "") for f in form_ids
+            })),
+        })
+    return out
+
+
+# ASYNC-SAFE
+async def save_session_schedule(
+    processing_session_id: str,
+    list_key: str,
+    rows: list,
+) -> Tuple[bool, dict]:
+    """Write a producer-supplied schedule into the session and stamp the forms.
+
+    Mirrors the client-submit path exactly (validate -> facts -> re-stamp), so a
+    schedule pre-loaded by the agent and one submitted by the client land in the
+    same place with the same shape. Provenance differs: these rows come from the
+    agency, so stamped cells are labelled `producer` rather than `client_arq`.
+    """
+    from repositories.session_repository import get_processing_session, upd_processing_session
+
+    if schedule_capture.get_def(list_key) is None:
+        return False, {"message": "Unknown schedule."}
+
+    try:
+        proc = await get_processing_session(processing_session_id)
+    except Exception as ex:
+        logger.error(f"save_session_schedule: cannot load {processing_session_id}: {ex}")
+        return False, {"message": "Session not found."}
+
+    clean_rows, report = schedule_capture.validate_rows(list_key, rows)
+    facts     = dict(proc.get("facts", {}) or {})
+    generated = proc.get("generated_forms", {}) or {}
+
+    facts[list_key] = schedule_capture.rows_for_facts(list_key, clean_rows)
+    touched = _restamp_schedule_into_forms(generated, list_key, facts)
+
+    # Producer-sourced, not client-sourced: relabel what the shared re-stamp
+    # marked so evidence provenance stays accurate for SQS and the audit trail.
+    for fid in touched:
+        form_data = generated.get(fid, {})
+        conf = form_data.get("confidence") or {}
+        cff = set(form_data.get("client_filled_fields", []))
+        for schema_field in list(conf.keys()):
+            if (conf.get(schema_field) == "client_arq"
+                    and schedule_capture.schedule_list_key_for_field(schema_field) == list_key):
+                conf[schema_field] = "producer"
+                cff.discard(schema_field)
+        form_data["confidence"] = conf
+        form_data["client_filled_fields"] = list(cff)
+
+    await upd_processing_session(
+        processing_session_id, {"generated_forms": generated, "facts": facts},
+    )
+    logger.info(
+        "save_session_schedule: %s rows=%d forms_touched=%d session=%s",
+        list_key, len(clean_rows), len(touched), processing_session_id,
+    )
+    return True, {
+        "rows":       clean_rows,
+        "row_count":  report["row_count"],
+        "errors":     report["errors"],
+        "duplicates": report["duplicates"],
+        "overflow":   report["overflow"],
+        "forms_updated": touched,
+    }
 
 
 # ASYNC-SAFE
@@ -2483,13 +3598,94 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         logger.error(f"recalc package SQS failed: {ex}", exc_info=True)
         package_sqs = proc.get("package_sqs")
 
-    await upd_processing_session(processing_session_id, {
+    # ── Post-remediation issue diff (Figure 24) ──────────────────────────────
+    # Compare the issue set BEFORE this recalculation against the one after, so
+    # the producer sees what the client's answers actually fixed, worsened, or
+    # left open - not just a score delta. Both sides are assembled identically
+    # (persisted structured issues + injected cross-form issues, then
+    # classify_stops applied) so the comparison is like-for-like and the
+    # severities agree with the cards the producer sees on screen.
+    #
+    # structured_issues is REFRESHED here too. It was written once at extraction
+    # time and never updated, so a hard stop the client had actually resolved
+    # stayed in the list and kept rendering as a blocker - build_grouped_view
+    # holds an issue at its original severity when its message appears in
+    # neither final list. Only the entries this function recomputes are
+    # replaced; doc-conflict / source-conflict / OCR / Tier-1 entries are left
+    # untouched, because nothing here re-runs those detectors and so this
+    # function cannot know whether they cleared.
+    issue_diff = None
+    fresh_structured = proc.get("structured_issues") or []
+    try:
+        from services.issue_registry import (
+            build_grouped_view, build_structured_from_sources,
+            diff_grouped_views, drop_confirmed_ocr_issues, replace_recomputed_issues,
+        )
+        from services.sqs_service import classify_stops
+
+        _, _prior_hard, _prior_down = classify_stops(proc.get("hard_stops", []) or [], flags)
+        prior_view = build_grouped_view(
+            proc.get("structured_issues") or [],
+            _prior_hard,
+            (proc.get("soft_stops", []) or []) + _prior_down,
+            cross_issues=proc.get("cross_issues_last") or [],
+        )
+
+        # Format the rebuilt field-level messages EXACTLY as extraction_pipeline
+        # stored them. It appends a "Fix: ..." remediation hint to every
+        # evaluate_stops message (plus a source annotation on address-format
+        # ones) BEFORE writing structured_issues. Rebuilding them raw gives the
+        # same underlying stop different text, hence a different issue_id, so
+        # every cluster holding a field-level stop reported as "updated" on the
+        # first recalculation even when nothing about it had changed - and the
+        # producer silently lost the Fix hints from their issue list.
+        from services.extraction_pipeline import _ensure_fix_hint, _enrich_stops_with_source
+        _legacy_hard = _ensure_fix_hint(list(re_hard))
+        _legacy_soft = _ensure_fix_hint(_enrich_stops_with_source(list(re_soft), _docs))
+
+        fresh_structured = replace_recomputed_issues(
+            proc.get("structured_issues") or [],
+            build_structured_from_sources(legacy_hard=_legacy_hard, legacy_soft=_legacy_soft),
+        )
+        # An OCR "confirm this field" warning is satisfied the moment a human
+        # supplies the value, and the questionnaire asks the client for exactly
+        # those fields. Every other preserved source (doc / source conflicts)
+        # describes two DOCUMENTS disagreeing, which an answer cannot settle, so
+        # those stay untouched.
+        fresh_structured = drop_confirmed_ocr_issues(
+            fresh_structured,
+            facts=facts,
+            confirmed_keys=(proc.get("underwriting_confirmations") or {}).keys(),
+        )
+        # The view's stop lists must carry that same formatting or
+        # build_grouped_view cannot match a structured issue to its final list,
+        # which is what lets it honour classify_stops' hard->soft downgrades.
+        # Display only - the persisted hard_stops/soft_stops that feed scoring
+        # are left exactly as they were.
+        _, _now_hard, _now_down = classify_stops(_legacy_hard + list(cf_hard), flags)
+        current_view = build_grouped_view(
+            fresh_structured, _now_hard, _legacy_soft + list(cf_soft) + _now_down,
+            cross_issues=cf_deduped,
+        )
+        issue_diff = diff_grouped_views(prior_view, current_view)
+    except Exception as _diff_ex:
+        # Non-fatal: remediation must still complete. Falling back leaves
+        # structured_issues exactly as it was, i.e. the prior behaviour.
+        logger.error(f"ARQ recalc: issue diff failed (non-fatal): {_diff_ex}", exc_info=True)
+        issue_diff = None
+        fresh_structured = proc.get("structured_issues") or []
+
+    _session_updates = {
         "generated_forms":   generated,
         "hard_stops":        hard_stops,
         "soft_stops":        soft_stops,
         "package_sqs":       package_sqs,
         "cross_issues_last": cf_deduped,
-    })
+        "structured_issues": fresh_structured,
+    }
+    if issue_diff is not None:
+        _session_updates["issue_diff_last"] = issue_diff
+    await upd_processing_session(processing_session_id, _session_updates)
 
     # §6.2 / AC2: auto-resolve open recommendation audit records whose underlying
     # issue was cleared during this recalculation. After the SQS recompute, each
@@ -2615,9 +3811,29 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
     else:
         status = "pending_validation"
 
+    # Report DISTINCT remaining problems, not raw message strings. The
+    # field-level engine (evaluate_stops) and cross_form_validator word the same
+    # deficiency differently - incomplete property COPE is reported by both - so
+    # len() counts one problem twice and disagrees with the clustered view the
+    # producer actually sees. Fail-open to the raw counts: a reporting number
+    # must never break the remediation path. `status` above deliberately keeps
+    # using len(hard_stops) - "zero raw stops" and "zero distinct stops" are the
+    # same condition, so its behaviour is unchanged.
+    try:
+        from services.issue_registry import count_distinct_issues
+        _counts = count_distinct_issues(
+            hard_stops=hard_stops, soft_stops=soft_stops,
+            legacy_hard=re_hard, legacy_soft=re_soft, cross_issues=cf_deduped,
+        )
+        _hard_remaining, _soft_remaining = _counts["hard"], _counts["soft"]
+    except Exception as _count_ex:
+        logger.error(f"ARQ recalc: distinct issue count failed (non-fatal): {_count_ex}")
+        _hard_remaining, _soft_remaining = len(hard_stops), len(soft_stops)
+
     logger.info(
         f"ARQ recalc {processing_session_id}: {score_before}->{score_after} "
-        f"({status}); hard_stops {hard_before}->{len(hard_stops)}"
+        f"({status}); hard_stops {hard_before}->{len(hard_stops)} "
+        f"(distinct {_hard_remaining})"
     )
     return {
         "ok":                   True,
@@ -2625,12 +3841,20 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         "score_after":          score_after,
         "delta":                delta,
         "status":               status,
-        "hard_stops_remaining": len(hard_stops),
-        "soft_stops_remaining": len(soft_stops),
+        "hard_stops_remaining": _hard_remaining,
+        "soft_stops_remaining": _soft_remaining,
+        # Raw string counts preserved under explicit names so nothing that needs
+        # the pre-dedup figure has to recompute it.
+        "hard_stops_raw_count": len(hard_stops),
+        "soft_stops_raw_count": len(soft_stops),
         "tier":                 (package_sqs or {}).get("tier"),
         "fill_rate_before":     fill_rate_before,
         "fill_rate_after":      fill_rate_after,
         "fill_rate_delta":      fill_rate_delta,
+        # Which issues the answers resolved / worsened / left open. None when the
+        # diff could not be computed, so the UI can tell "nothing changed" apart
+        # from "we don't know".
+        "issue_diff":           issue_diff,
     }
 
 

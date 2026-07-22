@@ -348,7 +348,13 @@ async def _process_form_generation_job(job: dict, queue) -> None:
         except Exception as _vex:
             logger.warning("Job %s: stamped-consistency check skipped: %s", job_id, _vex)
 
-        cross_issues_raw     = cross_validate(session["facts"], session.get("flags", {}), form_ids)
+        # Same engine as the sync select_forms_bulk path - see the note there.
+        # These two must stay in step or an async-generated session would carry a
+        # different validation set than a sync-generated one.
+        from services.cross_form_validator import run_cross_form_validation
+        cross_issues_raw     = run_cross_form_validation(
+            session["facts"], session.get("flags", {}), set(form_ids),
+        )
         seen_msgs            = set()
         cross_issues_deduped = []
         for issue in cross_issues_raw:

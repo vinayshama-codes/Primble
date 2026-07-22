@@ -76,9 +76,16 @@ def _build_unmatched_fields():
 
 
 def _fake_openai_client(captured_messages):
-    """A stand-in for the AsyncOpenAI client - captures every `messages` kwarg
-    passed to chat.completions.create and returns a minimal valid JSON reply."""
-    async def _create(**kwargs):
+    """A stand-in for the SYNC OpenAI client - captures every `messages` kwarg
+    passed to chat.completions.create and returns a minimal valid JSON reply.
+
+    Sync (not AsyncMock) on purpose: the gap-fill pass runs its calls on
+    ThreadPoolExecutor worker threads and therefore uses the synchronous client
+    (`_get_openai_form_fill_client_sync`). It previously wrapped an async client
+    in `asyncio.run()` per call, which shared one AsyncOpenAI/httpx.AsyncClient
+    across a fresh event loop per call and could deadlock a worker forever.
+    """
+    def _create(**kwargs):
         captured_messages.append(kwargs.get("messages"))
         resp = MagicMock()
         resp.choices = [MagicMock()]
@@ -86,13 +93,13 @@ def _fake_openai_client(captured_messages):
         return resp
 
     client = MagicMock()
-    client.chat.completions.create = AsyncMock(side_effect=_create)
+    client.chat.completions.create = MagicMock(side_effect=_create)
     return client
 
 
 def test_table_columns_sent_in_a_single_llm_call():
     captured = []
-    with patch.object(pdf_service, "_get_openai_form_fill_client", return_value=_fake_openai_client(captured)):
+    with patch.object(pdf_service, "_get_openai_form_fill_client_sync", return_value=_fake_openai_client(captured)):
         pdf_service._fill_unmatched_with_gpt(
             _build_unmatched_fields(),
             facts={},
@@ -119,7 +126,7 @@ def test_table_columns_sent_in_a_single_llm_call():
 
 def test_prompt_renders_one_table_block_not_six_repeating_groups():
     captured = []
-    with patch.object(pdf_service, "_get_openai_form_fill_client", return_value=_fake_openai_client(captured)):
+    with patch.object(pdf_service, "_get_openai_form_fill_client_sync", return_value=_fake_openai_client(captured)):
         pdf_service._fill_unmatched_with_gpt(
             _build_unmatched_fields(),
             facts={},
@@ -162,7 +169,7 @@ def test_already_filled_row_is_surfaced_and_excluded_from_active_fields():
         "CommercialProperty_Premises_ValuationCode_A": "RCV",
     }
     captured = []
-    with patch.object(pdf_service, "_get_openai_form_fill_client", return_value=_fake_openai_client(captured)):
+    with patch.object(pdf_service, "_get_openai_form_fill_client_sync", return_value=_fake_openai_client(captured)):
         pdf_service._fill_unmatched_with_gpt(
             unmatched,
             facts={},
@@ -188,7 +195,7 @@ def test_no_already_filled_context_behaves_exactly_as_before():
     as it did before this fix, for the overwhelming majority of calls that
     have no such context to give."""
     captured = []
-    with patch.object(pdf_service, "_get_openai_form_fill_client", return_value=_fake_openai_client(captured)):
+    with patch.object(pdf_service, "_get_openai_form_fill_client_sync", return_value=_fake_openai_client(captured)):
         pdf_service._fill_unmatched_with_gpt(
             _build_unmatched_fields(),
             facts={},
@@ -226,7 +233,7 @@ def test_table_survives_columns_with_different_active_row_sets():
             unmatched[f"{base}_{row}"] = _ACORD_140_SCHEMA[f"{base}_{row}"]
 
     captured = []
-    with patch.object(pdf_service, "_get_openai_form_fill_client", return_value=_fake_openai_client(captured)):
+    with patch.object(pdf_service, "_get_openai_form_fill_client_sync", return_value=_fake_openai_client(captured)):
         pdf_service._fill_unmatched_with_gpt(
             unmatched, facts={}, form_id="ACORD_140",
             raw_text="Location 1: Building, $3,150,000. Location 2: Building, $2,480,000.",
@@ -257,7 +264,7 @@ def test_table_survives_columns_with_different_active_row_sets():
 
 def test_non_table_pair_still_uses_ordinary_repeating_group():
     captured = []
-    with patch.object(pdf_service, "_get_openai_form_fill_client", return_value=_fake_openai_client(captured)):
+    with patch.object(pdf_service, "_get_openai_form_fill_client_sync", return_value=_fake_openai_client(captured)):
         pdf_service._fill_unmatched_with_gpt(
             _build_unmatched_fields(),
             facts={},

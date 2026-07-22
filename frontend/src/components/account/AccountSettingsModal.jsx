@@ -4,6 +4,7 @@ import { API_BASE } from "../../config/constants";
 export default function AccountSettingsModal({ user, onClose, onUserUpdate, openBillingPortal }) {
   const [fullName, setFullName] = useState(user?.full_name || "");
   const [orgName, setOrgName] = useState(user?.organization_name || "");
+  const [phone, setPhone] = useState(user?.phone || "");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -22,6 +23,11 @@ export default function AccountSettingsModal({ user, onClose, onUserUpdate, open
         body: JSON.stringify({
           full_name: fullName.trim() || null,
           organization_name: orgName.trim() || null,
+          // null = "no change", matching full_name / organization_name above. This
+          // matters: if the in-memory user object predates the phone field, the
+          // input initializes empty, and sending "" would silently wipe a saved
+          // number. null makes an untouched field a no-op.
+          phone: phone.trim() || null,
         }),
       });
       const data = await res.json();
@@ -80,6 +86,20 @@ export default function AccountSettingsModal({ user, onClose, onUserUpdate, open
                   onChange={e => setFullName(e.target.value)}
                   placeholder="Your full name"
                 />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 700, color: "#475569" }}>Contact Phone</label>
+                <input
+                  className="acct-input"
+                  type="tel"
+                  value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                  placeholder="e.g. (512) 555-1234"
+                  maxLength={32}
+                />
+                <span style={{ fontSize: 11.5, color: "#94a3b8", fontWeight: 500 }}>
+                  Optional. Shown to clients on their questionnaire so they can reach you if they get stuck.
+                </span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                 <label style={{ fontSize: 12.5, fontWeight: 700, color: "#475569" }}>Email</label>

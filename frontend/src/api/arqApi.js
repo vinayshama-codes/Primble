@@ -45,6 +45,13 @@ export async function markArqNotificationsRead() {
   });
 }
 
+// Figure 21: the immutable client response receipt. Read-only by design -
+// there is no update/delete counterpart on the server.
+export async function getArqReceipt(arq_id) {
+  const res = await fetch(`${API_BASE}/api/arq/receipt/${arq_id}`, { credentials: "include" });
+  return { ok: res.ok, data: await res.json() };
+}
+
 export async function getClientFilledFields(session_id) {
   const res = await fetch(`${API_BASE}/api/arq/client-filled/${session_id}`, { credentials: "include" });
   return res.ok ? (await res.json()).client_filled_fields || [] : [];

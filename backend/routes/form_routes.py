@@ -51,7 +51,9 @@ from services.sqs_service import (
     check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION, classify_stops,
     _check_loss_run_insured_match, _extract_narrative_doc_text,
 )
-from services.issue_registry import build_grouped_view, make_issue
+from services.issue_registry import (
+    build_grouped_view, build_structured_from_sources, make_issue, normalize_issue_type,
+)
 from services.audit_service import (
     log_recommendations_presented,
     log_field_change,
@@ -70,6 +72,35 @@ from utils.virus_scanner import scan_file_bytes
 
 router = APIRouter(tags=["forms"])
 logger = logging.getLogger(__name__)
+
+
+def _grouped_cross_issues_or_none(cross_issues: list) -> Optional[dict]:
+    """Cluster + tier a raw cross_form_validator issue list for display (Fig 24).
+
+    Every JSON response that hands the editor a `cross_issues` list must also
+    hand it this, or the editor's Cross-Form Validation panel falls back to
+    rendering that list flat, in raw emit order - undeduplicated and
+    unsequenced, exactly the defect the client reported. There are several such
+    response sites (initial form generation, a field edit, a session reload),
+    and each one must call this the same way or the panel's behaviour depends
+    on which action the producer took last.
+
+    include_advisories=True: this panel displays the raw list as-is, which
+    carries advisories (UM/UIM, ACORD 101 narrative) that intentionally never
+    enter hard_stops/soft_stops. Dropping them here would silently delete rows
+    the flat list used to show.
+    """
+    try:
+        _typed = [(normalize_issue_type(i.get("type")), i.get("message", ""))
+                  for i in (cross_issues or []) if isinstance(i, dict)]
+        return build_grouped_view(
+            build_structured_from_sources(cross_issues=cross_issues, include_advisories=True),
+            [m for t, m in _typed if t == "hard_stop"],
+            [m for t, m in _typed if t == "soft_warning"],
+        )
+    except Exception as _gx:
+        logger.error(f"grouped_cross_issues computation failed (non-fatal): {_gx}")
+        return None
 
 
 def _humanize_fact(v):
@@ -1111,7 +1142,18 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
         except Exception as _vex:
             logger.warning("select_forms_bulk: stamped-consistency check skipped: %s", _vex)
 
-        cross_issues_raw     = cross_validate(session["facts"], session["flags"], combined_ids)
+        # Use the SAME cross-form engine as every other lifecycle point. This
+        # path previously called sqs_service.cross_validate() - a 16-rule legacy
+        # function with no rule codes - while update_pdf, the ARQ recalculation
+        # and the extraction pipeline all call the 45-rule cross_form_validator.
+        # The producer therefore saw a short, uncoded list at generation that
+        # silently tripled the first time anything re-scored the session. The
+        # rules are gated on which forms are selected, so `combined_ids` is the
+        # trigger set, exactly as update_pdf uses its own selected ids.
+        from services.cross_form_validator import run_cross_form_validation
+        cross_issues_raw     = run_cross_form_validation(
+            session["facts"], session["flags"], set(combined_ids),
+        )
         seen_msgs            = set()
         cross_issues_deduped = []
         for issue in cross_issues_raw:
@@ -1232,6 +1274,7 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             "generated": summary,
             "form_ids": combined_ids,
             "cross_issues": _display_cross,
+            "grouped_cross_issues": _grouped_cross_issues_or_none(_display_cross),
             "package_sqs": package_sqs,
             "stamp_consistency": _stamp_check,
         })
@@ -1756,6 +1799,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
         return JSONResponse({"success": True, "sqs": sqs, "confidence": confidence,
                              "package_sqs": pkg_sqs, "cross_issues": _display_cross,
+                             "grouped_cross_issues": _grouped_cross_issues_or_none(_display_cross),
                              "stamp_consistency": _stamp_check})
     except HTTPException:
         raise
@@ -1778,9 +1822,18 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
     # restore the editor shell. The PDF viewer fetches form data lazily per-form.
     summary   = {fid: {"form_id": r.get("form_id", fid), "form_name": r.get("form_name", fid),
                         "sqs": r.get("sqs", {})} for fid, r in generated.items()}
+
+    _cross = proc_session.get("cross_issues_last", []) or []
     return JSONResponse({"session_id": session_id, "generated_forms": summary,
-                         "cross_issues": proc_session.get("cross_issues_last", []),
+                         "cross_issues": _cross,
+                         "grouped_cross_issues": _grouped_cross_issues_or_none(_cross),
                          "package_sqs": proc_session.get("package_sqs"),
+                         # Fig 24: what the last client questionnaire resolved /
+                         # worsened / left open. This endpoint (not
+                         # /extraction-result) is what restores a session that
+                         # already HAS generated forms, i.e. every session that
+                         # can have had a questionnaire sent from the editor.
+                         "issue_diff": proc_session.get("issue_diff_last"),
                          # Fig 8: present only while a generation is still running
                          # (cleared once forms are stored). Lets a reopened session
                          # resume the progress overlay with the remaining time.
@@ -1814,8 +1867,13 @@ async def get_extraction_result(
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
     integrity  = proc_session.get("integrity") or {}
     _final_soft_stops = proc_session.get("soft_stops", []) + _downgraded
+    # cross_issues_last is passed explicitly: cross-form issues are never copied
+    # into structured_issues, so without it every one of them lands in
+    # build_grouped_view's uncoded safety net and collapses into a single
+    # "Other validations" cluster instead of its real one.
     _grouped_issues = build_grouped_view(
-        proc_session.get("structured_issues") or [], _remaining_hard, _final_soft_stops
+        proc_session.get("structured_issues") or [], _remaining_hard, _final_soft_stops,
+        cross_issues=proc_session.get("cross_issues_last") or [],
     )
 
     return JSONResponse({
@@ -1830,6 +1888,9 @@ async def get_extraction_result(
         "can_proceed_with_warning": _can_proceed_warn,
         "warning_stops":         _downgraded,
         "grouped_issues":        _grouped_issues,
+        # What the last client questionnaire actually changed (Figure 24).
+        # None until an ARQ has been submitted and recalculated.
+        "issue_diff":            proc_session.get("issue_diff_last"),
         # Submission Integrity (§4.1): same withholding as the upload response - a
         # paused session reloaded (e.g. browser refresh on the review screen) must
         # not re-transmit the readiness number derived from a possibly-mixed package.

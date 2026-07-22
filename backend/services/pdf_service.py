@@ -30,13 +30,14 @@ GPT_TEMPERATURE = float(os.getenv("GPT_TEMPERATURE", "0.0"))
 # Client is created on first use so Pass 1 deterministic fills work without
 # OPENAI_API_KEY being present.
 try:
-    from openai import AsyncOpenAI as _AsyncOpenAI
+    from openai import AsyncOpenAI as _AsyncOpenAI, OpenAI as _SyncOpenAI
     _HAS_OPENAI = True
 except ImportError:
     _HAS_OPENAI = False
     logger.warning("openai package not installed — GPT form fill pass disabled")
 
 _openai_form_fill_client = None
+_openai_form_fill_client_sync = None
 
 
 def _get_openai_form_fill_client():
@@ -57,6 +58,43 @@ def _get_openai_form_fill_client():
             ),
         )
     return _openai_form_fill_client
+
+
+def _get_openai_form_fill_client_sync():
+    """SYNCHRONOUS form-fill client, for the ThreadPoolExecutor gap-fill path.
+
+    Why a separate client (deadlock fix): an `httpx.AsyncClient` binds its
+    connection pool AND its timeout timers to the event loop that created them.
+    The gap-fill pass runs its calls on worker threads that each did
+    `asyncio.run()` — a NEW event loop per call — while sharing the single
+    module-level AsyncOpenAI client above. When a worker picked up a pooled
+    connection created on another thread's now-closed loop, the await parked on
+    a dead loop: it never completed, and the timeout never fired because that
+    timer lived on the dead loop too. No exception, no log line — the thread
+    simply blocked forever, and `concurrent.futures.as_completed()` waited on it
+    forever, hanging the whole request. (Observed live: 4 compliance batches
+    dispatched, 3 returned HTTP 200, the 4th vanished and all logging stopped.)
+
+    `httpx.Client` is thread-safe and loop-free, so one shared sync client is
+    both correct and connection-pool efficient across all worker threads.
+    """
+    global _openai_form_fill_client_sync
+    if _openai_form_fill_client_sync is None:
+        if not _HAS_OPENAI:
+            raise RuntimeError("openai package not installed — install it with: pip install openai")
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        if not api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY not set — GPT form-fill pass unavailable. "
+                "Set OPENAI_API_KEY in your .env file."
+            )
+        _openai_form_fill_client_sync = _SyncOpenAI(
+            api_key=api_key,
+            http_client=httpx.Client(
+                timeout=float(os.getenv("LLM_REQUEST_TIMEOUT", "120")),
+            ),
+        )
+    return _openai_form_fill_client_sync
 
 # ── PII fields excluded from LLM prompts (SOC2 / data minimisation) ──────────
 # These fields are handled deterministically by Pass 1 (_ACORD_FIELD_RULES +
@@ -122,12 +160,25 @@ class _ScheduleDef(NamedTuple):
 
 _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     # ── Vehicles (ACORD 127) ────────────────────────────────────────────────
+    # NOTE (2026-07-21): the four `Vehicle_*Identifier`/`*Name`/`BodyCode` entries
+    # below are the names ACORD 127 ACTUALLY uses. Audited against all 17 real
+    # schemas: of the vehicle entries only `Vehicle_ModelYear` and
+    # `Vehicle_GrossVehicleWeight` matched a real field, so VIN / make / model /
+    # body type were extracted by `extraction_service` into `auto_vin_schedule`
+    # and then had nowhere to land - the identity columns of the vehicle schedule
+    # could never be stamped, and those boxes fell through to a gap-fill guess.
+    # The generic aliases are retained (harmless, and other ACORD editions may
+    # use them); these additions are what make the binding live.
     "Vehicle_ModelYear":             _ScheduleDef("auto_vin_schedule", "year"),
     "Vehicle_Year":                  _ScheduleDef("auto_vin_schedule", "year"),
+    "Vehicle_ManufacturersName":     _ScheduleDef("auto_vin_schedule", "make"),
     "Vehicle_Make":                  _ScheduleDef("auto_vin_schedule", "make"),
+    "Vehicle_ModelName":             _ScheduleDef("auto_vin_schedule", "model"),
     "Vehicle_Model":                 _ScheduleDef("auto_vin_schedule", "model"),
+    "Vehicle_VINIdentifier":         _ScheduleDef("auto_vin_schedule", "vin"),
     "Vehicle_VINNumber":             _ScheduleDef("auto_vin_schedule", "vin"),
     "Vehicle_VIN":                   _ScheduleDef("auto_vin_schedule", "vin"),
+    "Vehicle_BodyCode":              _ScheduleDef("auto_vin_schedule", "body_type"),
     "Vehicle_BodyStyle":             _ScheduleDef("auto_vin_schedule", "body_type"),
     "Vehicle_BodyType":              _ScheduleDef("auto_vin_schedule", "body_type"),
     "Vehicle_GrossVehicleWeight":    _ScheduleDef("auto_vin_schedule", "gvw"),
@@ -1725,6 +1776,29 @@ def _resolve_no_loss_indicator(field_name: str, facts: dict, raw_text: str = "")
     return "UNMATCHED"
 
 
+def _resolve_via_field_rules(field_name: str, facts: dict):
+    """The plain `_ACORD_FIELD_RULES` substring lookup, factored out so it can
+    also serve as a fallback for row A of a schedule-shadowed field (see the
+    call site in `_deterministic_map`) without duplicating this logic."""
+    for pattern, fact_key in _ACORD_FIELD_RULES:
+        if pattern in field_name:
+            if fact_key is None:
+                return None
+            if fact_key.startswith("_"):
+                if fact_key.startswith("_addr_") and not field_name.startswith("NamedInsured_"):
+                    return "UNMATCHED"
+                return _resolve_special(fact_key, facts, "_" + fact_key.split("_")[1]) or None
+            val = _fv(facts, fact_key)
+            if fact_key == "valuation_method" and isinstance(val, str):
+                val = _VALUATION_METHOD_TO_ACORD_CODE.get(val.strip().lower(), val)
+            if isinstance(val, list):
+                if "Indicator" in field_name and isinstance(val, list):
+                    return _derive_indicator(field_name, facts)
+                return str(val[0]) if val else None
+            return str(val) if val is not None else None
+    return None
+
+
 def _deterministic_map(field_name: str, facts: dict):
     # ── Loss-history no-loss checkbox (single source of truth with SQS) ─────
     no_loss = _resolve_no_loss_indicator(field_name, facts)
@@ -1744,6 +1818,35 @@ def _deterministic_map(field_name: str, facts: dict):
     # ── Schedule row resolution (highest priority) ───────────────────────────
     sched = _resolve_schedule_row(field_name, facts)
     if sched is not _SCHED_SKIP:
+        # A handful of `_ACORD_FIELD_RULES` entries share their EXACT base name
+        # with a `_SCHEDULE_REGISTRY` entry (e.g. BusinessInformation_
+        # FullTimeEmployeeCount is both "the num_employees rule" AND "column
+        # full_time_employees of the property_locations schedule") - swept
+        # across the full registry (2026-07): 4 such pairs exist. The schedule
+        # check runs first and unconditionally wins, which is correct WHEN a
+        # genuine structured breakdown exists (a real per-location employee
+        # split, a real per-line prior-coverage schedule) - but when NO such
+        # breakdown was ever captured (the common case: a document just states
+        # one overall total), it silently shadows the simple scalar fact
+        # forever, even after a client explicitly confirms it via ARQ.
+        #
+        # Live finding: a client answered "How many people does your business
+        # employ?" - `facts['num_employees']` updated and SQS moved, but the
+        # actual PDF box never changed, because this exact interception
+        # returned None (property_locations has no entries) before the plain
+        # num_employees rule was ever reached.
+        #
+        # Scoped narrowly to row A only: `_resolve_schedule_row` returns None
+        # at row A (list index 0) if and only if the schedule's list is
+        # COMPLETELY EMPTY - never as "too short for this particular row",
+        # since index 0 always exists whenever the list has at least one real
+        # entry. So this fallback can never override or hide genuine partial
+        # schedule data, and rows B/C/D+ are untouched - a document with real
+        # per-location or per-line data still uses it, exactly as before.
+        if sched is None and field_name.endswith("_A"):
+            fallback = _resolve_via_field_rules(field_name, facts)
+            if fallback is not None and fallback != "UNMATCHED":
+                return fallback
         return sched  # None means blank; any string is the resolved value
 
     # Layer: Location\d+_SubField  →  facts["locations"][N-1] or sub-key lookup
@@ -2724,7 +2827,10 @@ def _fill_unmatched_with_gpt(
         return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "question_grounding": {}, "model_used": model or GPT_MODEL}
 
     try:
-        _client = _get_openai_form_fill_client()
+        # Gap fill dispatches its LLM calls onto worker threads, so it uses the
+        # SYNC client — sharing the async one across per-call event loops is what
+        # caused the generation-hang deadlock (see the factory's docstring).
+        _sync_client = _get_openai_form_fill_client_sync()
     except RuntimeError as _e:
         logger.warning("gpt_fill: %s — skipping GPT form fill pass", _e)
         return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "question_grounding": {}, "model_used": model or GPT_MODEL}
@@ -3254,11 +3360,19 @@ def _fill_unmatched_with_gpt(
 
     # ── LLM caller with retry (reusable for any system+user+schema) ───────────
     def _chat_json(system_msg: str, user_msg: str, response_format: dict) -> dict:
-        async def _inner():
-            from utils.llm_limiter import get_llm_semaphore
-            async with get_llm_semaphore():
+        # Runs on ThreadPoolExecutor worker threads. This is DELIBERATELY fully
+        # synchronous: the previous implementation wrapped an async call in
+        # asyncio.run(), creating a fresh event loop per call while sharing one
+        # module-level AsyncOpenAI client. That let a worker await a pooled
+        # connection owned by another thread's already-closed loop, which hung
+        # forever with the timeout timer stranded on the dead loop — see
+        # _get_openai_form_fill_client_sync() for the full analysis.
+        from utils.llm_limiter import llm_slot_sync
+
+        def _inner() -> str:
+            with llm_slot_sync():
                 try:
-                    resp = await _client.chat.completions.create(
+                    resp = _sync_client.chat.completions.create(
                         model=llm_model,
                         messages=[
                             {"role": "system", "content": system_msg},
@@ -3276,7 +3390,7 @@ def _fill_unmatched_with_gpt(
                         "gpt_fill: json_schema response_format rejected (%s) — "
                         "falling back to json_object for this call", _schema_err,
                     )
-                    resp = await _client.chat.completions.create(
+                    resp = _sync_client.chat.completions.create(
                         model=llm_model,
                         messages=[
                             {"role": "system", "content": system_msg},
@@ -3291,7 +3405,7 @@ def _fill_unmatched_with_gpt(
         import time as _time
         for attempt in range(_FORM_FILL_BATCH_RETRIES):
             try:
-                return json.loads(_run_coro_sync(_inner()))
+                return json.loads(_inner())
             except Exception as ex:
                 if attempt < _FORM_FILL_BATCH_RETRIES - 1:
                     wait = min(2 ** attempt, 8)
@@ -4833,6 +4947,234 @@ def _value_in_raw_text(value: str, haystack_norm: str) -> bool:
     return bool(tokens) and all(t in haystack_norm for t in tokens)
 
 
+# ── Guard: fabricated industry-classification codes ─────────────────────────
+# Live finding (2026-07-20, two independent submissions, different industries):
+# ACORD 125's GL CODE / SIC / NAICS boxes came back filled with REAL, correct
+# codes for the applicant's industry that appear NOWHERE in the uploaded
+# document - 236220 + 5403 for a commercial GC, then 561730 + 0782 for a
+# landscaper. The gap-fill model recognised the industry from the operations
+# narrative and supplied the code from its own world knowledge. A classification
+# code is a regulated identifier that drives rating and eligibility: an
+# authoritative-looking wrong code on a submitted ACORD is worse than a blank
+# box, and a producer has no way to tell the invented ones apart.
+#
+# The check is deterministic and purely structural - no LLM, no topic matching
+# (see evidence-gate-design memory). A code is kept ONLY when the document
+# both (a) mentions that code SYSTEM by name and (b) contains the value itself.
+# Requiring the system name is what catches cross-family bleed: the GC document
+# did contain "5403", but only as a WORKERS COMP class code, and it never says
+# "SIC" anywhere - so 5403 cannot be a grounded SIC code.
+#
+# Deterministic (Pass 1 / alias) and client-supplied values are never touched -
+# only values this run's gap-fill LLM authored.
+_CLASSIFICATION_CODE_LABELS: List[Tuple[str, Tuple[str, ...]]] = [
+    ("SICCode",              ("sic",)),
+    ("NAICSCode",            ("naics",)),
+    ("GeneralLiabilityCode", ("gl code", "gl class", "general liability code",
+                              "general liability class")),
+]
+
+
+def _drop_ungrounded_classification_codes(
+    mapped: dict, raw_text: str, gpt_filled_set: set,
+) -> List[str]:
+    """Blank any AI-filled SIC / NAICS / GL classification code that the source
+    document does not actually support. Returns the list of blanked fields."""
+    if not raw_text or not gpt_filled_set:
+        return []
+    hay_norm = _normalize_for_search(raw_text)
+    hay_low  = raw_text.lower()
+    dropped: List[str] = []
+
+    for field in list(mapped.keys()):
+        if field not in gpt_filled_set:
+            continue
+        val = mapped.get(field)
+        if val is None or not str(val).strip():
+            continue
+        for token, labels in _CLASSIFICATION_CODE_LABELS:
+            if token not in field:
+                continue
+            label_present = any(lbl in hay_low for lbl in labels)
+            value_present = _value_in_raw_text(str(val), hay_norm)
+            if not (label_present and value_present):
+                logger.info(
+                    "gpt_fill DROP_UNGROUNDED_CODE: field=%s value=%r "
+                    "label_in_doc=%s value_in_doc=%s",
+                    field, val, label_present, value_present,
+                )
+                mapped[field] = None
+                dropped.append(field)
+            break
+    return dropped
+
+
+# ── Guard: the insured's own address bleeding into a THIRD PARTY's block ─────
+# Live finding (2026-07-20): ACORD 125's PRODUCER block showed the applicant's
+# street address. The deterministic rule for this was already fixed (see
+# _deterministic_map: `_addr_*` resolves for NamedInsured_* only, everything
+# else returns UNMATCHED) - so the field correctly fell through to gap-fill,
+# and gap-fill then supplied the applicant's address because it was the only
+# address in the document. Blanking the deterministic path alone was therefore
+# not enough; the same wrong value simply arrived one pass later.
+#
+# A producer / certificate holder / mortgagee is by definition a DIFFERENT
+# entity from the insured, so its street address matching the insured's own is
+# a fill error, never a coincidence. Matching is done on the STREET line only -
+# a third party genuinely can share the insured's city, state or ZIP - and when
+# it matches, the whole address block for that entity is cleared so a stray
+# city/ZIP is not left behind orphaned next to a blanked street.
+#
+# This is a value-IDENTITY check against one known fact with a different
+# purpose (the same shape as _is_generic_boilerplate_reuse), not a keyword or
+# topic heuristic.
+# Swept across all 17 schemas for entity blocks that own an address: the ones
+# below are the THIRD PARTIES (a different legal entity from the insured).
+# Deliberately EXCLUDED, because the insured's own address is legitimate there:
+#   NamedInsured / CommercialStructure / Location  - the insured's own premises
+#   Vehicle                                        - garaging is often the yard
+#   EmployeeBenefitPlan                            - a small employer really can
+#                                                    administer its own plan
+_THIRD_PARTY_ADDRESS_BLOCKS: Tuple[str, ...] = (
+    "Producer_MailingAddress",
+    "AdditionalInterest_MailingAddress",
+    "CertificateHolder_MailingAddress",
+    "Auditor_MailingAddress",
+    "Auditor_Address",
+)
+
+
+def _drop_third_party_address_bleed(
+    mapped: dict, facts: dict, gpt_filled_set: set,
+) -> List[str]:
+    """Clear a third party's address block when its street line is really the
+    insured's own address. Returns the list of blanked fields."""
+    if not gpt_filled_set:
+        return []
+    insured_addr = _fv(facts, "mailing_address")
+    if not insured_addr or not str(insured_addr).strip():
+        return []
+    insured_norm = _normalize_for_search(str(insured_addr))
+    if not insured_norm:
+        return []
+
+    dropped: List[str] = []
+    for block in _THIRD_PARTY_ADDRESS_BLOCKS:
+        # Find this block's street line(s) and test them against the insured's.
+        bleed_rows: set = set()
+        for field, val in mapped.items():
+            if not field.startswith(block) or "LineOne" not in field:
+                continue
+            if field not in gpt_filled_set:
+                continue
+            if val is None or len(str(val).strip()) < 5:
+                continue
+            if _normalize_for_search(str(val)) in insured_norm:
+                # Row suffix (_A/_B/…) so only the offending row is cleared.
+                _m = re.search(r"_([A-N])$", field)
+                bleed_rows.add(_m.group(1) if _m else "")
+
+        if not bleed_rows:
+            continue
+        for field in list(mapped.keys()):
+            if not field.startswith(block):
+                continue
+            _m = re.search(r"_([A-N])$", field)
+            if (_m.group(1) if _m else "") not in bleed_rows:
+                continue
+            if mapped.get(field) is None or not str(mapped.get(field)).strip():
+                continue
+            if field not in gpt_filled_set:
+                continue  # never touch a deterministic / client value
+            logger.info(
+                "gpt_fill DROP_ADDRESS_BLEED: field=%s value=%r "
+                "(matches the insured's own mailing address)",
+                field, mapped.get(field),
+            )
+            mapped[field] = None
+            dropped.append(field)
+    return dropped
+
+
+# ── Guard: a NAIC number labelled for one entity, stamped for another ────────
+# Live finding (2026-07-20): ACORD 125's CARRIER NAIC CODE box (Insurer_NAICCode
+# - the CARRIER's own NAIC number) showed the PRODUCER's NAIC number instead.
+# The document states "Producer NAIC Number: 41982" and never states a NAIC
+# number for the carrier (Pinnacle Mutual Insurance) at all. There is no
+# structured `producer_naic` fact anywhere in the extraction schema for this
+# guard to compare against (unlike the address guard above, which has
+# `facts['mailing_address']`) - "producer NAIC number" simply has no home, so
+# gap-fill reached for the only NAIC-shaped number anywhere in the document.
+#
+# This is a DIFFERENT mechanism from both guards above: the value is not
+# fabricated (5-digit codes like a WC class code, above) and it is not a known
+# fact belonging to a different entity (the address guard, above) - it is a
+# real number in the document whose OWN label names a different entity than
+# the field being filled. So the check is text-proximity: does this number, at
+# the point it actually appears in the document, sit next to language for the
+# RIGHT entity (carrier/insurer) rather than a different one (producer/agency)?
+#
+# Every occurrence of the value is checked (a document can repeat a number);
+# the value is kept if ANY occurrence is carrier/insurer-labelled. It is only
+# dropped when EVERY occurrence is labelled for a different role - so a
+# genuinely stated carrier NAIC number is never at risk even if the SAME
+# digits happen to also appear elsewhere for an unrelated reason.
+_NAIC_FIELD_TOKENS: Tuple[str, ...] = ("Insurer_NAICCode", "PriorCoverage_NAICCode")
+_NAIC_OWN_ROLE_WORDS   = ("insurer", "carrier", "insurance company", "underwriter", "company")
+_NAIC_OTHER_ROLE_WORDS = ("producer", "agency", "agent", "broker")
+_NAIC_CONTEXT_WINDOW   = 45  # chars of context immediately before the number
+
+
+def _drop_mislabeled_naic_codes(
+    mapped: dict, raw_text: str, gpt_filled_set: set,
+) -> List[str]:
+    """Blank an AI-filled Insurer/PriorCoverage NAIC code whose only grounding
+    in the document is labelled for a DIFFERENT entity (producer/agency, not
+    carrier/insurer). Returns the list of blanked fields."""
+    if not raw_text or not gpt_filled_set:
+        return []
+    hay_low = raw_text.lower()
+    dropped: List[str] = []
+
+    for field in list(mapped.keys()):
+        if field not in gpt_filled_set:
+            continue
+        if not any(tok in field for tok in _NAIC_FIELD_TOKENS):
+            continue
+        val = mapped.get(field)
+        if val is None or not str(val).strip():
+            continue
+        digits = re.sub(r"\D", "", str(val))
+        if len(digits) < 4:
+            continue  # too short to search for meaningfully
+
+        any_own_role   = False
+        any_other_only = False
+        start = 0
+        while True:
+            idx = hay_low.find(digits, start)
+            if idx == -1:
+                break
+            window = hay_low[max(0, idx - _NAIC_CONTEXT_WINDOW): idx]
+            has_own   = any(w in window for w in _NAIC_OWN_ROLE_WORDS)
+            has_other = any(w in window for w in _NAIC_OTHER_ROLE_WORDS)
+            if has_own:
+                any_own_role = True
+            elif has_other:
+                any_other_only = True
+            start = idx + len(digits)
+
+        if not any_own_role and any_other_only:
+            logger.info(
+                "gpt_fill DROP_MISLABELED_NAIC: field=%s value=%r "
+                "(only labelled for a different entity in the document)",
+                field, val,
+            )
+            mapped[field] = None
+            dropped.append(field)
+    return dropped
+
+
 # ── Stricter verification for LLM-authored "grounding quotes" ───────────────
 # _value_in_raw_text's word-subset fallback exists to forgive a lightly
 # REWORDED real value (dropped suffix, reordered tokens on an address/name).
@@ -5047,14 +5389,22 @@ _UMBRELLA_PERIOD_RESPONSE_FORMAT = {
 }
 
 
-async def _fetch_umbrella_period(raw_text: str) -> Optional[dict]:
-    """Ask, in isolation, whether the document states a distinct umbrella/excess
-    policy period. Returns {"umbrella_effective_date": ..., "umbrella_expiration_date": ...}
+def _fetch_umbrella_period_sync(raw_text: str) -> Optional[dict]:
+    """Synchronous implementation of the umbrella-period probe.
+
+    This is the single source of truth for the call. It is fully synchronous and
+    uses the SYNC OpenAI client so it is safe to invoke directly from a
+    ThreadPoolExecutor worker — the previous code reached this logic via
+    `_run_coro_sync(...)`, i.e. `asyncio.run()` on a worker thread sharing the
+    module-level AsyncOpenAI client, which is the same cross-event-loop deadlock
+    documented on `_get_openai_form_fill_client_sync()`.
+
+    Returns {"umbrella_effective_date": ..., "umbrella_expiration_date": ...}
     (either value may be None) or None on any failure — advisory only, never
     raises past this function so a call-site failure can't block form generation.
     """
     try:
-        _client = _get_openai_form_fill_client()
+        _client = _get_openai_form_fill_client_sync()
     except RuntimeError as exc:
         logger.warning("gpt_fill UMBRELLA_PERIOD: %s — skipping", exc)
         return None
@@ -5063,9 +5413,9 @@ async def _fetch_umbrella_period(raw_text: str) -> Optional[dict]:
     user_msg = f"=== DOCUMENT TEXT ===\n{text}"
 
     try:
-        from utils.llm_limiter import get_llm_semaphore
-        async with get_llm_semaphore():
-            resp = await _client.chat.completions.create(
+        from utils.llm_limiter import llm_slot_sync
+        with llm_slot_sync():
+            resp = _client.chat.completions.create(
                 model=GPT_MODEL,
                 messages=[
                     {"role": "system", "content": _UMBRELLA_PERIOD_SYSTEM_PROMPT},
@@ -5086,6 +5436,19 @@ async def _fetch_umbrella_period(raw_text: str) -> Optional[dict]:
     except Exception as exc:                              # noqa: BLE001 — advisory only
         logger.warning("gpt_fill UMBRELLA_PERIOD: call failed — %s", exc)
         return None
+
+
+async def _fetch_umbrella_period(raw_text: str) -> Optional[dict]:
+    """Async wrapper kept for the awaiting caller (extraction_pipeline).
+
+    Delegates to the sync implementation on a worker thread, so there is exactly
+    ONE request code path and no AsyncOpenAI client is ever shared across event
+    loops. Offloading also keeps the blocking semaphore acquire off the loop.
+    """
+    import asyncio as _asyncio
+    return await _asyncio.get_event_loop().run_in_executor(
+        None, _fetch_umbrella_period_sync, raw_text,
+    )
 
 
 def map_facts_to_form(
@@ -5159,7 +5522,9 @@ def map_facts_to_form(
         _has_umb_exp = not _is_empty_llm_value(_fv(facts, "umbrella_expiration_date"))
         if not (_has_umb_eff and _has_umb_exp):
             try:
-                _umb_dates = _run_coro_sync(_fetch_umbrella_period(raw_text))
+                # Direct sync call — map_facts_to_form runs on a worker thread,
+                # so wrapping this in asyncio.run() risked the cross-loop hang.
+                _umb_dates = _fetch_umbrella_period_sync(raw_text)
             except Exception as exc:                      # noqa: BLE001 — advisory only
                 logger.warning("map_facts UMBRELLA_PERIOD form=%s | error: %s", form_id, exc)
                 _umb_dates = None
@@ -5626,6 +5991,22 @@ def map_facts_to_form(
     # legal-entity mutual exclusion and repeating-row de-duplication. Runs on the
     # merged result so it corrects values from any source (Pass 1, alias, GPT).
     _enforce_post_fill_guards(mapped, schema, facts)
+
+    # ── Guard: ungrounded industry-classification codes ───────────────────────
+    # Runs BEFORE the trust-labelling pass below so a dropped value can never be
+    # painted "ai_verified" on its way out.
+    _dropped_codes = _drop_ungrounded_classification_codes(mapped, raw_text, gpt_filled_set)
+
+    # ── Guard: insured's own address bleeding into a third party's block ──────
+    _dropped_addr = _drop_third_party_address_bleed(mapped, facts, gpt_filled_set)
+
+    # ── Guard: a NAIC number labelled for one entity, stamped for another ─────
+    _dropped_naic = _drop_mislabeled_naic_codes(mapped, raw_text, gpt_filled_set)
+
+    # Values that were just blanked are no longer AI-filled - drop them from the
+    # fill set so downstream confidence/QA passes don't reason about a dead value.
+    for _df in (_dropped_codes + _dropped_addr + _dropped_naic):
+        gpt_filled_set.discard(_df)
 
     # ── Raw-text verification (Figure 26 trust check — no LLM) ────────────────
     # Confirm every value the AI filled actually appears in the uploaded document

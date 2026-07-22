@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { sendArqReminder } from "../../api/arqApi";
+import ARQReceiptModal from "./ARQReceiptModal";
 
 // §6.2: post-remediation status vocabulary (7 states)
 const REMEDIATION_LABEL = {
@@ -14,6 +15,8 @@ const REMEDIATION_LABEL = {
 
 export default function ARQStatusPanel({ arqSessions, token, onRefresh }) {
   const [reminding, setReminding] = useState(null);
+  // Figure 21: which submitted questionnaire's response receipt is open.
+  const [receiptFor, setReceiptFor] = useState(null);
 
   const handleRemind = async (arq_id) => {
     setReminding(arq_id);
@@ -51,6 +54,16 @@ export default function ARQStatusPanel({ arqSessions, token, onRefresh }) {
           const sc = statusColor[displayStatus] || statusColor.pending;
           const remStatus = arq.remediation_status ? REMEDIATION_LABEL[arq.remediation_status] : null;
           const fieldsCount = arq.fields_answered_count || 0;
+          // Questions the client explicitly answered "I'm not sure" on. Distinct
+          // from questions they never reached - these need producer follow-up.
+          const notSureList  = Array.isArray(arq.not_sure_fields) ? arq.not_sure_fields : [];
+          const notSureCount = arq.not_sure_count ?? notSureList.length;
+          // Figure 18: answers the client DID give that we could not normalize
+          // (an unreadable date, a NAICS code of the wrong width). These are
+          // saved on the form as-is - they need a confirming glance, not a
+          // re-ask, which is why they are kept separate from the list above.
+          const reviewList   = Array.isArray(arq.review_fields) ? arq.review_fields : [];
+          const reviewCount  = arq.review_count ?? reviewList.length;
 
           return (
             <div key={arq.id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px" }}>
@@ -87,7 +100,47 @@ export default function ARQStatusPanel({ arqSessions, token, onRefresh }) {
                         </div>
                       )}
 
-                      {!remStatus && fieldsCount === 0 && (
+                      {/* Client explicitly could not answer these - follow up */}
+                      {notSureCount > 0 && (
+                        <div style={{ fontSize: 11, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, padding: "6px 8px" }}>
+                          <div style={{ fontWeight: 700, marginBottom: notSureList.length ? 4 : 0 }}>
+                            {notSureCount} question{notSureCount !== 1 ? "s" : ""} the client wasn't sure about - needs your follow-up
+                          </div>
+                          {notSureList.slice(0, 5).map((item, i) => (
+                            <div key={i} style={{ color: "#b45309", lineHeight: 1.45 }}>
+                              • {typeof item === "string" ? item : (item.question || item.field_name)}
+                            </div>
+                          ))}
+                          {notSureList.length > 5 && (
+                            <div style={{ color: "#b45309", marginTop: 2 }}>
+                              + {notSureList.length - 5} more
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Saved, but the format was unexpected - confirm these */}
+                      {reviewCount > 0 && (
+                        <div style={{ fontSize: 11, color: "#9a3412", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 6, padding: "6px 8px" }}>
+                          <div style={{ fontWeight: 700, marginBottom: reviewList.length ? 4 : 0 }}>
+                            {reviewCount} answer{reviewCount !== 1 ? "s" : ""} saved but worth confirming
+                          </div>
+                          {reviewList.slice(0, 5).map((item, i) => (
+                            <div key={i} style={{ color: "#c2410c", lineHeight: 1.45 }}>
+                              • {item.question || item.field_name}
+                              {item.value ? ` - client entered "${item.value}"` : ""}
+                              {item.reason ? ` (${item.reason})` : ""}
+                            </div>
+                          ))}
+                          {reviewList.length > 5 && (
+                            <div style={{ color: "#c2410c", marginTop: 2 }}>
+                              + {reviewList.length - 5} more
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {!remStatus && fieldsCount === 0 && notSureCount === 0 && reviewCount === 0 && (
                         <div style={{ fontSize: 11, color: "#047857" }}>
                           Scores and form data updated - reload session to view changes
                         </div>
@@ -99,6 +152,18 @@ export default function ARQStatusPanel({ arqSessions, token, onRefresh }) {
                   {displayStatus === "submitted" ? "✓ Submitted" : displayStatus === "expired" ? "Expired" : "Pending"}
                 </span>
               </div>
+
+              {/* Figure 21: the producer's read-only view of exactly what the
+                  client sent. Previously there was no way to see the answers
+                  themselves anywhere in this panel - only the follow-up lists. */}
+              {displayStatus === "submitted" && (
+                <button
+                  onClick={() => setReceiptFor(arq)}
+                  style={{ marginTop: 8, fontSize: 11, fontWeight: 600, color: "#0f172a", background: "none", border: "1px solid #cbd5e1", borderRadius: 6, padding: "3px 10px", cursor: "pointer" }}
+                >
+                  View response receipt
+                </button>
+              )}
 
               {arq.status === "pending" && !isExpired && (
                 <button
@@ -114,6 +179,14 @@ export default function ARQStatusPanel({ arqSessions, token, onRefresh }) {
           );
         })}
       </div>
+
+      {receiptFor && (
+        <ARQReceiptModal
+          arqId={receiptFor.id}
+          clientLabel={receiptFor.client_name ? `${receiptFor.client_name} (${receiptFor.email})` : receiptFor.email}
+          onClose={() => setReceiptFor(null)}
+        />
+      )}
     </div>
   );
 }

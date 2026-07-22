@@ -159,6 +159,16 @@ ENABLE_ACORD101_OVERFLOW: bool = os.getenv("ENABLE_ACORD101_OVERFLOW", "false").
 # plumbing); set ENABLE_PRODUCER_ANSWERS=false to fall back to dismiss-only.
 ENABLE_PRODUCER_ANSWERS: bool = os.getenv("ENABLE_PRODUCER_ANSWERS", "true").lower() == "true"
 
+# Bulk schedule capture (Figure 15 client feedback: "many vehicle detail
+# questions"). When true, repeating-row ACORD fields (vehicles, drivers,
+# locations, class codes, loss runs, ...) collapse into ONE questionnaire item
+# per schedule, rendered as an editable table with CSV/XLSX import, row-level
+# validation and duplicate detection — instead of one ordinal-labelled card per
+# field ("141th vehicle"). Default ON because the prior behaviour is the
+# reported defect, not a working fallback; set ENABLE_SCHEDULE_CAPTURE=false to
+# restore the legacy per-field questions.
+ENABLE_SCHEDULE_CAPTURE: bool = os.getenv("ENABLE_SCHEDULE_CAPTURE", "true").lower() == "true"
+
 
 ADMIN_EMAILS: set = {
     e.strip().lower()

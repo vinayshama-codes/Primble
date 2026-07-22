@@ -346,6 +346,9 @@ class CompleteProfileRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     full_name: Optional[str] = None
     organization_name: Optional[str] = None
+    # Optional producer contact phone surfaced to the client on the ARQ
+    # "Contact Your Agent" card. Empty string clears it.
+    phone: Optional[str] = None
 
 
 # ── Audit API request / response models ───────────────────────────────────────

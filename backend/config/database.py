@@ -94,6 +94,7 @@ async def init_db() -> None:
                 email                         TEXT UNIQUE NOT NULL,
                 password_hash                 TEXT,
                 full_name                     TEXT,
+                phone                         TEXT,
                 organization_name             TEXT,
                 auth_provider                 TEXT DEFAULT 'email',
                 google_id                     TEXT UNIQUE,
@@ -123,6 +124,9 @@ async def init_db() -> None:
 
         for col, definition in [
             ("organization_name",            "TEXT"),
+            # Producer contact phone — shown to the client on the questionnaire's
+            # "Contact Your Agent" card. Optional; blank simply hides the line.
+            ("phone",                        "TEXT"),
             ("acord_disclaimer_accepted",    "INTEGER DEFAULT 0"),
             ("acord_disclaimer_accepted_at", "TEXT"),
             ("acord_license_confirmed",      "INTEGER DEFAULT 0"),
@@ -244,6 +248,9 @@ async def init_db() -> None:
                 status           TEXT DEFAULT 'pending',
                 questions        JSONB NOT NULL,
                 answers          JSONB DEFAULT '{}',
+                draft_answers    JSONB DEFAULT '{}',
+                not_sure_fields  JSONB DEFAULT '[]',
+                review_fields    JSONB DEFAULT '[]',
                 expires_at       TEXT NOT NULL,
                 created_at       TEXT NOT NULL,
                 submitted_at     TEXT,
@@ -272,6 +279,28 @@ async def init_db() -> None:
             ("last_reminder_at",      "TEXT"),
             ("remediation_status",    "TEXT DEFAULT NULL"),
             ("fields_answered_count", "INTEGER DEFAULT 0"),
+            # Server-side draft persistence (cross-browser / incognito safe). This
+            # previously existed ONLY in the legacy create_tables.py / migrate.py
+            # paths, neither of which runs at startup — so a fresh database never
+            # got the column and draft saving silently failed. Added here so the
+            # schema stays portable per the documented convention.
+            #
+            # NOTE: both are declared bare `JSONB` (no DEFAULT). _SAFE_DEF rejects
+            # a brace-containing default such as "JSONB DEFAULT '{}'" and raises
+            # OUTSIDE the try/except below, which would abort startup. Existing
+            # rows therefore back-fill as NULL and every reader coerces NULL to an
+            # empty dict/list.
+            ("draft_answers",         "JSONB"),
+            # Fields the client explicitly answered "I'm not sure" on. Kept OUT of
+            # `answers` on purpose so the sentinel can never be stamped into an
+            # ACORD field or counted as a real answer by the scorer.
+            ("not_sure_fields",       "JSONB"),
+            # Figure 18: answers the client DID give that we could not normalize
+            # (an unreadable date, a NAICS code of the wrong width). Previously
+            # these were silently discarded at submit; they are now stored in
+            # `answers` like any other value and listed here so the producer can
+            # confirm them. Bare JSONB for the same _SAFE_DEF reason noted above.
+            ("review_fields",         "JSONB"),
         ]:
             if not (_SAFE_IDENT.match(col) and _SAFE_DEF.match(definition)):
                 raise ValueError(f"Unsafe DDL identifier blocked: {col!r} {definition!r}")
@@ -281,6 +310,35 @@ async def init_db() -> None:
                 )
             except Exception:
                 pass
+
+        # Figure 21: immutable client response receipt. Written ONCE at submit
+        # and never updated - `arq_sessions.answers` is a working row that later
+        # stages read and that a future edit path could rewrite, so it cannot
+        # serve as the record of what the client actually said. This table is the
+        # point-in-time record the package audit trail points at.
+        #
+        # `payload` holds the whole receipt as Fernet ciphertext (TEXT, not JSONB)
+        # because it contains the client's own answers - the same PII class as
+        # processing_sessions.facts, which is encrypted the same way. The counts
+        # beside it are deliberately plaintext so the panel can summarise a
+        # receipt without decrypting it.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS arq_receipts (
+                id             TEXT PRIMARY KEY,
+                arq_id         TEXT NOT NULL,
+                session_id     TEXT,
+                user_id        TEXT NOT NULL,
+                client_name    TEXT DEFAULT '',
+                client_email   TEXT DEFAULT '',
+                payload        TEXT NOT NULL,
+                item_count     INTEGER DEFAULT 0,
+                answered_count INTEGER DEFAULT 0,
+                not_sure_count INTEGER DEFAULT 0,
+                review_count   INTEGER DEFAULT 0,
+                submitted_at   TEXT NOT NULL,
+                created_at     TEXT NOT NULL
+            )
+        """)
 
         # Package activity log — durable, user-level event feed. Persists
         # independently of processing_sessions so the log survives session close
@@ -352,6 +410,8 @@ async def init_db() -> None:
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_token ON sessions(token)",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)",
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_activity_user_created ON activity_events(user_id, created_at DESC)",
+            # Receipt lookup is always "the receipt for this questionnaire".
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_arq_receipts_arq ON arq_receipts(arq_id)",
         ]:
             try:
                 await conn.execute(idx_stmt)
