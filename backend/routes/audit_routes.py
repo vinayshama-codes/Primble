@@ -9,6 +9,8 @@ from models.schemas import (
     DismissRecommendationRequest,
     ResolveRecommendationRequest,
     AnswerRecommendationRequest,
+    ResolveIssueRequest,
+    ReopenIssueRequest,
     DownloadAnywayRequest,
     IssueStatusRequest,
 )
@@ -429,6 +431,342 @@ async def answer_recommendation(
         "new_package_sqs_score": impact.get("score_after"),
         "new_package_tier":      impact.get("tier"),
         "open_recommendations":  open_recs,
+    })
+
+
+def _grouped_cross_issues_for_panel(cross_issues: list):
+    """Cluster + tier a raw cross_form_validator issue list for the SQS panel.
+
+    Same shape the editor's Cross-Form Validation panel already consumes
+    (form_routes._grouped_cross_issues_or_none): each cluster/item carries the
+    inline `resolution` descriptor, attached centrally in issue_registry, so the
+    panel can re-render its Open-to-fix affordance after a resolution is applied.
+    """
+    try:
+        from services.issue_registry import (
+            build_grouped_view, build_structured_from_sources, normalize_issue_type,
+        )
+        _typed = [(normalize_issue_type(i.get("type")), i.get("message", ""))
+                  for i in (cross_issues or []) if isinstance(i, dict)]
+        return build_grouped_view(
+            build_structured_from_sources(cross_issues=cross_issues, include_advisories=True),
+            [m for t, m in _typed if t == "hard_stop"],
+            [m for t, m in _typed if t == "soft_warning"],
+        )
+    except Exception as _gx:
+        logger.error(f"resolve_issue: grouped view computation failed (non-fatal): {_gx}")
+        return None
+
+
+@router.post("/api/audit/resolve-issue")
+async def resolve_issue(
+    req: ResolveIssueRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Resolve a Cross-Form Validation issue inline (SQS panel "Open" -> fix).
+
+    Writes the producer's input into the session facts through the SAME paths the
+    recommendation-answer and producer-schedule flows already use (so provenance,
+    form re-stamping and the audit trail are identical), re-runs the SQS /
+    cross-form rules, and returns the recomputed per-form scores plus a freshly
+    grouped cross-issue view so the panel updates in place. The dismiss/answer
+    endpoints are untouched.
+
+      mode=field     -> apply a canonical scalar fact (producer answer path)
+      mode=narrative -> append an ACORD 101 explanation (additional_remarks_text)
+      mode=schedule  -> save an edited repeating schedule (producer schedule path)
+    """
+    await _verify_session_owner(req.session_id, current_user)
+    if not ENABLE_PRODUCER_ANSWERS:
+        return JSONResponse({
+            "success": False, "disabled": True,
+            "message": "Inline issue resolution is disabled.",
+        })
+
+    from services.arq_service import (
+        apply_producer_answer_to_session, save_session_schedule,
+        recalculate_session_scores,
+    )
+
+    mode = (req.mode or "").strip()
+    applied = False
+    _log_field: str = ""
+    _log_value: str = ""
+
+    if mode == "field":
+        field = (req.field or "").strip()
+        value = (req.value or "").strip()
+        if not field or not value:
+            return JSONResponse({"success": False, "message": "Enter a value to apply."})
+        ok, err = _validate_producer_answer(field, value)
+        if not ok:
+            return JSONResponse({"success": False, "validation_error": err})
+        applied, _ = await apply_producer_answer_to_session(req.session_id, field, value)
+        if not applied:
+            return JSONResponse({
+                "success": False,
+                "message": "This value can't be applied directly. Attach a "
+                           "supporting document or dismiss it with a note.",
+            })
+        _log_field, _log_value = field, value
+
+    elif mode == "narrative":
+        text = (req.text or "").strip()
+        if not text:
+            return JSONResponse({"success": False, "message": "Enter an explanation to apply."})
+        if len(text) > 4000:
+            return JSONResponse({"success": False, "message": "Explanation is too long."})
+        # Append to any existing ACORD 101 remarks rather than overwrite, so
+        # explanations for different issues coexist instead of clobbering.
+        try:
+            _proc = await get_processing_session(req.session_id)
+            _existing = (_proc.get("facts") or {}).get("additional_remarks_text")
+            _existing_val = _existing.get("value") if isinstance(_existing, dict) else _existing
+            _existing_val = str(_existing_val or "").strip()
+        except Exception:
+            _existing_val = ""
+        if _existing_val and text not in _existing_val:
+            combined = f"{_existing_val}\n{text}".strip()
+        elif not _existing_val:
+            combined = text
+        else:
+            combined = _existing_val
+        applied, _ = await apply_producer_answer_to_session(
+            req.session_id, "additional_remarks_text", combined,
+        )
+        if not applied:
+            return JSONResponse({"success": False, "message": "Could not save the explanation."})
+        _log_field, _log_value = "additional_remarks_text", text
+
+    elif mode == "schedule":
+        from services import schedule_capture
+        list_key = (req.schedule_key or "").strip()
+        rows = req.rows if isinstance(req.rows, list) else []
+        if schedule_capture.get_def(list_key) is None:
+            return JSONResponse({"success": False, "message": "Unknown schedule."})
+        if len(rows) > schedule_capture.MAX_ROWS:
+            return JSONResponse({
+                "success": False,
+                "message": f"Too many rows (max {schedule_capture.MAX_ROWS}).",
+            })
+        ok, result = await save_session_schedule(req.session_id, list_key, rows)
+        if not ok:
+            return JSONResponse({"success": False, "message": result.get("message", "Could not save schedule.")})
+        applied = True
+
+    else:
+        return JSONResponse({
+            "success": False,
+            "message": "This item can't be resolved inline - use Resolve or Dismiss.",
+        })
+
+    if _log_field:
+        try:
+            await log_field_change(
+                session_id=req.session_id, user_id=str(current_user["id"]),
+                form_id=req.form_id, field_name=_log_field, fact_key=_log_field,
+                source="producer", previous_value=None, new_value=str(_log_value)[:2000],
+                confidence="filled", model_version=SQS_MODEL_VERSION,
+            )
+        except Exception as _le:
+            logger.warning(f"resolve_issue: audit log failed: {_le}")
+
+    # Re-run field + cross-form rules and per-form / package SQS from updated facts.
+    impact = await recalculate_session_scores(req.session_id)
+    if not isinstance(impact, dict):
+        impact = {}
+
+    # Read back the recomputed session for the panel: per-form scores (same shape
+    # as the dismiss-credit / answer paths), fresh cross issues + grouped view,
+    # and the final stop lists.
+    sess = await get_processing_session(req.session_id)
+    updated_forms: dict = {}
+    try:
+        for fid, fdata in (sess.get("generated_forms") or {}).items():
+            if not isinstance(fdata, dict):
+                continue
+            score = (fdata.get("sqs") or {}).get("sqs_score")
+            if score is None:
+                continue
+            g, t, c = _grade_from_score(int(score))
+            updated_forms[fid] = {
+                "new_sqs_score":  int(score),
+                "new_grade":      g,
+                "new_tier":       t,
+                "new_tier_color": c,
+            }
+    except Exception as _re:
+        logger.error(f"resolve_issue: score read-back failed: {_re}")
+
+    cross_issues = sess.get("cross_issues_last") or []
+    package_sqs  = sess.get("package_sqs") or {}
+
+    # Form-selection (recommendations-step) view: the classified hard/soft split +
+    # grouped_issues that the confirm-value / marketing-reason routes return, so an
+    # inline resolution opened from the Select Forms banners refreshes them in place
+    # just like the editor's Cross-Form panel does via grouped_cross_issues above.
+    # The hard/soft lists here are the SAME stored lists, now classify_stops-
+    # processed (a hard stop that downgrades for a non-property submission is shown
+    # as a warning, matching every other Select Forms response). Best-effort: a
+    # display-computation failure must never fail the resolve that already
+    # succeeded server-side, so we fall back to the raw stored lists.
+    _fs_hard = sess.get("hard_stops") or []
+    _fs_soft = sess.get("soft_stops") or []
+    _fs_grouped = None
+    _can_proceed_warn = False
+    _warning_stops: list = []
+    try:
+        from services.sqs_service import classify_stops
+        from services.issue_registry import build_grouped_view
+        _can_proceed_warn, _fs_hard, _warning_stops = classify_stops(
+            sess.get("hard_stops") or [], sess.get("flags") or {}
+        )
+        _fs_soft = list(sess.get("soft_stops") or []) + list(_warning_stops)
+        _fs_grouped = build_grouped_view(
+            sess.get("structured_issues") or [],
+            _fs_hard, _fs_soft,
+            cross_issues=cross_issues,
+        )
+    except Exception as _fgx:
+        logger.error(f"resolve_issue: form-selection grouped view failed (non-fatal): {_fgx}")
+        _fs_hard = sess.get("hard_stops") or []
+        _fs_soft = sess.get("soft_stops") or []
+
+    return JSONResponse({
+        "success":               True,
+        "applied":               applied,
+        "updated_forms":         updated_forms,
+        "new_package_sqs_score": package_sqs.get("package_sqs_score", impact.get("score_after")),
+        "new_package_tier":      package_sqs.get("tier") or impact.get("tier"),
+        "cross_issues":          cross_issues,
+        "grouped_cross_issues":  _grouped_cross_issues_for_panel(cross_issues),
+        "hard_stops":            _fs_hard,
+        "soft_stops":            _fs_soft,
+        # New (form-selection banners). The editor panel ignores these.
+        "grouped_issues":           _fs_grouped,
+        "can_proceed_with_warning": _can_proceed_warn,
+        "warning_stops":            _warning_stops,
+    })
+
+
+@router.get("/api/audit/issue-values/{session_id}")
+async def issue_values(
+    session_id: str,
+    facts: str = "",
+    current_user: dict = Depends(get_current_user),
+):
+    """Current session values for a set of canonical facts (SQS panel modal).
+
+    Lets the inline-resolution modal PRE-FILL its inputs with whatever is already
+    on record, so reopening a validation shows the value the producer previously
+    applied instead of a blank box. Read-only; owner-gated; returns the producer's
+    own form data (nothing they can't already see on the forms).
+    """
+    await _verify_session_owner(session_id, current_user)
+    try:
+        proc = await get_processing_session(session_id)
+    except Exception:
+        return JSONResponse({"success": False, "values": {}})
+    sess_facts = proc.get("facts") or {}
+
+    def _scalar(key: str) -> str:
+        v = sess_facts.get(key)
+        if isinstance(v, dict):
+            v = v.get("value")
+        if v is None or isinstance(v, (list, dict)):
+            return ""
+        return str(v)
+
+    keys = [f.strip() for f in (facts or "").split(",") if f.strip()]
+    return JSONResponse({"success": True, "values": {k: _scalar(k) for k in keys}})
+
+
+@router.post("/api/audit/reopen-issue")
+async def reopen_issue(
+    req: ReopenIssueRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Reopen a Cross-Form Validation issue (SQS panel "Reopen").
+
+    For a `field`-mode issue this UNDOES the inline fix: deletes the
+    producer-provenance fact(s) resolve-issue wrote and blanks them on every
+    form they were stamped into, then re-runs the rules - so Reopen genuinely
+    restores the "needs input" state instead of leaving the old answer sitting
+    on the form while the panel claims the issue is open again.
+
+    Schedule/narrative-mode issues (and anything with no resolution) are
+    deliberately NOT auto-cleared here:
+      - a schedule can be shared by several validations (e.g. two location
+        checks both point at `property_locations`) - clearing it because ONE
+        was reopened could destroy rows a DIFFERENT still-resolved issue
+        depends on. Editing an existing schedule is already fully supported
+        via "Open to fix", which loads the current rows for editing.
+      - a narrative note is appended into ONE shared ACORD 101 remarks fact -
+        surgically removing just one issue's sentence out of that blob isn't
+        something that can be done safely/unambiguously.
+    Those two modes (and `none`) just flip the status marker, exactly as
+    Resolve/Dismiss already do.
+    """
+    await _verify_session_owner(req.session_id, current_user)
+
+    from services.issue_registry import resolution_for
+    from services.arq_service import (
+        clear_producer_answer_from_session, recalculate_session_scores,
+    )
+
+    resolution = resolution_for(req.code)
+    cleared_any = False
+    if resolution and resolution.get("mode") == "field":
+        for fact in resolution.get("facts") or []:
+            ok, _ = await clear_producer_answer_from_session(req.session_id, fact)
+            cleared_any = cleared_any or ok
+
+    if req.issue_id:
+        await set_issue_status(
+            session_id=req.session_id, issue_id=req.issue_id, status="open",
+            user_id=str(current_user["id"]), form_id=req.form_id,
+            rule_code=req.code, message=req.message,
+        )
+
+    if not cleared_any:
+        # Nothing on any form actually changed - a plain status-only reopen,
+        # same as Resolve/Dismiss have always been.
+        return JSONResponse({"success": True, "cleared": False})
+
+    await recalculate_session_scores(req.session_id)
+    sess = await get_processing_session(req.session_id)
+
+    updated_forms: dict = {}
+    try:
+        for fid, fdata in (sess.get("generated_forms") or {}).items():
+            if not isinstance(fdata, dict):
+                continue
+            score = (fdata.get("sqs") or {}).get("sqs_score")
+            if score is None:
+                continue
+            g, t, c = _grade_from_score(int(score))
+            updated_forms[fid] = {
+                "new_sqs_score":  int(score),
+                "new_grade":      g,
+                "new_tier":       t,
+                "new_tier_color": c,
+            }
+    except Exception as _re:
+        logger.error(f"reopen_issue: score read-back failed: {_re}")
+
+    cross_issues = sess.get("cross_issues_last") or []
+    package_sqs  = sess.get("package_sqs") or {}
+
+    return JSONResponse({
+        "success":               True,
+        "cleared":               True,
+        "updated_forms":         updated_forms,
+        "new_package_sqs_score": package_sqs.get("package_sqs_score"),
+        "new_package_tier":      package_sqs.get("tier"),
+        "cross_issues":          cross_issues,
+        "grouped_cross_issues":  _grouped_cross_issues_for_panel(cross_issues),
+        "hard_stops":            sess.get("hard_stops") or [],
+        "soft_stops":            sess.get("soft_stops") or [],
     })
 
 

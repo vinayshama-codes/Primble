@@ -22,3 +22,14 @@ export const sqsGradeFromScore = (v) => {
   return "F";
 };
 
+// Short label for a form where space is tight (e.g. the pinned score header in a
+// 300px sidebar). form_name is the full title - "ACORD 137 CA (2023/01) -
+// California Commercial Auto Coverages / Limits Section" - which wraps badly
+// there, so prefer the form id: "ACORD_137_CA" -> "ACORD 137 CA". Falls back to
+// the part of form_name before the first " - " when no id is available.
+export const shortFormLabel = (formId, formName) => {
+  if (formId) return String(formId).replace(/_/g, " ").trim();
+  if (formName) return String(formName).split(" - ")[0].trim();
+  return "This form";
+};
+

@@ -396,6 +396,38 @@ class AnswerRecommendationRequest(BaseModel):
     form_id: Optional[str] = None
 
 
+class ResolveIssueRequest(BaseModel):
+    # Inline resolution of a Cross-Form Validation issue from the SQS panel.
+    # `mode` selects the editor the producer used:
+    #   field    -> `field` (a canonical fact key) + `value` (the typed value)
+    #   narrative -> `text` (an ACORD 101 explanation, appended)
+    #   schedule -> `schedule_key` + `rows` (the edited table)
+    # `issue_id` / `code` identify the issue for logging and status marking.
+    session_id: str
+    issue_id: Optional[str] = None
+    code: Optional[str] = None
+    mode: str
+    field: Optional[str] = None
+    value: Optional[str] = None
+    text: Optional[str] = None
+    schedule_key: Optional[str] = None
+    rows: Optional[List[dict]] = None
+    form_id: Optional[str] = None
+
+
+class ReopenIssueRequest(BaseModel):
+    # Reopen a Cross-Form Validation issue from the SQS panel. For a
+    # `field`-mode issue, this also clears whichever canonical fact(s) a prior
+    # inline resolve wrote (Reopen must undo the fix, not just relabel a
+    # validation whose value still shows on the form). Other resolution modes
+    # only flip the status marker - see audit_routes.reopen_issue for why.
+    session_id: str
+    issue_id: Optional[str] = None
+    code: Optional[str] = None
+    form_id: Optional[str] = None
+    message: Optional[str] = None
+
+
 class DownloadAnywayRequest(BaseModel):
     session_id: str
     override_reason: Optional[str] = None

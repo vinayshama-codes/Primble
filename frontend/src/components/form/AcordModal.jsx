@@ -1,12 +1,13 @@
 ﻿//AcordModal.jsx
 import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
 import { API_BASE } from "../../config/constants";
-import { gradeColor, barColor, sqsGradeFromScore } from "../../utils/formatters";
+import { gradeColor, barColor, sqsGradeFromScore, shortFormLabel } from "../../utils/formatters";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
 import UploadProgressOverlay from "../overlays/UploadProgressOverlay";
 import PDFJsViewer from "./PDFJsViewer";
 import ScheduleTable from "../arq/ScheduleTable";
 import ARQReceiptModal from "../arq/ARQReceiptModal";
+import ResolutionModal from "./ResolutionModal";
 
 const SQS_LABELS = {
   structural_completeness: "Structural Completeness",
@@ -429,12 +430,17 @@ function packageStatusNotice({ integrityReviewRequired, hardStopCount, warningCo
 // Deliberately tiny and self-contained so it drops into existing layouts without
 // touching spacing/responsiveness. tone: "ready" (green) | "caution" (amber).
 function NextStepBanner({ text }) {
-  // Same light-magenta surface as the DOCUMENTS PROCESSED / hard-stops / warnings
-  // sections so every status block on a screen reads as one consistent family.
+  // Client review: this was the same light-magenta as the hard-stops/warnings
+  // banners, which made the top of the screen read as a wall of pink. Neutral
+  // surface instead - it still reads as its own status block (fill + border +
+  // radius are kept, only the hue changes), just without competing for
+  // attention with the pink blocks below. The .stops-banner blocks are
+  // deliberately left pink for now; if they are ever de-pinked too, this should
+  // move to a shared class rather than growing a second copy of these values.
   return (
     <div style={{
-      background: "rgba(230, 27, 132, 0.07)",
-      border: "1.5px solid rgba(230, 27, 132, 0.25)",
+      background: "#f8fafc",
+      border: "1px solid #e2e8f0",
       borderRadius: 10,
       padding: "10px 14px",
       fontSize: 13, fontWeight: 600, color: "#1e293b",
@@ -505,11 +511,15 @@ function InfoTip({ text }) {
 
 // ── Reusable collapsible section (chevron header + optional tooltip). Resets to
 // its default (collapsed) whenever resetKey changes, e.g. on active-form switch. ─
-function CollapsibleSection({ title, tooltip, titleRight, defaultOpen = false, resetKey, headerColor = "#94a3b8", titleSize = 10, children }) {
+// `marginBottom` defaults to the 10px every existing call site was hard-coded
+// to, so this stays a no-op everywhere except the issue cards, which pass 0:
+// inside a card the section's own bottom margin would push the action row away
+// from the items it acts on (see IssueCard).
+function CollapsibleSection({ title, tooltip, titleRight, defaultOpen = false, resetKey, headerColor = "#94a3b8", titleSize = 10, marginBottom = 10, children }) {
   const [open, setOpen] = useState(defaultOpen);
   useEffect(() => { setOpen(defaultOpen); }, [resetKey]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
-    <div style={{ marginBottom: 10 }}>
+    <div style={{ marginBottom }}>
       <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
         style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", padding: "3px 0", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
         <span style={{ fontSize: 8, color: "#94a3b8", transform: open ? "rotate(90deg)" : "none", transition: "transform 0.15s", display: "inline-block", flexShrink: 0 }}>▶</span>
@@ -524,11 +534,50 @@ function CollapsibleSection({ title, tooltip, titleRight, defaultOpen = false, r
   );
 }
 
+// ── Review-page section badge ────────────────────────────────────────────────
+// Client feedback item 13: the pre-scoring page is now a work list, so each
+// section has to say at a glance whether it wants anything from the broker.
+// Two states only, deliberately: "N to fix" (magenta, the app's attention
+// colour) when the section holds something actionable, and a quiet "All clear"
+// when it does not. `tone="advisory"` is the third case - hard stops and
+// warnings, which are worth reading but cannot be typed away on this screen, so
+// they get a neutral count that never claims to be actionable.
+function ReviewCountBadge({ count, tone = "action", clearLabel = "All clear" }) {
+  if (!count) {
+    return (
+      <span style={{ fontSize: 10, fontWeight: 700, color: "#16a34a", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 20, padding: "1px 9px", whiteSpace: "nowrap" }}>
+        {clearLabel}
+      </span>
+    );
+  }
+  const advisory = tone === "advisory";
+  return (
+    <span style={{
+      fontSize: 10, fontWeight: 700, whiteSpace: "nowrap",
+      borderRadius: 20, padding: "1px 9px",
+      color:      advisory ? "#475569" : "#9d0f5a",
+      background: advisory ? "#f1f5f9" : "rgba(230,27,132,0.10)",
+      border:     `1px solid ${advisory ? "#e2e8f0" : "rgba(230,27,132,0.30)"}`,
+    }}>
+      {advisory ? count : `${count} to fix`}
+    </span>
+  );
+}
+
 // ── One hard-stop/warning line: bullet point, with any trailing "Fix: ..."
 // remediation hint broken onto its own line and bolded so it stands out from
 // the descriptive part of the message. Messages without a "Fix: " segment
 // (e.g. raw cross-document conflict text) render as a plain bulleted line. ─
 const _issueBullet = <span style={{ fontWeight: 700, fontSize: "1.3em", lineHeight: 0, position: "relative", top: "1px" }}>•</span>;
+
+// The one generic remediation line, appended by extraction_pipeline's
+// _ensure_fix_hint() to every message that has no remediation of its own. It
+// carries no information, but it is deliberate (it exists so the Fix line is
+// present consistently rather than on a random subset), so it is rendered
+// quietly rather than removed - a real "Fix: Define deductible amounts or
+// remove references" keeps full weight, this one recedes. Kept in sync with
+// backend/services/extraction_pipeline.py::_ensure_fix_hint.
+const _GENERIC_FIX_TEXT = "Review and correct this before proceeding.";
 
 function IssueLine({ message, className }) {
   const fixIdx = message.indexOf("Fix: ");
@@ -537,11 +586,159 @@ function IssueLine({ message, className }) {
   }
   const before = message.slice(0, fixIdx).trimEnd();
   const afterLabel = message.slice(fixIdx + "Fix: ".length);
+  const isGeneric = afterLabel.trim() === _GENERIC_FIX_TEXT;
   return (
     <div className={className}>
       {_issueBullet} {before}
       <br />
-      <strong>Fix:</strong> {afterLabel}
+      <span className={isGeneric ? "issue-fix issue-fix-generic" : "issue-fix"}>
+        <strong>Fix:</strong> {afterLabel}
+      </span>
+    </div>
+  );
+}
+
+// ── One issue cluster, rendered as a self-contained card ─────────────────────
+// Client review #7 + #9. Two things the previous flat markup got wrong:
+//   #7 - a cluster's Open/Resolve/Dismiss row sat ~3px below it and ~15px from
+//        its own items, so it read as belonging to the NEXT cluster. The card
+//        border now encloses the row, which fixes it structurally instead of
+//        by tuning gaps.
+//   #9 - a banner was one continuous run of divs, so 23 warnings read as a
+//        single paragraph. Cards chunk it into scannable blocks.
+// This also replaces four near-identical branches (hard/soft x multi/single).
+// Label plus its count as a pill instead of a trailing "(2)", so the number
+// reads as a separate object rather than more uppercase text running on from
+// the label. Shared by cluster cards and tier headers so both levels match.
+function countTitle(label, count) {
+  return <>{label}<span className="issue-count">{count}</span></>;
+}
+
+// "Open to fix" affordance for an inline-resolvable issue (opens ResolutionModal
+// to enter the correct value / edit a schedule / add an ACORD 101 note, which
+// re-runs the deterministic stop + SQS rules server-side). Same look and wording
+// as the editor's Cross-Form Validation panel so the two surfaces read as one.
+function OpenToFixButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 6, border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#be185d", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+    >
+      Open to fix
+      <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M3 2l4 4-4 4" stroke="#be185d" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    </button>
+  );
+}
+
+// Same look as "Open to fix", but points UP to the Data Consistency section
+// where a cross-document value conflict (name / FEIN / dates / Gross Sales /
+// DBA) is reconciled - those are NOT resolved by the inline modal (by design;
+// the Data Consistency picker shows each document's value + apply-to-all), so
+// this jumps the producer straight to the right row instead.
+function FixInDataConsistencyButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 6, border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#be185d", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+    >
+      <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M2 8l4-4 4 4" stroke="#be185d" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+      Fix in Data Consistency
+    </button>
+  );
+}
+
+// Short, muted note explaining WHY an issue has no "Open to fix" - so a row that
+// can't be typed-fixed says so instead of looking like the feature just missed
+// it. Keyed off the resolution `mode` the backend already attaches:
+//   narrative - needs a written explanation (routed to ACORD 101), not a value
+//   none      - no single value fixes it: a coverage decision or a form to add
+// `field` / `schedule` modes have their own button, so they never hit this.
+function ResolutionHint({ mode }) {
+  const text = mode === "narrative"
+    ? "Needs a written explanation, not a value."
+    : "Can't be fixed by typing a value - needs a coverage decision or a form change.";
+  return (
+    <div style={{ fontSize: 10.5, color: "#94a3b8", fontStyle: "italic", marginTop: 4 }}>{text}</div>
+  );
+}
+
+// A conflict-family issue (documents disagree on a value) is reconciled in the
+// Data Consistency picker, keyed by its canonical fact. Its issue `code` encodes
+// that fact; derive it so a banner issue can be matched to its Data Consistency
+// row. Purely a display-routing hint - returns null when the code isn't a
+// conflict-family code, so non-conflict issues fall through untouched. Kept in
+// sync with the code prefixes emitted in extraction_pipeline.py.
+const _DOC_CONFLICT_CODE_TO_FACT = {
+  name_conflict:       "applicant_name",
+  fein_conflict:       "fein",
+  date_conflict:       "effective_date",
+  expiration_conflict: "expiration_date",
+  // dba_name / lines_of_business / revenue arrive as `field=<fact>`, already the
+  // fact key, so they need no remap.
+};
+function issueFactKey(it) {
+  const code = (it && it.code) || "";
+  let m;
+  if ((m = code.match(/^underwriting_reconciliation_(.+)$/))) return m[1];
+  if ((m = code.match(/^source_conflict_(?:carrier_)?(.+)$/)))  return m[1];
+  if ((m = code.match(/^doc_conflict_(?:hard|warn)_(.+)$/))) {
+    const c = m[1];
+    return _DOC_CONFLICT_CODE_TO_FACT[c] || c;
+  }
+  return null;
+}
+
+// `renderItemActions(item)` builds the Resolve/Dismiss control for ONE issue.
+// Client review #8: a "(15)" cluster used to carry a single control below the
+// header that (a) showed even while the cluster was collapsed and (b) only ever
+// wrote the first member's status - so one "Dismiss" left 14 issues open while
+// looking handled. Now every sub-item owns its control, and those controls live
+// INSIDE the collapsible body, so a collapsed cluster exposes no buttons at all.
+// `headerRight` is the collapsed-progress pill (e.g. "2 of 15 handled").
+function IssueCard({ cluster: c, tone, defaultOpen = false, renderItemActions, headerRight }) {
+  const itemClass = `stop-item stop-item-${tone}`;
+  return (
+    <div className={`issue-card issue-card-${tone}`}>
+      {c.count > 1 ? (
+        <CollapsibleSection
+          title={countTitle(c.cluster, c.count)}
+          titleRight={headerRight}
+          defaultOpen={defaultOpen}
+          titleSize={10.5}
+          headerColor="#64748b"
+          marginBottom={0}
+        >
+          {c.items.map((it, j) => (
+            <div key={j} className="issue-card-item">
+              <IssueLine message={it.message} className={itemClass} />
+              {renderItemActions && renderItemActions(it)}
+            </div>
+          ))}
+        </CollapsibleSection>
+      ) : (
+        // A single-issue cluster still gets its category heading (client ask):
+        // a lone conflict like "Cross-document data conflicts" was rendering as
+        // a bare line with no label, so the reader couldn't tell what kind of
+        // warning it was. Open by default - there is only one line, nothing to
+        // hide behind the chevron - and no count pill, since "(1)" is noise.
+        <CollapsibleSection
+          title={c.cluster}
+          titleRight={headerRight}
+          defaultOpen
+          titleSize={10.5}
+          headerColor="#64748b"
+          marginBottom={0}
+        >
+          <IssueLine message={c.primary_message} className={itemClass} />
+          {renderItemActions && (
+            <div className="issue-card-actions">
+              {renderItemActions(c.items?.[0] || { issue_id: c.issue_id, message: c.primary_message, forms: c.forms })}
+            </div>
+          )}
+        </CollapsibleSection>
+      )}
     </div>
   );
 }
@@ -559,29 +756,41 @@ function _fallbackIssueId(message, forms) {
 function issueIdOf(iss) {
   return (iss && iss.issue_id) || _fallbackIssueId(iss && iss.message, iss && iss.forms);
 }
+// Same identity for a grouped-issue CLUSTER (keyed off primary_message, not
+// message). issue_registry._make_clusters always stamps an issue_id, so this
+// is an exact match in practice; the fallback only covers alias-stamp clusters
+// that arrive without one. Used both to key the status control and to
+// de-duplicate the "Important" preview against the tiers below it.
+function clusterIdOf(c) {
+  return (c && c.issue_id) || _fallbackIssueId(c && c.primary_message, c && c.forms);
+}
 
 // ── Issue-rail resolution status control (Open / Resolved / Dismissed) ────────
 // Compact and wraps on small screens. Purely a work-tracking marker: setting a
 // status never changes the SQS score (its endpoint is isolated from scoring).
 const _ISSUE_STATUS_BADGE = {
-  open:      { t: "Open",      bg: "#f1f5f9", fg: "#475569", bd: "#e2e8f0" },
+  open:      { t: "Still open", bg: "#f1f5f9", fg: "#475569", bd: "#e2e8f0" },
   resolved:  { t: "Resolved",  bg: "#dcfce7", fg: "#166534", bd: "#86efac" },
   dismissed: { t: "Dismissed", bg: "#fef3c7", fg: "#92400e", bd: "#fde68a" },
 };
 function IssueStatusControl({ issueId, meta, status, onSet }) {
   const st = status || "open";
   const badge = _ISSUE_STATUS_BADGE[st] || _ISSUE_STATUS_BADGE.open;
-  const btn = { fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 5, cursor: "pointer", border: "1px solid #e2e8f0", background: "#fff", color: "#475569", whiteSpace: "nowrap", fontFamily: "inherit" };
+  // Border/background/color moved to `.issue-status-btn` so the buttons can
+  // carry a hover state (inline styles can't be overridden by a :hover rule).
+  // Resting appearance is byte-identical to before - this control is shared
+  // with the editor's Cross-Form Validation panel, which must not shift.
+  const btn = { fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 5, whiteSpace: "nowrap", fontFamily: "inherit" };
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5, marginTop: 5 }}>
       <span style={{ fontSize: 9.5, fontWeight: 700, padding: "1px 7px", borderRadius: 10, background: badge.bg, color: badge.fg, border: `1px solid ${badge.bd}`, whiteSpace: "nowrap" }}>{badge.t}</span>
       {st === "open" ? (
         <>
-          <button type="button" onMouseDown={e => { e.preventDefault(); onSet(issueId, "resolved", meta); }} style={btn}>Resolve</button>
-          <button type="button" onMouseDown={e => { e.preventDefault(); onSet(issueId, "dismissed", meta); }} style={btn}>Dismiss</button>
+          <button type="button" className="issue-status-btn" onMouseDown={e => { e.preventDefault(); onSet(issueId, "resolved", meta); }} style={btn}>Resolve</button>
+          <button type="button" className="issue-status-btn" onMouseDown={e => { e.preventDefault(); onSet(issueId, "dismissed", meta); }} style={btn}>Dismiss</button>
         </>
       ) : (
-        <button type="button" onMouseDown={e => { e.preventDefault(); onSet(issueId, "open", meta); }} style={{ ...btn, color: "#94a3b8" }}>Reopen</button>
+        <button type="button" className="issue-status-btn issue-status-btn-reopen" onMouseDown={e => { e.preventDefault(); onSet(issueId, "open", meta); }} style={btn}>Reopen</button>
       )}
     </div>
   );
@@ -2040,11 +2249,20 @@ const AcordModal = forwardRef(function AcordModal({
   const [recommendations, setRecommendations] = useState([]);
   const [accountProfile, setAccountProfile] = useState(null);
   const [allAvailableForms, setAllAvailableForms] = useState([]);
-  // "Why are you marketing this account?" (DOUBTS-Workstream4 / Brent) - answering
-  // re-runs recommendations so ACORD 101 escalates to its correct tier.
+  // "Why are you marketing this account?" (DOUBTS-Workstream4 / Brent). Asked on
+  // the UPLOAD screen, where no session exists yet, so these hold the answer until
+  // applyPendingMarketingReason can submit it - which re-runs recommendations so
+  // ACORD 101 escalates to its correct tier. Cleared by resetToUpload /
+  // goToDashboard so an answer never carries into the next submission.
+  // (There is no busy flag: the submit happens underneath the upload / integrity
+  // overlay, so there is never a moment where a spinner would be visible.)
   const [marketingReason, setMarketingReason] = useState("");
   const [marketingOther, setMarketingOther] = useState("");
-  const [marketingBusy, setMarketingBusy] = useState(false);
+  // The free-text "Other" note is only counted once the producer hits Submit -
+  // an explicit commit reads cleaner than saving on every keystroke, and it lets
+  // the input collapse into a confirmation line. Reset whenever the text changes
+  // so an edit forces a re-submit.
+  const [marketingOtherSaved, setMarketingOtherSaved] = useState(false);
   // Submission Integrity Validation (Beta Report §4.1)
   const [integrity, setIntegrity] = useState(null);
   const [integrityBusy, setIntegrityBusy] = useState(false);
@@ -2061,6 +2279,22 @@ const AcordModal = forwardRef(function AcordModal({
   const [underwriting, setUnderwriting] = useState(null);
   const [underwritingBusy, setUnderwritingBusy] = useState(null); // fact_key currently confirming
   const [underwritingPicks, setUnderwritingPicks] = useState({});  // {fact_key: chosen/typed value}
+  // "Fix in Data Consistency" jump target: a banner conflict issue routes here
+  // instead of the inline modal. dcOpenTick force-opens the (possibly collapsed)
+  // section; dcHighlight briefly rings the specific field row it landed on.
+  const dcSectionRef = useRef(null);
+  const [dcOpenTick, setDcOpenTick] = useState(0);
+  const [dcHighlight, setDcHighlight] = useState(null); // fact_key being highlighted
+  const jumpToDataConsistency = (factKey) => {
+    setDcOpenTick(t => t + 1);          // re-applies defaultOpen (true when conflicts exist)
+    setDcHighlight(factKey || null);
+    // Let the section render/expand before scrolling to the field row.
+    setTimeout(() => {
+      const el = (factKey && document.getElementById(`dc-field-${factKey}`)) || dcSectionRef.current;
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 70);
+    setTimeout(() => setDcHighlight(null), 2400);
+  };
 
   // Figure 3: pre-select the suggested value for HIGH-confidence, non-hard-stop
   // conflicts (the backend sets f.preselect). Only seeds a field the user has NOT
@@ -2092,6 +2326,12 @@ const AcordModal = forwardRef(function AcordModal({
   // Fig 24: same cross-form issues, clustered + tiered for display. Null falls
   // back to the flat crossIssues list.
   const [crossGrouped, setCrossGrouped] = useState(null);
+  // The cross-form issue currently open in the inline-resolution modal (SQS
+  // panel "Open" -> fix in place), or null. Set from a validation row/cluster.
+  const [resolutionIssue, setResolutionIssue] = useState(null);
+  // Bumped after an inline resolution stamps a value into the forms, so the PDF
+  // viewer re-fetches the regenerated PDF and the value shows on the field.
+  const [pdfRefreshTick, setPdfRefreshTick] = useState(0);
   // Durable-issue-id -> { status, reason } for the rail's resolution status.
   // Work-tracking only; never affects the SQS score.
   const [issueStatuses, setIssueStatuses] = useState(new Map());
@@ -2177,24 +2417,45 @@ const AcordModal = forwardRef(function AcordModal({
   }, [step, sessionId]); // eslint-disable-line
 
   // Usage counting (client 2026-07-01): professional/business consume one package
-  // the moment the form-recommendations screen is shown - the point at which the
-  // submission has been analysed - rather than waiting for a download. The call
-  // is idempotent per session server-side (a no-op for other tiers, an already
-  // counted session, or one still pending integrity review), so it is safe to
-  // fire on every visit to this step. We refresh the user afterwards so any usage
-  // display reflects the new count.
+  // the moment the submission has been analysed - i.e. when the review (pre-scoring)
+  // screen is shown - rather than waiting for a download. Bound to "review" and NOT
+  // to "form_selection": the two are one analysis, so counting on both would be
+  // counting the same package twice.
+  //
+  // The call is idempotent per session server-side (a no-op for other tiers, an
+  // already counted session, or one still pending integrity review). The ref guard
+  // is a client-side companion to that: the user can now bounce review ->
+  // form_selection -> review freely, and without it every return trip would re-POST
+  // and re-run refreshUser() for a count the server has already recorded.
+  const _usageCountedFor = useRef(null);
   useEffect(() => {
-    if (step !== "recommendations" || !sessionId) return;
+    if (step !== "review" || !sessionId) return;
     const tier = user?.subscription_tier;
     if (tier !== "professional" && tier !== "business") return;
+    if (_usageCountedFor.current === sessionId) return;
+    _usageCountedFor.current = sessionId;
     fetch(`${API_BASE}/api/session/${sessionId}/count-usage`, { method: "POST", credentials: "include" })
       .then(r => (r.ok ? r.json() : null))
       .then(d => { if (d?.counted) refreshUser().catch(() => {}); })
       .catch(() => {});
   }, [step, sessionId]); // eslint-disable-line
 
+  // Moving between steps must start at the top of the new screen. The review page
+  // is long, so "Continue to form selection" is usually clicked from near its
+  // bottom; without this the form list opens already scrolled past its own header
+  // and tier labels. The non-editor shell scrolls with the window (see the root
+  // element's minHeight), so this is a window scroll. The editor manages its own
+  // internal panes and is excluded.
+  useEffect(() => {
+    if (step === "editor") return;
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [step]);
+
   // Restore a session that has NOT generated forms yet — i.e. one paused at the
-  // Submission Integrity review or sitting on the recommendations / SQS step.
+  // Submission Integrity review or sitting on the review (pre-scoring) / SQS step.
+  // A resumed session always re-enters at "review", never at "form_selection":
+  // the documents and conflicts are what the broker needs to re-orient on, and
+  // form picks are not persisted anyway.
   // Lets users reopen in-progress submissions (including the extra ones created
   // by "Create separate submissions") instead of being bounced to the dashboard
   // (Beta Report §4.1). Returns true on success. Works for all non-essentials
@@ -2222,7 +2483,7 @@ const AcordModal = forwardRef(function AcordModal({
         setRemoveDocIds(new Set());
         setStep("integrity_review");
       } else {
-        setStep("recommendations");
+        setStep("review");
       }
       return true;
     } catch {
@@ -2346,7 +2607,12 @@ const AcordModal = forwardRef(function AcordModal({
       const d = r.ok ? await r.json() : null;
       if (!d?.success) return;
       const next = new Map();
-      for (const s of (d.issue_statuses || [])) next.set(s.issue_id, { status: s.status, reason: s.reason });
+      // Keep message/form_id/rule_code (not just status) - a "resolved" issue
+      // that no longer recomputes as live needs this to still render as a row
+      // instead of vanishing (see ghostIssues below).
+      for (const s of (d.issue_statuses || [])) {
+        next.set(s.issue_id, { status: s.status, reason: s.reason, message: s.message, form_id: s.form_id, rule_code: s.rule_code });
+      }
       setIssueStatuses(next);
     } catch { /* non-fatal */ }
   };
@@ -2355,7 +2621,20 @@ const AcordModal = forwardRef(function AcordModal({
   // optimistic value (non-fatal) - a reload re-syncs from the DB.
   const setIssueStatus = async (issueId, status, meta = {}) => {
     if (!issueId || !sessionId) return;
-    setIssueStatuses(prev => { const n = new Map(prev); n.set(issueId, { status, reason: "" }); return n; });
+    // Keep meta's message/form_id/rule_code alongside the new status (falling
+    // back to whatever was already stored) so a ghost row can render right away,
+    // without waiting on a reload from the DB.
+    setIssueStatuses(prev => {
+      const n = new Map(prev);
+      const existing = prev.get(issueId) || {};
+      n.set(issueId, {
+        status, reason: "",
+        message:   meta.message   ?? existing.message   ?? null,
+        form_id:   meta.form_id   ?? existing.form_id   ?? null,
+        rule_code: meta.rule_code ?? existing.rule_code ?? null,
+      });
+      return n;
+    });
     try {
       await fetch(`${API_BASE}/api/issues/status`, {
         method: "POST",
@@ -2375,19 +2654,105 @@ const AcordModal = forwardRef(function AcordModal({
     } catch { /* keep optimistic value; non-fatal */ }
   };
 
-  // One compact status control for a grouped-issue cluster (banner hard-stops /
-  // warnings). Cluster carries a durable issue_id from the backend.
-  const clusterStatusControl = (c) => {
-    const iid = c.issue_id || _fallbackIssueId(c.primary_message, c.forms);
+  // Cross-form issues the producer marked "resolved" (via the inline-fix modal
+  // or the status control) that no longer recompute as live - i.e. the fix
+  // actually cleared the underlying condition, so cross_form_validator simply
+  // stops emitting them. Without this, a fixed issue would just vanish from the
+  // panel instead of staying visible with a Resolved badge. Kept separate from
+  // "dismissed" (still-live issues the producer chose to ignore, which already
+  // render normally in their severity section) - this is only for issues that
+  // are both marked resolved AND no longer present at all.
+  const liveIssueIds = new Set(crossIssues.map(iss => issueIdOf(iss)));
+  const ghostIssues = Array.from(issueStatuses.entries())
+    .filter(([iid, st]) => st.status === "resolved" && st.message && !liveIssueIds.has(iid))
+    .map(([iid, st]) => ({ issue_id: iid, message: st.message, forms: st.form_id ? [st.form_id] : [], code: st.rule_code }));
+
+  // One compact status control for a SINGLE issue. Every hard-stop / warning
+  // sub-item gets its own (client review #8), so resolving or dismissing one
+  // line never silently marks the other members of its cluster. Mirrors the
+  // Cross-Form Validation panel, which is already per-row.
+  const itemStatusControl = (it, forms) => {
+    const iid = issueIdOf(it);
     return (
       <IssueStatusControl
         issueId={iid}
         status={issueStatuses.get(iid)?.status}
-        meta={{ form_id: Array.isArray(c.forms) ? c.forms[0] : null, rule_code: c.items?.[0]?.code, message: c.primary_message }}
+        meta={{
+          form_id:   (Array.isArray(it.forms) && it.forms[0]) || (Array.isArray(forms) ? forms[0] : null),
+          rule_code: it.code,
+          message:   it.message,
+        }}
         onSet={setIssueStatus}
       />
     );
   };
+
+  // One issue's action row for the Select Forms banners: an "Open to fix" button
+  // when the issue carries an inline-resolution descriptor (mode field/schedule/
+  // narrative - opens the SAME ResolutionModal the editor uses, which applies the
+  // value and re-runs stops + SQS deterministically), followed by the durable
+  // Open/Resolve/Dismiss work-tracking control. mode "none" or an uncoded legacy
+  // stop (no descriptor) shows work-tracking only, exactly as before - so nothing
+  // regresses, some rows just gain the fix affordance.
+  const itemResolveAndStatus = (it, forms) => {
+    // 1) Conflict-family issue that IS an open row in the Data Consistency
+    //    picker (documents disagree on name / FEIN / dates / Gross Sales / DBA):
+    //    reconciled there, not by the inline modal - so route the producer up to
+    //    that row. Checked first: it is the purpose-built path for these.
+    const dcKey = issueFactKey(it);
+    const inDataConsistency = !!dcKey && (underwriting?.fields || []).some(
+      (f) => f.fact_key === dcKey && f.status === "conflict"
+    );
+    // 2) Otherwise, a cross-form issue carrying an inline-resolution descriptor.
+    //    Only `field` / `schedule` are typed/edited in the modal; `narrative` and
+    //    `none` cannot be typed-fixed - they get an explanatory note instead of a
+    //    button (client ask), so a row never looks like the feature just skipped it.
+    const res = it?.resolution;
+    const mode = res && res.mode;
+    const canResolve = mode === "field" || mode === "schedule";
+    const explainOnly = !inDataConsistency && (mode === "narrative" || mode === "none");
+    // 3) None of the above (uncoded legacy stop, no descriptor at all): return
+    //    EXACTLY what the banner rendered before this feature - the work-tracking
+    //    control alone, no wrapper - so those rows are unchanged.
+    if (!inDataConsistency && !canResolve && !explainOnly) return itemStatusControl(it, forms);
+    // A fix affordance (or a why-not note) + the same status control, laid out
+    // like the editor's Cross-Form panel.
+    return (
+      <div>
+        {explainOnly && <ResolutionHint mode={mode} />}
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+          {inDataConsistency && <FixInDataConsistencyButton onClick={() => jumpToDataConsistency(dcKey)} />}
+          {canResolve && <OpenToFixButton onClick={() => openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms) })} />}
+          {itemStatusControl(it, forms)}
+        </div>
+      </div>
+    );
+  };
+
+  // Collapsed-cluster progress pill: how many of a cluster's sub-items are
+  // already handled (resolved or dismissed). Shown in the section header so a
+  // collapsed cluster still reports progress without exposing any buttons.
+  const clusterRollup = (c) => {
+    const items = Array.isArray(c.items) ? c.items : [];
+    const done = items.reduce((n, it) => {
+      const st = issueStatuses.get(issueIdOf(it))?.status;
+      return n + (st === "resolved" || st === "dismissed" ? 1 : 0);
+    }, 0);
+    if (!done) return null;
+    return (
+      <span style={{ fontSize: 9, fontWeight: 700, color: "#166534", background: "#dcfce7", border: "1px solid #86efac", borderRadius: 10, padding: "1px 7px", whiteSpace: "nowrap" }}>
+        {done} of {c.count} handled
+      </span>
+    );
+  };
+
+  // "Important" is a read-only PREVIEW of the top 3 warning clusters (per
+  // client direction): a collapsible, open-by-default summary that says "these
+  // three matter most", with no action controls of its own. It is deliberately
+  // NOT de-duplicated against the tiers below - the same clusters still appear,
+  // actionable, under their real Required/Recommended headings, which is where
+  // the client wants the full data to live. So the preview and the tiers are
+  // rendered independently and no promotion/filtering state is needed here.
 
   useEffect(() => {
     if ((step !== "editor" && step !== "lite") || !sessionId) return;
@@ -2466,6 +2831,9 @@ const AcordModal = forwardRef(function AcordModal({
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
     setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0); setIssueDiff(null);
+    // Asked upfront on the upload screen now, so it MUST be cleared here - a
+    // leftover answer would otherwise be applied to the next submission.
+    setMarketingReason(""); setMarketingOther(""); setMarketingOtherSaved(false);
     _resetSqsState();
   };
 
@@ -2478,6 +2846,8 @@ const AcordModal = forwardRef(function AcordModal({
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
     setSignedForms(new Set()); setShowUploadOverlay(false); setShowGenerateOverlay(false); setShowDownloadOverlay(false);
     setArqQuestions([]); setArqSessions([]); setClientFilledFields([]); setArqNotifCount(0); setIssueDiff(null);
+    // Same reason as in resetToUpload above.
+    setMarketingReason(""); setMarketingOther(""); setMarketingOtherSaved(false);
     _resetSqsState();
   };
 
@@ -3027,7 +3397,7 @@ const AcordModal = forwardRef(function AcordModal({
           setSoftStops((data.missing_fields || []).map(m => `ACORD 125 minimum field missing: ${m}`));
           setHardStops([]);
           setRecommendations(data.recommendations || []);
-          setStep(user?.subscription_tier === "essentials" ? "lite" : "recommendations");
+          setStep(user?.subscription_tier === "essentials" ? "lite" : "review");
           return;
         }
         setError(data.message || "Upload failed");
@@ -3055,9 +3425,17 @@ const AcordModal = forwardRef(function AcordModal({
       if (data.integrity_review_required) {
         setRemoveDocIds(new Set());
         setStep("integrity_review");
+        // The answer stays pending: the marketing-reason endpoint is behind the
+        // same integrity gate, so it is applied once the review clears (see
+        // handleIntegrityAction).
         return;
       }
-      setStep(user?.subscription_tier === "essentials" ? "lite" : "recommendations");
+      // Apply the upfront "Why are you marketing this account?" answer before
+      // landing on the form list, so ACORD 101 is already at its correct tier.
+      // Must run last - it re-runs recommendations and its result supersedes the
+      // recommendations/account_profile/flags set above.
+      await applyPendingMarketingReason(data.session_id);
+      setStep(user?.subscription_tier === "essentials" ? "lite" : "review");
     } catch (e) {
       if (e.message === "Failed to fetch" || e.name === "TypeError") {
         setError("Upload failed: could not reach the server. Check your connection, or the file may be too large. Please try again.");
@@ -3133,7 +3511,11 @@ const AcordModal = forwardRef(function AcordModal({
               warningCount: (data.soft_stops || []).length,
             });
       _notifyJobDone("upload", true, _resolveNotice);
-      setStep(user?.subscription_tier === "essentials" ? "lite" : "recommendations");
+      // The integrity gate blocked the marketing-reason endpoint during the
+      // review; the package is clear now, so apply the upfront answer here.
+      // Last, for the same reason as in handleUpload.
+      await applyPendingMarketingReason(sessionId);
+      setStep(user?.subscription_tier === "essentials" ? "lite" : "review");
     } catch (e) {
       setError("Could not resolve the submission integrity review: " + (e?.message || "network error"));
     } finally {
@@ -3184,30 +3566,51 @@ const AcordModal = forwardRef(function AcordModal({
   };
 
   // "Why are you marketing this account?" answer (DOUBTS-Workstream4 / Brent).
-  // Re-runs form recommendations live so ACORD 101 moves to its correct tier; the
-  // answer also persists into the session so it flows into later SQS scoring.
-  const handleMarketingReason = async (reason) => {
-    if (!sessionId || !reason) return;
-    setMarketingBusy(true); setError(null);
+  // Asked UP FRONT on the upload screen - client feedback (item 10) was that it
+  // reads as out of place on Select Forms and belongs with the declaration-page
+  // upload it relates to. There is no session at that point (handleUpload creates
+  // it), so the producer's choice is held in local state and applied by the two
+  // helpers below the moment a session exists. The backend contract is unchanged:
+  // it writes the durable audit row, sets carrier_marketing_reason +
+  // prior_carrier_adverse_action, and re-runs form recommendations so ACORD 101
+  // escalates to its correct tier before the producer ever sees the form list.
+
+  // Collapses the dropdown + "Other" note into the single string the backend
+  // expects. Mirrors what the old inline Save button used to send. For "Other"
+  // the note only counts once it has been submitted, so an unconfirmed draft is
+  // treated as no answer rather than being applied silently.
+  const marketingReasonAnswer = () => {
+    if (!marketingReason) return null;
+    if (marketingReason !== "Other") return marketingReason;
+    const note = marketingOther.trim();
+    return (marketingOtherSaved && note) ? `Other: ${note}` : null;
+  };
+
+  // Applies the pending answer against an EXPLICIT session id - handleUpload can't
+  // read the sessionId state here because setSessionId hasn't flushed yet. Runs
+  // while the upload overlay is still up, so the extra round trip is invisible.
+  // The answer is optional, so a failure is reported but never blocks the
+  // submission: the producer still lands on their forms, just without the re-run.
+  const applyPendingMarketingReason = async (sid) => {
+    const reason = marketingReasonAnswer();
+    if (!sid || !reason) return;
     try {
-      const res = await fetch(`${API_BASE}/api/session/${sessionId}/marketing-reason`, {
+      const res = await fetch(`${API_BASE}/api/session/${sid}/marketing-reason`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
-        setError(data.detail || data.message || "Could not update recommendations.");
+        setError("Your documents were analyzed, but the marketing reason could not be saved, so the recommended forms were not adjusted for it. You can continue.");
         return;
       }
-      setRecommendations(data.recommendations || recommendations);
+      if (data.recommendations) setRecommendations(data.recommendations);
       if (data.account_profile) setAccountProfile(data.account_profile);
       if (data.all_available_forms) setAllAvailableForms(data.all_available_forms);
       if (data.flags) setFlags(data.flags);
     } catch (e) {
-      setError("Could not update recommendations: " + (e?.message || "network error"));
-    } finally {
-      setMarketingBusy(false);
+      setError("Your documents were analyzed, but the marketing reason could not be saved: " + (e?.message || "network error"));
     }
   };
 
@@ -3231,10 +3634,14 @@ const AcordModal = forwardRef(function AcordModal({
     }
   };
 
-  // Submission Integrity status banner (Beta Report §4.1). Pink to match the
-  // other sections. HIGH / MEDIUM are surfaced here on the recommendations/SQS
-  // screen (they never pause); LOW pauses and is shown on the dedicated
-  // "Submission Integrity Review Needed" screen instead. Informational only.
+  // Submission Integrity status banner (Beta Report §4.1). Neutral white/slate
+  // surface - client feedback (Figure 4) asked for the pink section background
+  // to be removed here; severity is carried by the chip alone, not by tinting
+  // the whole card. The pink family is retained on the other sections of this
+  // screen and on the LOW hard-stop review screen, which was not part of that
+  // request. HIGH / MEDIUM are surfaced here on the recommendations/SQS screen
+  // (they never pause); LOW pauses and is shown on the dedicated "Submission
+  // Integrity Review Needed" screen instead. Informational only.
   const renderIntegrityStatus = () => {
     const st = integrity?.status;
     if (!st) return null;
@@ -3270,29 +3677,29 @@ const AcordModal = forwardRef(function AcordModal({
           : null;
 
     return (
-      <div style={{ marginBottom: 14, background: "rgba(230,27,132,0.07)", border: "1.5px solid rgba(230,27,132,0.25)", borderRadius: 12, padding: "14px 18px" }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: "#9d0f5a", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Submission integrity</div>
+      <div style={{ marginBottom: 14, background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 12, padding: "14px 18px" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Submission integrity</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <IntegritySeverityChip severity={severity} />
-          <span style={{ fontWeight: 700, color: "#9d0f5a", fontSize: 13.5 }}>{title}</span>
+          <span style={{ fontWeight: 700, color: "#1e293b", fontSize: 13.5 }}>{title}</span>
         </div>
-        <div style={{ fontSize: 12.5, color: "#b01868", lineHeight: 1.5, marginTop: 4 }}>{desc}</div>
+        <div style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.5, marginTop: 4 }}>{desc}</div>
         {entities.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
             {entities.map((e, i) => (
-              <span key={i} style={{ background: "rgba(230,27,132,0.08)", color: "#9d0f5a", border: "1px solid rgba(230,27,132,0.22)", borderRadius: 999, padding: "3px 12px", fontSize: 12.5, fontWeight: 600 }}>{e}</span>
+              <span key={i} style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0", borderRadius: 999, padding: "3px 12px", fontSize: 12.5, fontWeight: 600 }}>{e}</span>
             ))}
           </div>
         )}
         {reasons.length > 0 && (
           <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
             {reasons.map((r, i) => (
-              <li key={i} style={{ fontSize: 12.5, color: "#b01868", padding: "1px 0" }}>{r}</li>
+              <li key={i} style={{ fontSize: 12.5, color: "#475569", padding: "1px 0" }}>{r}</li>
             ))}
           </ul>
         )}
         {normalizedDiffs.length > 0 && (
-          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(230,27,132,0.2)" }}>
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #e2e8f0" }}>
             <div style={{ fontWeight: 700, fontSize: 12, color: "#1e293b", marginBottom: 4 }}>
               Resolved formatting difference
             </div>
@@ -3376,12 +3783,14 @@ const AcordModal = forwardRef(function AcordModal({
         }
         // Building-value review gate (client Property Integrity): the server
         // refuses to generate forms while building values conflict across
-        // documents. Route back to the recommendations step where the Data
-        // Consistency picker lets the broker confirm the correct value.
+        // documents. Route back to the REVIEW step - that is where the Data
+        // Consistency picker lives, so it is the only screen on which the
+        // broker can actually satisfy this gate. Sending them back to
+        // form_selection would strand them on a page with no way to resolve it.
         if (detail.error === "building_value_review_required") {
           if (detail.underwriting_consistency) setUnderwriting(detail.underwriting_consistency);
           setUnderwritingPicks({});
-          setStep("recommendations");
+          setStep("review");
           setError(detail.message || "Building values differ across the submitted documents. Confirm the correct value before generating forms.");
           return;
         }
@@ -3437,7 +3846,29 @@ const AcordModal = forwardRef(function AcordModal({
   const groupedRecs = TIER_ORDER
     .map(t => ({ tier: t, items: recommendations.filter(r => tierOf(r) === t) }))
     .filter(g => g.items.length > 0);
+  // ── Review (pre-scoring) page: what the broker can actually act on ──────────
+  // Client feedback item 13 asked for a page they "click into items to resolve
+  // them by entering the correct data" on. Only two of this screen's sections
+  // accept data: a document's type (reclassify/exclude) and a cross-document
+  // value conflict (pick or type, then Confirm & apply). Hard stops and warnings
+  // are advisory - their Resolve/Dismiss chips are work-tracking markers whose
+  // endpoint is deliberately isolated from scoring - so they are reported
+  // separately and NOT folded into this count. Counting them here would promise
+  // an action this screen cannot deliver.
+  //
+  // Derived on every render from the same state the sections themselves read, so
+  // the count cannot drift out of sync with the lists below it.
+  const docsNeedingReview = docSummary.filter(
+    d => !d.excluded && ((d.doc_type || "unknown") === "unknown" || d.doc_type_confidence === "low")
+  );
+  const openConflicts = (underwriting?.fields || []).filter(f => f.status === "conflict");
+  const openItemCount = docsNeedingReview.length + openConflicts.length;
+
   const activeSqs = activeFormId && generatedForms[activeFormId]?.sqs;
+  // Short name of the form the pinned score belongs to. The pinned header is the
+  // only thing left at the top of the panel once it scrolls, so it has to name
+  // its own form - see the comment on that card.
+  const activeFormLabel = shortFormLabel(activeFormId, generatedForms[activeFormId]?.form_name);
   const pkgsUsed = user?.packages_used || 0;
   const pkgsLimit = user?.packages_limit || 0;
   const softBuffer = user?.packages_soft_buffer || 0;
@@ -3520,6 +3951,114 @@ const AcordModal = forwardRef(function AcordModal({
     } catch (e) {
       return { ok: false, error: "Network error. Please try again." };
     }
+  };
+
+  // Producer resolves a Cross-Form Validation issue inline (SQS panel "Open" ->
+  // fix). ResolutionModal already applied the change server-side and returns the
+  // recomputed scores + a freshly grouped cross-issue view; drop them into state
+  // and mark the issue resolved so the panel reflects the fix without a reload.
+  // Same per-form / package SQS update shape as the answer + dismiss-credit paths.
+  // Shared by resolve-issue AND reopen-issue - both return the identical
+  // {updated_forms, new_package_sqs_score, cross_issues, grouped_cross_issues,
+  // hard_stops, soft_stops, grouped_issues, ...} shape, so a value applied via
+  // the modal and a value cleared via Reopen refresh the panel exactly the
+  // same way. Keeping this in one place means the two can't drift apart.
+  const _applyCrossIssuePanelUpdate = (data) => {
+    if (data.updated_forms && Object.keys(data.updated_forms).length > 0) {
+      setGeneratedForms(prev => {
+        const next = { ...prev };
+        for (const [fid, upd] of Object.entries(data.updated_forms)) {
+          const form = next[fid];
+          if (!form?.sqs) continue;
+          next[fid] = {
+            ...form,
+            sqs: {
+              ...form.sqs,
+              sqs_score:  upd.new_sqs_score,
+              grade:      upd.new_grade      ?? form.sqs.grade,
+              tier:       upd.new_tier       ?? form.sqs.tier,
+              tier_color: upd.new_tier_color ?? form.sqs.tier_color,
+            },
+          };
+        }
+        return next;
+      });
+    }
+    if (data.new_package_sqs_score != null) {
+      setPackageSqs(prev => prev ? { ...prev, package_sqs_score: data.new_package_sqs_score, tier: data.new_package_tier ?? prev.tier } : prev);
+    }
+    if (Array.isArray(data.hard_stops)) setHardStops(data.hard_stops);
+    if (Array.isArray(data.soft_stops)) setSoftStops(data.soft_stops);
+    if (Array.isArray(data.cross_issues)) setCrossIssues(data.cross_issues);
+    if (data.grouped_cross_issues !== undefined) setCrossGrouped(data.grouped_cross_issues || null);
+    // Select Forms banners (recommendations step): the endpoint also returns the
+    // classified split + grouped_issues, so an inline fix/reopen opened from
+    // those banners refreshes them in place. Harmless on the editor step, which
+    // renders crossGrouped rather than these.
+    if (data.grouped_issues !== undefined) setGroupedIssues(data.grouped_issues || null);
+    if (typeof data.can_proceed_with_warning === "boolean") setCanProceedWithWarning(data.can_proceed_with_warning);
+    if (Array.isArray(data.warning_stops)) setWarningStops(data.warning_stops);
+    // A value was stamped/cleared on the forms server-side; re-fetch the open
+    // PDF so the change shows on the field (other forms re-fetch when navigated
+    // to via their key).
+    setPdfRefreshTick(t => t + 1);
+  };
+
+  // Producer applies an inline fix (SQS panel "Open to fix" -> Apply).
+  // ResolutionModal already applied the change server-side; this drops the
+  // response into state and marks the issue resolved so the panel reflects
+  // the fix without a reload.
+  const handleIssueResolved = (data, issue) => {
+    if (!data?.success) return;
+    _applyCrossIssuePanelUpdate(data);
+    // Flip the issue's durable status chip to Resolved (work-tracking marker).
+    const iid = issueIdOf(issue);
+    if (iid) setIssueStatus(iid, "resolved", { form_id: Array.isArray(issue?.forms) ? issue.forms[0] : null, rule_code: issue?.code, message: issue?.message });
+    setResolutionIssue(null);
+  };
+
+  // Producer clicks "Reopen" on a Cross-Form Validation row (live or already-
+  // resolved/ghost). For a field-mode issue this UNDOES the fix: the backend
+  // deletes the producer-provenance fact(s) and blanks them everywhere they
+  // were stamped, then re-runs the rules - so reopening genuinely clears the
+  // value instead of just relabeling a validation that still shows the old
+  // answer on the form. Schedule/narrative/none-mode issues (and the generic
+  // hard-stop/warning rail elsewhere, which never routes through here) just
+  // flip the status marker, same as Resolve/Dismiss always have.
+  const handleReopenIssue = async (issueId, status, meta = {}) => {
+    if (status !== "open") { setIssueStatus(issueId, status, meta); return; }
+    if (!issueId || !sessionId) return;
+    // Optimistic status flip so the badge updates immediately even if the
+    // network call is slow; a failure below just leaves it at "open", which is
+    // the correct end state either way (worst case: the fact wasn't cleared).
+    setIssueStatuses(prev => { const n = new Map(prev); const existing = prev.get(issueId) || {}; n.set(issueId, { ...existing, status: "open", reason: "" }); return n; });
+    try {
+      const res = await fetch(`${API_BASE}/api/audit/reopen-issue`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          issue_id: issueId,
+          code: meta.rule_code ?? null,
+          form_id: meta.form_id ?? null,
+          message: meta.message ?? null,
+        }),
+      });
+      const data = await res.json();
+      if (data?.success && data.cleared) _applyCrossIssuePanelUpdate(data);
+    } catch { /* optimistic status already applied; non-fatal */ }
+  };
+
+  // Open the inline-resolution modal for a validation row/cluster that carries a
+  // resolution descriptor. Clusters expose `resolution` + `primary_message`, so
+  // normalize a cluster into an issue-shaped object the modal understands.
+  const openResolution = (issOrCluster) => {
+    if (!issOrCluster?.resolution) return;
+    const issue = issOrCluster.message
+      ? issOrCluster
+      : { ...issOrCluster, message: issOrCluster.primary_message, issue_id: issueIdOf(issOrCluster) };
+    setResolutionIssue(issue);
   };
 
   const handleDismissRec = async (rec, currentScore, reason = "") => {
@@ -3769,10 +4308,16 @@ const AcordModal = forwardRef(function AcordModal({
         ? { height: "calc(100vh - 81px)", display: "flex", flexDirection: "column", overflow: "hidden" }
         : { minHeight: "calc(100vh - 81px)" })
     }}>
-      <div style={{
-        padding: step === "editor" ? 0 : "32px 40px",
-        ...(step === "editor" && { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 })
-      }}>
+      {/* The non-editor padding used to be an inline "32px 40px", which no media
+          query could reach - on a 380px phone that spent 80px of the screen on
+          side padding before .modal-step's own 8px. Moved to .acord-step-shell so
+          it can step down with the viewport. Desktop values are unchanged. */}
+      <div
+        className={step === "editor" ? undefined : "acord-step-shell"}
+        style={step === "editor"
+          ? { padding: 0, flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }
+          : undefined}
+      >
         {renderContent()}
       </div>
       {showEnterprisePopup && (
@@ -3831,6 +4376,15 @@ const AcordModal = forwardRef(function AcordModal({
             </div>
           </div>
         </div>
+      )}
+      {resolutionIssue && (
+        <ResolutionModal
+          issue={resolutionIssue}
+          sessionId={sessionId}
+          onApplied={handleIssueResolved}
+          onSetStatus={(issue, status) => { const iid = issueIdOf(issue); if (iid) setIssueStatus(iid, status, { form_id: Array.isArray(issue?.forms) ? issue.forms[0] : null, rule_code: issue?.code, message: issue?.message }); }}
+          onClose={() => setResolutionIssue(null)}
+        />
       )}
       {downloadPreflightLoading && <ProcessStageOverlay stages={["Checking recommendations", "Loading SQS summary"]} advanceAfter={1800} />}
       {showDownloadPreflight && (
@@ -4057,7 +4611,7 @@ const AcordModal = forwardRef(function AcordModal({
           <div className="alert alert-error" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
             <span style={{ flex: 1 }}>{error}</span>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              {step === "recommendations" && checkedFormIds.size > 0 && (
+              {step === "form_selection" && checkedFormIds.size > 0 && (
                 <button
                   onClick={() => { setError(null); handleGenerateAll(); }}
                   style={{ padding: "5px 14px", background: "#E61B84", color: "#fff", border: "none", borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}
@@ -4402,6 +4956,95 @@ const AcordModal = forwardRef(function AcordModal({
                   </button>
                 </div>
               </div>
+
+              {/* DOUBTS-Workstream4 (Brent): producer-answerable "Why are you
+                  marketing this account?". Client feedback (item 10) moved it here
+                  from Select Forms, where it read as out of place. Purely local at
+                  this point - there is no session until Analyze runs - so the
+                  answer is held in state and applied by applyPendingMarketingReason
+                  the moment the session exists, which re-runs recommendations and
+                  escalates ACORD 101 before the form list is ever shown. Optional
+                  and non-blocking: leaving it alone changes nothing.
+                  Shown to non-essentials only, matching who could reach it before
+                  (essentials lands on the lite screen, never on Select Forms).
+                  Card matches this screen's white surface; fully fluid for
+                  mobile/iOS. */}
+              {user?.subscription_tier !== "essentials" && (
+                <div style={{
+                  marginTop: 12,
+                  background: "#fff",
+                  borderRadius: 12,
+                  border: "1px solid #e9edf2",
+                  padding: "12px 14px",
+                }}>
+                  <div style={{ fontSize: 12.5, marginBottom: 8, lineHeight: 1.4 }}>
+                    <span style={{ color: "#9d0f5a", fontWeight: 600 }}>Why are you marketing this account?</span>
+                    <span style={{ color: "#94a3b8", fontWeight: 500 }}> - optional, helps recommend the right forms</span>
+                  </div>
+                  <select
+                    value={marketingReason}
+                    disabled={loading || uploadBlocked}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setMarketingReason(v);
+                      setMarketingOther("");
+                      setMarketingOtherSaved(false);
+                    }}
+                    style={{ width: "100%", maxWidth: 360, boxSizing: "border-box", padding: "7px 10px", fontSize: 12.5, color: "#1e293b", background: "#fff", border: "1px solid #d8dee6", borderRadius: 7, cursor: (loading || uploadBlocked) ? "default" : "pointer" }}
+                  >
+                    <option value="">Select a reason...</option>
+                    {MARKETING_REASON_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                  {MARKETING_ADVERSE_REASONS.has(marketingReason) && (
+                    <div style={{ marginTop: 7, fontSize: 11.5, color: "#9d0f5a", lineHeight: 1.4 }}>
+                      This will add ACORD 101 (Additional Remarks) to your recommended forms for an underwriter narrative.
+                    </div>
+                  )}
+                  {marketingReason === "Other" && (
+                    marketingOtherSaved ? (
+                      // Submitted → collapse the input into a compact confirmation
+                      // line with an Edit affordance, so the panel stays tidy.
+                      <div style={{ marginTop: 7, maxWidth: 360, display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#1e293b", background: "#f8fafc", border: "1px solid #e9edf2", borderRadius: 7, padding: "6px 10px" }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="20 6 9 17 4 12"/></svg>
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{marketingOther.trim()}</span>
+                        <button
+                          type="button"
+                          disabled={loading || uploadBlocked}
+                          onClick={() => setMarketingOtherSaved(false)}
+                          style={{ flexShrink: 0, background: "none", border: "none", color: "#9d0f5a", fontSize: 11.5, fontWeight: 600, cursor: (loading || uploadBlocked) ? "default" : "pointer", padding: 0 }}
+                        >
+                          Edit
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 7, maxWidth: 360 }}>
+                        <input
+                          type="text"
+                          value={marketingOther}
+                          disabled={loading || uploadBlocked}
+                          onChange={(e) => setMarketingOther(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && marketingOther.trim()) {
+                              e.preventDefault();
+                              setMarketingOtherSaved(true);
+                            }
+                          }}
+                          placeholder="Please explain..."
+                          style={{ flex: "1 1 180px", minWidth: 0, boxSizing: "border-box", padding: "6px 10px", fontSize: 12, color: "#1e293b", background: "#fff", border: "1px solid #d8dee6", borderRadius: 7, outline: "none" }}
+                        />
+                        <button
+                          type="button"
+                          disabled={loading || uploadBlocked || !marketingOther.trim()}
+                          onClick={() => setMarketingOtherSaved(true)}
+                          style={{ flexShrink: 0, padding: "6px 16px", fontSize: 12, fontWeight: 600, color: "#fff", border: "none", borderRadius: 7, background: (loading || uploadBlocked || !marketingOther.trim()) ? "#e9a8cb" : "#E61B84", cursor: (loading || uploadBlocked || !marketingOther.trim()) ? "default" : "pointer" }}
+                        >
+                          Submit
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
             </div>
           );
         })()}
@@ -4433,9 +5076,8 @@ const AcordModal = forwardRef(function AcordModal({
             <div style={{ marginBottom: 14 }}>
               <NextStepBanner text="Ready to Review Documents" />
             </div>
-            {/* ── Banner - light magenta to match the homepage hero ── */}
+            {/* ── Banner ── */}
             <div style={{
-              background: "rgba(230,27,132,0.07)",
               border: "1.5px solid rgba(230,27,132,0.25)",
               borderRadius: 12,
               padding: "18px 22px",
@@ -4559,33 +5201,70 @@ const AcordModal = forwardRef(function AcordModal({
           </div>
         )}
 
-        {step === "recommendations" && (
+        {/* ── PRE-SCORING ──────────────────────────────────────────────────────
+            Client feedback item 13: this screen used to carry the form-selection
+            list as well, under a "Select Forms to Generate" header, so a broker
+            met 23 warnings and a form picker at the same time and neither read as
+            a coherent task. It is now one theme - understand and fix the
+            submission - and form selection is its own step below. */}
+        {step === "review" && (
           <div className="modal-step modal-step-wide">
             <div className="step-header">
-              <h2 className="step-title" style={{ color: "#1e293b" }}>Select Forms to Generate</h2>
-              <p className="step-subtitle">Select the forms you need, then generate all at once.</p>
+              <h2 className="step-title" style={{ color: "#1e293b" }}>Review Your Submission</h2>
+              <p className="step-subtitle">Resolve what needs your input, then continue to form selection.</p>
             </div>
             {/* Workstream 6 §9.1 - "what to do next" guidance. Never says "Ready"
                 while hard stops remain (acceptance criteria). */}
             <div style={{ marginBottom: 14 }}>
               {(() => {
-                // Reflects the live hard-stop + warning counts (they update as the
-                // user reclassifies/excludes docs). Only "Ready" once both are zero.
+                // Reflects the live counts (they update as the user reclassifies,
+                // excludes, and confirms values). openItemCount leads because it is
+                // the only part of this screen the broker can act on; hard stops and
+                // warnings follow as context. Only "ready" once all three are zero.
                 const h = hardStops.length, w = softStops.length;
+                const n = openItemCount;
+                const plural = (c, word) => `${c} ${word}${c !== 1 ? "s" : ""}`;
+                const advisory = [
+                  h > 0 ? plural(h, "hard stop") : null,
+                  w > 0 ? plural(w, "warning") : null,
+                ].filter(Boolean).join(" and ");
                 let text;
-                if (h > 0 && w > 0) text = `Review ${h} hard stop${h !== 1 ? "s" : ""} and ${w} warning${w !== 1 ? "s" : ""} below before generating forms`;
-                else if (h > 0)     text = `Review ${h} hard stop${h !== 1 ? "s" : ""} below before generating forms`;
-                else if (w > 0)     text = `Review ${w} warning${w !== 1 ? "s" : ""} below before generating forms`;
-                else                text = "Ready to Generate Forms";
+                if (n > 0 && advisory)  text = `${plural(n, "item")} need${n === 1 ? "s" : ""} your input below, plus ${advisory} to review`;
+                else if (n > 0)         text = `${plural(n, "item")} need${n === 1 ? "s" : ""} your input below`;
+                else if (advisory)      text = `Review ${advisory} below before continuing`;
+                else                    text = "Nothing needs your attention - continue to form selection";
                 return <NextStepBanner text={text} />;
               })()}
             </div>
+            {/* Submission Readiness (client feedback item 11): sits directly
+                below the next-step banner and above Submission integrity, so
+                the score leads the screen instead of being buried under the
+                stop lists. Same data/condition as before - position and
+                surface only. */}
+            {tier2Score !== null && (
+              <div className="tier2-bar">
+                <div className="tier2-header"><span className="tier2-label">Submission Readiness</span><span className="tier2-score" style={{ color: barColor(tier2Score) }}>{tier2Score}%</span></div>
+                <div className="metric-bar"><div className="metric-fill" style={{ width: `${tier2Score}%`, background: barColor(tier2Score) }} /></div>
+                {tier2Missing.length > 0 && <div className="tier2-missing">Missing: {tier2Missing.join(" · ")}</div>}
+              </div>
+            )}
             {/* Submission Integrity status (Beta Report §4.1): advisory banner for
                 all statuses (HIGH / MEDIUM / LOW). LOW/MEDIUM expose an on-demand
                 "Review / separate documents" action; nothing is force-paused. */}
             {renderIntegrityStatus()}
-            <div className="doc-summary">
-              <div className="doc-summary-title">DOCUMENTS PROCESSED</div>
+            {/* Collapsible so a clean submission does not make the broker scroll
+                past a list that wants nothing from them. Opens by default only
+                while something in it actually needs setting - that is what makes
+                "click into items to resolve them" land on the right section. */}
+            <div className="doc-summary review-section">
+              <CollapsibleSection
+                title={`Documents Processed (${docSummary.length})`}
+                defaultOpen={docsNeedingReview.length > 0}
+                titleSize={14}
+                headerColor="#1e293b"
+                marginBottom={0}
+                titleRight={<ReviewCountBadge count={docsNeedingReview.length} />}
+              >
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {docSummary.map((d, i) => {
                   const docType = d.doc_type || "unknown";
@@ -4612,7 +5291,11 @@ const AcordModal = forwardRef(function AcordModal({
                     <div key={d.doc_id || i} style={{
                       display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
                       padding: "8px 12px", borderRadius: 8,
-                      border: `1px solid ${needsReview ? "rgba(230,27,132,0.35)" : "rgba(230,27,132,0.15)"}`,
+                      // Without the pink panel behind them these rows are the only
+                      // thing separating one document from the next, so the default
+                      // border is a neutral gray that stays visible on white. Rows
+                      // needing review keep the pink accent.
+                      border: `1px solid ${needsReview ? "rgba(230,27,132,0.35)" : "#e2e8f0"}`,
                       background: excluded ? "#f8fafc" : (needsReview ? "rgba(230,27,132,0.05)" : "#fff"),
                       opacity: excluded ? 0.6 : 1,
                     }}>
@@ -4692,6 +5375,7 @@ const AcordModal = forwardRef(function AcordModal({
                   Some documents need review. Set the correct type so scoring and form recommendations use them - or exclude documents that don't belong.
                 </div>
               )}
+              </CollapsibleSection>
             </div>
 
             {/* Cross-document value reconciliation picker (Beta Report §4.3 + §5).
@@ -4700,11 +5384,19 @@ const AcordModal = forwardRef(function AcordModal({
                 address, carrier) — with each document's value as a choice plus a
                 custom-value option. Consistent fields are silent (no action). */}
             {underwriting?.fields?.some(f => f.status === "conflict" || f.status === "confirmed") && (
-              <div className="doc-summary" style={{ marginTop: 12 }}>
-                <div className="doc-summary-title">DATA CONSISTENCY</div>
+              <div ref={dcSectionRef} className="doc-summary review-section" style={{ marginTop: 12 }}>
+                <CollapsibleSection
+                  title="Data Consistency"
+                  defaultOpen={openConflicts.length > 0}
+                  resetKey={dcOpenTick}
+                  titleSize={14}
+                  headerColor="#1e293b"
+                  marginBottom={0}
+                  titleRight={<ReviewCountBadge count={openConflicts.length} clearLabel="All confirmed" />}
+                >
                 {underwritingBusy !== null && (
                   <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>
-                    Applying your confirmation and updating the forms - please confirm the next item once this finishes.
+                    Applying your confirmation and updating the forms - you can prepare any other item, confirming it will apply once this finishes.
                   </div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -4712,19 +5404,28 @@ const AcordModal = forwardRef(function AcordModal({
                     const isConflict = f.status === "conflict";
                     const isConfirmed = f.status === "confirmed";
                     const busy = underwritingBusy === f.fact_key;
-                    // Any in-flight confirm blocks every row's controls. Each
-                    // confirm re-runs the pipeline server-side and replaces the
-                    // whole underwriting object; letting a second row fire while
-                    // the first is still applying raced the responses and dropped
-                    // confirmations (the "click multiple, none applied" lag).
-                    const rowDisabled = busy || underwritingBusy !== null;
+                    // Selecting/typing a value on ANY row is always allowed, in
+                    // any order (item 9 or 10 can be prepared before item 1) -
+                    // only the row currently applying locks its own inputs.
+                    // Firing a SECOND confirm while one is in flight is what's
+                    // still serialized: each confirm re-runs the pipeline
+                    // server-side and replaces the whole underwriting object,
+                    // so letting two race dropped confirmations (the "click
+                    // multiple, none applied" lag). anyConfirmInFlight covers
+                    // just the Confirm button; it never disables radios/text.
+                    const rowDisabled = busy;
+                    const anyConfirmInFlight = underwritingBusy !== null;
                     const picked = underwritingPicks[f.fact_key] ?? "";
                     const formsLabel = (f.forms || []).map(x => x.replace("ACORD_", "ACORD ")).join(", ");
+                    const highlighted = dcHighlight === f.fact_key;
                     return (
-                      <div key={f.fact_key} style={{
+                      <div key={f.fact_key} id={`dc-field-${f.fact_key}`} style={{
                         padding: "10px 12px", borderRadius: 8,
-                        border: "1px solid rgba(230,27,132,0.2)",
-                        background: "rgba(230,27,132,0.04)",
+                        border: highlighted ? "1px solid rgba(230,27,132,0.85)" : "1px solid rgba(230,27,132,0.2)",
+                        background: highlighted ? "rgba(230,27,132,0.10)" : "rgba(230,27,132,0.04)",
+                        boxShadow: highlighted ? "0 0 0 3px rgba(230,27,132,0.18)" : "none",
+                        transition: "box-shadow 0.25s, border-color 0.25s, background 0.25s",
+                        scrollMarginTop: 16,
                       }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
@@ -4750,11 +5451,16 @@ const AcordModal = forwardRef(function AcordModal({
                                     checked={picked === v.display}
                                     onChange={() => setUnderwritingPicks(p => ({ ...p, [f.fact_key]: v.display }))}
                                     disabled={rowDisabled}
+                                    style={{ flexShrink: 0 }}
                                   />
                                 )}
-                                <span style={{ fontWeight: 600, color: "#0f172a" }}>{v.display}</span>
-                                <span style={{ color: "#94a3b8" }}>from</span>
-                                <span style={{ color: "#334155" }}>
+                                {/* minWidth/overflowWrap: a flex item won't shrink
+                                    below its content by default, so a long address
+                                    or a run of filenames pushed this row past the
+                                    card on narrow screens instead of wrapping. */}
+                                <span style={{ fontWeight: 600, color: "#0f172a", minWidth: 0, overflowWrap: "anywhere" }}>{v.display}</span>
+                                <span style={{ color: "#94a3b8", flexShrink: 0 }}>from</span>
+                                <span style={{ color: "#334155", minWidth: 0, overflowWrap: "anywhere" }}>
                                   {v.sources.map(s => s.filename).join(", ")}
                                 </span>
                                 {isConflict && f.suggested_value != null && v.display === f.suggested_value && (
@@ -4778,19 +5484,22 @@ const AcordModal = forwardRef(function AcordModal({
                         {/* Confirm control (§4.3 item 5) */}
                         {isConflict && (
                           <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            {/* Basis 160 keeps the desktop width it always had;
+                                shrink-only (no grow) lets it give way to the
+                                button on narrow screens instead of overflowing. */}
                             <input
                               type="text"
                               value={picked}
                               disabled={rowDisabled}
                               placeholder="…or type a value"
                               onChange={(e) => setUnderwritingPicks(p => ({ ...p, [f.fact_key]: e.target.value }))}
-                              style={{ fontSize: 12, padding: "4px 8px", borderRadius: 6, border: "1px solid #cbd5e1", width: 160 }}
+                              style={{ fontSize: 12, padding: "4px 8px", borderRadius: 6, border: "1px solid #cbd5e1", flex: "0 1 160px", minWidth: 0 }}
                             />
                             <button
                               type="button"
-                              disabled={rowDisabled || !picked}
+                              disabled={anyConfirmInFlight || !picked}
                               onClick={() => handleConfirmUnderwriting(f.fact_key, picked)}
-                              style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 6, border: "none", background: picked && !rowDisabled ? "#2563eb" : "#cbd5e1", color: "#fff", cursor: picked && !rowDisabled ? "pointer" : "not-allowed" }}
+                              style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 6, border: "none", background: picked && !anyConfirmInFlight ? "#2563eb" : "#cbd5e1", color: "#fff", cursor: picked && !anyConfirmInFlight ? "pointer" : "not-allowed", flexShrink: 0 }}
                             >
                               {busy ? "Applying…" : "Confirm & apply to forms"}
                             </button>
@@ -4800,34 +5509,48 @@ const AcordModal = forwardRef(function AcordModal({
                     );
                   })}
                 </div>
+                </CollapsibleSection>
               </div>
             )}
 
             <RemediationDiffBand diff={issueDiff} />
 
+            {/* Honest framing, added with the item-13 split. Everything above this
+                point can be fixed in place; these two lists cannot. Their
+                Resolve/Dismiss chips are work-tracking markers whose endpoint is
+                deliberately isolated from scoring (see IssueStatusControl), so
+                saying so out loud is better than letting the broker click Resolve
+                and assume the score moved. They are excluded from openItemCount
+                for the same reason. */}
+            {(hardStops.length > 0 || softStops.length > 0) && (
+              <div style={{ fontSize: 11.5, color: "#64748b", margin: "0 2px 8px", lineHeight: 1.5 }}>
+                These come from the submission itself. Correct them at source - in the
+                documents above, or in the generated forms after this step. Marking one
+                Resolved or Dismissed tracks your progress; it does not change the score.
+              </div>
+            )}
             {(hardStops.length > 0 || softStops.length > 0) && (
               <div className="stops-row">
                 {hardStops.length > 0 && (
                   <div className="stops-banner stops-hard">
-                    <div className="stops-title">Hard Stops - Required Before Submission - Caps Your SQS at 60</div>
+                    <div className="stops-title">
+                      Hard Stops
+                      <span className="stops-title-meta">Required before submission - Caps your SQS at 60</span>
+                    </div>
+                    {/* Hard-stop cards stay expanded by default: these block
+                        submission, so collapsing them behind a chevron risks a
+                        broker never reading a blocker. The card chunking is
+                        what makes them scannable, not hiding them. */}
                     {groupedIssues?.hard_stops?.length > 0 ? (
-                      groupedIssues.hard_stops.map((c, i) => (
-                        c.count > 1 ? (
-                          // Cluster header - same size/color as a Warnings cluster
-                          // header (10.5px, muted), since a cluster is a cluster
-                          // regardless of which banner it sits under.
-                          <div key={i}>
-                            <CollapsibleSection title={`${c.cluster} (${c.count})`} defaultOpen titleSize={10.5} headerColor="#64748b">
-                              {c.items.map((it, j) => <IssueLine key={j} message={it.message} className="stop-item stop-item-hard" />)}
-                            </CollapsibleSection>
-                            {clusterStatusControl(c)}
-                          </div>
-                        ) : (
-                          <div key={i}>
-                            <IssueLine message={c.primary_message} className="stop-item stop-item-hard" />
-                            {clusterStatusControl(c)}
-                          </div>
-                        )
+                      groupedIssues.hard_stops.map((c) => (
+                        <IssueCard
+                          key={clusterIdOf(c)}
+                          cluster={c}
+                          tone="hard"
+                          defaultOpen
+                          renderItemActions={(it) => itemResolveAndStatus(it, c.forms)}
+                          headerRight={clusterRollup(c)}
+                        />
                       ))
                     ) : (
                       hardStops.map((s, i) => <IssueLine key={i} message={s} className="stop-item stop-item-hard" />)
@@ -4836,17 +5559,35 @@ const AcordModal = forwardRef(function AcordModal({
                 )}
                 {softStops.length > 0 && (
                   <div className="stops-banner stops-soft">
-                    <div className="stops-title">Warnings - Caps Your SQS at 85</div>
+                    <div className="stops-title">
+                      Warnings
+                      <span className="stops-title-meta">Caps your SQS at 85</span>
+                    </div>
+                    {/* "Important" preview - the top 3 warning clusters, shown as
+                        a read-only summary so the producer sees at a glance which
+                        few matter most. No cluster sub-headers and no
+                        Open/Resolve/Dismiss here (per client): those live on the
+                        real, actionable copy under the tiers below, which still
+                        list every cluster including these three. Collapsible like
+                        the tiers, but open by default. */}
                     {groupedIssues?.important?.length > 0 && (
                       <div className="warning-tier-section warning-important-section">
-                        <div className="warning-important-label">Important</div>
-                        {groupedIssues.important.map((c, i) => (
-                          <IssueLine
-                            key={i}
-                            message={c.count > 1 ? `${c.primary_message} (+${c.count - 1} related)` : c.primary_message}
-                            className="stop-item stop-item-soft"
-                          />
-                        ))}
+                        <CollapsibleSection title="Important" defaultOpen titleSize={12} headerColor="#E61B84">
+                          {/* The preview lines sit on the same white card surface
+                              as every actionable cluster below, so "Important"
+                              reads as part of the same system rather than loose
+                              text on the pink banner. No action controls here -
+                              it stays a read-only summary. */}
+                          <div className="issue-card issue-card-soft">
+                            {groupedIssues.important.map((c, i) => (
+                              <IssueLine
+                                key={i}
+                                message={c.count > 1 ? `${c.primary_message} (+${c.count - 1} related)` : c.primary_message}
+                                className="stop-item stop-item-soft"
+                              />
+                            ))}
+                          </div>
+                        </CollapsibleSection>
                       </div>
                     )}
                     {groupedIssues?.warnings ? (
@@ -4859,32 +5600,27 @@ const AcordModal = forwardRef(function AcordModal({
                             {/* Level 2: tier header - the most prominent label inside the
                                 Warnings banner (12px), clearly smaller than the 13px
                                 banner title above it, but clearly bigger than the
-                                cluster headers nested inside it. */}
+                                cluster headers nested inside it. Shows every cluster
+                                in the tier; the three echoed in the Important preview
+                                above intentionally appear here too, where they are
+                                actionable. */}
                             <CollapsibleSection
-                              title={`${groupedIssues.tier_labels[tier]} (${totalCount})`}
+                              title={countTitle(groupedIssues.tier_labels[tier], totalCount)}
                               defaultOpen={tier === "required"}
                               titleSize={12}
                               headerColor="#0f172a"
                             >
-                              {clusters.map((c, i) => (
-                                c.count > 1 ? (
-                                  // Level 3: cluster header - the short category name
-                                  // (e.g. "Financial figure conflicts"), never the raw
-                                  // issue sentence, so it stays a compact label instead
-                                  // of a wall of upper-cased text. Sized clearly below
-                                  // the 12px tier header above it.
-                                  <div key={i}>
-                                    <CollapsibleSection title={`${c.cluster} (${c.count})`} titleSize={10.5} headerColor="#64748b">
-                                      {c.items.map((it, j) => <IssueLine key={j} message={it.message} className="stop-item stop-item-soft" />)}
-                                    </CollapsibleSection>
-                                    {clusterStatusControl(c)}
-                                  </div>
-                                ) : (
-                                  <div key={i}>
-                                    <IssueLine message={c.primary_message} className="stop-item stop-item-soft" />
-                                    {clusterStatusControl(c)}
-                                  </div>
-                                )
+                              {/* Level 3: each cluster is a card - the header is the
+                                  short category name (e.g. "Financial figure
+                                  conflicts"), never the raw issue sentence. */}
+                              {clusters.map((c) => (
+                                <IssueCard
+                                  key={clusterIdOf(c)}
+                                  cluster={c}
+                                  tone="soft"
+                                  renderItemActions={(it) => itemResolveAndStatus(it, c.forms)}
+                                  headerRight={clusterRollup(c)}
+                                />
                               ))}
                             </CollapsibleSection>
                           </div>
@@ -4910,90 +5646,64 @@ const AcordModal = forwardRef(function AcordModal({
                 </div>
               </div>
             )}
-            {/* DOUBTS-Workstream4 (Brent): producer-answerable "Why are you
-                marketing this account?" - answering re-runs recommendations so
-                ACORD 101 escalates to its correct tier; the answer also flows
-                into later SQS scoring. Optional / non-blocking. Same magenta
-                surface as the panels above; fully fluid for mobile/iOS. */}
-            {recommendations.length > 0 && (
-              <div style={{ margin: "8px 0", padding: "12px 16px", background: "rgba(230,27,132,0.07)", border: "1.5px solid rgba(230,27,132,0.25)", borderRadius: 8 }}>
-                <div style={{ color: "#9d0f5a", fontWeight: 600, fontSize: 13.5, marginBottom: 10 }}>
-                  Why are you marketing this account? (optional)
-                </div>
-                <select
-                  value={marketingReason}
-                  disabled={marketingBusy}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setMarketingReason(v);
-                    setMarketingOther("");
-                    if (v) handleMarketingReason(v);
-                  }}
-                  style={{ width: "100%", maxWidth: 420, boxSizing: "border-box", padding: "9px 12px", fontSize: 13, color: "#1e293b", background: "#fff", border: "1px solid rgba(230,27,132,0.3)", borderRadius: 8, cursor: marketingBusy ? "default" : "pointer" }}
-                >
-                  <option value="">Select a reason...</option>
-                  {MARKETING_REASON_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-                {MARKETING_ADVERSE_REASONS.has(marketingReason) && (
-                  <div style={{ marginTop: 8, fontSize: 12, color: "#9d0f5a", lineHeight: 1.45 }}>
-                    Adds ACORD 101 (Additional Remarks) to your recommended forms for an underwriter narrative.
-                  </div>
-                )}
-                {marketingReason === "Other" && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8, maxWidth: 420 }}>
-                    <input
-                      type="text"
-                      value={marketingOther}
-                      disabled={marketingBusy}
-                      onChange={(e) => setMarketingOther(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && marketingOther.trim()) {
-                          e.preventDefault();
-                          handleMarketingReason(`Other: ${marketingOther.trim()}`);
-                        }
-                      }}
-                      placeholder="Please explain..."
-                      style={{ flex: "1 1 200px", minWidth: 0, boxSizing: "border-box", padding: "7px 11px", fontSize: 12.5, color: "#1e293b", background: "#fff", border: "1px solid rgba(230,27,132,0.3)", borderRadius: 7, outline: "none" }}
-                    />
-                    <button
-                      type="button"
-                      disabled={marketingBusy || !marketingOther.trim()}
-                      onClick={() => handleMarketingReason(`Other: ${marketingOther.trim()}`)}
-                      style={{ flexShrink: 0, padding: "7px 16px", fontSize: 12.5, fontWeight: 600, color: "#fff", border: "none", borderRadius: 7, background: (marketingBusy || !marketingOther.trim()) ? "#e9a8cb" : "#E61B84", cursor: (marketingBusy || !marketingOther.trim()) ? "default" : "pointer" }}
-                    >
-                      Save
-                    </button>
-                  </div>
-                )}
-                {marketingBusy && (
-                  <div style={{ marginTop: 8, fontSize: 12, color: "#9d0f5a", display: "flex", alignItems: "center", gap: 7 }}>
-                    <span style={{ width: 11, height: 11, border: "2px solid rgba(230,27,132,0.25)", borderTopColor: "#E61B84", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite", flexShrink: 0 }} />
-                    Updating recommendations...
-                  </div>
-                )}
-              </div>
-            )}
-            {tier2Score !== null && (
-              <div className="tier2-bar">
-                <div className="tier2-header"><span className="tier2-label">Submission Readiness</span><span className="tier2-score" style={{ color: barColor(tier2Score) }}>{tier2Score}%</span></div>
-                <div className="metric-bar"><div className="metric-fill" style={{ width: `${tier2Score}%`, background: barColor(tier2Score) }} /></div>
-                {tier2Missing.length > 0 && <div className="tier2-missing">Missing: {tier2Missing.join(" · ")}</div>}
-              </div>
-            )}
-            <div className="form-selection-list" style={{ opacity: marketingBusy ? 0.55 : 1, transition: "opacity 0.18s ease" }}>
-              <div className="form-selection-header">
-                <span style={{ display: "inline-flex", alignItems: "center" }}>
-                  <span className="form-selection-title">Recommended Forms</span>
-                  {marketingBusy && (
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, marginLeft: 8, fontSize: 11, fontWeight: 600, color: "#9d0f5a" }}>
-                      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ animation: "spin 0.8s linear infinite", flexShrink: 0 }}>
-                        <circle cx="8" cy="8" r="6" stroke="rgba(230,27,132,0.25)" strokeWidth="2.5" />
-                        <path d="M8 2a6 6 0 0 1 6 6" stroke="#E61B84" strokeWidth="2.5" strokeLinecap="round" />
-                      </svg>
-                      Updating...
-                    </span>
-                  )}
+            {/* DOUBTS-Workstream4 (Brent): the "Why are you marketing this
+                account?" question used to live here. Client feedback (item 10)
+                was that it reads as out of place on Select Forms and should be
+                addressed earlier, so it now sits on the upload screen and is
+                applied as soon as the session exists - by the time this screen
+                renders, ACORD 101 has already been escalated for an adverse
+                reason. See applyPendingMarketingReason. */}
+            {/* Submission Readiness used to render here, below the stop lists.
+                Client feedback (item 11): it belongs at the top of the screen,
+                directly under the next-step banner and above Submission
+                integrity, so the score is the first thing read. Moved there -
+                see the block after NextStepBanner above. */}
+
+            {/* Continue is NEVER disabled. Hard stops have never blocked
+                generation in this product, and the client's "Skip to forms"
+                is served by the button simply always working - the unresolved
+                count next to it is the nudge, not a lock. Gating here would be
+                a new restriction wearing the clothes of a layout change. */}
+            <div className="step-footer-actions">
+              {openItemCount > 0 && (
+                <span className="step-footer-note">
+                  {openItemCount} item{openItemCount !== 1 ? "s" : ""} still need{openItemCount === 1 ? "s" : ""} your input. You can continue and come back.
                 </span>
+              )}
+              <button
+                className="btn btn-modal-primary btn-block btn-large"
+                onClick={() => setStep("form_selection")}
+              >
+                Continue to form selection
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── FORM SELECTION ───────────────────────────────────────────────────
+            Client feedback item 13. Nothing inside the form list changed: the
+            recommendations are backend-computed (match_forms_deterministic), the
+            frontend only groups them by the tier the backend stamped, and
+            handleGenerateAll still posts exactly {session_id, form_ids}. This
+            step is the same markup on its own screen.
+
+            Because this is a branch of the SAME mounted component rather than a
+            route, checkedFormIds survives a trip back to review and returns
+            intact - a broker can go fix a conflict without losing their picks. */}
+        {step === "form_selection" && (
+          <div className="modal-step modal-step-wide">
+            {/* No readiness score or stop counts on this screen. Per the client,
+                this page is "only the actual form selection" - those belong to the
+                review step and repeating them here reintroduced exactly the mixed
+                screen the split was meant to remove. Navigation back to review is
+                a footer button alongside Generate, not a top strip. */}
+            <div className="step-header">
+              <h2 className="step-title" style={{ color: "#1e293b" }}>Select Forms to Generate</h2>
+              <p className="step-subtitle">Select the forms you need, then generate all at once.</p>
+            </div>
+            <div className="form-selection-list">
+              <div className="form-selection-header">
+                <span className="form-selection-title">Recommended Forms</span>
                 <span className="form-selection-hint">{checkedFormIds.size} selected</span>
               </div>
               {/* Account context (Beta Report §7.2 item 5): business class /
@@ -5070,7 +5780,7 @@ const AcordModal = forwardRef(function AcordModal({
             </div>
             {extraForms.length > 0 && (
               <div className="add-forms-section">
-                <button className="btn btn-modal-secondary btn-small" onClick={() => setShowAddForms(v => !v)}>
+                <button className="add-forms-toggle" onClick={() => setShowAddForms(v => !v)}>
                   {showAddForms ? "▲ Hide" : "▼ Add more ACORD forms"} ({extraForms.length} available)
                 </button>
                 {showAddForms && (
@@ -5109,9 +5819,27 @@ const AcordModal = forwardRef(function AcordModal({
                 )}
               </div>
             )}
-            <button className="btn btn-modal-primary btn-block btn-large" onClick={handleGenerateAll} disabled={loading || checkedFormIds.size === 0}>
+            <div className="step-footer-actions">
+              {checkedFormIds.size === 0 && (
+                <span className="step-footer-note">Select at least one form to generate.</span>
+              )}
+              {/* Back sits beside Generate rather than in a top strip, and uses
+                  the same solid btn-modal-primary pink as every other button in
+                  the app. Generate takes the remaining width, which is what
+                  separates the two now that colour no longer does. */}
+              <div className="step-footer-buttons">
+                <button
+                  type="button"
+                  className="btn btn-modal-primary step-footer-back"
+                  onClick={() => setStep("review")}
+                >
+                  ← Back to review
+                </button>
+                <button className="btn btn-modal-primary btn-large step-footer-primary" onClick={handleGenerateAll} disabled={loading || checkedFormIds.size === 0}>
 {loading ? "Generating..." : `Generate ${checkedFormIds.size} Form${checkedFormIds.size !== 1 ? "s" : ""} Now`}
-            </button>
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -5185,51 +5913,72 @@ const AcordModal = forwardRef(function AcordModal({
                 <>
                   <div style={{ padding: "0 14px 12px" }}>
 
-                    {/* ── Pinned Individual Form Score: only this card stays pinned to the top
-                        of the panel while it scrolls. The sticky wrapper is white so content
-                        scrolling under blends into the side gutters; the pink card sits inside.
+                    {/* ── Pinned form score: only this card stays pinned to the top of the
+                        panel while it scrolls. The sticky wrapper is white so content
+                        scrolling under blends into the side gutters.
+                        Borderless (client request): the wrapper's hairline + shadow is the
+                        only separator, so this reads as a panel header rather than a card.
+                        The eyebrow NAMES the active form on purpose - once this is pinned,
+                        everything that identifies the form (the panel's own header, the
+                        Generated Forms row) has scrolled out of view, and a bare "60/100"
+                        at the top of the panel gets read as the whole submission's score.
                         Works in the mobile drawer and on iOS Safari (sticky, no prefix). ── */}
                     <div style={{ position: "sticky", top: 0, zIndex: 5, background: "#fff", paddingTop: 6, paddingBottom: 8, marginBottom: 10, borderBottom: "1px solid #f1f5f9", boxShadow: "0 6px 6px -6px rgba(15,23,42,0.08)" }}>
-                      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "10px 12px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <div style={{ width: 44, height: 44, borderRadius: "50%", background: gradeColor(activeSqs.grade), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{activeSqs.grade}</div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ display: "flex", alignItems: "baseline", gap: 4, flexWrap: "wrap" }}>
-                              <span style={{ fontSize: 28, fontWeight: 800, lineHeight: 1, color: gradeColor(activeSqs.grade) }}>{activeSqs.sqs_score}</span>
-                              <span style={{ fontSize: 11, color: "#94a3b8" }}>/100</span>
-                              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, color: "#fff", marginLeft: 4, background: { green: "#10b981", yellow: "#f59e0b", orange: "#f97316", red: "#ef4444" }[activeSqs.tier_color] || "#94a3b8" }}>{activeSqs.tier}</span>
-                            </div>
-                            <div style={{ fontSize: 10, color: "#94a3b8", marginTop: 2, textTransform: "uppercase", letterSpacing: "0.04em", fontWeight: 600 }}>Individual Form Score</div>
+                      {/* Eyebrow spans the full width above the score so it titles the grade
+                          circle too, and left-aligns with the section labels below it. */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 6, minWidth: 0 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#E61B84", letterSpacing: "0.05em", textTransform: "uppercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                          {activeFormLabel} - Form Score
+                        </span>
+                        <InfoTip text={`Scores only this form (${activeFormLabel}). The whole submission is scored separately under Total Package Score, further down this panel.`} />
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 44, height: 44, borderRadius: "50%", background: gradeColor(activeSqs.grade), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{activeSqs.grade}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 4, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 28, fontWeight: 800, lineHeight: 1, color: gradeColor(activeSqs.grade) }}>{activeSqs.sqs_score}</span>
+                            <span style={{ fontSize: 11, color: "#94a3b8" }}>/100</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 20, color: "#fff", marginLeft: 4, background: { green: "#10b981", yellow: "#f59e0b", orange: "#f97316", red: "#ef4444" }[activeSqs.tier_color] || "#94a3b8" }}>{activeSqs.tier}</span>
                           </div>
                         </div>
                       </div>
                     </div>
 
-                    {/* ── Form Completion (current-form, pink; bold black %, right-justified) ── */}
-                    {activeSqs.match_score != null && (
-                      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, padding: "7px 10px", marginBottom: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#000", display: "inline-flex", alignItems: "center", gap: 3 }}>Form Completion<InfoTip text="Share of this form's fields filled from your documents." /></span>
-                          <span style={{ fontSize: 12, fontWeight: 800, color: "#000" }}>{activeSqs.match_score}%</span>
-                        </div>
-                      </div>
-                    )}
+                    {/* ── Completion metrics: Form Completion + Quality Fill Rate share ONE
+                        bordered section (two stacked rows separated by a hairline) instead
+                        of two separate cards. Each row keeps its own null guard, so the
+                        section renders correctly when only one metric is available. ── */}
+                    {(activeSqs.match_score != null || activeSqs.confidence_fill_rate != null) && (
+                      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, marginBottom: 10 }}>
 
-                    {/* ── Quality Fill Rate (current-form, pink; bar + % black, hint in tooltip) ── */}
-                    {activeSqs.confidence_fill_rate != null && (
-                      <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, padding: "7px 10px", marginBottom: 10 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: "#000", display: "inline-flex", alignItems: "center", gap: 3 }}>Quality Fill Rate<InfoTip text="Filled fields weighted by confidence. Producer edits = 100%, AI high = 85%, AI low = 50%." /></span>
-                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                            {activeSqs.fill_rate != null && activeSqs.fill_rate !== activeSqs.confidence_fill_rate && (
-                              <span style={{ fontSize: 10, color: "#94a3b8", textDecoration: "line-through" }}>{activeSqs.fill_rate}%</span>
-                            )}
-                            <span style={{ fontSize: 12, fontWeight: 800, color: "#000" }}>{activeSqs.confidence_fill_rate}%</span>
+                        {/* Form Completion (current-form; bold black %, right-justified) */}
+                        {activeSqs.match_score != null && (
+                          <div style={{ padding: "7px 10px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#000", display: "inline-flex", alignItems: "center", gap: 3 }}>Form Completion<InfoTip text="Share of this form's fields filled from your documents." /></span>
+                              <span style={{ fontSize: 12, fontWeight: 800, color: "#000" }}>{activeSqs.match_score}%</span>
+                            </div>
                           </div>
-                        </div>
-                        <div style={{ height: 4, background: "#e2e8f0", borderRadius: 2, overflow: "hidden" }}>
-                          <div style={{ height: "100%", width: `${activeSqs.confidence_fill_rate}%`, background: "#000", borderRadius: 2, transition: "width 0.6s ease" }} />
-                        </div>
+                        )}
+
+                        {/* Quality Fill Rate (current-form; bar + % black, hint in tooltip) */}
+                        {activeSqs.confidence_fill_rate != null && (
+                          <div style={{ padding: "7px 10px", borderTop: activeSqs.match_score != null ? "1px solid #f1f5f9" : "none" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: "#000", display: "inline-flex", alignItems: "center", gap: 3 }}>Quality Fill Rate<InfoTip text="Filled fields weighted by confidence. Producer edits = 100%, AI high = 85%, AI low = 50%." /></span>
+                              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                {activeSqs.fill_rate != null && activeSqs.fill_rate !== activeSqs.confidence_fill_rate && (
+                                  <span style={{ fontSize: 10, color: "#94a3b8", textDecoration: "line-through" }}>{activeSqs.fill_rate}%</span>
+                                )}
+                                <span style={{ fontSize: 12, fontWeight: 800, color: "#000" }}>{activeSqs.confidence_fill_rate}%</span>
+                              </div>
+                            </div>
+                            <div style={{ height: 4, background: "#e2e8f0", borderRadius: 2, overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: `${activeSqs.confidence_fill_rate}%`, background: "#000", borderRadius: 2, transition: "width 0.6s ease" }} />
+                            </div>
+                          </div>
+                        )}
+
                       </div>
                     )}
 
@@ -5595,13 +6344,23 @@ const AcordModal = forwardRef(function AcordModal({
                       </CollapsibleSection>
                     )}
 
-                    {/* Cross-Form Validation - now in the same flow so its gap matches the sections above. */}
-                    {crossIssues.length > 0 && (
+                    {/* Cross-Form Validation - now in the same flow so its gap matches the sections above.
+                        Stays visible even once every LIVE issue clears, as long as ghostIssues has
+                        entries - a fully-resolved submission still shows its resolved history rather
+                        than the whole panel disappearing along with the last fixed issue. */}
+                    {(crossIssues.length > 0 || ghostIssues.length > 0) && (
                       <CollapsibleSection resetKey={activeFormId} title="Cross-Form Validation" tooltip="Checks that data agrees across the different ACORD forms.">
                         {(() => {
                           // One validation row. Shared by the grouped path and the
                           // flat fallback so the two can never drift apart.
-                          const row = (iss, key, divider) => (
+                          const row = (iss, key, divider) => {
+                            // Client feedback #13: a validation is now clickable to
+                            // "open a modal and enter correct responses right there".
+                            // Every cross-form issue carries a `resolution` descriptor
+                            // (field / schedule / narrative / none) from the backend,
+                            // so this is generic across all forms and rules.
+                            const actionable = !!iss.resolution;
+                            return (
                             <div key={key} style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "5px 0", borderBottom: divider ? "1px solid #f1f5f9" : "none" }}>
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 {Array.isArray(iss.forms) && iss.forms.length > 0 && (
@@ -5611,60 +6370,106 @@ const AcordModal = forwardRef(function AcordModal({
                                     ))}
                                   </div>
                                 )}
-                                <div style={{ fontSize: 12, color: "#000", lineHeight: 1.4 }}>{iss.message}</div>
-                                {(() => { const iid = issueIdOf(iss); return (
-                                  <IssueStatusControl
-                                    issueId={iid}
-                                    status={issueStatuses.get(iid)?.status}
-                                    meta={{ form_id: Array.isArray(iss.forms) ? iss.forms[0] : null, rule_code: iss.code, message: iss.message }}
-                                    onSet={setIssueStatus}
-                                  />
-                                ); })()}
-                              </div>
-                            </div>
-                          );
-
-                          // Fallback: the flat list this panel always rendered, used
-                          // only if the server could not group them.
-                          if (!crossGrouped) {
-                            return crossIssues.map((iss, i) => row(iss, i, i < crossIssues.length - 1));
-                          }
-
-                          // Sequenced: blocking clusters first, then Required /
-                          // Recommended / Binder follow-up. Deduplicated: repeats of
-                          // one underlying problem collapse into a single cluster
-                          // instead of N separately numbered lines.
-                          const sections = [
-                            { key: "hard", label: "Blocking - fix first", clusters: crossGrouped.hard_stops || [], color: "#b91c1c" },
-                            ...["required", "recommended", "binder_followup"].map(t => ({
-                              key: t,
-                              label: (crossGrouped.tier_labels || {})[t] || t,
-                              clusters: (crossGrouped.warnings || {})[t] || [],
-                              color: "#64748b",
-                            })),
-                          ].filter(s => s.clusters.length > 0);
-
-                          if (sections.length === 0) {
-                            return crossIssues.map((iss, i) => row(iss, i, i < crossIssues.length - 1));
-                          }
-
-                          return sections.map(sec => (
-                            <div key={sec.key} style={{ marginTop: 8 }}>
-                              <div style={{ fontSize: 9.5, fontWeight: 700, color: sec.color, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-                                {sec.label} ({sec.clusters.length})
-                              </div>
-                              {sec.clusters.map((c, ci) => (
-                                <div key={c.cluster || ci} style={{ marginBottom: 6 }}>
-                                  {c.count > 1 && (
-                                    <div style={{ fontSize: 10.5, fontWeight: 700, color: "#334155", marginBottom: 2 }}>
-                                      {c.cluster} ({c.count})
-                                    </div>
+                                {actionable ? (
+                                  <div
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => openResolution(iss)}
+                                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openResolution(iss); } }}
+                                    title="Open to fix"
+                                    style={{ fontSize: 12, color: "#000", lineHeight: 1.4, cursor: "pointer" }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.color = "#be185d"; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.color = "#000"; }}
+                                  >
+                                    {iss.message}
+                                  </div>
+                                ) : (
+                                  <div style={{ fontSize: 12, color: "#000", lineHeight: 1.4 }}>{iss.message}</div>
+                                )}
+                                <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
+                                  {actionable && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openResolution(iss)}
+                                      style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, padding: "2px 9px", borderRadius: 6, border: "1px solid #f9a8d4", background: "#fdf2f8", color: "#be185d", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}
+                                    >
+                                      Open to fix
+                                      <svg width="9" height="9" viewBox="0 0 12 12" fill="none"><path d="M3 2l4 4-4 4" stroke="#be185d" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                    </button>
                                   )}
-                                  {(c.items || []).map((it, ii) => row(it, `${c.cluster}-${ii}`, ii < (c.items || []).length - 1))}
+                                  {(() => { const iid = issueIdOf(iss); return (
+                                    <IssueStatusControl
+                                      issueId={iid}
+                                      status={issueStatuses.get(iid)?.status}
+                                      meta={{ form_id: Array.isArray(iss.forms) ? iss.forms[0] : null, rule_code: iss.code, message: iss.message }}
+                                      onSet={handleReopenIssue}
+                                    />
+                                  ); })()}
                                 </div>
-                              ))}
+                              </div>
                             </div>
-                          ));
+                          ); };
+
+                          // mainContent = the currently-live issues (flat fallback or
+                          // sequenced sections, as before). resolvedBlock is appended
+                          // after EITHER path, so an inline-applied fix stays visible
+                          // with a Resolved badge instead of just disappearing the
+                          // moment cross_form_validator stops emitting it.
+                          let mainContent;
+
+                          if (!crossGrouped) {
+                            // Fallback: the flat list this panel always rendered, used
+                            // only if the server could not group them.
+                            mainContent = crossIssues.map((iss, i) => row(iss, i, i < crossIssues.length - 1));
+                          } else {
+                            // Sequenced: blocking clusters first, then Required /
+                            // Recommended / Binder follow-up. Deduplicated: repeats of
+                            // one underlying problem collapse into a single cluster
+                            // instead of N separately numbered lines.
+                            const sections = [
+                              { key: "hard", label: "Blocking - fix first", clusters: crossGrouped.hard_stops || [], color: "#b91c1c" },
+                              ...["required", "recommended", "binder_followup"].map(t => ({
+                                key: t,
+                                label: (crossGrouped.tier_labels || {})[t] || t,
+                                clusters: (crossGrouped.warnings || {})[t] || [],
+                                color: "#64748b",
+                              })),
+                            ].filter(s => s.clusters.length > 0);
+
+                            mainContent = sections.length === 0
+                              ? crossIssues.map((iss, i) => row(iss, i, i < crossIssues.length - 1))
+                              : sections.map(sec => (
+                                  <div key={sec.key} style={{ marginTop: 8 }}>
+                                    <div style={{ fontSize: 9.5, fontWeight: 700, color: sec.color, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                                      {sec.label} ({sec.clusters.length})
+                                    </div>
+                                    {sec.clusters.map((c, ci) => (
+                                      <div key={c.cluster || ci} style={{ marginBottom: 6 }}>
+                                        {c.count > 1 && (
+                                          <div style={{ fontSize: 10.5, fontWeight: 700, color: "#334155", marginBottom: 2 }}>
+                                            {c.cluster} ({c.count})
+                                          </div>
+                                        )}
+                                        {(c.items || []).map((it, ii) => row(it, `${c.cluster}-${ii}`, ii < (c.items || []).length - 1))}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ));
+                          }
+
+                          return (
+                            <>
+                              {mainContent}
+                              {ghostIssues.length > 0 && (
+                                <div key="resolved-ghosts" style={{ marginTop: 8 }}>
+                                  <div style={{ fontSize: 9.5, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                                    Resolved ({ghostIssues.length})
+                                  </div>
+                                  {ghostIssues.map((g, gi) => row(g, `resolved-${gi}`, gi < ghostIssues.length - 1))}
+                                </div>
+                              )}
+                            </>
+                          );
                         })()}
                       </CollapsibleSection>
                     )}
@@ -5865,8 +6670,8 @@ const AcordModal = forwardRef(function AcordModal({
                 </button>
               )}
               <PDFJsViewer
-                key={activeFormId}
-                pdfUrl={`${API_BASE}/api/get-pdf/${sessionId}/${activeFormId}`}
+                key={`${activeFormId}::${pdfRefreshTick}`}
+                pdfUrl={`${API_BASE}/api/get-pdf/${sessionId}/${activeFormId}?v=${pdfRefreshTick}`}
                 formName={activeFormId ? (generatedForms[activeFormId]?.form_name || activeFormId) : ""}
                 onFormNav={{ goPrev, goNext, activeIdx, total: formIdList.length }}
                 sessionId={sessionId} formId={activeFormId} token={token}

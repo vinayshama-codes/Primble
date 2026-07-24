@@ -3469,6 +3469,107 @@ async def apply_producer_answer_to_session(
     return True, updated
 
 
+def _clear_canonical_from_forms(generated: dict, canon: str) -> List[str]:
+    """Blank every generated-form field that a producer's answer for `canon`
+    previously stamped - the reverse of _restamp_canonical_into_forms's write.
+
+    Reopening a resolved cross-form issue (SQS panel "Reopen") must clear the
+    value everywhere it was applied, not just flip the status label - a field
+    still showing the old answer while the panel claims the issue is open
+    again is worse than useless, since it looks fixed when it isn't.
+
+    Deliberately narrow: a field is blanked ONLY when it currently carries
+    confidence "producer" or "client_arq" - i.e. only when THIS mechanism (or
+    the equivalent client-answer path sharing the same restamp engine) is the
+    one that wrote it. A value that came from document extraction or the LLM
+    gap-fill is never touched, so reopening an inline fix can never erase real
+    data the client's documents actually provided - it can only undo what a
+    producer typed through this exact flow.
+    """
+    touched_forms: List[str] = []
+    for fid, form_data in generated.items():
+        schema = form_data.get("schema", {}) or {}
+        if not schema:
+            continue
+        field_state = form_data.get("field_state") or form_data.get("mapped", {})
+        conf = form_data.get("confidence") or {}
+        cff = set(form_data.get("client_filled_fields", []))
+        form_touched = False
+
+        for schema_field in schema.keys():
+            if _canonical_key(schema_field) != canon:
+                continue
+            if conf.get(schema_field) not in ("producer", "client_arq"):
+                continue
+            if str(field_state.get(schema_field) or "").strip() == "":
+                continue
+            field_state[schema_field] = ""
+            conf.pop(schema_field, None)
+            cff.discard(schema_field)
+            form_touched = True
+
+        if form_touched:
+            form_data["field_state"] = field_state
+            form_data["confidence"] = conf
+            form_data["client_filled_fields"] = list(cff)
+            form_data["_pdf_cache_hash"] = ""
+            form_data["pdf_bytes"] = None
+            touched_forms.append(fid)
+
+    return touched_forms
+
+
+async def clear_producer_answer_from_session(
+    processing_session_id: str,
+    field_name: str,
+) -> Tuple[bool, List[str]]:
+    """Undo a producer's inline answer for one canonical fact (SQS panel
+    "Reopen" on a field-mode Cross-Form Validation issue).
+
+    Reverse of apply_producer_answer_to_session: deletes the producer-
+    provenance fact and blanks it on every form it was stamped into. Only acts
+    when the CURRENT fact value's source is literally "producer" - if the fact
+    is already blank, or its value came from extraction/gap-fill (the producer
+    never actually answered this one), this is a no-op and returns (False, []),
+    so a caller can safely call it speculatively for every fact a resolution
+    covers without risking a value it doesn't own.
+
+    Returns (ok, updated_form_ids).
+    """
+    from repositories.session_repository import (
+        get_processing_session, upd_processing_session,
+    )
+
+    canon = _canonical_key(field_name)
+    if not canon or canon.startswith("_"):
+        return False, []
+
+    try:
+        proc_session = await get_processing_session(processing_session_id)
+    except Exception as ex:
+        logger.error(f"clear_producer_answer: cannot load session {processing_session_id}: {ex}")
+        return False, []
+
+    facts = dict(proc_session.get("facts", {}) or {})
+    existing = facts.get(canon)
+    existing_source = existing.get("source") if isinstance(existing, dict) else None
+    if existing_source != "producer":
+        return False, []
+
+    generated = proc_session.get("generated_forms", {}) or {}
+    del facts[canon]
+    cleared = _clear_canonical_from_forms(generated, canon)
+
+    await upd_processing_session(
+        processing_session_id, {"generated_forms": generated, "facts": facts},
+    )
+    logger.info(
+        f"Producer answer cleared: session={processing_session_id} "
+        f"field={field_name} canon={canon} forms={cleared}"
+    )
+    return True, cleared
+
+
 # ASYNC-SAFE
 async def recalculate_session_scores(processing_session_id: str) -> dict:
     """Re-run scoring after ARQ answers are applied (Beta Report §6.2 / §8.2.7).

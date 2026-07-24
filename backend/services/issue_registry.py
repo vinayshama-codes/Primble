@@ -195,6 +195,159 @@ TIER_MAP: Dict[str, str] = {
     "legal_name_equals_dba": "binder_followup",
 }
 
+# ── Inline resolution (SQS panel: "Open" a validation and fix it in place) ────
+#
+# code -> how the producer can resolve this issue directly from the Cross-Form
+# Validation panel, instead of hunting for the field on a form. Four modes:
+#
+#   field    - the issue clears by entering one or more scalar values. `facts`
+#              are canonical fact keys; EVERY one must resolve through
+#              arq_service._canonical_key (i.e. be writable via the producer
+#              answer path) or the guard test test_issue_resolution fails the
+#              build. The modal renders one input per fact.
+#   schedule - the issue clears by editing a repeating table. `schedule_key`
+#              MUST be a live schedule in schedule_capture.SCHEDULE_DEFS (guard
+#              test enforces). The modal renders the shared ScheduleTable.
+#   narrative- the issue is resolved by an ACORD 101 explanation. The modal
+#              renders a textarea whose text is appended to the
+#              `additional_remarks_text` fact (which several rules here read to
+#              downgrade a hard stop to a warning).
+#   none     - no single value/table/narrative fixes it (add a form, a coverage
+#              decision, an advisory). The modal shows the detail read-only with
+#              the existing Resolve / Dismiss work-tracking controls.
+#
+# This map is the SINGLE source of truth for the feature. It attaches to every
+# issue and cluster centrally (make_issue / build_grouped_view / _make_clusters
+# below and cross_form_validator._issue), so no rule body changes and no route
+# has to thread it through. Adding a new rule code means adding one row here;
+# the guard test fails the build if a live cross-form code is left unmapped.
+
+
+def _r_field(*facts: str) -> dict:
+    return {"mode": "field", "facts": list(facts)}
+
+
+def _r_schedule(schedule_key: str) -> dict:
+    return {"mode": "schedule", "schedule_key": schedule_key}
+
+
+_R_NARRATIVE = {"mode": "narrative"}
+_R_NONE = {"mode": "none"}
+
+RESOLUTION_MAP: Dict[str, dict] = {
+    # ── Property COPE ──
+    "minimum_viable_cope_missing": _r_field(
+        "occupancy_type", "construction_type",
+        "property_building_value", "property_bpp_value",
+    ),
+    "carrier_grade_cope_incomplete": _r_field(
+        "year_built", "roof_year", "sprinkler_system", "fire_protection_class",
+    ),
+    "per_location_cope_incomplete": _r_schedule("property_locations"),
+    # ── Property deductibles ──
+    "peril_deductible_referenced_but_undefined": _r_field(
+        "property_deductible_wind", "property_deductible_earthquake", "property_deductible_flood",
+    ),
+    "property_aop_deductible_missing": _r_field("property_deductible_aop"),
+    "property_peril_deductible_incomplete": _r_field(
+        "property_deductible_wind", "property_deductible_earthquake", "property_deductible_flood",
+    ),
+    # `property_deductible_basis` is not a writable canonical fact, so this is
+    # resolved by an ACORD 101 note rather than a direct value entry.
+    "property_deductible_basis_missing": _R_NARRATIVE,
+    # ── Property valuation ──
+    "property_valuation_method_missing": _r_field("valuation_method"),
+    "acv_high_value_building": _R_NONE,   # advisory: consider RCV (coverage choice)
+    "rcv_old_building": _R_NONE,          # advisory: verify reconstruction cost
+    # ── Property coinsurance ──
+    "property_coinsurance_missing": _r_field("coinsurance_percentage", "agreed_value_endorsement"),
+    "property_coinsurance_unreasonable": _r_field("coinsurance_percentage"),
+    # ── Business Income ──
+    "bi_missing_period_of_restoration": _r_field("period_of_restoration"),
+    "bi_coverage_no_limit": _r_field("business_income_limit", "period_of_restoration"),
+    # ── Location / address ──
+    "location_count_mismatch": _r_schedule("property_locations"),
+    "location_count_mismatch_minor": _r_schedule("property_locations"),
+    "location_address_mismatch": _r_schedule("property_locations"),
+    "physical_vs_mailing_address_unclear": _r_field("physical_address"),
+    # ── Builders Risk ──
+    "builders_risk_project_value_missing": _r_field("builders_risk_project_cost"),
+    "builders_risk_property_duplication": _R_NARRATIVE,   # explain disjoint coverage via 101
+    "inland_marine_property_overlap": _R_NARRATIVE,       # confirm no double-count via 101
+    # ── WC payroll reconciliation ──
+    "wc_payroll_mismatch": _r_field("wc_payroll", "total_payroll"),
+    "wc_payroll_vs_revenue": _r_field("wc_payroll", "total_revenue"),
+    "wc_subcontracting_payroll_conflict": _r_field("percent_subcontracted", "wc_payroll"),
+    # per-state payroll has no live capture schedule / writable scalar - explain
+    "wc_multi_state_no_breakdown": _R_NARRATIVE,
+    "wc_state_payroll_total_mismatch": _r_field("total_payroll"),
+    # ── WC / GL class code alignment ──
+    "wc_gl_class_code_mismatch": _R_NARRATIVE,            # explain exposure mismatch via 101
+    "gl_codes_no_operations": _r_field("operations_description"),
+    # ── Contractor / subcontracting ──
+    "contractor_missing_acord186": _R_NONE,               # add ACORD 186 form
+    "acord186_high_sub_high_wc_payroll": _r_field("percent_subcontracted", "wc_payroll"),
+    "high_subcontracting_no_wc_payroll": _r_field("wc_payroll"),
+    # ── Umbrella ──
+    "umbrella_no_underlying_coverage": _R_NONE,           # add underlying GL/Auto
+    "umbrella_sir_below_gl_deductible": _r_field("umbrella_sir", "gl_deductible"),
+    "umbrella_gl_period_misaligned": _r_field("umbrella_effective_date", "effective_date"),
+    "umbrella_gl_expiration_misaligned": _r_field("umbrella_expiration_date", "expiration_date"),
+    # underlying auto/wc date facts are not writable; resolved via 101 note
+    # (these rules already downgrade a hard stop when additional_remarks_text is set)
+    "umbrella_auto_period_misaligned": _R_NARRATIVE,
+    "umbrella_auto_expiration_misaligned": _R_NARRATIVE,
+    "umbrella_wc_period_misaligned": _R_NARRATIVE,
+    "umbrella_gl_attachment_failure": _r_field("gl_each_occurrence", "gl_limits"),
+    "umbrella_gl_limits_not_found": _r_field("gl_each_occurrence", "gl_limits"),
+    "umbrella_auto_attachment_failure": _r_field("auto_liability_limit"),
+    "umbrella_auto_limits_not_found": _r_field("auto_liability_limit"),
+    "umbrella_sir_below_auto_deductible": _r_field("umbrella_sir"),
+    "umbrella_missing_employers_liability": _r_field("employers_liability_limits"),
+    "umbrella_el_below_minimum": _r_field("employers_liability_limits"),
+    # ── Claims-made continuity ──
+    "claims_made_missing_retro_date": _r_field("retro_date"),
+    # `prior_acts_confirmation` is not a writable canonical fact - explain via 101
+    "claims_made_missing_prior_acts": _R_NARRATIVE,
+    # ── Auto ──
+    # Split-limit components and coverage symbols are not writable canonical
+    # facts; they are set on ACORD 127 directly, so these are read-only here.
+    "auto_split_limits_incomplete": _R_NONE,
+    "auto_hired_nonowned_symbols_missing": _R_NONE,
+    "auto_physical_damage_symbols_missing": _R_NONE,
+    "auto_doc_symbol_missing": _R_NONE,
+    "auto_agreed_value_requires_schedule": _r_schedule("auto_vin_schedule"),
+    "auto_um_uim_not_specified": _R_NONE,                 # advisory (UM/UIM limits not writable)
+    "auto_pip_medpay_not_specified": _r_field("auto_med_pay_limit"),
+    "auto_drive_other_car_not_specified": _R_NONE,        # advisory (DOC symbol not writable)
+    # ── Silent exposure (coverage decisions - handled on their own forms) ──
+    "crime_silent_exposure": _R_NONE,
+    "cyber_silent_exposure": _R_NONE,
+    # ── Certificates / evidence (add the requested form) ──
+    "certificate_requested_but_acord25_missing": _R_NONE,
+    "property_evidence_requested_but_acord28_missing": _R_NONE,
+    # ── Baseline / identity ──
+    "acord125_missing": _R_NONE,                          # add ACORD 125
+    "legal_name_equals_dba": _r_field("dba_name"),
+    # ── Narrative requirement ──
+    "acord101_required": _R_NARRATIVE,
+}
+
+
+def resolution_for(code: Optional[str]) -> Optional[dict]:
+    """Inline-resolution descriptor for a rule code, or None.
+
+    Returns a COPY so callers can attach it to an issue dict without any risk of
+    mutating the shared template. None for codes with no inline resolution
+    (legacy field-level stops, doc/source conflicts, OCR, Tier-1) - those keep
+    their existing Resolve / Dismiss work-tracking controls unchanged.
+    """
+    if not code:
+        return None
+    res = RESOLUTION_MAP.get(code)
+    return dict(res) if res else None
+
+
 # Prefix rules for the dynamically-generated codes (one per fact/field, so
 # they can't be listed individually above). Checked in order; first match
 # wins. These cover the warning sources that sit outside cross_form_validator
@@ -328,6 +481,7 @@ def make_issue(
         "forms": list(forms or []),
         "cluster": cluster,
         "tier": tier,
+        "resolution": resolution_for(code),
     }
 
 
@@ -350,6 +504,13 @@ def _make_clusters(items: List[dict]) -> List[dict]:
     for key in order:
         members = by_cluster[key]
         forms = sorted({f for m in members for f in m["forms"]})
+        # Cluster-level resolution: the first member that carries one. Members of
+        # a cluster share a domain (same cluster label), so their resolutions are
+        # the same family; the cluster surfaces one so the panel can "Open" the
+        # whole cluster, and each item still carries its own for per-row Open.
+        _cluster_res = next(
+            (m.get("resolution") for m in members if m.get("resolution")), None,
+        )
         clusters.append({
             "cluster": key,
             "issue_id": members[0].get("issue_id") or issue_id_for(members[0]["message"], forms),
@@ -357,6 +518,7 @@ def _make_clusters(items: List[dict]) -> List[dict]:
             "count": len(members),
             "forms": forms,
             "items": members,
+            "resolution": _cluster_res,
         })
     clusters.sort(key=_cluster_rank_key)
     return clusters
@@ -445,6 +607,7 @@ def build_grouped_view(
             "severity": severity,
             "cluster": cluster,
             "tier": tier,
+            "resolution": issue.get("resolution") or resolution_for(code),
         })
 
     # Safety net: guarantee every message the caller is actually about to show

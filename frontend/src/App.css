@@ -1439,8 +1439,11 @@ body {
   gap: 14px;
   margin-bottom: 20px;
 }
+/* 260px basis rather than 220px: below that the cards inside get too narrow
+   for a 13px message to break sensibly, so it is better for the two banners to
+   drop to one column slightly sooner. */
 .stops-row .stops-banner {
-  flex: 1 1 220px;
+  flex: 1 1 260px;
   margin-bottom: 0;
 }
 .stops-banner {
@@ -1448,6 +1451,16 @@ body {
   padding: 16px 20px;
   background: rgba(230, 27, 132, 0.07);
   border: 1.5px solid rgba(230, 27, 132, 0.25);
+}
+/* Phone widths: 20px of banner padding plus 13px of card padding eats a lot of
+   a 360px screen, so tighten the outer shell and let the text keep the space. */
+@media (max-width: 480px) {
+  .stops-banner {
+    padding: 13px 14px;
+  }
+  .stops-row {
+    gap: 10px;
+  }
 }
 .stops-banner.stops-hard {
   background: rgba(230, 27, 132, 0.07);
@@ -1457,13 +1470,28 @@ body {
   background: rgba(230, 27, 132, 0.07);
   border: 1.5px solid rgba(230, 27, 132, 0.25);
 }
+/* The banner title used to be one long uppercase run-on ("HARD STOPS -
+   REQUIRED BEFORE SUBMISSION - CAPS YOUR SQS AT 60") in which the actual
+   heading and its two qualifiers all carried identical weight. Same words,
+   same color family - the qualifiers now sit on a second, quieter line so the
+   heading itself is readable at a glance. */
 .stops-title {
-  font-size: 13px;
-  font-weight: 700;
-  margin-bottom: 10px;
+  font-size: 12.5px;
+  font-weight: 800;
+  margin-bottom: 12px;
   color: #1e293b;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+/* The qualifier line ("Required before submission - Caps your SQS at 60").
+   Slate 500, the same muted tone the cluster headers already use. */
+.stops-title-meta {
+  display: block;
+  margin-top: 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #64748b;
 }
 .stops-hard .stops-title {
   color: #1e293b;
@@ -1471,11 +1499,28 @@ body {
 .stops-soft .stops-title {
   color: #1e293b;
 }
+/* 5px (10px between bullets) rather than 4px: most messages wrap to two or
+   three lines and carry their own "Fix:" line, so at 4px consecutive bullets
+   ran together into the wall of text the client flagged.
+
+   The padding-left/negative-text-indent pair is a hanging indent: the bullet
+   sits flush at 0 and every wrapped line aligns under the first character of
+   the text instead of sliding back under the bullet. text-indent only affects
+   a block's first line, so the "Fix:" line after the <br> also lands on the
+   text column - the message reads as one indented paragraph per bullet rather
+   than a ragged left edge, which is most of why the old list looked like a
+   wall of text. */
 .stop-item {
   font-size: 13px;
-  padding: 4px 0;
-  line-height: 1.5;
+  padding: 5px 0 5px 15px;
+  text-indent: -15px;
+  line-height: 1.55;
   color: #1e293b;
+}
+/* A single-issue card holds the line directly; the card's own padding is
+   already doing that job, so don't double it. */
+.issue-card > .stop-item:first-child {
+  padding-top: 0;
 }
 .stop-item-hard {
   color: #1e293b;
@@ -1503,30 +1548,121 @@ body {
   margin-bottom: 0;
 }
 
-/* "Important" preview - the top 3 Required/Recommended warning clusters,
-   pulled to the top of the Warnings banner. Accent-colored so it reads as a
-   highlight rather than another plain tier section. */
+/* "Important" - a read-only preview of the top 3 warning clusters at the top of
+   the Warnings banner. A plain grouping wrapper (no tinted inset box - it would
+   be pink on the pink banner); the section is marked by its collapsible
+   "Important" header, rendered by CollapsibleSection in the accent color, and
+   every entry shares the banner's single column. */
 .warning-important-section {
-  border-left: 3px solid #E61B84;
-  background: rgba(230, 27, 132, 0.06);
-  border-radius: 6px;
-  padding: 8px 10px 6px;
+  margin-bottom: 14px;
 }
-.warning-important-label {
-  font-size: 12px;
+
+/* ==================== ISSUE CLUSTER CARDS ====================
+   Client review #7 and #9 (Select Forms). Two problems, one fix:
+
+   #7 - a cluster's Open/Resolve/Dismiss row used to sit ~3px below it and
+        ~15px from its own items, so it read as belonging to the cluster
+        BELOW it. The card border now encloses the row, so the grouping is
+        structural and no longer depends on getting a gap value exactly right.
+   #9 - each banner was one continuous run of divs, so 23 warnings read as a
+        single paragraph. A white card on the banner's tinted surface chunks
+        that into scannable blocks.
+
+   Padding/margin/border only, inside the existing `flex: 1 1 220px` banners,
+   so the two banners still sit side by side on wide screens and stack on
+   narrow ones exactly as before. */
+.issue-card {
+  background: #fff;
+  border: 1px solid rgba(230, 27, 132, 0.18);
+  border-radius: 10px;
+  padding: 11px 13px;
+  margin-bottom: 9px;
+  /* A neutral 1px lift, not a colored glow - enough to separate the card from
+     the tinted banner behind it without introducing a new hue. */
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.issue-card:last-child {
+  margin-bottom: 0;
+}
+/* Hard-stop and warning cards share the same surface (per client) - the
+   banner title above each already says which is which, so no per-card accent
+   stripe is needed. `.issue-card-hard` / `.issue-card-soft` are kept as hooks
+   in case they need to diverge again, but carry no distinguishing style now. */
+/* The divider is what makes the action row read as the FOOTER of this card
+   rather than the header of the next one - the actual #7 defect. Used for the
+   single-issue card, where the one control IS the card footer. */
+.issue-card-actions {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}
+/* Multi-issue cluster (client review #8): each sub-item is a line plus its OWN
+   Resolve/Dismiss control, so a cluster of 15 reads as 15 individually
+   handleable rows instead of one line with a single shared button set. A hair
+   divider between consecutive sub-items keeps each line grouped with its own
+   control rather than bleeding into the next. */
+.issue-card-item + .issue-card-item {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid #f1f5f9;
+}
+/* Open/Resolve/Dismiss buttons. Resting values are exactly what was inline
+   before; the class exists so :hover can apply at all. Shared with the
+   editor's Cross-Form Validation panel. */
+.issue-status-btn {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.issue-status-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+.issue-status-btn:active {
+  background: #f1f5f9;
+}
+.issue-status-btn-reopen {
+  color: #94a3b8;
+}
+/* Count pill on a cluster/tier header. Replaces a bare "(2)" so the number is
+   a scannable object rather than more uppercase text running on from the
+   label. Slate values already used elsewhere in this file - no new hue. */
+.issue-count {
+  display: inline-block;
+  font-size: 9px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #E61B84;
-  margin-bottom: 6px;
+  line-height: 1.6;
+  color: #64748b;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 0 6px;
+  margin-left: 6px;
+  letter-spacing: 0;
+  vertical-align: 1px;
+}
+/* The generic "Fix: Review and correct this before proceeding." recedes; a
+   specific remediation keeps full weight. See _GENERIC_FIX_TEXT in
+   AcordModal.jsx. */
+.issue-fix-generic {
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 /* ==================== DOC SUMMARY ==================== */
+/* Client review (Figures 5 and 6): on the Select Forms step both DOCUMENTS
+   PROCESSED and DATA CONSISTENCY read as a pink panel wrapping rows that carry
+   their own surface - pink on pink. The section is a plain grouping wrapper
+   now: no background, no border, no inset. Its rows keep their own backgrounds
+   (the DATA CONSISTENCY items stay pink), and separation from neighboring
+   sections comes from the title plus margin. Dropping the inset also lets the
+   rows use the full modal width on narrow screens. */
 .doc-summary {
-  background: rgba(230, 27, 132, 0.07);
-  border: 1.5px solid rgba(230, 27, 132, 0.25);
-  border-radius: var(--radius-md);
-  padding: 16px 20px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   margin-bottom: 20px;
 }
 .doc-summary-title {
@@ -1581,17 +1717,25 @@ body {
 }
 
 /* ==================== TIER 2 BAR ==================== */
+/* Submission Readiness. Sits at the top of Select Forms, directly above the
+   Submission integrity card - white surface + neutral border deliberately
+   mirror that card so the two read as one pair (client feedback item 11).
+   The score/fill keep their own red-amber-green scale via barColor(). */
 .tier2-bar {
-  background: rgba(230, 27, 132, 0.07);
-  border: 1.5px solid rgba(230, 27, 132, 0.25);
-  border-radius: var(--radius-md);
-  padding: 16px 20px;
-  margin-bottom: 20px;
+  background: #fff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
 }
 .tier2-header {
   display: flex;
   justify-content: space-between;
+  /* Narrow screens: let the score drop below the label rather than squash
+     either one. Row gap only applies once it actually wraps. */
+  flex-wrap: wrap;
   align-items: center;
+  gap: 2px 12px;
   margin-bottom: 10px;
 }
 .tier2-label {
@@ -1602,11 +1746,29 @@ body {
 .tier2-score {
   font-size: 20px;
   font-weight: 800;
+  line-height: 1.2;
 }
 .tier2-missing {
   font-size: 12px;
   color: var(--text-secondary);
   margin-top: 8px;
+  line-height: 1.5;
+  /* The missing list is an unbounded run of field names joined by " · " -
+     break long ones instead of pushing the card wider than the modal. */
+  overflow-wrap: anywhere;
+}
+/* The track is neutral on the white card: a pink track behind a red/amber/green
+   fill muddied the score's meaning once the surface stopped being pink. */
+.tier2-bar .metric-bar {
+  background: #eef2f7;
+}
+@media (max-width: 480px) {
+  .tier2-bar {
+    padding: 12px 14px;
+  }
+  .tier2-score {
+    font-size: 18px;
+  }
 }
 
 /* ==================== CROSS ISSUES ==================== */
@@ -1971,6 +2133,17 @@ body {
   color:#1e293b;
 }
 .add-forms-section { margin:12px 0; }
+/* Text-only toggle - bold pink label with no button chrome. Self-contained
+   (no .btn classes) so the shared button styles can never re-add a background. */
+.add-forms-toggle {
+  display:inline-block; max-width:100%;
+  padding:6px 0; background:none; border:none; box-shadow:none;
+  font-family:inherit; font-size:14px; font-weight:700; line-height:1.4;
+  color:var(--primary); text-align:left; cursor:pointer;
+  transition:color 0.2s;
+}
+.add-forms-toggle:hover { color:var(--primary-dark); text-decoration:underline; }
+.add-forms-toggle:focus-visible { outline:2px solid var(--primary); outline-offset:3px; border-radius:4px; }
 .extra-forms-list { background:none; padding:4px 0; margin-top:8px; display:flex; flex-direction:column; gap:10px; }
 
 /* Form navigator */
@@ -4954,4 +5127,98 @@ body.app-header-collapsed .acord-modal-editor-root {
 .contact-sent-body {
   font-size: 14px; color: #64748b; line-height: 1.5;
 }
+}
+
+/* ══ Review (pre-scoring) + Form selection steps ═══════════════════════════════
+   Client feedback item 13. The old single "recommendations" screen carried the
+   documents, conflicts, stops AND the form picker at once; it is now two steps
+   ("review" then "form_selection") in the same AcordModal step machine. These
+   are the only new surfaces - everything inside the form list is unchanged. */
+
+/* Section panel on the review page. .doc-summary is transparent and borderless,
+   so on its own the collapsed section headers would read as one continuous run
+   of text. The panel is what makes each section a distinct, clickable block. */
+.review-section {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+/* Footer action row, shared by both new steps. Column layout so the supporting
+   note sits above the button rather than competing with it for width. */
+.step-footer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+}
+.step-footer-note {
+  font-size: 12px;
+  color: #64748b;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* Footer button row on the form-selection step: "Back to review" beside
+   "Generate". align-items:stretch makes the secondary match the primary's
+   height without hard-coding either, so btn-large can change freely. */
+.step-footer-buttons {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+.step-footer-buttons .step-footer-back { flex: 0 0 auto; white-space: nowrap; }
+.step-footer-buttons .step-footer-primary { flex: 1 1 auto; min-width: 0; }
+
+@media (max-width: 768px) {
+  /* Sticky primary action. Both new steps end in a long scrollable list (20+
+     warnings on review, 17 forms plus extras on selection), so the action has
+     to stay reachable at any scroll depth. On the review page this is also what
+     makes the client's "skip to forms" genuinely one tap away from anywhere.
+     No negative margins: .modal-step's mobile side padding is set with
+     !important elsewhere, and coupling to it would silently break if it moves. */
+  .step-footer-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    margin-top: 16px;
+    padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
+    background: rgba(248, 250, 252, 0.94);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid #e2e8f0;
+  }
+  /* Touch targets: the whole row is already the label, so growing the row and
+     the checkbox is enough to clear the 44px minimum without new markup. */
+  .form-select-row { padding: 16px; }
+  .form-select-checkbox { width: 20px; height: 20px; }
+  .form-select-checkbox-label { min-height: 44px; }
+}
+
+@media (max-width: 480px) {
+  /* Stack the footer buttons. column-reverse keeps Generate on top - it is the
+     action being taken, and on a phone the topmost button in a sticky footer is
+     the one under the thumb. DOM order stays Back-then-Generate for tab order. */
+  .step-footer-buttons {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .step-footer-buttons .step-footer-back { flex: 1 1 auto; }
+  .review-section { padding: 12px; }
+  .form-selection-list { padding: 12px 14px; }
+}
+
+/* Step shell padding for every non-editor step (upload, review, form selection,
+   integrity review, lite, success). Desktop matches the inline value this
+   replaced exactly; the breakpoints below are the part that was impossible
+   before, since an inline style cannot be overridden by a media query. */
+.acord-step-shell { padding: 32px 40px; }
+
+@media (max-width: 768px) {
+  .acord-step-shell { padding: 24px 16px; }
+}
+@media (max-width: 480px) {
+  .acord-step-shell { padding: 20px 12px; }
 }

@@ -78,11 +78,20 @@ def _issue(issue_type: str, code: str, message: str, forms: List[str]) -> dict:
     # `issue_id` is a durable, content-derived barcode used only by the display /
     # resolution-status layer (issue_registry.issue_id_for). It never affects the
     # cross-form gating below, which continues to key off `code`/`message`.
-    from services.issue_registry import issue_id_for
-    return {
+    #
+    # `resolution` (issue_registry.resolution_for) tells the SQS panel how the
+    # producer can fix THIS issue inline (enter a value / edit a schedule / add
+    # an ACORD 101 note), keyed purely off `code`. Additive: None for any code
+    # without an inline resolution, and never consulted by scoring/gating.
+    from services.issue_registry import issue_id_for, resolution_for
+    issue = {
         "type": issue_type, "code": code, "message": message, "forms": forms,
         "issue_id": issue_id_for(message, forms),
     }
+    _res = resolution_for(code)
+    if _res:
+        issue["resolution"] = _res
+    return issue
 
 
 def _umbrella_in_scope(flags: dict) -> bool:
@@ -802,12 +811,12 @@ def _check_auto_symbol_to_exposure_alignment(
                 missing.append("comprehensive")
             if not coll_sym:
                 missing.append("collision")
-            issues.append({
-                "type": "soft_warning",
-                "code": "auto_physical_damage_symbols_missing",
-                "message": f"Physical damage coverage requested but symbols undefined: {', '.join(missing)}",
-                "forms": ["ACORD_127"],
-            })
+            issues.append(_issue(
+                "soft_warning",
+                "auto_physical_damage_symbols_missing",
+                f"Physical damage coverage requested but symbols undefined: {', '.join(missing)}",
+                ["ACORD_127"],
+            ))
 
     # Check liability coverage structure
     liability_struct = _fv(facts, "auto_liability_structure")
@@ -819,21 +828,21 @@ def _check_auto_symbol_to_exposure_alignment(
             pd_pa = _fv(facts, "pd_per_accident")
             if not all([bi_pp, bi_pa, pd_pa]):
                 # Spec: split limits incomplete = HARD STOP
-                issues.append({
-                    "type": "hard_stop",
-                    "code": "auto_split_limits_incomplete",
-                    "message": "Split liability structure selected but not all three limits (BI/person, BI/accident, PD/accident) defined",
-                    "forms": ["ACORD_127"],
-                })
+                issues.append(_issue(
+                    "hard_stop",
+                    "auto_split_limits_incomplete",
+                    "Split liability structure selected but not all three limits (BI/person, BI/accident, PD/accident) defined",
+                    ["ACORD_127"],
+                ))
 
     # Check drive other car (DOC) symbol if requested
     if flags.get("auto_has_drive_other_car") and not _fv(facts, "drive_other_car_symbol"):
-        issues.append({
-            "type": "soft_warning",
-            "code": "auto_doc_symbol_missing",
-            "message": "Drive Other Car coverage referenced but symbol not defined on ACORD 127",
-            "forms": ["ACORD_127"],
-        })
+        issues.append(_issue(
+            "soft_warning",
+            "auto_doc_symbol_missing",
+            "Drive Other Car coverage referenced but symbol not defined on ACORD 127",
+            ["ACORD_127"],
+        ))
 
     return issues
 
@@ -1465,12 +1474,12 @@ def _check_property_deductible_structure(
     # Check for AOP deductible (minimum requirement)
     aop_ded = _fv(facts, "property_deductible_aop")
     if not aop_ded:
-        issues.append({
-            "type": "soft_warning",
-            "code": "property_aop_deductible_missing",
-            "message": "Property coverage present but AOP (All Other Perils) deductible not specified",
-            "forms": ["ACORD_140", "ACORD_141"],
-        })
+        issues.append(_issue(
+            "soft_warning",
+            "property_aop_deductible_missing",
+            "Property coverage present but AOP (All Other Perils) deductible not specified",
+            ["ACORD_140", "ACORD_141"],
+        ))
 
     # Check for peril-specific deductible consistency
     has_wind = _fv(facts, "property_deductible_wind")
@@ -1490,25 +1499,25 @@ def _check_property_deductible_structure(
         if not has_flood:
             missing_perils.append("flood")
 
-        issues.append({
-            "type": "soft_warning",
-            "code": "property_peril_deductible_incomplete",
-            "message": f"Some peril-specific deductibles defined but missing: {', '.join(missing_perils)}. "
-                      "Define all peril deductibles or remove partially-defined ones.",
-            "forms": ["ACORD_140", "ACORD_141"],
-        })
+        issues.append(_issue(
+            "soft_warning",
+            "property_peril_deductible_incomplete",
+            f"Some peril-specific deductibles defined but missing: {', '.join(missing_perils)}. "
+            "Define all peril deductibles or remove partially-defined ones.",
+            ["ACORD_140", "ACORD_141"],
+        ))
 
     # Check deductible basis (if deductible present, basis should be clear)
     has_any_ded = aop_ded or has_wind or has_earth or has_flood
     if has_any_ded:
         basis = _fv(facts, "property_deductible_basis")
         if not basis:
-            issues.append({
-                "type": "soft_warning",
-                "code": "property_deductible_basis_missing",
-                "message": "Property deductible defined but basis (flat dollar or percentage) not specified",
-                "forms": ["ACORD_140", "ACORD_141"],
-            })
+            issues.append(_issue(
+                "soft_warning",
+                "property_deductible_basis_missing",
+                "Property deductible defined but basis (flat dollar or percentage) not specified",
+                ["ACORD_140", "ACORD_141"],
+            ))
 
     return issues
 
@@ -1541,25 +1550,25 @@ def _check_property_coinsurance_enforcement(
     agreed_value_end = _fv(facts, "agreed_value_endorsement")
 
     if not coinsurance_pct and not agreed_value_end:
-        issues.append({
-            "type": "soft_warning",
-            "code": "property_coinsurance_missing",
-            "message": "Property values present but coinsurance percentage or agreed value endorsement not specified. "
-                      "Define coinsurance % or confirm agreed value endorsement is in place.",
-            "forms": ["ACORD_140", "ACORD_141"],
-        })
+        issues.append(_issue(
+            "soft_warning",
+            "property_coinsurance_missing",
+            "Property values present but coinsurance percentage or agreed value endorsement not specified. "
+            "Define coinsurance % or confirm agreed value endorsement is in place.",
+            ["ACORD_140", "ACORD_141"],
+        ))
     elif coinsurance_pct:
         # Validate coinsurance percentage is reasonable (typically 80-100%)
         try:
             coinspct_val = float(re.sub(r"[^\d.]", "", str(coinsurance_pct)))
             if coinspct_val < 60 or coinspct_val > 100:
-                issues.append({
-                    "type": "soft_warning",
-                    "code": "property_coinsurance_unreasonable",
-                    "message": f"Coinsurance percentage {coinspct_val}% appears outside normal range (80-100%). "
-                              "Verify this is intentional.",
-                    "forms": ["ACORD_140", "ACORD_141"],
-                })
+                issues.append(_issue(
+                    "soft_warning",
+                    "property_coinsurance_unreasonable",
+                    f"Coinsurance percentage {coinspct_val}% appears outside normal range (80-100%). "
+                    "Verify this is intentional.",
+                    ["ACORD_140", "ACORD_141"],
+                ))
         except Exception:
             pass
 
@@ -1601,13 +1610,13 @@ def _check_peril_specific_deductibles_referenced(
             missing_perils.append("flood")
 
         if missing_perils:
-            issues.append({
-                "type": "hard_stop",
-                "code": "peril_deductible_referenced_but_undefined",
-                "message": f"Peril-specific deductible referenced on document but amounts undefined: {', '.join(missing_perils)}. "
-                          "Define deductible amounts or remove references.",
-                "forms": ["ACORD_140", "ACORD_141"],
-            })
+            issues.append(_issue(
+                "hard_stop",
+                "peril_deductible_referenced_but_undefined",
+                f"Peril-specific deductible referenced on document but amounts undefined: {', '.join(missing_perils)}. "
+                "Define deductible amounts or remove references.",
+                ["ACORD_140", "ACORD_141"],
+            ))
 
     return issues
 

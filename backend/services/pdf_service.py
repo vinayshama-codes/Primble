@@ -2606,6 +2606,15 @@ _FIELD_BATCH_POOL = int(os.getenv("FIELD_BATCH_POOL", "4"))
 # should omit; a handful per call it reads each carefully against the document.
 _COMPLIANCE_BATCH = int(os.getenv("COMPLIANCE_BATCH", "10"))
 
+# Retry backoff for a failed gap-fill call. The dominant failure is an OpenAI
+# TPM (tokens-per-minute) 429 — the whole pipeline ships the document on every
+# call, so a multi-form run can drain a 200k TPM budget. A TPM bucket refills
+# over tens of seconds, so the old 1/2/4s backoff just re-hit the same 429 and
+# burned all three attempts, after which the call returned {} and its fields
+# went silently BLANK.
+_LLM_RETRY_BACKOFF_BASE_S = float(os.getenv("LLM_RETRY_BACKOFF_BASE_S", "5"))
+_LLM_RETRY_BACKOFF_MAX_S  = float(os.getenv("LLM_RETRY_BACKOFF_MAX_S", "45"))
+
 # Evidence gate: max distinct Yes/No fields that may cite the same (near-duplicate)
 # grounding quote before ALL of them are treated as boilerplate reuse and blanked.
 # This existed to catch a false-"No" flood the model produced when it was BLIND to
@@ -2863,6 +2872,10 @@ def _fill_unmatched_with_gpt(
     candidate_counts: Dict[str, Dict[str, int]] = {f: {} for f in field_list}
     all_raw_fields:   set                       = set()
     all_question_grounding: Dict[str, str]      = {}
+    # Permanently-failed LLM calls in this pass. A failed call returns {}, which
+    # downstream looks identical to "the model answered nothing" — so without
+    # this the fields simply come back blank and nobody knows a call died.
+    _llm_call_failures: List[str]               = []
 
     # ── Partition eligible fields into singles and slot-groups ────────────────
     # Slot-groups: fields sharing the same base name with _A/_B/…/_N suffixes.
@@ -3408,12 +3421,30 @@ def _fill_unmatched_with_gpt(
                 return json.loads(_inner())
             except Exception as ex:
                 if attempt < _FORM_FILL_BATCH_RETRIES - 1:
-                    wait = min(2 ** attempt, 8)
+                    # Backoff is deliberately longer than plain 1/2/4s: the common
+                    # failure here is an OpenAI TPM (tokens-per-minute) 429, and a
+                    # TPM bucket needs tens of seconds to refill — a 4s retry just
+                    # burns an attempt and lands on the same 429. The SDK's own
+                    # Retry-After handling covers the polite case; this covers the
+                    # case where we exhausted the minute budget ourselves.
+                    wait = min(_LLM_RETRY_BACKOFF_BASE_S * (2 ** attempt), _LLM_RETRY_BACKOFF_MAX_S)
                     logger.warning("gpt_fill: call failed attempt=%d/%d retrying in %ds — %s",
                                    attempt + 1, _FORM_FILL_BATCH_RETRIES, wait, ex)
                     _time.sleep(wait)
                 else:
-                    logger.warning("gpt_fill: call permanently failed — %s", ex)
+                    # A permanently-failed call returns {} — indistinguishable
+                    # downstream from "the model legitimately answered nothing".
+                    # That silence is how a rate-limited run turns into a form
+                    # full of unexplained BLANK Yes/No answers. Count it and log
+                    # at ERROR so the failure is visible instead of looking like
+                    # a correct omission.
+                    _llm_call_failures.append(str(ex)[:200])
+                    logger.error(
+                        "gpt_fill: call PERMANENTLY FAILED after %d attempts — the fields in "
+                        "this batch will be BLANK and that is a FAILURE, not a model omission. "
+                        "form=%s err=%s",
+                        _FORM_FILL_BATCH_RETRIES, form_id, ex,
+                    )
                     return {}
 
     # JSON-schema response format for the general field-fill call: typing `values`
@@ -3626,22 +3657,74 @@ def _fill_unmatched_with_gpt(
         high — a single call with all ~40 questions makes it rush and borrow a
         plausible sentence for questions it should omit; ~10 per call it reads
         each carefully. Cross-group quote reuse is still caught downstream by
-        the evidence gate's near-duplicate reuse cap."""
+        the evidence gate's near-duplicate reuse cap.
+
+        The DOCUMENT IS PLACED FIRST, before the question list. Two reasons:
+        (1) it makes (system prompt + document) an identical PREFIX across every
+        compliance batch for this submission, which OpenAI's automatic prefix
+        caching can reuse — without it each call re-billed and re-processed the
+        whole document from scratch (the dominant cost of this pipeline: a real
+        8-form run issues ~70 calls, each previously shipping the full document);
+        (2) "context first, task last" is the stronger ordering for grounded
+        extraction.
+
+        The document is also CHUNKED against the call budget. Previously the
+        full raw_text was concatenated with no guard at all (unlike the general
+        fill, which uses _split_raw_text): on a large multi-document submission
+        that pushed the prompt past the budget, the call errored, the retry
+        layer exhausted, _chat_json returned {} — and every Yes/No question in
+        that batch came back BLANK with nothing surfaced to the user. Chunking
+        keeps each call inside budget; a question is answered from whichever
+        chunk actually contains its evidence, and "first non-empty answer wins"
+        on merge (the model omits questions it cannot ground, so chunks that
+        lack the evidence simply return nothing for them)."""
         lines = []
         for f in q_fields:
             info  = eligible_fields.get(f) or {}
             qtext = _compliance_question_text(info.get("tu") if isinstance(info, dict) else "")
             lines.append(f"- {f}: {qtext}")
-        user_msg = (
-            f"Answer these YES/NO underwriting questions for ACORD form {form_id}, using ONLY the "
-            "document text below. Follow every HARD RULE. Omit any question the document does not "
-            "specifically address — most of the time that is the correct choice.\n\n"
-            "QUESTIONS:\n" + "\n".join(lines)
-            + "\n\n=== DOCUMENT TEXT ===\n" + raw_text
+        questions_block = (
+            "\n\nQUESTIONS — answer using ONLY the document above. Follow every HARD RULE. "
+            "Omit any question the document does not specifically address; most of the time "
+            f"that is the correct choice. (ACORD form {form_id}.)\n" + "\n".join(lines)
         )
-        result  = _chat_json(_COMPLIANCE_SYSTEM_PROMPT, user_msg, _COMPLIANCE_RESPONSE_FORMAT)
-        answers = (result.get("answers") or {}) if isinstance(result, dict) else {}
-        quotes  = (result.get("quotes")  or {}) if isinstance(result, dict) else {}
+        # Budget the document so (system + document + questions + reply headroom)
+        # stays inside one call.
+        _overhead = len(_COMPLIANCE_SYSTEM_PROMPT) + len(questions_block) + 2_000
+        _doc_budget = max(10_000, _GPT_CALL_BUDGET_CHARS - _GPT_REPLY_RESERVE_CHARS - _overhead)
+        _doc_chunks: List[str] = []
+        _rest = raw_text
+        while _rest:
+            if len(_rest) <= _doc_budget:
+                _doc_chunks.append(_rest)
+                break
+            _cut = _rest.rfind("\n\n", 0, _doc_budget)
+            if _cut == -1:
+                _cut = _rest.rfind("\n", 0, _doc_budget)
+            if _cut == -1:
+                _cut = _doc_budget
+            _doc_chunks.append(_rest[:_cut])
+            _rest = _rest[_cut:].lstrip("\n")
+        if not _doc_chunks:
+            _doc_chunks = [raw_text]
+        if len(_doc_chunks) > 1:
+            logger.info("gpt_fill COMPLIANCE: form=%s document split into %d chunks (%d chars)",
+                        form_id, len(_doc_chunks), len(raw_text))
+
+        answers: dict = {}
+        quotes:  dict = {}
+        for _ci, _chunk in enumerate(_doc_chunks):
+            user_msg = f"=== DOCUMENT TEXT ===\n{_chunk}" + questions_block
+            result = _chat_json(_COMPLIANCE_SYSTEM_PROMPT, user_msg, _COMPLIANCE_RESPONSE_FORMAT)
+            _a = (result.get("answers") or {}) if isinstance(result, dict) else {}
+            _q = (result.get("quotes")  or {}) if isinstance(result, dict) else {}
+            for _f, _v in _a.items():
+                if _f not in answers:            # first chunk that grounds it wins
+                    answers[_f] = _v
+                    if _q.get(_f):
+                        quotes[_f] = _q[_f]
+            if len(answers) >= len(q_fields):
+                break                            # every question answered already
         return answers, quotes
 
     def _run_compliance_pass(q_fields: List[str]) -> None:
@@ -3781,12 +3864,22 @@ def _fill_unmatched_with_gpt(
         "gpt_fill DONE: form=%s fields_filled=%d/%d field_batches=%d model=%s",
         form_id, len(all_filled), len(eligible_fields), len(field_batches), llm_model,
     )
+    if _llm_call_failures:
+        # Loud, explicit: some fields are blank because a call DIED, not because
+        # the document lacked an answer. Without this the two are identical from
+        # the outside and a rate-limited run looks like a correct sparse fill.
+        logger.error(
+            "gpt_fill INCOMPLETE: form=%s — %d LLM call(s) permanently failed; some fields are "
+            "BLANK due to call failure, NOT because the document lacked an answer. Causes: %s",
+            form_id, len(_llm_call_failures), "; ".join(_llm_call_failures[:3]),
+        )
     return {
         "filled_values":       all_filled,
         "new_mappings":        {},
         "raw_text_fields":     all_raw_fields,
         "question_grounding":  {f: q for f, q in all_question_grounding.items() if f in all_filled},
         "model_used":          llm_model,
+        "llm_call_failures":   len(_llm_call_failures),
     }
 
 
