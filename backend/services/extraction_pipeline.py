@@ -538,7 +538,7 @@ async def _finalize_pipeline(
     # SQS scoring.
     confirmations = confirmations or {}
     if confirmations:
-        merged_facts = apply_confirmations(merged_facts, confirmations)
+        merged_facts = apply_confirmations(merged_facts, confirmations, docs=active_docs)
 
     tier1_ok, tier1_missing = check_tier1(merged_facts, mflags)
 
@@ -675,14 +675,15 @@ async def _finalize_pipeline(
             skip_fields=set(RECONCILABLE_FIELD_KEYS)
             | _consistency_owned
             | set(underwriting.get("assessed_keys") or []),
+            # Carry the real fact key back (client #1: the display message no
+            # longer contains it, so the old `for '<field>'` regex-scrape is gone -
+            # the code is now derived from the actual key, structurally).
+            return_fields=True,
         )
         if source_conflicts:
             logger.info("Source conflicts detected across docs: %d", len(source_conflicts))
-            soft_stops = list(soft_stops) + source_conflicts
-            for _sc_msg in source_conflicts:
-                _sc_is_carrier = _sc_msg.startswith("Carrier names differ")
-                _sc_field_match = re.search(r"for '([^']+)'", _sc_msg)
-                _sc_field = _sc_field_match.group(1) if _sc_field_match else "field"
+            for _sc_field, _sc_msg, _sc_is_carrier in source_conflicts:
+                soft_stops = list(soft_stops) + [_sc_msg]
                 _sc_code = f"source_conflict_{'carrier_' if _sc_is_carrier else ''}{_sc_field}"
                 structured_issues.append(make_issue(_sc_code, "soft_warning", _sc_msg))
 
@@ -1109,9 +1110,12 @@ async def confirm_underwriting_value(
     docs = list(session.get("docs") or [])
     if not docs:
         raise ValueError("underwriting_no_docs")
+    active_docs = [d for d in docs if not d.get("excluded")] or docs
 
     # Raises ValueError(code) on unknown field / empty / unparseable value.
-    canonical = validate_confirmation(fact_key, value)
+    # docs=active_docs lets an auto-discovered (non-curated) field validate too
+    # — see underwriting_consistency._resolve_reconcilable_cfg.
+    canonical = validate_confirmation(fact_key, value, docs=active_docs)
 
     confirmations = dict(session.get("underwriting_confirmations") or {})
 
@@ -1124,7 +1128,6 @@ async def confirm_underwriting_value(
     # confirmation below.
     linked_applied: List[str] = []
     try:
-        active_docs = [d for d in docs if not d.get("excluded")] or docs
         pre = assess_underwriting_consistency(active_docs, session.get("facts") or {}, confirmations)
         target = next((f for f in pre.get("fields") or [] if f["fact_key"] == fact_key), None)
         for link in (target.get("linked_fields") if target else None) or []:
@@ -1132,7 +1135,7 @@ async def confirm_underwriting_value(
             if lk in confirmations:
                 continue
             try:
-                confirmations[lk] = validate_confirmation(lk, canonical)
+                confirmations[lk] = validate_confirmation(lk, canonical, docs=active_docs)
                 linked_applied.append(lk)
             except ValueError:
                 continue  # not a valid value for this field's kind - skip, never fail the request

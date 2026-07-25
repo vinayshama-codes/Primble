@@ -1103,9 +1103,15 @@ async def mark_read(current_user: dict = Depends(get_current_user)):
 @router.get("/schedules/{session_id}")
 async def list_session_schedules(
     session_id: str,
+    schedule_key: str = "",
     current_user: dict = Depends(get_current_user),
 ):
-    """Producer pre-load (Figure 15): the schedules this package can capture."""
+    """Producer pre-load (Figure 15): the schedules this package can capture.
+
+    ``schedule_key`` (optional) limits the response to a single schedule - the
+    inline ResolutionModal needs exactly one, so it avoids building/validating
+    every schedule for the session (client #2 latency fix). Omitted -> all.
+    """
     try:
         proc_session = await get_processing_session(session_id)
     except Exception:
@@ -1114,7 +1120,8 @@ async def list_session_schedules(
         raise HTTPException(403, "Access denied")
     check_payment_access(current_user.get("payment_status", "ok"), "form")
 
-    schedules = await get_session_schedules(session_id)
+    only_key = _sanitize_str(schedule_key, 64) or None
+    schedules = await get_session_schedules(session_id, only_key=only_key)
     return JSONResponse({"success": True, "schedules": schedules})
 
 

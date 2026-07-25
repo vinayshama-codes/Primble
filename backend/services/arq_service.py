@@ -3257,7 +3257,9 @@ async def apply_arq_answers_to_session(
 
 
 # ASYNC-SAFE
-async def get_session_schedules(processing_session_id: str) -> List[dict]:
+async def get_session_schedules(
+    processing_session_id: str, only_key: Optional[str] = None,
+) -> List[dict]:
     """Every capturable schedule for a session, with its current rows.
 
     Powers the producer-side pre-load table: the agent can paste or upload the
@@ -3267,6 +3269,11 @@ async def get_session_schedules(processing_session_id: str) -> List[dict]:
     A schedule is included when the session's selected forms actually have
     repeating rows bound to it, OR when rows already exist for it - so the agent
     is never shown a Workers Comp class-code table on a property-only package.
+
+    ``only_key`` limits the work to a single schedule (client #2): the inline
+    ResolutionModal needs exactly one, and building/validating/serialising EVERY
+    schedule - each a full row-validation pass over the facts - is wasted effort
+    (and payload) on a large fleet. When set, only that schedule is computed.
     """
     from repositories.session_repository import get_processing_session
 
@@ -3288,6 +3295,8 @@ async def get_session_schedules(processing_session_id: str) -> List[dict]:
 
     out: List[dict] = []
     for list_key, defn in schedule_capture.SCHEDULE_DEFS.items():
+        if only_key and list_key != only_key:
+            continue
         rows, report = schedule_capture.validate_rows(
             list_key, schedule_capture.rows_from_facts(list_key, facts),
         )

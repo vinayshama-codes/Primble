@@ -23,7 +23,7 @@ Warnings/advisories are tiered required / recommended / binder_followup.
 """
 
 import hashlib
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 DEFAULT_CLUSTER = "Other validations"
 DEFAULT_TIER = "recommended"
@@ -339,13 +339,117 @@ def resolution_for(code: Optional[str]) -> Optional[dict]:
 
     Returns a COPY so callers can attach it to an issue dict without any risk of
     mutating the shared template. None for codes with no inline resolution
-    (legacy field-level stops, doc/source conflicts, OCR, Tier-1) - those keep
-    their existing Resolve / Dismiss work-tracking controls unchanged.
+    (legacy field-level stops, doc/source conflicts, OCR) - those keep their
+    existing Resolve / Dismiss work-tracking controls unchanged.
+
+    Tier-1 baseline fields (client review #4: "if we can provide it manually,
+    why doesn't it have Open to fix?") are the one dynamically-coded family that
+    DOES get a resolution here, via _tier1_resolution() below - each missing
+    field/label is a genuine single scalar fact (producer/applicant name,
+    mailing address, effective date, LOB, entity type, or one of the 3
+    contact_* facts), the same shape RESOLUTION_MAP already handles for every
+    other _r_field() rule. There was never a real "can't be typed" reason for
+    these to be work-tracking-only; the "Fix:" text on the tier1 message itself
+    already tells the producer to "provide this value manually" - this makes
+    that literally clickable instead of a dead-end instruction.
     """
     if not code:
         return None
     res = RESOLUTION_MAP.get(code)
-    return dict(res) if res else None
+    if res:
+        return dict(res)
+    if code.startswith("tier1_missing_"):
+        return _tier1_resolution(code[len("tier1_missing_"):])
+    if code.startswith("source_conflict_"):
+        return _source_conflict_resolution(code)
+    return None
+
+
+def _r_review(note: str) -> dict:
+    """A 'none'-mode resolution carrying a CONTEXT-SPECIFIC review note. mode
+    'none' renders no functional value input (nothing is auto-applied) - the
+    `note` just replaces the generic "needs a coverage/form change" hint with
+    wording that fits WHY this particular item can't be typed (client #4: a
+    cross-document conflict on a nested sub-field is reconciled on the form, not
+    by a picker/typed value, so it must say that instead of looking skipped)."""
+    return {"mode": "none", "note": note}
+
+
+_CONFLICT_REVIEW_NOTE = (
+    "Documents disagree on this value. Confirm the correct one on the relevant "
+    "form, then mark it resolved - it can't be applied automatically."
+)
+
+
+def _writable_fact(fact: str) -> bool:
+    """True when `fact` is a canonical scalar the producer-answer path can write
+    (arq_service._canonical_key). Lazy import to keep this module cycle-agnostic
+    (same pattern as _tier1_label_to_facts / cross_form_validator._to_int)."""
+    if not fact:
+        return False
+    try:
+        from services.arq_service import _canonical_key
+        return bool(_canonical_key(fact))
+    except Exception:                                  # pragma: no cover
+        return False
+
+
+def _source_conflict_resolution(code: str) -> Optional[dict]:
+    """Resolution for a cross-document `source_conflict_<field>` /
+    `source_conflict_carrier_<field>` issue (client #4).
+
+    A conflict on a plain writable scalar (carrier name, prior carrier, employee
+    count, ...) becomes a typed 'Open to fix' - the producer picks the correct
+    value, which applies as a producer-provenance fact exactly like every other
+    field resolution. A conflict on a NESTED structured-dict sub-field (a dotted
+    key like 'risk_transfer.additional_insured_names') has no scalar apply path
+    and is not held by the Data-Consistency picker, so it gets an honest review
+    NOTE instead of a dead button - never left as a bare Resolve/Dismiss row that
+    looks like the fix feature skipped it."""
+    field = code[len("source_conflict_"):]
+    # The carrier-conflict variant prefixes an EXTRA "carrier_" (so a carrier_name
+    # conflict is `source_conflict_carrier_carrier_name`). Strip it only when what
+    # remains is itself a real field - otherwise a field legitimately named
+    # `carrier_*` (e.g. carrier_name) would be wrongly truncated to `name`.
+    if field.startswith("carrier_"):
+        stripped = field[len("carrier_"):]
+        if "." in stripped or _writable_fact(stripped):
+            field = stripped
+    if not field:
+        return None
+    # Nested sub-field (dotted) or anything not writable as a scalar -> review note.
+    if "." in field or not _writable_fact(field):
+        return _r_review(_CONFLICT_REVIEW_NOTE)
+    return _r_field(field)
+
+
+_tier1_label_to_facts_cache: Optional[Dict[str, tuple]] = None
+
+
+def _tier1_label_to_facts() -> Dict[str, tuple]:
+    """label (as emitted by check_tier1()) -> the canonical fact key(s) that
+    satisfy it. Lazy + cached: sqs_service doesn't import this module, so a
+    module-level import here would be safe today, but every other cross-service
+    reach-in in this file (see cross_form_validator._to_int) uses a lazy import
+    specifically to keep this file import-cycle-agnostic as the pipeline grows -
+    matched here for the same reason, not because a cycle currently exists."""
+    global _tier1_label_to_facts_cache
+    if _tier1_label_to_facts_cache is None:
+        from services.sqs_service import TIER1_FIELDS, TIER1_CONTACT
+        mapping: Dict[str, tuple] = {label: (field,) for field, label in TIER1_FIELDS.items()}
+        # "Contact information" isn't one field - check_tier1() accepts ANY of
+        # the three. Offer all three as alternatives; the producer only needs
+        # to fill one (ResolutionModal already renders one input per fact and
+        # applies whichever the producer actually types, same as every other
+        # multi-fact _r_field() rule such as minimum_viable_cope_missing).
+        mapping["Contact information"] = TIER1_CONTACT
+        _tier1_label_to_facts_cache = mapping
+    return _tier1_label_to_facts_cache
+
+
+def _tier1_resolution(label: str) -> Optional[dict]:
+    facts = _tier1_label_to_facts().get(label)
+    return _r_field(*facts) if facts else None
 
 
 # Prefix rules for the dynamically-generated codes (one per fact/field, so
@@ -447,6 +551,35 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
 ]
 
 
+# ── Cross-engine twin registry (client review #4) ────────────────────────────
+# A handful of rules are computed by BOTH engines: the legacy field-level engine
+# (sqs_service.evaluate_stops / utils.run_field_validations), which emits plain
+# UNCODED strings, AND cross_form_validator, which emits the SAME rule with a
+# real code and a resolution descriptor ("Open to fix"). When both fire they land
+# in the identical cluster (the legacy phrase and the coded code are mapped to one
+# cluster label in _LEGACY_MESSAGE_RULES / CLUSTER_MAP above) and render as two
+# near-duplicate bullets - only one of which is resolvable. This maps each such
+# coded key to the substring that identifies its legacy twin, so build_grouped_view
+# can hide the legacy twin whenever its coded counterpart is present in the same
+# view. Verified pairs: every entry's coded code and legacy phrase resolve to the
+# same cluster above, which is the codebase's own signal that they are one rule.
+#
+# Suppression is display-only and conditional: the legacy twin is hidden ONLY when
+# the coded twin is actually present, so no blocker is ever lost - if the coded
+# rule did not fire (e.g. its extra form-trigger gate was not met, which the legacy
+# rule does not require), the legacy row still shows exactly as before. The raw
+# hard_stops list that caps SQS is never altered by this.
+_LEGACY_SUPERSEDED_BY_CODE: Dict[str, str] = {
+    "minimum_viable_cope_missing":               "Minimum Viable COPE incomplete",
+    "peril_deductible_referenced_but_undefined": "Peril-specific deductibles referenced but not defined",
+    "property_valuation_method_missing":         "Property valuation method not specified",
+    "umbrella_no_underlying_coverage":           "Umbrella detected but no underlying",
+    "umbrella_sir_below_gl_deductible":          "Umbrella SIR",
+    "auto_split_limits_incomplete":              "Split liability limits incomplete",
+    "bi_coverage_no_limit":                      "Business Income coverage detected",
+}
+
+
 def classify_legacy_message(message: str, severity: str) -> tuple:
     """Cluster/tier a plain-string message from evaluate_stops()/
     run_field_validations() by matching known substrings (these two functions
@@ -456,6 +589,44 @@ def classify_legacy_message(message: str, severity: str) -> tuple:
         if phrase in message:
             return cluster, (tier if severity != "hard_stop" else "required")
     return DEFAULT_CLUSTER, DEFAULT_TIER
+
+
+# ── Typeable legacy stops (client review #5) ─────────────────────────────────
+# evaluate_stops() emits uncoded strings, so make_issue() gets no code to key a
+# resolution off - which is why several genuinely single-value-fixable stops
+# ("...no revenue or payroll found", "...payroll is missing", "...deductibles not
+# specified") rendered as bare Resolve/Dismiss with no "Open to fix", even though
+# the fix is exactly "type the value". This maps the identifying phrase of each
+# such stop to the writable canonical fact(s) that fix it, so make_issue() can
+# attach a field resolution from the MESSAGE (it has no code). Checked most-
+# specific first; each fact is a verified-writable scalar (never a list/dict, so
+# a typed value can never corrupt a schedule-backed field). Deliberately NOT
+# mapped: "no class codes found" (a class-code SCHEDULE, no live capture table)
+# and symbol/structure stops - those have no clean single-value fix, so they
+# correctly keep work-tracking-only rather than get a button that opens onto
+# nothing. Legacy phrases already owned by a coded twin (_LEGACY_SUPERSEDED_BY_
+# CODE) are suppressed from the view when the coded one is present, so a resolved
+# duplicate never shows; when the legacy shows alone, this makes it fixable too.
+_LEGACY_STOP_RESOLUTIONS: List[Tuple[str, dict]] = [
+    ("no revenue or payroll found",           _r_field("total_revenue", "total_payroll")),
+    ("Workers Comp detected but payroll is missing", _r_field("wc_payroll", "total_payroll")),
+    ("Physical damage coverage present but deductibles not specified",
+                                              _r_field("auto_deductible_comp", "auto_deductible_collision")),
+    ("retro date is required",                _r_field("retro_date")),
+    ("requires retro date for umbrella",      _r_field("retro_date")),
+    ("Business Income coverage detected",     _r_field("business_income_limit")),
+]
+
+
+def _legacy_message_resolution(message: str) -> Optional[dict]:
+    """Field resolution derived from a legacy stop's MESSAGE (it carries no code).
+    First matching phrase wins; None when nothing matches (unchanged behaviour)."""
+    if not message:
+        return None
+    for phrase, res in _LEGACY_STOP_RESOLUTIONS:
+        if phrase in message:
+            return dict(res)
+    return None
 
 
 def make_issue(
@@ -474,6 +645,12 @@ def make_issue(
     which has no `code` to key a registry lookup off of). When omitted,
     build_grouped_view() derives them from `code` via the registry as usual.
     """
+    # Prefer a code-keyed resolution; fall back to a MESSAGE-keyed one for the
+    # uncoded legacy stops that are single-value fixable (client #5). The message
+    # fallback only fires when the code has no resolution, and its phrases are
+    # specific to legacy stop wording, so it never overrides or collides with a
+    # coded/cross-form/source-conflict resolution.
+    resolution = resolution_for(code) or _legacy_message_resolution(message)
     return {
         "code": code,
         "severity": severity,
@@ -481,7 +658,7 @@ def make_issue(
         "forms": list(forms or []),
         "cluster": cluster,
         "tier": tier,
-        "resolution": resolution_for(code),
+        "resolution": resolution,
     }
 
 
@@ -560,6 +737,46 @@ def build_grouped_view(
             if (i.get("message") or "").strip() not in _seen_msgs
         ]
 
+    # ── Cross-engine de-duplication (client review #4) ───────────────────────
+    # Several rules are emitted by BOTH the legacy field-level engine (uncoded
+    # strings) and cross_form_validator (coded, resolvable). When both are present
+    # they cluster together and show as two near-identical bullets - only the
+    # coded one carries "Open to fix". Hide the legacy twin so the problem shows
+    # once, on the resolvable row. This only ever removes the legacy STRING from
+    # the display: the coded issue is kept, and the raw hard_stops/soft_stops
+    # lists that drive SQS capping (owned by the caller) are unaffected. Because
+    # suppression is gated on the coded twin actually being present, a scenario
+    # where only the legacy rule fired (its coded counterpart has a stricter
+    # form-trigger gate) still shows the legacy row exactly as before - no blocker
+    # is ever dropped.
+    _present_codes = {(i.get("code") or "") for i in (structured_issues or [])} \
+        | {(i.get("code") or "") for i in (cross_issues or [])}
+    _suppress_phrases = tuple(
+        phrase for code, phrase in _LEGACY_SUPERSEDED_BY_CODE.items()
+        if code in _present_codes
+    )
+    if _suppress_phrases:
+        _superseding_codes = set(_LEGACY_SUPERSEDED_BY_CODE.keys())
+
+        def _is_suppressed_legacy(issue: dict) -> bool:
+            # Never drop the coded keeper itself (its wording differs from the
+            # legacy phrase anyway - this is belt-and-suspenders).
+            if (issue.get("code") or "") in _superseding_codes:
+                return False
+            msg = issue.get("message") or ""
+            return any(p in msg for p in _suppress_phrases)
+
+        structured_issues = [
+            i for i in (structured_issues or []) if not _is_suppressed_legacy(i)
+        ]
+        # Also drop the suppressed legacy strings from the local final-list copies
+        # so the "uncovered" safety net below does not re-add them under the
+        # default "Other validations" cluster. The coded twin's message uses
+        # different wording and is NOT matched, so it survives here and stays
+        # covered by its own structured issue.
+        hard_stops = [m for m in hard_stops if not any(p in m for p in _suppress_phrases)]
+        soft_stops = [m for m in soft_stops if not any(p in m for p in _suppress_phrases)]
+
     def _present_in(message: str, final_list: List[str]) -> bool:
         # Exact match covers the common case. Prefix match covers callers that
         # append a suffix to the original message (e.g. an "(Affects: ... Fix:
@@ -607,7 +824,8 @@ def build_grouped_view(
             "severity": severity,
             "cluster": cluster,
             "tier": tier,
-            "resolution": issue.get("resolution") or resolution_for(code),
+            "resolution": issue.get("resolution") or resolution_for(code)
+                          or _legacy_message_resolution(message),
         })
 
     # Safety net: guarantee every message the caller is actually about to show
@@ -627,6 +845,7 @@ def build_grouped_view(
                 "code": "uncovered_hard_stop", "issue_id": issue_id_for(_msg, []),
                 "message": _msg, "forms": [], "field": None, "source_fact": None,
                 "severity": "hard_stop", "cluster": DEFAULT_CLUSTER, "tier": "required",
+                "resolution": _legacy_message_resolution(_msg),
             })
     for _msg in soft_stops:
         if not _covered_by(_msg):
@@ -634,6 +853,7 @@ def build_grouped_view(
                 "code": "uncovered_soft_stop", "issue_id": issue_id_for(_msg, []),
                 "message": _msg, "forms": [], "field": None, "source_fact": None,
                 "severity": "soft_warning", "cluster": DEFAULT_CLUSTER, "tier": DEFAULT_TIER,
+                "resolution": _legacy_message_resolution(_msg),
             })
 
     hard_items = [i for i in enriched if i["severity"] == "hard_stop"]

@@ -160,6 +160,36 @@ def _generic_label_pattern(label: str) -> str:
 # revenue figure — filters out stray small numbers like zip codes or page refs.
 _TEXT_SCAN_MIN_AMOUNT = 10_000
 
+# ── Name plausibility guard (text-scan safety net only) ───────────────────────
+# The identity text-scan patterns are label-anchored ("insured -", "carrier:",
+# ...) but the trigger word can also appear mid-sentence in ordinary policy
+# prose (e.g. "...the insured - if either makes a written demand for...") and
+# the regex cannot tell that apart from a real label. Confirmed cause of a
+# client-reported bad suggestion: that exact fragment was captured as a
+# candidate Applicant Name and, being longer than the real name, outranked it.
+# Applies only to fields whose value MUST be an organization/person name
+# (applicant/DBA/carrier all share the same one-word-label regex shape above);
+# a real legal name is short and never contains ordinary sentence/legal-
+# boilerplate connector words.
+_NAME_LIKE_FIELDS = frozenset({"applicant_name", "dba_name", "carrier_name"})
+
+_NAME_IMPLAUSIBLE_WORDS = frozenset({
+    "if", "either", "whether", "shall", "hereby", "whereas", "pursuant",
+    "notwithstanding", "unless", "thereof", "herein", "hereto", "wherein",
+    "whereby", "aforesaid", "hereinafter", "hereunder", "thereunder",
+})
+
+_NAME_MAX_WORDS = 8
+
+
+def _looks_like_name(value: str) -> bool:
+    """False when ``value`` reads as a sentence fragment rather than a name."""
+    words = value.split()
+    if not words or len(words) > _NAME_MAX_WORDS:
+        return False
+    stripped = {w.strip(".,'\"();:").lower() for w in words}
+    return not (stripped & _NAME_IMPLAUSIBLE_WORDS)
+
 
 def _text_scan_values(text: str, fact_key: str) -> List[str]:
     """Scan raw OCR text for values of ``fact_key`` directly.
@@ -193,6 +223,8 @@ def _text_scan_values(text: str, fact_key: str) -> List[str]:
         for m in re.finditer(pattern, text, re.IGNORECASE):
             raw = (m.group(1) or "").strip()
             if not raw:
+                continue
+            if fact_key in _NAME_LIKE_FIELDS and not _looks_like_name(raw):
                 continue
             if is_currency:
                 norm = _normalize_currency(raw)
@@ -478,28 +510,49 @@ def _suggest_for_field(fact_key: str, kind: str, values: List[dict]) -> Optional
     """Recommend the most complete/correct value for a conflicting field.
 
     Ranks candidate value groups by completeness (primary) then document
-    frequency (tiebreak). Returns ``{value, normalized, confidence, preselect}``,
-    or None when there is nothing to suggest.
+    frequency (tiebreak) — EXCEPT for name-like fields (``_NAME_LIKE_FIELDS``),
+    where document agreement is the primary signal and completeness (raw
+    string length) is only the tiebreak. Those fields pull candidates from a
+    loose, label-anchored text-scan regex that can occasionally capture a
+    stray sentence fragment instead of a real name (see ``_looks_like_name``);
+    a fragment is often long, so scoring by length first let one bad text-scan
+    hit outrank a name multiple real documents agreed on. Document count is
+    much harder for a single bad match to win. Returns ``{value, normalized,
+    confidence, preselect}``, or None when there is nothing to suggest.
     """
     if not values or len(values) < 2:
         return None
-    ranked = sorted(
-        values,
-        key=lambda g: (_value_completeness(fact_key, kind, g.get("display")), _group_doc_count(g)),
-        reverse=True,
-    )
-    top, second = ranked[0], ranked[1]
-    top_c = _value_completeness(fact_key, kind, top.get("display"))
-    sec_c = _value_completeness(fact_key, kind, second.get("display"))
 
-    if top_c - sec_c >= _COMPLETENESS_MARGIN:
-        confidence = "high"                               # clearly more complete
-    elif top_c > sec_c:
-        confidence = "medium"                             # somewhat more complete
-    elif _group_doc_count(top) > _group_doc_count(second):
-        confidence = "medium"                             # equally complete, more docs agree
+    name_like = fact_key in _NAME_LIKE_FIELDS
+
+    def _completeness(g: dict) -> float:
+        return _value_completeness(fact_key, kind, g.get("display"))
+
+    if name_like:
+        ranked = sorted(values, key=lambda g: (_group_doc_count(g), _completeness(g)), reverse=True)
     else:
-        confidence = "low"                                # genuine tie — no clear winner
+        ranked = sorted(values, key=lambda g: (_completeness(g), _group_doc_count(g)), reverse=True)
+
+    top, second = ranked[0], ranked[1]
+    top_c, sec_c = _completeness(top), _completeness(second)
+    top_docs, sec_docs = _group_doc_count(top), _group_doc_count(second)
+
+    if name_like:
+        if top_docs > sec_docs:
+            confidence = "high"                               # clearly more corroborated
+        elif top_c > sec_c:
+            confidence = "medium"                             # equally corroborated, more descriptive
+        else:
+            confidence = "low"                                # genuine tie — no clear winner
+    else:
+        if top_c - sec_c >= _COMPLETENESS_MARGIN:
+            confidence = "high"                               # clearly more complete
+        elif top_c > sec_c:
+            confidence = "medium"                             # somewhat more complete
+        elif top_docs > sec_docs:
+            confidence = "medium"                             # equally complete, more docs agree
+        else:
+            confidence = "low"                                # genuine tie — no clear winner
 
     # A value found ONLY by the raw-text safety net (never LLM-extracted) is less
     # certain: never let text-scan-only evidence reach an auto-preselect HIGH.
@@ -814,7 +867,31 @@ def _display(value: Any) -> Optional[str]:
     return s or None
 
 
-def apply_confirmations(merged_facts: dict, confirmations: Optional[dict]) -> dict:
+def _resolve_reconcilable_cfg(fact_key: str, docs: Optional[List[dict]] = None) -> Optional[dict]:
+    """Field config for confirm/apply — must mirror what the DISPLAY path
+    (``assess_underwriting_consistency``'s ``effective_fields``) considers
+    reconcilable, or a field the UI is actively showing a "Confirm & apply to
+    forms" button for gets rejected by the confirm endpoint every time.
+
+    Curated fields use their own registry entry. Any other key is only
+    accepted when full-field reconciliation is on AND ``docs`` is supplied AND
+    the key is a genuine scalar fact actually present in one of those
+    documents — the same discovery check the display path uses
+    (``_auto_scalar_keys``). This deliberately does NOT accept an arbitrary
+    fact_key just because the feature flag is on; without a real document
+    backing it, it is rejected exactly as before. Returns None when the field
+    is not confirmable.
+    """
+    cfg = RECONCILABLE_FIELDS.get(fact_key)
+    if cfg is not None:
+        return cfg
+    if docs and _full_field_enabled():
+        if fact_key in _auto_scalar_keys(docs, exclude=set(RECONCILABLE_FIELDS)):
+            return {"kind": "identity"}
+    return None
+
+
+def apply_confirmations(merged_facts: dict, confirmations: Optional[dict], docs: Optional[List[dict]] = None) -> dict:
     """Return a copy of ``merged_facts`` with every confirmed value applied.
 
     A confirmed value is stamped as a producer-verified envelope so it (a) flows
@@ -822,12 +899,18 @@ def apply_confirmations(merged_facts: dict, confirmations: Optional[dict]) -> di
     confidence by SQS — while remaining labelled as user-provided (source
     "user_confirmed"), distinct from source-document evidence (§6 evidence
     labelling). Mutates a shallow copy; the caller's dict is untouched.
+
+    ``docs`` (the session's active documents) is required to accept a
+    confirmation for an auto-discovered (non-curated) field — see
+    ``_resolve_reconcilable_cfg``. Omitting it only affects those fields;
+    curated fields are unaffected.
     """
     if not confirmations:
         return merged_facts
     out = dict(merged_facts or {})
     for fact_key, raw in confirmations.items():
-        if fact_key not in RECONCILABLE_FIELDS or raw is None:
+        cfg = _resolve_reconcilable_cfg(fact_key, docs)
+        if cfg is None or raw is None:
             continue
         envelope = {
             "value":      str(raw),
@@ -839,22 +922,26 @@ def apply_confirmations(merged_facts: dict, confirmations: Optional[dict]) -> di
         # number has one without re-parsing. The raw ``value`` is preserved
         # unchanged — what gets stamped onto forms and read by scoring is
         # untouched (display fidelity); this key is metadata only.
-        norm = _normalize(raw, RECONCILABLE_FIELDS[fact_key]["kind"], fact_key)
+        norm = _normalize(raw, cfg["kind"], fact_key)
         if norm:
             envelope["normalized"] = norm
         out[fact_key] = envelope
     return out
 
 
-def validate_confirmation(fact_key: str, value: Any) -> Optional[str]:
+def validate_confirmation(fact_key: str, value: Any, docs: Optional[List[dict]] = None) -> Optional[str]:
     """Validate a confirm request. Returns a canonicalized display value, or
     raises ValueError with a stable code the route can translate.
+
+    ``docs`` is required to validate an auto-discovered (non-curated) field —
+    see ``_resolve_reconcilable_cfg``.
     """
-    if fact_key not in RECONCILABLE_FIELDS:
+    cfg = _resolve_reconcilable_cfg(fact_key, docs)
+    if cfg is None:
         raise ValueError("underwriting_unknown_field")
     if value is None or str(value).strip() == "":
         raise ValueError("underwriting_empty_value")
-    kind = RECONCILABLE_FIELDS[fact_key]["kind"]
+    kind = cfg["kind"]
     # A confirmed value must parse with the field's NATIVE normalizer (no text
     # fallback): confirming Gross Sales requires a real number, not free text;
     # confirming an identity field must carry usable signal after WS-2

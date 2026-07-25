@@ -43,6 +43,11 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   // narrative render immediately (typeable) and hydrate their saved values in the
   // background, so the producer never waits to start typing.
   const [loading, setLoading] = useState(mode === 'schedule');
+  // Field/narrative modes hydrate their saved values from the server (so
+  // reopening a resolved validation shows what was applied). `prefillLoading`
+  // gates the field inputs behind a spinner until that value lands, instead of
+  // flashing an empty box that fills a beat later (client #3).
+  const [prefillLoading, setPrefillLoading] = useState(mode === 'field' || mode === 'narrative');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   // Facts the producer has started editing - the async pre-fill must never
@@ -50,11 +55,12 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   const touched = useRef(new Set());
 
   // Pre-fill field inputs (and narrative's "already saved" context) from the
-  // current session facts in the BACKGROUND, so reopening a validation shows what
-  // was applied. Non-blocking: inputs are live the whole time; a fetched value
-  // only lands in a field the producer hasn't touched and left empty.
+  // current session facts, so reopening a validation shows what was applied.
+  // Field mode holds a spinner until this resolves (client #3) so a
+  // previously-entered value never flashes in a beat after an empty box;
+  // narrative stays non-blocking (its textarea is empty on open anyway).
   useEffect(() => {
-    if (mode !== 'field' && mode !== 'narrative') return;
+    if (mode !== 'field' && mode !== 'narrative') { setPrefillLoading(false); return; }
     let alive = true;
     const facts = mode === 'field' ? (resolution.facts || []) : ['additional_remarks_text'];
     (async () => {
@@ -77,6 +83,8 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
         }
       } catch {
         /* non-fatal: inputs stay as-is */
+      } finally {
+        if (alive) setPrefillLoading(false);
       }
     })();
     return () => { alive = false; };
@@ -89,7 +97,11 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
     let alive = true;
     (async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/arq/schedules/${sessionId}`, { credentials: 'include' });
+        // Ask for ONLY the schedule this modal needs (client #2). The endpoint
+        // otherwise builds, validates and serialises EVERY capturable schedule
+        // for the session - expensive on a large fleet - when we use exactly one.
+        const key = encodeURIComponent(resolution.schedule_key || '');
+        const res = await fetch(`${API_BASE}/api/arq/schedules/${sessionId}?schedule_key=${key}`, { credentials: 'include' });
         const data = await res.json();
         const match = (data?.schedules || []).find((s) => s.schedule_key === resolution.schedule_key);
         if (!alive) return;
@@ -225,7 +237,13 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
 
         {/* Body */}
         <div style={{ padding: '16px 20px' }}>
-          {mode === 'field' && (
+          {mode === 'field' && prefillLoading && (
+            <div style={{ padding: '24px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, color: '#64748b', fontSize: 13 }}>
+              <span style={{ width: 15, height: 15, border: '2px solid #e2e8f0', borderTopColor: PINK, borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
+              Loading current value...
+            </div>
+          )}
+          {mode === 'field' && !prefillLoading && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {(resolution.facts || []).length > 1 && (
                 <div style={{ fontSize: 11.5, color: '#64748b' }}>Provide the correct value for whichever applies - you don't have to fill every field.</div>
@@ -270,7 +288,10 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
           {mode === 'schedule' && (
             <div>
               {loading ? (
-                <div style={{ padding: '24px 0', textAlign: 'center', color: '#64748b', fontSize: 13 }}>Loading schedule...</div>
+                <div style={{ padding: '24px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, color: '#64748b', fontSize: 13 }}>
+                  <span style={{ width: 15, height: 15, border: '2px solid #e2e8f0', borderTopColor: PINK, borderRadius: '50%', display: 'inline-block', animation: 'spin 0.7s linear infinite' }} />
+                  Loading schedule...
+                </div>
               ) : schedule ? (
                 <ScheduleTable
                   columns={schedule.columns || []}
@@ -291,7 +312,8 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
 
           {mode === 'none' && (
             <div style={{ fontSize: 12.5, color: '#475569', lineHeight: 1.55, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: '12px 14px' }}>
-              This validation can't be fixed by entering a single value - it usually means adding or adjusting a coverage or form. Handle it on the relevant form, then mark it resolved here, or dismiss it with a note.
+              {resolution.note
+                || "This validation can't be fixed by entering a single value - it usually means adding or adjusting a coverage or form. Handle it on the relevant form, then mark it resolved here, or dismiss it with a note."}
             </div>
           )}
 

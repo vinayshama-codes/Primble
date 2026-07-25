@@ -197,6 +197,131 @@ def test_carrier_unknown_difference_flagged_for_review_not_hard():
     assert "hard" not in conflicts[0].lower()
 
 
+# ── Structured dict fields (risk_transfer etc.) — per-sub-key, not one blob ────
+# Client screenshot bug: risk_transfer is an 8-key dict (mortgagee_name,
+# loss_payee_name, certificate_holder_name, additional_insured_names,
+# additional_insured_required, specific_wording_requirements,
+# waiver_of_subrogation_required, primary_noncontributory_required). Comparing
+# it as one opaque scalar produced a single unreadable Python-dict-repr message
+# bundling every sub-question behind one generic "Fix", AND fired even when only
+# ONE document had a value for ONE sub-key (a dict with 8 keys is never "empty"
+# even when every value inside is None/False/[]).
+
+def _risk_transfer(**overrides):
+    base = {
+        "additional_insured_required": False, "additional_insured_names": [],
+        "primary_noncontributory_required": False, "waiver_of_subrogation_required": False,
+        "certificate_holder_name": None, "loss_payee_name": None,
+        "mortgagee_name": None, "specific_wording_requirements": None,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_structured_dict_no_real_disagreement_no_conflict():
+    """The exact screenshot data: only ONE doc (certificate) has a value for
+    specific_wording_requirements, the other two are None. That is a single
+    source providing extra info, not a disagreement - must NOT be flagged."""
+    docs = [
+        doc({"risk_transfer": env(_risk_transfer())}, "dec_page"),
+        doc({"risk_transfer": env(_risk_transfer(
+            specific_wording_requirements="If the certificate holder is an additional "
+            "insured, the policy(ies) must have additional insured provisions or be "
+            "endorsed.",
+        ))}, "certificate"),
+        doc({"risk_transfer": env(_risk_transfer())}, "narrative"),
+    ]
+    assert detect_source_conflicts(docs) == []
+
+
+def test_structured_dict_real_disagreement_reported_per_subkey():
+    """Two docs genuinely disagree on TWO sub-keys (mortgagee_name and
+    waiver_of_subrogation_required) - each must be its OWN message, not one
+    bundle, and unrelated matching sub-keys must not appear at all."""
+    docs = [
+        doc({"risk_transfer": env(_risk_transfer(
+            mortgagee_name="First National Bank",
+            waiver_of_subrogation_required=True,
+        ))}, "dec_page"),
+        doc({"risk_transfer": env(_risk_transfer(
+            mortgagee_name="Second City Trust",
+            waiver_of_subrogation_required=False,
+        ))}, "certificate"),
+    ]
+    conflicts = detect_source_conflicts(docs)
+    assert len(conflicts) == 2
+    joined = " | ".join(conflicts)
+    # Client #1: the message shows a HUMAN label, never the raw fact key.
+    assert "Mortgagee Name" in joined
+    assert "Waiver Of Subrogation Required" in joined
+    assert "risk_transfer." not in joined       # no variable name leaks to the user
+    # No single message bundles both sub-keys together.
+    for c in conflicts:
+        assert not ("Mortgagee" in c and "Waiver" in c)
+    # Readable Yes/No, not a raw Python bool.
+    assert "Yes" in joined and "No" in joined
+    assert "True" not in joined and "False" not in joined
+
+
+def test_structured_dict_list_subkey_order_insensitive():
+    """additional_insured_names differing only in list ORDER must not conflict -
+    extraction order across chunks/docs is not a real disagreement."""
+    docs = [
+        doc({"risk_transfer": env(_risk_transfer(
+            additional_insured_names=["Acme Corp", "XYZ Holdings"],
+        ))}, "dec_page"),
+        doc({"risk_transfer": env(_risk_transfer(
+            additional_insured_names=["XYZ Holdings", "Acme Corp"],
+        ))}, "certificate"),
+    ]
+    assert detect_source_conflicts(docs) == []
+
+
+def test_structured_dict_list_subkey_real_difference_flagged():
+    docs = [
+        doc({"risk_transfer": env(_risk_transfer(
+            additional_insured_names=["Acme Corp"],
+        ))}, "dec_page"),
+        doc({"risk_transfer": env(_risk_transfer(
+            additional_insured_names=["Beta Industries"],
+        ))}, "certificate"),
+    ]
+    conflicts = detect_source_conflicts(docs)
+    assert len(conflicts) == 1
+    assert "Additional Insured Names" in conflicts[0]      # human label (client #1)
+    assert "risk_transfer." not in conflicts[0]            # no raw key leak
+
+
+def test_return_fields_carries_the_real_key_for_the_code():
+    """Client #1/#4: the humanised message no longer contains the raw fact key,
+    so the pipeline must get it structurally. return_fields=True yields
+    (field_key, message, is_carrier) - the field_key is the REAL dotted key even
+    though the message shows only the label, and the message stays label-only."""
+    docs = [
+        doc({"risk_transfer": env(_risk_transfer(mortgagee_name="First National Bank"))}, "dec_page"),
+        doc({"risk_transfer": env(_risk_transfer(mortgagee_name="Second City Trust"))}, "certificate"),
+    ]
+    tuples = detect_source_conflicts(docs, return_fields=True)
+    assert len(tuples) == 1
+    field_key, message, is_carrier = tuples[0]
+    assert field_key == "risk_transfer.mortgagee_name"     # real key for the code
+    assert "Mortgagee Name" in message and "risk_transfer." not in message
+    assert is_carrier is False
+    # Default (no return_fields) stays the historical List[str] contract.
+    assert detect_source_conflicts(docs) == [message]
+
+
+def test_carrier_conflict_return_fields_flags_is_carrier():
+    docs = [
+        doc({"carrier_name": env("Travelers Indemnity")}),
+        doc({"carrier_name": env("The Hartford")}, "certificate"),
+    ]
+    tuples = detect_source_conflicts(docs, return_fields=True)
+    assert len(tuples) == 1
+    field_key, _msg, is_carrier = tuples[0]
+    assert field_key == "carrier_name" and is_carrier is True
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     passed = 0

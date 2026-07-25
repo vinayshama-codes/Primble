@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 # what forces a stale cached extraction to be discarded instead of silently
 # served forever. v10: added umbrella_effective_date/umbrella_expiration_date
 # to the schema and a RULE 1 umbrella-policy-namespace instruction to the prompt.
-PROMPT_VERSION = "v10"
-SCHEMA_VERSION = "v10"
+PROMPT_VERSION = "v11"
+SCHEMA_VERSION = "v11"
 
 # ── Model context config ──────────────────────────────────────────────────────
 _MODEL_CHUNK_CHARS: Dict[str, int] = {
@@ -191,6 +191,16 @@ _EXTRACT_SCHEMA = (
     # explicitly mentions loss runs have been requested but not yet received.
     # Null when loss run data is actually present or when no loss runs are mentioned.
     '  "loss_run_status": "pending"|"requested"|null,\n'
+    # risk_transfer sub-fields are independent facts - do not let one leak into
+    # another. specific_wording_requirements is ONLY for an actual CONTRACTUAL/
+    # ENDORSEMENT WORDING clause quoted or closely paraphrased from the document
+    # (e.g. "certificate holder must be endorsed as additional insured", "waiver
+    # applies only where required by written contract") - never a restatement or
+    # summary of the OTHER risk_transfer booleans/names above (do not write
+    # something like "waiver required: yes; AI required: no" into this field -
+    # those facts already have their own keys). Leave null when the document
+    # contains no such wording clause, even if other risk_transfer sub-fields
+    # are populated.
     '  "risk_transfer": {\n'
     '    "additional_insured_required": boolean,\n'
     '    "additional_insured_names": [string],\n'
@@ -199,7 +209,9 @@ _EXTRACT_SCHEMA = (
     '    "certificate_holder_name": string or null,\n'
     '    "loss_payee_name": string or null,\n'
     '    "mortgagee_name": string or null,\n'
-    '    "specific_wording_requirements": string or null\n'
+    '    "specific_wording_requirements": string or null (an actual quoted/paraphrased '
+    'contractual wording or endorsement REQUIREMENT clause only - never a summary of the '
+    'other risk_transfer fields; null if no such clause is stated)\n'
     '  },\n'
     '  "builders_risk_project_address": string or null,\n'
     '  "builders_risk_project_cost": string or null,\n'
@@ -2955,17 +2967,175 @@ def _get_authoritative_doc(docs: List[dict], field: str) -> Optional[dict]:
     return None
 
 
-def detect_source_conflicts(docs: List[dict], skip_fields: Optional[set] = None) -> List[str]:
+def _display_scalar(v: Any) -> Any:
+    """Coerce a structured-dict sub-value to something readable in a message.
+
+    bool -> Yes/No (raw True/False reads as a coding artifact to a broker);
+    list -> sorted comma-joined text (so ['A','B'] vs ['B','A'] never manufacture
+    a false conflict purely from extraction order); everything else unchanged.
+    """
+    if isinstance(v, bool):
+        return "Yes" if v else "No"
+    if isinstance(v, list):
+        return ", ".join(sorted(str(x) for x in v if x not in (None, "")))
+    return v
+
+
+# Insurance acronyms that must stay upper-cased when a raw fact key is turned
+# into a human label (so "gl_deductible" reads "GL Deductible", not "Gl
+# Deductible"). Mirrors the frontend humanizeFact() acronym set.
+_LABEL_ACRONYMS = {
+    "gl", "wc", "bi", "pd", "el", "um", "uim", "sir", "aop", "acv", "rcv",
+    "bpp", "dba", "fein", "vin", "naics", "sic", "coi", "itv", "hnoa", "por",
+}
+
+# Friendly prefixes for the structured-dict CONTAINERS. risk_transfer's sub-keys
+# ("additional_insured_names", "certificate_holder_name") are self-descriptive,
+# so they read best with no container prefix; the WC payroll containers key their
+# sub-values by state code ("CA", "NY"), which is meaningless alone, so those DO
+# get a prefix. Anything not listed falls back to humanizing the container too.
+_CONFLICT_CONTAINER_LABEL = {
+    "risk_transfer": "",
+    "wc_payroll_by_state": "WC payroll",
+    "wc_monopolistic_payroll": "Monopolistic WC payroll",
+}
+
+
+def _humanize_label(token: str) -> str:
+    """Turn a snake_case fact token into a readable label, upper-casing known
+    insurance acronyms. 'additional_insured_names' -> 'Additional Insured Names';
+    'gl_deductible' -> 'GL Deductible'."""
+    parts = [p for p in str(token or "").replace(".", " ").split("_") if p]
+    if not parts:
+        return str(token or "")
+    return " ".join(
+        p.upper() if p.lower() in _LABEL_ACRONYMS else p[:1].upper() + p[1:]
+        for p in parts
+    )
+
+
+def _conflict_field_label(field: str) -> str:
+    """Human label for a cross-document conflict's field key, so the producer
+    never sees a raw variable like 'risk_transfer.additional_insured_names'.
+    Handles the 'container.subkey' shape used by structured-dict facts."""
+    if "." in field:
+        container, subkey = field.split(".", 1)
+        sub_label = _humanize_label(subkey)
+        prefix = _CONFLICT_CONTAINER_LABEL.get(container)
+        if prefix is None:                       # unknown container: humanize it
+            prefix = _humanize_label(container)
+        return f"{prefix} - {sub_label}" if prefix else sub_label
+    return _humanize_label(field)
+
+
+def _humanize_conflict_sources(sources: str) -> str:
+    """Rewrite the 'doc_type=value, doc_type=value' source string so each source
+    shows the DOCUMENT'S readable name, not its internal doc_type token
+    ('emod_worksheet=X' -> 'Experience Modification Worksheet: X')."""
+    out = []
+    for part in sources.split(", "):
+        dt, sep, val = part.partition("=")
+        if not sep:
+            out.append(part)
+            continue
+        label = DOC_TYPE_LABELS.get(dt.strip(), dt.strip().replace("_", " ").title())
+        out.append(f"{label}: {val}")
+    return ", ".join(out)
+
+
+def _structured_dict_field_conflicts(
+    field: str, values_by_doc: List[Tuple[str, dict]],
+    normalize_value, is_carrier_field,
+) -> List[Tuple[str, str, bool]]:
+    """Per-sub-key conflict tuples ``(field_key, message, is_carrier)`` for a
+    structured dict fact (Fix 4's
+    ``_STRUCTURED_DICT_FIELDS`` — e.g. ``risk_transfer``'s mortgagee/loss-payee/
+    additional-insured/waiver-of-subrogation/... sub-questions, or
+    ``wc_payroll_by_state``'s per-state amounts).
+
+    Comparing the dict as one opaque scalar (``str(dict)``) was the actual bug:
+    it bundled every unrelated sub-question into a single unreadable Python-repr
+    dump behind one generic "Fix", AND manufactured a conflict any time a SINGLE
+    sub-key was populated on only one document — a dict with 8 keys is never
+    "empty" even when every value inside it is None/False/[], so the whole-dict
+    comparison fired constantly on cases with zero real disagreement. Each
+    sub-key is its own underwriting question; it is compared and reported
+    independently, exactly like every other scalar field, and only when at
+    least two documents actually disagree about THAT sub-key.
+    """
+    conflicts: List[Tuple[str, str, bool]] = []
+    all_subkeys: set = set()
+    for _, v in values_by_doc:
+        if isinstance(v, dict):
+            all_subkeys.update(v.keys())
+
+    for subkey in sorted(all_subkeys):
+        sub_values: List[Tuple[str, Any]] = []
+        for dt, v in values_by_doc:
+            if not isinstance(v, dict):
+                continue
+            sv = v.get(subkey)
+            if _is_empty(sv):
+                continue
+            sub_values.append((dt, sv))
+        if len(sub_values) < 2:
+            continue
+
+        # "_name"/"_date"/"_address"/carrier shape inference (normalization.py
+        # _infer_field_category) keys off the field NAME's suffix, so composing
+        # "risk_transfer_mortgagee_name" reuses the same name-aware normalizer a
+        # top-level "mortgagee_name" field would get, with no extra mapping.
+        sub_field = f"{field}_{subkey}"
+        normalized = {
+            n for _, sv in sub_values
+            if (n := normalize_value(sub_field, _display_scalar(sv)))
+        }
+        if len(normalized) <= 1:
+            continue
+
+        raw_sources = ", ".join(f"{dt}={_display_scalar(sv)}" for dt, sv in sub_values[:3])
+        sources = _humanize_conflict_sources(raw_sources)
+        field_key = f"{field}.{subkey}"
+        label = _conflict_field_label(field_key)
+        is_carrier = is_carrier_field(sub_field)
+        if is_carrier:
+            msg = (
+                f"Carrier names differ across documents for {label} - {sources}. "
+                "Flagged for review (possible carrier alias). "
+                "Fix: Confirm whether these refer to the same carrier."
+            )
+        else:
+            msg = (
+                f"Conflicting values for {label} across documents - {sources}. "
+                "Fix: Review and confirm the correct value."
+            )
+        conflicts.append((field_key, msg, is_carrier))
+    return conflicts
+
+
+def detect_source_conflicts(
+    docs: List[dict], skip_fields: Optional[set] = None, return_fields: bool = False,
+):
     """
     Compare field values across documents. Return human-readable conflict messages
     for fields that have materially different non-empty values from two or more docs.
-    Only checks scalar fields (not lists) to keep noise low.
+    Only checks scalar fields (not lists) to keep noise low. Structured dict fields
+    (``_STRUCTURED_DICT_FIELDS``) are compared per sub-key instead — see
+    ``_structured_dict_field_conflicts`` — so one field's sub-questions never
+    bundle into a single unreadable message.
 
     ``skip_fields`` lets a more specialised, normalization-aware reconciler own a
     set of fields (e.g. the Core Underwriting Data reconciler owns total_revenue,
     Beta Report §4.3). Those keys are excluded here so a formatting-only
     difference ($1,000,000 vs 1000000) is not double-reported as a raw-string
     conflict.
+
+    ``return_fields`` (default False keeps the historical ``List[str]`` contract
+    every existing caller/test relies on). When True, returns
+    ``List[(field_key, message, is_carrier)]`` so the pipeline can derive a stable
+    ``source_conflict_<field_key>`` code DIRECTLY from the real fact key instead of
+    regex-scraping it back out of the (now humanised, label-only) display message —
+    the message no longer contains the raw key at all, by design (client #1).
     """
     if len(docs) < 2:
         return []
@@ -2976,7 +3146,7 @@ def detect_source_conflicts(docs: List[dict], skip_fields: Optional[set] = None)
     )
 
     skip_fields = skip_fields or set()
-    conflicts: List[str] = []
+    conflicts: List[Tuple[str, str, bool]] = []
     all_keys: set = set()
     for d in docs:
         all_keys.update(d.get("facts", {}).keys())
@@ -2984,6 +3154,20 @@ def detect_source_conflicts(docs: List[dict], skip_fields: Optional[set] = None)
     for field in sorted(all_keys):
         if field in _LIST_FIELDS or field in skip_fields:
             continue
+
+        if field in _STRUCTURED_DICT_FIELDS:
+            dict_values_by_doc: List[Tuple[str, dict]] = []
+            for d in docs:
+                v = _fv(d.get("facts", {}), field)
+                if isinstance(v, dict):
+                    dict_values_by_doc.append((d.get("doc_type", "unknown"), v))
+            if len(dict_values_by_doc) < 2:
+                continue
+            conflicts.extend(_structured_dict_field_conflicts(
+                field, dict_values_by_doc, normalize_value, is_carrier_field,
+            ))
+            continue
+
         values_by_doc: List[Tuple[str, object]] = []
         for d in docs:
             # Unwrap the {value, confidence, source} envelope before comparison so
@@ -3009,21 +3193,28 @@ def detect_source_conflicts(docs: List[dict], skip_fields: Optional[set] = None)
         if len(normalized) <= 1:
             continue
 
-        sources = ", ".join(f"{dt}={val}" for dt, val in values_by_doc[:3])
-        if is_carrier_field(field):
+        raw_sources = ", ".join(f"{dt}={val}" for dt, val in values_by_doc[:3])
+        sources = _humanize_conflict_sources(raw_sources)
+        label = _conflict_field_label(field)
+        is_carrier = is_carrier_field(field)
+        if is_carrier:
             # §5.2 carrier handling: surface as a REVIEW item when the seed alias
             # map cannot collapse the names, never as a definitive hard conflict.
-            conflicts.append(
-                f"Carrier names differ across documents for '{field}' - {sources}. "
+            msg = (
+                f"Carrier names differ across documents for {label} - {sources}. "
                 "Flagged for review (possible carrier alias). "
                 "Fix: Confirm whether these refer to the same carrier."
             )
         else:
-            conflicts.append(
-                f"Conflicting values for '{field}' across documents - {sources}. "
+            msg = (
+                f"Conflicting values for {label} across documents - {sources}. "
                 "Fix: Review and confirm the correct value."
             )
-    return conflicts
+        conflicts.append((field, msg, is_carrier))
+
+    if return_fields:
+        return conflicts
+    return [m for _, m, _ in conflicts]
 
 
 # ── Multi-doc merge ───────────────────────────────────────────────────────────

@@ -65,6 +65,103 @@ def test_field_mode_facts_are_writable_via_producer_answer():
     assert not bad, f"field-mode facts that are NOT writable canonical facts: {bad}"
 
 
+# ── Tier-1 baseline fields (client review #4) ────────────────────────────────
+# "ACORD 125 minimum field missing: X (Fix: Provide this value manually...)" is a
+# soft warning generated per-field by form_routes.py (code = f"tier1_missing_{label}"),
+# NOT a RESOLUTION_MAP entry - resolution_for() derives it dynamically via
+# _tier1_resolution(). These lock that every real tier1 label actually resolves
+# (so the "Open to fix" button that now appears for these rows is never a dead
+# end) and that a garbage/renamed label safely falls back to None instead of
+# crashing or fabricating a resolution.
+def test_every_tier1_label_resolves_to_a_writable_fact():
+    from services.sqs_service import TIER1_FIELDS, TIER1_CONTACT
+    from services.arq_service import _canonical_key
+
+    bad = []
+    for label in list(TIER1_FIELDS.values()) + ["Contact information"]:
+        res = resolution_for(f"tier1_missing_{label}")
+        if not res or res.get("mode") != "field" or not res.get("facts"):
+            bad.append((label, res))
+            continue
+        for fact in res["facts"]:
+            if not _canonical_key(fact):
+                bad.append((label, fact))
+    assert not bad, f"tier1 labels with no writable resolution: {bad}"
+
+    # "Contact information" is the one label backed by more than one fact (any
+    # of the three satisfies check_tier1()) - confirm all three ride along so
+    # the producer isn't limited to typing just one specific contact field.
+    contact_res = resolution_for("tier1_missing_Contact information")
+    assert set(contact_res["facts"]) == set(TIER1_CONTACT)
+
+
+def test_unknown_tier1_label_returns_none_not_a_fabricated_resolution():
+    """A label that doesn't match any known tier1 field (e.g. after a future
+    rename of TIER1_FIELDS) must fall back to None - never crash, never invent
+    a fact-less resolution that would render a broken 'Open to fix'."""
+    assert resolution_for("tier1_missing_Some Renamed Or Bogus Label") is None
+
+
+# ── Cross-document source conflicts (client review #4) ───────────────────────
+def test_scalar_source_conflict_is_typed_fixable():
+    """A conflict on a plain writable scalar becomes a typed 'Open to fix' - the
+    producer picks the correct value, applied like any other field resolution."""
+    from services.arq_service import _canonical_key
+    for field in ["num_employees", "prior_carrier"]:
+        res = resolution_for(f"source_conflict_{field}")
+        assert res and res["mode"] == "field"
+        assert res["facts"] == [field]
+        assert _canonical_key(field), f"{field} must be writable"
+    # The carrier variant prefixes an extra "carrier_"; it is stripped back to the
+    # real field WITHOUT mis-truncating a field legitimately named carrier_*.
+    res = resolution_for("source_conflict_carrier_carrier_name")
+    assert res["mode"] == "field" and res["facts"] == ["carrier_name"]
+
+
+def test_nested_structured_source_conflict_gets_review_note_not_a_button():
+    """A nested sub-field conflict (dotted key) can't be typed as a scalar and
+    isn't held by the Data-Consistency picker, so it gets an honest 'none'-mode
+    review note - never a dead typed-value button."""
+    res = resolution_for("source_conflict_risk_transfer.additional_insured_names")
+    assert res and res["mode"] == "none"
+    assert res.get("note")                       # context-specific wording
+    assert "facts" not in res                    # no fabricated input
+
+
+# ── Typeable legacy stops (client review #5) ─────────────────────────────────
+def test_typeable_legacy_stops_get_a_field_resolution_from_their_message():
+    """evaluate_stops() emits uncoded strings, so make_issue derives the fix from
+    the MESSAGE. Every mapped fact must be a writable canonical scalar."""
+    from services.arq_service import _canonical_key
+    cases = [
+        ("GL coverage detected but no revenue or payroll found. Fix: ...",
+         {"total_revenue", "total_payroll"}),
+        ("Workers Comp detected but payroll is missing. Fix: ...",
+         {"wc_payroll", "total_payroll"}),
+        ("Physical damage coverage present but deductibles not specified.",
+         {"auto_deductible_comp", "auto_deductible_collision"}),
+        ("GL policy is claims-made - retro date is required.", {"retro_date"}),
+    ]
+    for msg, expect in cases:
+        iss = make_issue("legacy_soft_0", "soft_warning", msg)
+        res = iss.get("resolution")
+        assert res and res["mode"] == "field", msg
+        assert set(res["facts"]) == expect, msg
+        for f in res["facts"]:
+            assert _canonical_key(f), f"{f} not writable"
+
+
+def test_non_typeable_legacy_stops_stay_worktracking_only():
+    """A stop with no clean single-value fix (a class-code schedule with no live
+    capture table, a symbol/structure gap) must NOT get a fabricated button."""
+    for msg in [
+        "GL coverage detected but no class codes found. Fix: ...",
+        "Split liability structure selected but symbols undefined.",
+        "Some entirely unrelated future stop with no mapping.",
+    ]:
+        assert make_issue("legacy_soft_0", "soft_warning", msg).get("resolution") is None
+
+
 def test_schedule_mode_keys_are_live_schedules():
     """Every `schedule`-mode schedule_key must be a real capture schedule with
     live ACORD bindings (schedule_capture.SCHEDULE_DEFS)."""

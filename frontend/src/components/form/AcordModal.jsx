@@ -655,8 +655,13 @@ function FixInDataConsistencyButton({ onClick }) {
 //   narrative - needs a written explanation (routed to ACORD 101), not a value
 //   none      - no single value fixes it: a coverage decision or a form to add
 // `field` / `schedule` modes have their own button, so they never hit this.
-function ResolutionHint({ mode }) {
-  const text = mode === "narrative"
+function ResolutionHint({ mode, note }) {
+  // A backend-supplied `note` (client #4: cross-document conflicts on nested
+  // sub-fields) wins - it explains THIS item's specific why. Otherwise fall back
+  // to the generic narrative/none wording.
+  const text = note
+    ? note
+    : mode === "narrative"
     ? "Needs a written explanation, not a value."
     : "Can't be fixed by typing a value - needs a coverage decision or a form change.";
   return (
@@ -781,9 +786,20 @@ function IssueStatusControl({ issueId, meta, status, onSet }) {
   // Resting appearance is byte-identical to before - this control is shared
   // with the editor's Cross-Form Validation panel, which must not shift.
   const btn = { fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 5, whiteSpace: "nowrap", fontFamily: "inherit" };
+  // No marginTop here (client review #4: "align them") - this control is
+  // rendered as a FLEX SIBLING of "Open to fix" / "Fix in Data Consistency" in
+  // both callers below. A margin on only one sibling shifts it out of vertical
+  // alignment with align-items:center - top spacing from the text above is the
+  // job of the shared row wrapper, not any one button inside it.
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5, marginTop: 5 }}>
-      <span style={{ fontSize: 9.5, fontWeight: 700, padding: "1px 7px", borderRadius: 10, background: badge.bg, color: badge.fg, border: `1px solid ${badge.bd}`, whiteSpace: "nowrap" }}>{badge.t}</span>
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5 }}>
+      {/* Client review #5: the "Still open" pill is dropped - Resolve/Dismiss
+          already make an untouched item read as open, so the badge was noise.
+          The "Resolved"/"Dismissed" pills stay: those DO communicate a decision
+          was made, and sit next to Reopen (left untouched per the client). */}
+      {st !== "open" && (
+        <span style={{ fontSize: 9.5, fontWeight: 700, padding: "1px 7px", borderRadius: 10, background: badge.bg, color: badge.fg, border: `1px solid ${badge.bd}`, whiteSpace: "nowrap" }}>{badge.t}</span>
+      )}
       {st === "open" ? (
         <>
           <button type="button" className="issue-status-btn" onMouseDown={e => { e.preventDefault(); onSet(issueId, "resolved", meta); }} style={btn}>Resolve</button>
@@ -2711,16 +2727,22 @@ const AcordModal = forwardRef(function AcordModal({
     const mode = res && res.mode;
     const canResolve = mode === "field" || mode === "schedule";
     const explainOnly = !inDataConsistency && (mode === "narrative" || mode === "none");
-    // 3) None of the above (uncoded legacy stop, no descriptor at all): return
-    //    EXACTLY what the banner rendered before this feature - the work-tracking
-    //    control alone, no wrapper - so those rows are unchanged.
-    if (!inDataConsistency && !canResolve && !explainOnly) return itemStatusControl(it, forms);
+    // 3) None of the above (uncoded legacy stop, no descriptor at all): the
+    //    work-tracking control alone. marginTop here (not on the control itself
+    //    - client review #4 "align them") is what separates it from the message
+    //    text above; kept equal to the fixable branch below so the vertical
+    //    rhythm never depends on whether a row also has a fix button.
+    if (!inDataConsistency && !canResolve && !explainOnly) {
+      return <div style={{ marginTop: 5 }}>{itemStatusControl(it, forms)}</div>;
+    }
     // A fix affordance (or a why-not note) + the same status control, laid out
-    // like the editor's Cross-Form panel.
+    // like the editor's Cross-Form panel. marginTop lives on this shared row,
+    // not on any individual button, so "Open to fix" and Resolve/Dismiss sit on
+    // the same baseline instead of drifting per-button.
     return (
       <div>
-        {explainOnly && <ResolutionHint mode={mode} />}
-        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        {explainOnly && <ResolutionHint mode={mode} note={res && res.note} />}
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 5 }}>
           {inDataConsistency && <FixInDataConsistencyButton onClick={() => jumpToDataConsistency(dcKey)} />}
           {canResolve && <OpenToFixButton onClick={() => openResolution({ ...it, forms: (Array.isArray(it.forms) && it.forms.length ? it.forms : forms) })} />}
           {itemStatusControl(it, forms)}
@@ -4887,7 +4909,7 @@ const AcordModal = forwardRef(function AcordModal({
 
                 {/* File list */}
                 {files.length > 0 && (
-                  <div style={{ padding: "0 16px 16px", marginTop: -4 }}>
+                  <div style={{ padding: "12px 16px 16px" }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 196, overflowY: "auto", paddingRight: 2 }}>
                       {files.map((f, i) => {
                         const isZip = f.name.toLowerCase().endsWith(".zip");
