@@ -4,7 +4,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from config.database import get_pool
 from fastapi import HTTPException
@@ -151,7 +151,26 @@ async def get_processing_session(sid: str, include_pdf: bool = False) -> dict:
 
 
 # ASYNC-SAFE
-async def upd_processing_session(sid: str, updates: dict) -> None:
+async def upd_processing_session(
+    sid: str,
+    updates: dict,
+    delete_facts: Optional[List[str]] = None,
+) -> None:
+    """Merge `updates` into the session's JSONB blob.
+
+    `delete_facts` REMOVES those keys from `facts` outright. It exists because the
+    `facts` merge below is deliberately additive - it skips None/empty values so an
+    in-flight writer can never blank a value another writer just set - which also
+    means a key simply *absent* from `updates["facts"]` is preserved. There was
+    therefore no way to genuinely retract a fact, and the one caller that tried
+    (`clear_producer_answer_from_session`, undoing a producer's answer) silently
+    had its deletion dropped: the form field was blanked but the fact survived and
+    was re-stamped on the next recalculation.
+
+    Deliberately a keyword parameter rather than a sentinel key inside `updates`:
+    it cannot leak into `current[k]` via the wholesale-replace branch below, and it
+    cannot ever collide with a real session-data key.
+    """
     # Phase 1: if there are new pdf_bytes, upload to S3/BYTEA before acquiring the
     # row lock so the DB transaction stays short and doesn't block other writers.
     if "generated_forms" in updates:
@@ -230,6 +249,14 @@ async def upd_processing_session(sid: str, updates: dict) -> None:
                             current["facts"] = merged_facts
                         else:
                             current[k] = v
+
+                    # Explicit retraction, applied AFTER the additive merge above so
+                    # a caller can pass the same fact in both places without the
+                    # merge resurrecting it. Idempotent, so the connection-error
+                    # retry below can safely re-run this whole block.
+                    if delete_facts and isinstance(current.get("facts"), dict):
+                        for _fk in delete_facts:
+                            current["facts"].pop(_fk, None)
 
                     clean = _session_to_db(_encrypt_facts(current))
                     now   = datetime.now(timezone.utc).isoformat()

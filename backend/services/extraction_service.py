@@ -29,19 +29,87 @@ logger = logging.getLogger(__name__)
 PROMPT_VERSION = "v11"
 SCHEMA_VERSION = "v11"
 
-# ── Model context config ──────────────────────────────────────────────────────
-_MODEL_CHUNK_CHARS: Dict[str, int] = {
-    "claude": 28_000,
-    "openai": 100_000,
+# ── Extraction chunk sizing ───────────────────────────────────────────────────
+# This used to be one hand-typed literal:
+#
+#     _MODEL_CHUNK_CHARS = {"claude": 28_000, "openai": 100_000}
+#
+# with no comment, no calculation and no provenance. It predated the current
+# model. THREE things were wrong with it, and only one was the number:
+#
+#  1. **No provenance.** Nothing said where 100,000 came from or what would make
+#     it wrong. Meanwhile gap fill derives its budget from the model spec
+#     (`MODEL_CONTEXT_TOKENS`), so the two halves of the pipeline disagreed about
+#     the same model: 56,357 chars/call for extraction, 899,393 for gap fill.
+#  2. **No capacity guard.** Nothing checked the value against the model's real
+#     window. Typing 2_000_000 there would have made every extraction call fail
+#     on context length, with no warning at import.
+#  3. **The overlap was coupled to it.** `_compute_prompt_overhead` computed the
+#     carry-over tail as `raw // 7`, so changing the chunk size silently changed
+#     how much context each chunk inherited from the previous one. Those are two
+#     unrelated concerns: the tail exists so a fact split across a boundary is
+#     still readable, which is a fixed-size need, not a fraction of anything.
+#
+# It is now derived from TWO explicit ceilings, and the smaller one wins:
+#
+#     capacity  = what the model's window can physically hold
+#     quality   = how much document the model still reads CAREFULLY per call
+#
+# **The quality ceiling is the binding one, by a wide margin**, and that is the
+# whole point. Capacity says ~1.3M chars would fit. Measured behaviour says
+# otherwise:
+#
+#     ~14,000 tok/call  (extraction today)   fine - 61 facts, 100% coverage
+#    ~170,000 tok/call  (gap fill, 684k doc) DEGRADED - the model stops copying
+#                                            ACORD field names and invents its
+#                                            own (improving-ll.md C21/C22)
+#
+# So extraction's small chunks were accidentally the SAFE setting. Deriving the
+# value must not be an excuse to raise it toward capacity - that would trade a
+# known-good stage for ~$0.11 a run. `EXTRACTION_DOC_TOKENS_PER_CALL` defaults to
+# 14,000 to reproduce today's behaviour almost exactly (56,000 vs 56,357 chars,
+# same chunk count on a real 683,601-char package - asserted in
+# tests/test_extraction_chunk_sizing.py). Raise it only with an accuracy baseline
+# in hand.
+_MODEL_CONTEXT_TOKENS: Dict[str, int] = {
+    # Shared with pdf_service via the same env var, so one edit moves both halves
+    # of the pipeline when the model changes.
+    "openai": int(os.getenv("MODEL_CONTEXT_TOKENS", "400000")),
+    "claude": int(os.getenv("CLAUDE_CONTEXT_TOKENS", "200000")),
 }
+# Fraction of the window one extraction call may occupy. Only ever a backstop
+# here, because the quality ceiling below binds first.
+_EXTRACTION_CONTEXT_UTILISATION = float(os.getenv("EXTRACTION_CONTEXT_UTILISATION", "0.75"))
+# Our own reply cap for an extraction call (facts JSON). Input + output share the
+# window, so this must be reserved.
+_EXTRACTION_REPLY_TOKENS = int(os.getenv("EXTRACTION_REPLY_TOKENS", "16000"))
+# THE quality dial. Document text per extraction call, in tokens. See above.
+_EXTRACTION_DOC_TOKENS_PER_CALL = int(os.getenv("EXTRACTION_DOC_TOKENS_PER_CALL", "14000"))
+# Carry-over tail from the previous chunk, so a fact spanning a chunk boundary is
+# still readable. Its own constant now, NOT a fraction of the chunk size (see 3
+# above). Default reproduces the historical `100_000 // 7`.
+_EXTRACTION_OVERLAP_CHARS = int(os.getenv("EXTRACTION_OVERLAP_CHARS", "14285"))
+
 ACTIVE_MODEL = LLM_PROVIDER  # driven by LLM_PROVIDER env var ("openai" or "claude")
 
 _MAX_TOKENS_PER_DOC = int(os.getenv("ACORDLY_MAX_DOC_TOKENS", "500000"))
 _CHARS_PER_TOKEN    = 4
 
 
+def _context_capacity_chars(model: str = ACTIVE_MODEL) -> int:
+    """Chars one extraction call may carry in total, from the model's window."""
+    window = _MODEL_CONTEXT_TOKENS.get(model, _MODEL_CONTEXT_TOKENS["openai"])
+    usable = window * _EXTRACTION_CONTEXT_UTILISATION - _EXTRACTION_REPLY_TOKENS
+    return max(1000, int(usable * _CHARS_PER_TOKEN))
+
+
 def get_chunk_size(model: str = ACTIVE_MODEL) -> int:
-    return _MODEL_CHUNK_CHARS.get(model, _MODEL_CHUNK_CHARS["openai"])
+    """Total prompt budget per extraction call (document text + fixed overhead).
+
+    Kept under its original name and signature for existing callers. It is now
+    derived rather than looked up in a table of literals.
+    """
+    return _effective_chunk_size(model) + _compute_prompt_overhead(model)
 
 
 # ── Token estimation (tiktoken with char/4 fallback) ─────────────────────────
@@ -469,7 +537,9 @@ _EXTRACT_PROMPT_PREFIX = (
 )
 
 # ── Prompt overhead constants ─────────────────────────────────────────────────
-# Max realistic context_section length (label + context_prefix up to max_chars//7 tail).
+# Max realistic context_section length (label + a context_prefix tail of at most
+# _EXTRACTION_OVERLAP_CHARS — the SAME constant the chunkers cut the tail with,
+# so this reservation is exact rather than a guess at a different number).
 # Max realistic low_conf_note length (label + 40 tokens * ~10 chars).
 # These are upper bounds used for prompt overhead calculation — no magic constants.
 _CONTEXT_SECTION_HEADER = (
@@ -484,12 +554,17 @@ _LOW_CONF_NOTE_MAX_TOKENS = 40 * 12  # 40 tokens * ~12 chars each (conservative)
 
 # Fix 7: dynamic prompt overhead computed from actual component lengths
 def _compute_prompt_overhead(model: str = ACTIVE_MODEL) -> int:
-    raw = get_chunk_size(model)
-    context_max = raw // 7   # max context_prefix tail length
+    """Fixed chars every extraction call spends before any document text.
+
+    NO LONGER CALLS `get_chunk_size`. It used to derive the carry-over tail as
+    `raw // 7`, which (a) coupled two unrelated concerns — see the block comment
+    at `_MODEL_CONTEXT_TOKENS` — and (b) would now be circular, since
+    `get_chunk_size` is derived from this function. The tail is its own constant.
+    """
     return (
         len(_EXTRACT_PROMPT_PREFIX)
         + len(_CONTEXT_SECTION_HEADER)
-        + context_max
+        + _EXTRACTION_OVERLAP_CHARS
         + len(_LOW_CONF_NOTE_HEADER)
         + _LOW_CONF_NOTE_MAX_TOKENS
     )
@@ -1223,15 +1298,36 @@ def _check_cost_guardrail(text: str, doc_type: str) -> None:
 # ── Fix 7: Dynamic effective chunk size ───────────────────────────────────────
 
 def _effective_chunk_size(model: str = ACTIVE_MODEL) -> int:
+    """Document-text chars per extraction call — the number that decides chunking.
+
+    The smaller of two ceilings, and which one binds is the whole story:
+
+      quality  — how much document the model still reads carefully per call.
+                 `EXTRACTION_DOC_TOKENS_PER_CALL` (14,000 tok = 56,000 chars).
+                 **This is the one that binds.**
+      capacity — what the model's window can physically hold after the prompt
+                 overhead and our reply reserve. ~1.29M chars on a 400k window.
+
+    Capacity is ~23x larger than quality here. That gap is not waste to be
+    reclaimed — it is the measured difference between a stage that works and one
+    that invents field names (improving-ll.md C21). Read the block comment at
+    `_MODEL_CONTEXT_TOKENS` before touching either number.
     """
-    Raw chunk_size minus dynamically computed prompt overhead.
-    Overhead = len(prompt prefix) + len(context section header) + max context tail
-               + len(OCR warning header) + max OCR token chars.
-    No magic constants — all components measured from actual strings.
-    """
-    raw      = get_chunk_size(model)
     overhead = _compute_prompt_overhead(model)
-    return max(1000, raw - overhead)
+    quality  = _EXTRACTION_DOC_TOKENS_PER_CALL * _CHARS_PER_TOKEN
+    capacity = _context_capacity_chars(model) - overhead
+    if quality > capacity:
+        # An explicit override that cannot physically fit. Clamping beats letting
+        # every call fail on context length with no explanation.
+        logger.warning(
+            "extraction: EXTRACTION_DOC_TOKENS_PER_CALL=%d (%d chars) exceeds what a "
+            "%d-token window holds after %d chars of prompt overhead and a %d-token "
+            "reply reserve — clamping to %d chars.",
+            _EXTRACTION_DOC_TOKENS_PER_CALL, quality,
+            _MODEL_CONTEXT_TOKENS.get(model, _MODEL_CONTEXT_TOKENS["openai"]),
+            overhead, _EXTRACTION_REPLY_TOKENS, capacity,
+        )
+    return max(1000, min(quality, capacity))
 
 
 # ── Structured fields whitelist (Fix 4) ──────────────────────────────────────
@@ -1626,7 +1722,7 @@ def _split_lines_into_chunks(
         safe_idx = min(upto_abs_line, len(line_starts) - 1)
         c_end    = line_starts[safe_idx]
         results.append((body, buf_char_start, c_end, context_prefix))
-        context_prefix = _tail_chars(body, max_chars // 7)
+        context_prefix = _tail_chars(body, _EXTRACTION_OVERLAP_CHARS)
         buf            = []
         buf_chars      = 0
         buf_char_start = c_end
@@ -1668,14 +1764,22 @@ def _split_lines_into_chunks(
 def _chunk_by_sections(
     text: str,
     max_chars: int,
-    overlap_pct: float,
+    overlap_pct: float = 0.0,
 ) -> List[ChunkTuple]:
     """
     Hybrid semantic + line chunking.
     char_start/char_end: unique content offsets into original text.
     context_prefix: boundary context for LLM — not counted in char ranges.
     Short sections never dropped.
+
+    `overlap_pct` is **accepted and ignored**, and has been for as long as this
+    function has existed. Kept only so existing positional callers/tests keep
+    working. The real carry-over is `_EXTRACTION_OVERLAP_CHARS` — a fixed char
+    count, not a fraction of anything. Do not add a third meaning of "overlap"
+    here; there were already three (this dead fraction, the constant, and a
+    `max_chars // 7` expression) and only the undocumented one was live.
     """
+    del overlap_pct                       # documented no-op, see docstring
     lines = text.splitlines(keepends=True)
 
     line_starts: List[int] = []
@@ -1706,7 +1810,7 @@ def _chunk_by_sections(
             return
         body = "".join(cur_lines)
         results.append((body, cur_char_start, upto_char, context_prefix))
-        context_prefix = _tail_chars(body, max_chars // 7)
+        context_prefix = _tail_chars(body, _EXTRACTION_OVERLAP_CHARS)
         cur_lines      = []
         cur_chars      = 0
 
@@ -1965,20 +2069,136 @@ _STRUCTURED_SCORE_FIELDS = frozenset({
 })
 
 # Currency fields where a larger non-zero magnitude is a stronger signal.
+# `gl_products_aggregate` and `gl_personal_advertising_injury` were added
+# 2026-07-30: a live run stamped BOTH from the umbrella ($3,000,000) alongside
+# gl_each_occurrence and gl_aggregate. They are children of the `gl_limits`
+# composite and must go through the same reconciliation.
 _CURRENCY_FIELDS = frozenset({
     "total_revenue", "total_payroll", "wc_payroll", "property_building_value",
     "property_bpp_value", "gl_limits", "gl_aggregate", "gl_each_occurrence",
+    "gl_products_aggregate", "gl_personal_advertising_injury",
     "auto_liability_limit", "umbrella_limit", "business_income_limit",
     "extra_expense_limit", "umbrella_sir", "umbrella_attachment_point",
 })
 
 
 def _currency_magnitude(sval: str) -> float:
-    """Extract numeric magnitude from a currency string for tiebreaking."""
+    """Extract numeric magnitude from a currency string for tiebreaking.
+
+    NOTE: only meaningful for a string holding ONE amount. On a composite
+    ("each occurrence $1,000,000; general aggregate $2,000,000") it concatenates
+    every digit and returns 1.0e+20 — which is why the magnitude tiebreak is now
+    restricted to the single zero-versus-real case. Do not widen it. See the
+    tiebreak comment in `_merge_list_fields`.
+    """
     try:
         return float(re.sub(r"[^\d.]", "", sval))
     except Exception:
         return 0.0
+
+
+# ── Composite-consistency tiebreak ───────────────────────────────────────────
+# A scalar limit fact and the composite fact it belongs to are extracted
+# separately, from the same document, and can disagree. On the real package that
+# produced C23 they did: `gl_limits` said "each occurrence $1,000,000 … general
+# aggregate $2,000,000" while `gl_each_occurrence` was filled from the Commercial
+# Liability Umbrella's $3,000,000.
+#
+# Killing the magnitude tiebreak stopped umbrella figures winning *systematically*
+# but left the outcome decided by which chunk happened to mention the amount
+# first — a coin flip on a field that prints on a certificate of liability. The
+# composite is the better witness for its own children: it was extracted as ONE
+# coherent block, so its parts are mutually consistent by construction.
+#
+# This does not parse, reformat or invent anything. It asks one question: does
+# this candidate's amount actually appear in the composite? It only acts when
+# EXACTLY ONE candidate does — if both appear, or neither does, the composite has
+# nothing useful to say and the ordinary scoring stands.
+_CURRENCY_COMPOSITE_PARENT = {
+    "gl_each_occurrence":             "gl_limits",
+    "gl_aggregate":                   "gl_limits",
+    "gl_products_aggregate":          "gl_limits",
+    "gl_personal_advertising_injury": "gl_limits",
+}
+_CURRENCY_COMPOSITES = frozenset(_CURRENCY_COMPOSITE_PARENT.values())
+_CURRENCY_COMPOSITE_CHILDREN: Dict[str, List[str]] = {}
+for _c, _p in _CURRENCY_COMPOSITE_PARENT.items():
+    _CURRENCY_COMPOSITE_CHILDREN.setdefault(_p, []).append(_c)
+
+_MONEY_TOKEN_RE = re.compile(r"\$\s*([\d][\d,]*(?:\.\d{1,2})?)")
+
+
+def _money_amounts(sval: str) -> set:
+    """Every $-prefixed amount in `sval`, as floats.
+
+    Requires the `$` so plain years, class codes and policy numbers are not
+    mistaken for money — this is used as a positive containment test, and a false
+    member would let a wrong candidate look 'consistent'.
+    """
+    out = set()
+    for m in _MONEY_TOKEN_RE.findall(sval or ""):
+        try:
+            out.add(float(m.replace(",", "")))
+        except Exception:
+            continue
+    return out
+
+
+def _score_composite_candidate(cand_text: str, child_candidates: Dict[str, dict]) -> tuple:
+    """Rank a candidate COMPOSITE limits string. Higher is better.
+
+    WHY THIS EXISTS — the fix above it was not enough, proven by a live run.
+    Reconciling each scalar against the composite only works if the COMPOSITE is
+    right. On a real package (ORBIN CONTRACTING, 2026-07-30) it was not: three
+    composites tied on score and the winner was the UMBRELLA one —
+
+        'each occurrence limit (liability coverage) $ 3,000,000; personal &
+         advertising injury limit $ 3,000,000; aggregate limit (liability
+         coverage) $ 3,000,000'
+
+    — so gl_each_occurrence, gl_aggregate and gl_personal_advertising_injury all
+    "agreed" with it and all came out $3,000,000 when the real GL part is
+    $1M/$2M. The scalar check made no change and logged nothing, because the top
+    scalar candidate already matched the wrong parent. It was not misfiring; it
+    was blind to a wrong witness.
+
+    Two structural signals, deliberately NOT keyword matching on coverage-part
+    names (that heuristic has failed here three times — see the evidence-gate
+    note in CLAUDE.md):
+
+      1. `explained` — how many CHILD FIELDS this composite can account for, i.e.
+         for how many of gl_each_occurrence / gl_aggregate /
+         gl_products_aggregate / gl_personal_advertising_injury does the composite
+         contain one of that child's own candidate amounts. A composite that
+         explains the whole family is describing the same coverage part the
+         scalars came from.
+      2. `distinct` — how many DIFFERENT dollar amounts it lists. A real GL
+         limits block enumerates several ($1M occurrence, $2M aggregate, $500k
+         damage-to-premises, $10k medical); an umbrella block repeats one number.
+         This is what separates the two GL candidates from the umbrella on the
+         package above, and it needs no domain vocabulary at all.
+
+    Measured on that package's exact strings:
+        umbrella  {3M}                  explained=3  distinct=1
+        GL short  {1M, 2M}              explained=4  distinct=2
+        GL full   {1M, 500k, 10k, 2M}   explained=4  distinct=4   <- wins
+    and the full GL breakdown is the correct answer.
+
+    `explained` is ordered FIRST so a long endorsement paragraph that happens to
+    contain many dollar figures cannot outrank a composite that actually accounts
+    for the scalars.
+    """
+    amts = _money_amounts(cand_text)
+    if not amts:
+        return (0, 0)
+    explained = 0
+    for _child, _cands in child_candidates.items():
+        child_amts = set()
+        for _nk in _cands:
+            child_amts |= _money_amounts(_nk)
+        if child_amts & amts:
+            explained += 1
+    return (explained, len(amts))
 
 
 def _score_value(field: str, record: Any, freq: int) -> float:
@@ -2123,29 +2343,171 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
 
     merged_facts: dict = {}
 
-    for field, candidates in val_candidates.items():
+    # Resolve COMPOSITE currency facts first so their scalar children can be
+    # checked against them in the same pass (see _CURRENCY_COMPOSITE_PARENT).
+    # Iteration order is otherwise irrelevant here — each field writes its own
+    # independent key — so reordering is safe.
+    _ordered_fields = sorted(
+        val_candidates, key=lambda f: (f not in _CURRENCY_COMPOSITES, f)
+    )
+
+    for field in _ordered_fields:
+        candidates = val_candidates[field]
         scored = sorted(
             [(nk, _score_value(field, c["record"], c["freq"]), c) for nk, c in candidates.items()],
             key=lambda x: x[1], reverse=True,
         )
 
-        # Tiebreaker for currency fields: equal score → prefer larger non-zero magnitude.
-        # This prevents "$0" from beating "$8,750,000" when both appear once.
+        # Tiebreaker for currency fields — NARROW ON PURPOSE. Read before widening.
+        #
+        # This used to re-sort the WHOLE candidate list by dollar magnitude
+        # whenever the top two scores were within 0.01, i.e. "biggest number
+        # wins". Three defects, all measured on a real package:
+        #
+        #  1. Across coverage parts it is inverted. A submission with a General
+        #     Liability part ($1M each occurrence / $2M aggregate) AND a
+        #     Commercial Liability Umbrella ($3M) had its GL facts filled from
+        #     the UMBRELLA: `gl_each_occurrence` came out "$ 3,000,000" over
+        #     "$1,000,000". Umbrella/excess limits are BY DEFINITION the larger
+        #     ones, so this rule is wrong precisely where two parts coexist —
+        #     which is most real packages. Wrong limits on a certificate of
+        #     liability is the failure mode with legal exposure.
+        #  2. The re-sort was global, not a top-two swap, so a candidate ranked
+        #     5th on score could win on magnitude alone. That discards the
+        #     scoring entirely on the strength of two entries being close.
+        #  3. `_currency_magnitude` strips non-digits and parses the remainder,
+        #     so on a COMPOSITE string ("each occurrence $1,000,000; general
+        #     aggregate $2,000,000; products $2,000,000" — and `gl_limits` IS in
+        #     `_CURRENCY_FIELDS`) it yields 1.0e+20. The tiebreak became
+        #     "whichever string contains the most digits".
+        #
+        # All that survives is the single case the original comment actually
+        # cites: a real limit beating a literal zero. Anything beyond that was
+        # coincidence, not correctness. On a genuine tie between two non-zero
+        # amounts, the COMPOSITE-CONSISTENCY check below decides it where it can,
+        # and otherwise the ordinary scoring stands.
+        # ── Composite SELECTION (must run before the scalar checks below) ────
+        # A wrong composite makes every scalar that agrees with it wrong too, so
+        # this is the load-bearing half of the C23 fix. See
+        # `_score_composite_candidate` for the two structural signals and the
+        # live measurement that forced it.
+        if (
+            field in _CURRENCY_COMPOSITES
+            and len(scored) >= 2
+            and abs(scored[0][1] - scored[1][1]) < 0.01   # effectively tied
+        ):
+            _kids = {
+                _ch: val_candidates.get(_ch, {})
+                for _ch in _CURRENCY_COMPOSITE_CHILDREN.get(field, [])
+                if val_candidates.get(_ch)
+            }
+            if _kids:
+                _tied_idx = [
+                    i for i, (_nk, _s, _c) in enumerate(scored)
+                    if abs(_s - scored[0][1]) < 0.01
+                ]
+                _best = max(
+                    _tied_idx,
+                    key=lambda i: _score_composite_candidate(scored[i][0], _kids),
+                )
+                if _best != 0:
+                    logger.warning(
+                        "merge field=%r composite SELECTION: chose %r over %r — it "
+                        "explains %s of the scalar limit fields and lists more "
+                        "distinct amounts. The rejected candidate is almost always "
+                        "an umbrella/excess block, whose limits are by definition "
+                        "larger and must NOT fill General Liability fields (C23).",
+                        field,
+                        scored[_best][0][:160], scored[0][0][:160],
+                        _score_composite_candidate(scored[_best][0], _kids)[0],
+                    )
+                    scored = [scored[_best]] + [
+                        s for i, s in enumerate(scored) if i != _best
+                    ]
+
         if (
             field in _CURRENCY_FIELDS
             and len(scored) >= 2
             and abs(scored[0][1] - scored[1][1]) < 0.01   # effectively tied
         ):
-            scored = sorted(
-                scored,
-                key=lambda x: _currency_magnitude(x[0]),
-                reverse=True,
-            )
-            if _currency_magnitude(scored[0][0]) > 0:
-                logger.info(
-                    f"merge field={field!r} currency tiebreak: "
-                    f"chose {scored[0][0]!r} over {scored[1][0]!r} by magnitude"
+            top_mag = _currency_magnitude(scored[0][0])
+            if top_mag == 0:
+                nonzero = next(
+                    (i for i, (nk, _s, _c) in enumerate(scored)
+                     if _currency_magnitude(nk) > 0),
+                    None,
                 )
+                if nonzero is not None:
+                    logger.info(
+                        "merge field=%r currency tiebreak: chose %r over a zero-valued "
+                        "candidate (the ONLY case the magnitude tiebreak still handles)",
+                        field, scored[nonzero][0],
+                    )
+                    scored = [scored[nonzero]] + [
+                        s for i, s in enumerate(scored) if i != nonzero
+                    ]
+            else:
+                # Composite consistency (see _CURRENCY_COMPOSITE_PARENT). Without
+                # this, a tie between the GL part's $1,000,000 and the umbrella's
+                # $3,000,000 is settled by whichever chunk mentioned it first —
+                # arbitrary, on a figure that prints on a certificate. Acts ONLY
+                # when exactly one tied candidate's amount is actually present in
+                # the already-resolved composite; otherwise the composite has
+                # nothing to say and nothing changes.
+                _parent = _CURRENCY_COMPOSITE_PARENT.get(field)
+                _prec = merged_facts.get(_parent) if _parent else None
+                if _prec is not None:
+                    _pval = _prec.get("value", _prec) if isinstance(_prec, dict) else _prec
+                    _pamts = _money_amounts(str(_pval))
+                    if _pamts:
+                        _tied = [
+                            i for i, (_nk, _s, _c) in enumerate(scored)
+                            if abs(_s - scored[0][1]) < 0.01
+                        ]
+                        _consistent = [
+                            i for i in _tied
+                            if _money_amounts(scored[i][0]) & _pamts
+                        ]
+                        # Group the consistent candidates by the AMOUNT they carry,
+                        # not by their string. An earlier version required EXACTLY
+                        # ONE consistent candidate and therefore did nothing on the
+                        # real ORBIN package: '$ 1,000,000' and '$1,000,000' are two
+                        # candidates for the SAME amount, both agreed with the
+                        # composite, the count was 2, and the wrong $3,000,000 stayed
+                        # in first place. Ambiguity means two DIFFERENT amounts, not
+                        # two spellings of one.
+                        _amt_sets = {
+                            frozenset(_money_amounts(scored[i][0])) for i in _consistent
+                        }
+                        if _consistent and len(_amt_sets) == 1 and _consistent[0] != 0:
+                            _pick = _consistent[0]
+                            logger.warning(
+                                "merge field=%r composite tiebreak: chose %r over %r — "
+                                "its amount appears in %s and the rejected one's does "
+                                "not. This is what stops an umbrella/excess limit "
+                                "filling a General Liability field (C23). parent=%r",
+                                field, scored[_pick][0], scored[0][0], _parent,
+                                str(_pval)[:120],
+                            )
+                            scored = [scored[_pick]] + [
+                                s for i, s in enumerate(scored) if i != _pick
+                            ]
+                        elif len(_amt_sets) > 1:
+                            logger.info(
+                                "merge field=%r composite tiebreak: no action — %d tied "
+                                "candidates carry %d DIFFERENT amounts that all appear "
+                                "in %s, so it cannot separate them",
+                                field, len(_consistent), len(_amt_sets), _parent,
+                            )
+                        elif not _consistent:
+                            logger.warning(
+                                "merge field=%r composite MISMATCH: none of the %d tied "
+                                "candidates %s appears in %s=%r. The scalar and the "
+                                "composite disagree about this limit — the value stamped "
+                                "on the form may be from a different coverage part.",
+                                field, len(_tied), [scored[i][0] for i in _tied],
+                                _parent, str(_pval)[:120],
+                            )
 
         winner_nk, winner_score, winner_c = scored[0]
         merged_facts[field] = winner_c["record"]

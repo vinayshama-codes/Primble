@@ -350,6 +350,24 @@ async def _openai_chat(
                     temperature=temperature,
                     **{token_param: max_tokens},
                 )
+            # Token accounting — see improving-ll.md. `cache_pct` is the share of
+            # input tokens served from OpenAI's automatic prefix cache (billed at
+            # ~10%). Extraction prompts are already prefix-first
+            # (_EXTRACT_PROMPT_PREFIX leads every call), so this should read high
+            # across a multi-chunk document. Never allowed to break a call.
+            try:
+                _u = getattr(r, "usage", None)
+                if _u is not None:
+                    _pt = int(getattr(_u, "prompt_tokens", 0) or 0)
+                    _cached = int(getattr(
+                        getattr(_u, "prompt_tokens_details", None), "cached_tokens", 0) or 0)
+                    logger.info(
+                        "LLM_SPEND stage=extraction form=- in=%d cached=%d out=%d cache_pct=%d",
+                        _pt, _cached, int(getattr(_u, "completion_tokens", 0) or 0),
+                        (100 * _cached // _pt) if _pt else 0,
+                    )
+            except Exception:                                  # pragma: no cover
+                pass
             return (r.choices[0].message.content or "").strip()
         except Exception as ex:
             last_ex = ex

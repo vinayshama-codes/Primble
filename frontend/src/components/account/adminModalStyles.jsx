@@ -6,6 +6,26 @@ export const inputStyle = {
 };
 export const labelStyle = { fontSize: 12, fontWeight: 600, color: "#64748b", marginBottom: 5, display: "block" };
 
+// Small "i" info icon with a hover tooltip, for briefing admins on what an
+// admin-only action does before they click it. Only ever rendered inside
+// admin-gated UI (AdminNavDropdown, admin modals), so it is admin-visible by
+// construction - no separate visibility check needed. Decorative/supplementary
+// (the button's own label already names the action), and stops click
+// propagation since it's usually nested inside a clickable menu item - hovering
+// to read it should never fire the parent button's action.
+export function AdminInfoTooltip({ text }) {
+  return (
+    <span
+      className="admin-info-icon"
+      data-tooltip={text}
+      aria-hidden="true"
+      onClick={(e) => e.stopPropagation()}
+    >
+      i
+    </span>
+  );
+}
+
 export function AdminMsg({ msg }) {
   if (!msg) return null;
   return (

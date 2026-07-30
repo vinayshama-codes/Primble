@@ -229,6 +229,43 @@ body {
 }
 .udrop-item-label { flex: 1; }
 
+/* Admin-only info tooltip — briefs an admin on what an action does before
+   they click it. Only ever rendered inside admin-gated UI. */
+.admin-info-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; flex-shrink: 0; margin-left: 6px;
+  border-radius: 50%; background: #e2e8f0; color: #64748b;
+  font-size: 10px; font-weight: 700; font-style: italic;
+  cursor: help; position: relative;
+}
+.admin-info-icon:hover { background: #cbd5e1; color: #334155; }
+.admin-info-icon:hover::after, .admin-info-icon:hover::before {
+  opacity: 1; visibility: visible;
+}
+.admin-info-icon::after {
+  content: attr(data-tooltip);
+  /* Opens DOWNWARD and right-anchored. Downward because the dropdown hangs
+     from the navbar, so an upward tooltip on the first item is clipped by the
+     navbar / top of the viewport; there is always room below. Right-anchored
+     (not centered) because the icon sits near the right edge of a
+     right-aligned panel, so a centered bubble risks overflowing the browser's
+     right edge. */
+  position: absolute; top: calc(100% + 8px); right: -4px;
+  width: 220px; padding: 9px 11px; border-radius: 8px;
+  background: #0f172a; color: #f1f5f9;
+  font-size: 11.5px; font-weight: 500; font-style: normal; line-height: 1.45;
+  text-align: left; white-space: normal;
+  opacity: 0; visibility: hidden; transition: opacity 0.15s;
+  pointer-events: none; z-index: 1200;
+  box-shadow: 0 6px 20px rgba(15,23,42,0.25);
+}
+.admin-info-icon::before {
+  content: ""; position: absolute; top: calc(100% + 3px); right: 2px;
+  border: 5px solid transparent; border-bottom-color: #0f172a;
+  opacity: 0; visibility: hidden; transition: opacity 0.15s;
+  pointer-events: none; z-index: 1200;
+}
+
 /* Submenu arrow pushed to the right */
 .udrop-item--submenu { justify-content: flex-start; }
 .udrop-item--submenu .udrop-item-label { flex: 1; }

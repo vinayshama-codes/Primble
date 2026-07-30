@@ -445,6 +445,148 @@ async def get_dismissed_recommendations(session_id: str) -> List[dict]:
 
 
 # ASYNC-SAFE
+async def mark_recommendation_answer_recorded(
+    session_id: str,
+    rec_id: str,
+    producer_answer: str,
+    model_version: str,
+    field: Optional[str] = None,
+    message: Optional[str] = None,
+    score_impact: Optional[int] = None,
+    user_id: Optional[str] = None,
+    form_id: Optional[str] = None,
+) -> bool:
+    """Record the value a producer typed on a recommendation card.
+
+    Deliberately does NOT write `action`. Whether the recommendation is actually
+    resolved is decided by the recalculation that follows: its auto-resolve pass
+    stamps 'resolved' only when the rec genuinely drops out of the recomputed
+    recommendations. Stamping 'resolved' here instead would hide answers that did
+    not in fact close the gap (several recs are satisfied by a combination of
+    facts, e.g. rec_min_cope needs four) from the pre-download gate, which is the
+    control that exists to stop exactly that.
+
+    The two resulting states are both meaningful:
+      producer_answer NOT NULL + action='resolved' -> answered and cleared; shows
+          in "Reviewed" and can be reopened.
+      producer_answer NOT NULL + action IS NULL    -> answered, gap remains; stays
+          in the open list and still blocks download. Correct.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO sqs_recommendation_audit (
+                    id, session_id, user_id, form_id, rec_id, field,
+                    recommendation_type, component, message, score_impact,
+                    presented_at, model_version, producer_answer
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                ON CONFLICT (session_id, rec_id) DO UPDATE
+                    SET producer_answer = EXCLUDED.producer_answer,
+                        field   = COALESCE(sqs_recommendation_audit.field,   EXCLUDED.field),
+                        form_id = COALESCE(EXCLUDED.form_id, sqs_recommendation_audit.form_id),
+                        score_impact = COALESCE(sqs_recommendation_audit.score_impact,
+                                                EXCLUDED.score_impact)
+                    WHERE sqs_recommendation_audit.action IS NULL
+                       OR sqs_recommendation_audit.action = 'downloaded_anyway'
+                """,
+                f"audit_{uuid.uuid4().hex}",
+                session_id, user_id, form_id, rec_id,
+                field, "suggestion", None,
+                # message is NOT NULL; a rec that first appeared on a recalculation
+                # was never seeded by log_recommendations_presented, so fall back to
+                # the rec_id rather than violating the constraint.
+                message or rec_id,
+                score_impact,
+                now, model_version, producer_answer,
+            )
+        logger.info(f"Recorded producer answer for rec {rec_id} (session {session_id})")
+        return True
+    except Exception as ex:
+        logger.error(f"Failed to record recommendation answer: {ex}")
+        return False
+
+
+# ASYNC-SAFE
+async def get_reviewed_recommendations(session_id: str) -> List[dict]:
+    """Recommendations the PRODUCER has acted on - the "Reviewed" section of the
+    SQS panel. Two kinds: dismissed, and answered-with-a-value-that-cleared-it.
+
+    The `producer_answer IS NOT NULL` half of the predicate matters: without it
+    this would also return every rec the client's questionnaire auto-resolved,
+    which the producer never touched and has nothing to reopen.
+
+    Separate from get_dismissed_recommendations(), which stays dismissals-only
+    because it feeds the E&O audit-trail export.
+    """
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT rec_id, form_id, field, message, score_impact,
+                          override_reason, producer_answer, action, action_at
+                   FROM sqs_recommendation_audit
+                   WHERE session_id=$1
+                     AND (action = 'dismissed'
+                          OR (action = 'resolved' AND producer_answer IS NOT NULL))
+                   ORDER BY action_at ASC""",
+                session_id,
+            )
+        return [dict(r) for r in rows]
+    except Exception as ex:
+        logger.error(f"Failed to get reviewed recommendations: {ex}")
+        return []
+
+
+# ASYNC-SAFE
+async def get_recommendation_audit_row(session_id: str, rec_id: str) -> Optional[dict]:
+    """One audit row, or None. Used by the reopen route to decide what has to be
+    undone: whether a producer fact must be retracted, and whether a dismiss score
+    credit was ever applied."""
+    try:
+        async with get_pool().acquire() as conn:
+            row = await conn.fetchrow(
+                """SELECT rec_id, form_id, field, message, score_impact, component,
+                          override_reason, producer_answer, action, action_at
+                   FROM sqs_recommendation_audit
+                   WHERE session_id=$1 AND rec_id=$2""",
+                session_id, rec_id,
+            )
+        return dict(row) if row else None
+    except Exception as ex:
+        logger.error(f"Failed to get recommendation audit row: {ex}")
+        return None
+
+
+# ASYNC-SAFE
+async def reopen_recommendation(session_id: str, rec_id: str) -> bool:
+    """Return a reviewed recommendation to the open state.
+
+    Nulls only the ACTION-STATE columns. `override_reason` and `producer_answer`
+    are deliberately preserved: they are the record of what the producer last
+    submitted, they are what the E&O export reports, and keeping them lets the
+    reopened card prefill the previous text for editing. They are overwritten only
+    when the producer submits a new value.
+
+    Note this is the only writer that can clear `action`; both mark_* writers are
+    latched on `action IS NULL` and cannot un-set it.
+    """
+    try:
+        async with get_pool().acquire() as conn:
+            result = await conn.execute(
+                """UPDATE sqs_recommendation_audit
+                   SET action=NULL, action_at=NULL, sqs_score_at_action=NULL
+                   WHERE session_id=$1 AND rec_id=$2""",
+                session_id, rec_id,
+            )
+        logger.info(f"Reopened rec {rec_id} (session {session_id}): {result}")
+        return True
+    except Exception as ex:
+        logger.error(f"Failed to reopen recommendation: {ex}")
+        return False
+
+
+# ASYNC-SAFE
 async def get_download_audit_log(session_id: str) -> List[dict]:
     """"Download anyway" override notes for this session (download_audit table),
     oldest first. Read-only counterpart to log_download_with_open_recs()."""
@@ -464,27 +606,132 @@ async def get_download_audit_log(session_id: str) -> List[dict]:
 
 
 # ASYNC-SAFE
-async def get_audit_trail_export(session_id: str) -> dict:
-    """Bundle every producer-supplied "reason" on this submission - the
-    package-level marketing reason (Figure 6) plus every individual dismissed
-    recommendation, issue-status override, and download-anyway note - into one
-    payload the producer can download for their own E&O record.
+async def get_field_change_log(session_id: str) -> List[dict]:
+    """Every recorded modification to a package field, oldest first, with the
+    source that made it ('ai' / 'producer' / 'client_arq') and the before/after
+    values. Read-only counterpart to log_field_change()."""
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT form_id, field_name, fact_key, source, previous_value,
+                          new_value, confidence, changed_at
+                   FROM field_source_audit
+                   WHERE session_id=$1
+                   ORDER BY changed_at ASC""",
+                session_id,
+            )
+        return [dict(r) for r in rows]
+    except Exception as ex:
+        logger.error(f"Failed to get field change log: {ex}")
+        return []
 
-    Per client clarification (2026-07-17): this does not need to be pushed to
-    underwriters/reviewers; it just needs to be retrievable on demand by the
-    user. Purely a read aggregation of existing audit tables - writes no new
-    data and does not touch scoring, dismiss-credit, or generation.
+
+# Max characters of any single fact value rendered into the export. Long
+# narrative facts (operations descriptions, remarks) are truncated rather than
+# dropped - the record is meant to show WHAT was captured and from WHERE, not
+# to be a second copy of the whole document.
+_EXPORT_VALUE_MAX = 300
+
+
+def _flatten_fact(key: str, raw) -> Optional[dict]:
+    """Normalize one entry of the session `facts` dict into a flat
+    {fact/value/source/confidence} row for the audit export.
+
+    Facts are stored either as a provenance envelope ({"value","confidence",
+    "source"}) or, for older/simpler entries, as a bare scalar. Schedules
+    (vehicles, drivers, locations, loss runs) are lists - those are summarized
+    by row count rather than dumped, since each row is itself a dict and the
+    detail already lives in the generated forms. Returns None for empty facts
+    so the export shows what WAS captured, not a wall of blanks.
+    """
+    if isinstance(raw, dict) and "value" in raw:
+        value = raw.get("value")
+        source = raw.get("source") or ""
+        confidence = raw.get("confidence") or ""
+    else:
+        value, source, confidence = raw, "", ""
+
+    if value is None or value == "" or value == [] or value == {}:
+        return None
+
+    if isinstance(value, (list, tuple)):
+        display = f"[{len(value)} row(s) captured]"
+    elif isinstance(value, dict):
+        display = "[structured value]"
+    else:
+        display = str(value)
+        if len(display) > _EXPORT_VALUE_MAX:
+            display = display[:_EXPORT_VALUE_MAX] + "…(truncated)"
+
+    return {
+        "fact": key,
+        "value": display,
+        "source": source,
+        "confidence": confidence,
+    }
+
+
+# ASYNC-SAFE
+async def get_audit_trail_export(session_id: str) -> dict:
+    """Full E&O record for one submission, for the producer to download.
+
+    Two halves, both required by the client (Figure 6 + the 2026-07-28
+    follow-up "should be in addition to traditional E&O... a record of all
+    inputs (including source) and modifications to the package"):
+
+      1. DECISIONS - every reason the producer gave: the package-level
+         marketing reason, each dismissed recommendation, each issue-status
+         override, each download-anyway note.
+      2. INPUTS & MODIFICATIONS - the documents the package was built from,
+         every captured fact with the source that produced it (AI extraction /
+         producer edit / client questionnaire), and the chronological change
+         log of every recorded field modification with its before/after values.
+
+    Purely a read aggregation of data these tables already hold - writes
+    nothing, and never touches scoring, dismiss-credit, or generation. Session
+    lookup is best-effort: if the session blob is gone (facts-retention job) the
+    durable audit tables still produce a usable record, which is exactly why the
+    reason/change data was put in its own tables in the first place.
     """
     marketing_reason = await get_marketing_reason(session_id)
     dismissed = await get_dismissed_recommendations(session_id)
     issue_statuses = [s for s in await get_issue_statuses(session_id) if s.get("reason")]
     downloads = await get_download_audit_log(session_id)
+    field_changes = await get_field_change_log(session_id)
+
+    documents: List[dict] = []
+    inputs: List[dict] = []
+    generated_forms: List[str] = []
+    try:
+        from repositories.session_repository import get_processing_session
+        session = await get_processing_session(session_id)
+        for d in (session.get("doc_summary") or []):
+            documents.append({
+                "filename":   d.get("filename") or "",
+                "doc_type":   d.get("doc_type_label") or d.get("doc_type") or "",
+                "confidence": d.get("doc_type_confidence") or "",
+                "classified_by": d.get("doc_type_source") or "",
+                "overridden": bool(d.get("doc_type_overridden")),
+                "excluded":   bool(d.get("excluded")),
+            })
+        for key, raw in sorted((session.get("facts") or {}).items()):
+            row = _flatten_fact(key, raw)
+            if row:
+                inputs.append(row)
+        generated_forms = sorted((session.get("generated_forms") or {}).keys())
+    except Exception as ex:
+        logger.warning(f"Audit export: session detail unavailable for {session_id}: {ex}")
+
     return {
         "session_id": session_id,
         "marketing_reason": marketing_reason,
         "dismissed_recommendations": dismissed,
         "issue_status_overrides": issue_statuses,
         "download_anyway_log": downloads,
+        "documents": documents,
+        "inputs": inputs,
+        "field_modifications": field_changes,
+        "generated_forms": generated_forms,
     }
 
 

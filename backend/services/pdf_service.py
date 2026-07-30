@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import threading
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -2563,12 +2564,61 @@ def _fill_empty_from_raw_text(
 # We budget: total_prompt_chars ≤ _GPT_CALL_BUDGET_CHARS per call.
 # Raw-text chunks are sized so that (fixed_overhead + fields_block + chunk) ≤ budget.
 
-_GPT_CALL_BUDGET_CHARS   = int(os.getenv("GPT_CALL_BUDGET_CHARS",  str(380_000)))  # ~95k tokens; bumped from 360k so combined batches keep doc coverage in fewer chunks
-_GPT_REPLY_RESERVE_CHARS = int(os.getenv("GPT_REPLY_RESERVE_CHARS", str(30_000)))   # output headroom
 # Max retries per individual LLM call
 _FORM_FILL_BATCH_RETRIES = int(os.getenv("FORM_FILL_BATCH_RETRIES", "3"))
-# Cap output tokens so one call can't burn the full 200k TPM budget
+# Cap output tokens so one call can't burn the full TPM budget. The model itself
+# allows far more (gpt-5.4-mini: 128k output); this cap is a cost/rate guard, not
+# a model limit, and is deliberately kept small.
 _FORM_FILL_MAX_TOKENS    = int(os.getenv("FORM_FILL_MAX_TOKENS",    "16000"))
+
+# ── Call sizing, derived from the real model spec ────────────────────────────
+# gpt-5.4-mini: 400,000-token context window, 128,000-token max output.
+# `_MODEL_CONTEXT_TOKENS` is the window shared by input AND output, so the input
+# budget must leave room for the reply.
+#
+# Measured on a real 271-page insurance package with the GPT-5 tokenizer
+# (o200k_base): **4.01 chars/token**, so the historical 4:1 assumption is sound
+# for this content. `_CHARS_PER_TOKEN_FLOOR` is deliberately pessimistic (3.5)
+# because dense material — VIN blocks, class-code tables, money columns —
+# tokenizes worse than prose, and under-estimating here is what produces a
+# context-length rejection.
+#
+# WHY THIS MATTERS MORE THAN IT LOOKS: every extra document chunk multiplies the
+# call count by the number of field sub-batches. The old 380,000-char budget used
+# only ~24% of the window and split a 671,654-char submission into 3 chunks —
+# 172 calls where 63 suffice. Sizing this correctly is the single biggest cost
+# and latency lever in the pipeline (improving-ll.md C20).
+_MODEL_CONTEXT_TOKENS   = int(os.getenv("MODEL_CONTEXT_TOKENS", "400000"))
+_CHARS_PER_TOKEN_FLOOR  = float(os.getenv("CHARS_PER_TOKEN_FLOOR", "3.5"))
+# Fraction of the window we are willing to occupy. The remainder absorbs
+# tokenizer variance and the reply. 0.75 leaves ~100k tokens of headroom.
+_CONTEXT_UTILISATION    = float(os.getenv("CONTEXT_UTILISATION", "0.75"))
+
+# Reply headroom must match what we actually allow the model to emit, or a full
+# 16k-token reply overruns the window we sized for. 16,000 tokens is ~64,000
+# chars — the previous 30,000-char default under-reserved by more than half.
+_GPT_REPLY_RESERVE_CHARS = int(os.getenv(
+    "GPT_REPLY_RESERVE_CHARS",
+    str(max(30_000, int(_FORM_FILL_MAX_TOKENS * 4))),
+))
+
+_CONTEXT_SAFE_BUDGET_CHARS = int(
+    (_MODEL_CONTEXT_TOKENS * _CONTEXT_UTILISATION - _FORM_FILL_MAX_TOKENS)
+    * _CHARS_PER_TOKEN_FLOOR
+)
+_GPT_CALL_BUDGET_CHARS = int(os.getenv(
+    "GPT_CALL_BUDGET_CHARS", str(_CONTEXT_SAFE_BUDGET_CHARS)))
+if _GPT_CALL_BUDGET_CHARS > _CONTEXT_SAFE_BUDGET_CHARS:
+    # An explicit override above what the window can hold would make EVERY call
+    # fail on context length. The self-tuning shrink would recover it, but only
+    # after burning a wasted call per batch — clamp instead and say so.
+    logger.warning(
+        "gpt_fill: GPT_CALL_BUDGET_CHARS=%d exceeds what a %d-token window can "
+        "hold at %.1f chars/token with a %d-token reply — clamping to %d.",
+        _GPT_CALL_BUDGET_CHARS, _MODEL_CONTEXT_TOKENS, _CHARS_PER_TOKEN_FLOOR,
+        _FORM_FILL_MAX_TOKENS, _CONTEXT_SAFE_BUDGET_CHARS,
+    )
+    _GPT_CALL_BUDGET_CHARS = _CONTEXT_SAFE_BUDGET_CHARS
 # combined_gap_fill: max fields per LLM batch — 200 cuts batch count ~50% vs 100,
 # halving how many times the raw document is re-shipped to OpenAI per session.
 _COMBINED_FIELD_BATCH    = int(os.getenv("COMBINED_FIELD_BATCH",    "200"))
@@ -2599,12 +2649,206 @@ _PROMPT_TOOLTIP_MAX = int(os.getenv("PROMPT_TOOLTIP_MAX", "500"))
 # is the final TPM backstop).
 _FIELD_FILL_BATCH = int(os.getenv("FIELD_FILL_BATCH", "40"))
 _FIELD_BATCH_POOL = int(os.getenv("FIELD_BATCH_POOL", "4"))
+# Pack table groups alongside ordinary fields (keeping each table WHOLE) instead
+# of giving every table its own call. See `_pack_field_batches` for the measured
+# waste this removes and the one quality risk it carries. Set 0 to revert.
+_PACK_TABLES_WITH_FIELDS = os.getenv(
+    "FIELD_BATCH_PACK_TABLES", "1").strip().lower() not in ("0", "false", "no")
+
+# Constant worst-case size of the rendered fields block, used by _raw_budget so
+# every sub-batch derives the SAME document chunk boundaries (see _raw_budget).
+# ~250 chars/field is the measured worst case for a spec line carrying a full
+# 500-char-capped tooltip; typical is ~193. Raising _FIELD_FILL_BATCH without
+# raising this just means more batches fall back to their true size.
+_MAX_FIELDS_BLOCK_CHARS = int(os.getenv("MAX_FIELDS_BLOCK_CHARS", str(_FIELD_FILL_BATCH * 250)))
+# Absolute floor on the raw-text slice, only to guarantee the chunk loop makes
+# progress. Deliberately SMALL: a large floor silently overrides the call-budget
+# guard and lets the prompt overflow. Hitting it is a misconfiguration and is
+# logged at ERROR.
+_MIN_RAW_CHUNK_CHARS = int(os.getenv("MIN_RAW_CHUNK_CHARS", "2000"))
+
+# Re-ask every field against every document chunk, instead of stopping once a
+# batch's fields are all answered.
+#
+# The default is AUTO, and auto is the only defensible setting. Reasoning:
+#
+#   * On a SINGLE-chunk document there is nothing to re-scan, so rescanning and
+#     not rescanning are byte-identical. The flag is irrelevant. That is the
+#     common case today (the derived budget makes anything under ~890k chars one
+#     chunk), which is why an OFF default looked free.
+#   * On a MULTI-chunk document, OFF means a batch whose fields all get answered
+#     from chunk 1 never sends chunks 2..N. That text reaches the model only if
+#     some OTHER batch happens to still have unanswered fields — which is luck,
+#     not a property. Measured: one 40-field batch against a 2-chunk document
+#     shipped 1 call and skipped 46% of the document.
+#
+# So "OFF by default because it costs nothing on one chunk" quietly relied on the
+# document staying under the line. Fixing `clean_text` (C24) removed ~0-25% of
+# deletion from every document, which pushes a large package TOWARD the line —
+# i.e. the shredder fix ARMED this hole. Coupling the decision to the actual
+# chunk count removes the trap: zero cost when there is one chunk, correct
+# behaviour the moment there are two, and no human has to notice a log line.
+#
+#   auto (default) — rescan iff the document actually split into >1 chunk
+#   1 / true       — always rescan (forces the multi-chunk path for testing)
+#   0 / false      — never rescan (legacy first-answer-wins; keeps the old,
+#                    measured-lossy behaviour and is retained only as a kill
+#                    switch if full rescan ever proves too expensive)
+_GAP_FILL_RESCAN_MODE = os.getenv("GAP_FILL_FULL_RESCAN", "auto").strip().lower()
+
+
+def _split_text_on_boundaries(text: str, budget: int) -> List[str]:
+    """Cut `text` into <=`budget`-char pieces at paragraph/line boundaries.
+
+    **The single source of truth for document chunking on the gap-fill side.**
+    Every LLM pass that carries the uploaded document must route through this,
+    for the reason C12 exists: three hand-rolled copies of the same loop is how
+    one of them silently ends up truncating instead of chunking. It did — the
+    umbrella probe used `raw_text[:60_000]` for months (C14).
+
+    Guarantees, in this order of importance:
+      1. **Concatenating the result reproduces every non-whitespace character of
+         the input.** Only newlines at a cut point are dropped. Nothing is ever
+         discarded, at any budget, for any input.
+      2. Cuts land on a blank line, else a line break, else — only if the piece
+         contains neither — mid-line at exactly `budget`.
+      3. Always terminates: a cut at offset 0 can only happen when the text
+         starts with the separator, and `lstrip` then removes it, so the same
+         cut cannot recur. An empty piece is never emitted — the previous
+         hand-rolled copies appended one, which cost a whole LLM call carrying
+         an empty document.
+    """
+    budget = max(1, int(budget))
+    chunks: List[str] = []
+    rest = text or ""
+    while rest:
+        if len(rest) <= budget:
+            chunks.append(rest)
+            break
+        cut = rest.rfind("\n\n", 0, budget)
+        if cut == -1:
+            cut = rest.rfind("\n", 0, budget)
+        if cut == -1:
+            cut = budget
+        piece = rest[:cut]
+        # A piece with no non-whitespace content is a whole LLM call carrying an
+        # empty document. Skipping it cannot lose anything — losslessness here is
+        # defined on non-whitespace characters, exactly as `clean_text`'s loss
+        # metric is, and for the same reason (C24).
+        if piece.strip():
+            chunks.append(piece)
+        rest = rest[cut:].lstrip("\n")
+    return chunks or [text or ""]
+
+
+def _rescan_enabled(n_chunks: int) -> bool:
+    """Whether to re-ask every field against every chunk, for a `n_chunks` split."""
+    if _GAP_FILL_RESCAN_MODE in ("1", "true", "yes"):
+        return True
+    if _GAP_FILL_RESCAN_MODE in ("0", "false", "no"):
+        return False
+    return n_chunks > 1                                   # auto
+
+
+# Retained for callers/tests that referenced the old boolean. Under `auto` this
+# is False, which is correct for the single-chunk case it is used to describe.
+_GAP_FILL_FULL_RESCAN = _GAP_FILL_RESCAN_MODE in ("1", "true", "yes")
 
 # Yes/No compliance questions per focused LLM call (see the dedicated compliance
 # pass). Small groups keep per-question diligence high — one call with all ~40
 # questions makes the model rush and borrow a plausible sentence for questions it
 # should omit; a handful per call it reads each carefully against the document.
 _COMPLIANCE_BATCH = int(os.getenv("COMPLIANCE_BATCH", "10"))
+# Constant worst-case size of the rendered questions block (see the compliance
+# batch builder). Same purpose as _MAX_FIELDS_BLOCK_CHARS: keep the document
+# chunk boundaries — i.e. the cached prefix — identical across every batch.
+_MAX_COMPLIANCE_BLOCK_CHARS = int(
+    os.getenv("MAX_COMPLIANCE_BLOCK_CHARS", str(_COMPLIANCE_BATCH * 800))
+)
+
+# OpenAI populates a cached prefix only when a request COMPLETES. Firing every
+# sub-batch concurrently therefore makes ALL of the first _FIELD_BATCH_POOL
+# calls cache MISSES — on a 6-batch run that caps the hit rate near 33%. Running
+# ONE call to completion first, then fanning out the rest, turns those into hits
+# (~83% on the same run).
+#
+# It is NOT free, and it is not unconditionally right. Warming always adds one
+# extra serialized wave: with N batches and pool P, waves go from ceil(N/P) to
+# 1 + ceil((N-1)/P), while cache hits go from max(0, N-P) to N-1. That trade is
+# clearly good when the prefix is large — a 75k-token document costs ~$0.15 in
+# repeated prefills across one wave, and a cached prefill is also much faster to
+# process, so the added wave is largely paid back. It is clearly BAD for a tiny
+# prefix: on a 3 KB document, warming buys about half a cent and costs a whole
+# round trip of wall-clock time the user is sitting through.
+#
+# So warming is gated on the prefix actually being worth caching. Below the
+# threshold the run is short anyway and latency wins; above it, cost wins.
+# LLM_PREFIX_WARMUP=0 disables warming entirely.
+_PREFIX_WARMUP = os.getenv("LLM_PREFIX_WARMUP", "1").strip().lower() not in ("0", "false", "no")
+_PREFIX_WARMUP_MIN_CHARS = int(os.getenv("LLM_PREFIX_WARMUP_MIN_CHARS", "40000"))
+
+# Prefixes already warmed in this process, keyed by (stage, prefix hash).
+#
+# WHY (improving-ll.md C27): warming is worth one serialized wave to POPULATE a
+# cold cache. It is worth nothing once that cache is warm. `_warmup_enabled` was
+# local to `_fill_unmatched_with_gpt`, which `combined_gap_fill` invokes once per
+# OUTER batch — so an 8-batch run warmed the same prefix up to 16 times (8 general
+# + 8 compliance), and batches 2..8 each paid a full extra round trip of
+# user-visible latency to warm a cache batch 1 had already filled. The prefix is
+# identical across outer batches by construction (same system prompt, same facts,
+# same document — that is the whole point of the C1 reordering), so one warm-up
+# per (stage, prefix) is exactly right.
+_warmed_prefixes: set = set()
+_warmup_lock = threading.Lock()
+
+
+def _claim_warmup(stage: str, prefix_key: str) -> bool:
+    """True for the FIRST caller of a given (stage, prefix); False afterwards."""
+    key = f"{stage}:{prefix_key}"
+    with _warmup_lock:
+        if key in _warmed_prefixes:
+            return False
+        _warmed_prefixes.add(key)
+        return True
+
+
+def reset_prefix_warmup() -> None:
+    """Forget warmed prefixes. Called once per submission alongside the budget
+    reset — a new document has a new prefix, and leaving stale keys in a
+    long-lived worker would only grow the set forever."""
+    with _warmup_lock:
+        _warmed_prefixes.clear()
+
+# ── Post-fill slot-value dedup — DEFAULT OFF since 2026-07-29 ────────────────
+# This cleared any repeating-slot field (_A/_B/_C) whose value had already
+# appeared in an earlier sibling. It was built as a safety net for the model
+# copying one value into several slots of a "find N DISTINCT values" group.
+#
+# It is off because it was measured DESTROYING CORRECT DATA on a real ACORD 127
+# run: a 3-vehicle fleet returned complete and correct, and the dedup deleted
+# 40+ cells — garaging city/county/state/postal code, radius of use, rating
+# territory, rate class, collision and comprehensive deductibles, and most
+# coverage indicators — for rows B and C, because a fleet garaged at one address
+# legitimately repeats those values down the column. Row A survived complete;
+# rows B and C came out near-empty.
+#
+# It cannot be made correct here. A gap-fill call only ever sees a SUBSET of a
+# schedule's columns (Pass 1/1.5 resolves some, `_COMBINED_FIELD_BATCH` splits
+# others across outer batches), so "the model copied a value" and "the document
+# really does say the same thing for every row" are indistinguishable from
+# inside this function. Row-level comparison was tried and fails for the same
+# reason — see the note at the dedup site.
+#
+# The asymmetry decides it: a wrongly REPEATED value is visible on the form and
+# the broker fixes it; a wrongly DELETED value is invisible and reads exactly
+# like "the document didn't say". Silent loss of verified document data is the
+# worse failure, and the prompts now carry the constraint directly (the slot
+# block says never copy a value across slots; the table block plus
+# `already_filled` handle row identity).
+#
+# Set SLOT_VALUE_DEDUP=1 to restore it. When on, detected tables and any group
+# under a detected schedule root are still exempt.
+_ENABLE_SLOT_VALUE_DEDUP = os.getenv("SLOT_VALUE_DEDUP", "0").strip().lower() in ("1", "true", "yes")
 
 # Retry backoff for a failed gap-fill call. The dominant failure is an OpenAI
 # TPM (tokens-per-minute) 429 — the whole pipeline ships the document on every
@@ -2714,6 +2958,359 @@ _COMPLIANCE_RESPONSE_FORMAT = {
 }
 
 
+# ── Token accounting ─────────────────────────────────────────────────────────
+# Nothing in this codebase read `resp.usage` before 2026-07-29, so no cost or
+# cache-hit claim could be verified. Every LLM call site now emits one LLM_SPEND
+# line. `cache_pct` is the number that matters: it is the share of the input
+# tokens OpenAI served from its automatic prefix cache (billed at ~10%). A run
+# whose gap-fill calls sit near 0% means the prompt prefix is diverging between
+# calls — see improving-ll.md §3 (C1/C2/C3).
+# Wrapped in a blanket except: telemetry must NEVER be able to break a fill.
+def _log_llm_spend(stage: str, form: str, resp: Any) -> None:
+    try:
+        u = getattr(resp, "usage", None)
+        if u is None:
+            return
+        pt     = int(getattr(u, "prompt_tokens", 0) or 0)
+        ct     = int(getattr(u, "completion_tokens", 0) or 0)
+        cached = int(getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0) or 0)
+        logger.info(
+            "LLM_SPEND stage=%s form=%s in=%d cached=%d out=%d cache_pct=%d",
+            stage, form, pt, cached, ct, (100 * cached // pt) if pt else 0,
+        )
+    except Exception:                                      # pragma: no cover
+        pass
+
+
+# ── Prefix-cache routing key ─────────────────────────────────────────────────
+# `prompt_cache_key` is a ROUTING HINT, not a requirement. OpenAI's automatic
+# prefix caching works without it — measured 99% cache_pct on a live 682k-char
+# run with this disabled — so it is a marginal optimisation at best.
+#
+# It is therefore detected, never assumed. It was previously assumed supported
+# and only disabled after the API rejected it, which cost one wasted full-size
+# call per process: the deployed venv runs `openai==1.54.4`, which predates the
+# parameter, and the check that "confirmed" support had been run against a
+# different interpreter (system Python, `openai==2.30.0`). Inspect the SDK that
+# will actually make the call, at import, and send nothing it cannot accept.
+def _detect_prompt_cache_key_support() -> bool:
+    if os.getenv("PROMPT_CACHE_KEY", "").strip().lower() in ("0", "false", "no"):
+        return False
+    try:
+        import inspect as _inspect
+        from openai.resources.chat.completions import Completions as _C
+        params = _inspect.signature(_C.create).parameters
+        return "prompt_cache_key" in params
+    except Exception:                                      # pragma: no cover
+        return False
+
+
+_PROMPT_CACHE_KEY_SUPPORTED = _detect_prompt_cache_key_support()
+logger.info(
+    "gpt_fill: prompt_cache_key %s (routing hint only — automatic prefix caching "
+    "works regardless)",
+    "enabled" if _PROMPT_CACHE_KEY_SUPPORTED else "not supported by the installed openai SDK",
+)
+
+
+# ── Self-tuning call budget ──────────────────────────────────────────────────
+# `_GPT_CALL_BUDGET_CHARS` is a GUESS about the model's usable input window. Set
+# it too low and a large document is split into needless chunks — each extra
+# chunk multiplies the call count by the number of field sub-batches, which is
+# the dominant cost and latency term on a big package (measured: a 671k-char,
+# 271-page submission made 172 calls at a 380k budget versus 63 at 760k).
+# Set it too HIGH and every call 400s on context length, all three retries burn,
+# `_chat_json` returns {} and whole batches ship BLANK — silently.
+#
+# So the budget shrinks itself. The first context-length rejection halves it
+# process-wide and the affected batch is re-split and retried, instead of the
+# run losing those fields. That makes raising GPT_CALL_BUDGET_CHARS safe to
+# experiment with: guess high, and a wrong guess costs one wasted call rather
+# than a form full of holes.
+_effective_budget_chars = _GPT_CALL_BUDGET_CHARS
+_budget_lock = threading.Lock()
+
+# Per-thread "my own last call overflowed" flag.
+#
+# WHY THIS IS NOT JUST A BUDGET COMPARISON (improving-ll.md C28). The re-split
+# loop used to detect overflow by testing whether the process-global
+# `_effective_budget_chars` had dropped since the batch started. Sub-batches run
+# concurrently on a thread pool, so ONE thread's context rejection made EVERY
+# other in-flight batch conclude that IT had overflowed: each discarded the
+# answers it had already collected and re-ran every chunk from scratch. One
+# genuine overflow therefore cost up to `_FIELD_BATCH_POOL` batches' worth of
+# duplicated LLM calls — wasted spend and wasted latency, for a condition that
+# did not apply to them. Overflow is a property of a specific call, so it is
+# tracked per thread.
+_overflow_state = threading.local()
+
+
+def _note_context_overflow() -> None:
+    _overflow_state.hit = True
+
+
+def _consume_context_overflow() -> bool:
+    """True if THIS thread saw a context-length rejection since the last check."""
+    hit = getattr(_overflow_state, "hit", False)
+    _overflow_state.hit = False
+    return hit
+
+
+def reset_call_budget() -> int:
+    """Restore the call budget to its configured value. Call once per submission.
+
+    `_shrink_budget_after_overflow` only ever DECREASES the budget, and it is
+    process-global, so before this existed a single pathological document halved
+    the budget for every later submission handled by the same worker — quietly
+    doubling their chunk count, call count and cost until the process restarted.
+    Nothing ever put it back.
+
+    Resetting per submission keeps the useful part of the behaviour (a document
+    that overflows teaches the rest of ITS OWN run to use smaller chunks, across
+    all outer batches) and drops the harmful part (that lesson leaking into
+    unrelated submissions). The cost of being wrong is one wasted call on the
+    next genuinely oversized document, which is exactly what the shrink-and-retry
+    path is built to absorb.
+    """
+    global _effective_budget_chars
+    with _budget_lock:
+        if _effective_budget_chars != _GPT_CALL_BUDGET_CHARS:
+            logger.info(
+                "gpt_fill: restoring call budget %d -> %d chars for a new submission "
+                "(a previous document had shrunk it; that must not be inherited)",
+                _effective_budget_chars, _GPT_CALL_BUDGET_CHARS,
+            )
+        _effective_budget_chars = _GPT_CALL_BUDGET_CHARS
+        return _effective_budget_chars
+# How many halvings one batch may ride out. 5 spans a 32x over-estimate; the
+# shrink floors at 40k chars so the loop always terminates.
+_CONTEXT_SHRINK_ATTEMPTS = int(os.getenv("CONTEXT_SHRINK_ATTEMPTS", "5"))
+
+_CONTEXT_ERROR_MARKERS = (
+    "context length", "context_length", "maximum context",
+    "too many tokens", "reduce the length", "string too long",
+)
+
+
+def _is_context_length_error(err: Exception) -> bool:
+    status = getattr(err, "status_code", None) or getattr(
+        getattr(err, "response", None), "status_code", None
+    )
+    if status not in (400, 413):
+        return False
+    msg = str(err).lower()
+    return any(m in msg for m in _CONTEXT_ERROR_MARKERS)
+
+
+def _shrink_budget_after_overflow(err: Exception) -> int:
+    """Halve the call budget process-wide. Returns the new budget."""
+    global _effective_budget_chars
+    with _budget_lock:
+        new = max(40_000, _effective_budget_chars // 2)
+        if new < _effective_budget_chars:
+            logger.error(
+                "gpt_fill: model rejected the prompt on CONTEXT LENGTH — halving the call "
+                "budget %d -> %d chars for the rest of this process and re-splitting the "
+                "affected batch. GPT_CALL_BUDGET_CHARS is set too high for this model; "
+                "lower it in the environment so future runs do not pay for this. err=%s",
+                _effective_budget_chars, new, str(err)[:200],
+            )
+            _effective_budget_chars = new
+        return _effective_budget_chars
+
+
+def _is_response_format_rejection(err: Exception) -> bool:
+    """True only when `err` means 'this model/SDK will not accept that
+    response_format' — i.e. retrying with json_object is worth a second call.
+
+    Deliberately narrow. The previous code fell back on ANY exception, so a
+    timeout or a 429 (where OpenAI had already processed and BILLED the first
+    request) immediately fired a second full-prompt call. A context-length 400
+    likewise re-billed a call that could not possibly succeed. See
+    improving-ll.md C7.
+    """
+    status = getattr(err, "status_code", None) or getattr(
+        getattr(err, "response", None), "status_code", None
+    )
+    if status is None and isinstance(err, (TypeError, ValueError)):
+        return True          # SDK rejected the kwarg locally; no request was sent
+    if status != 400:
+        return False
+    msg = str(err).lower()
+    return any(m in msg for m in ("response_format", "json_schema", "additionalproperties"))
+
+
+def _salvage_truncated_json(text: str) -> Optional[dict]:
+    """Best-effort recovery of a JSON object cut off by the output-token cap.
+
+    A reply truncated mid-object raises JSONDecodeError. Re-sending the whole
+    prompt (the old behaviour) re-bills every input token to get the SAME
+    truncation at temperature 0, after the wasted output was already paid for.
+    Instead, rewind to the last completed element and close the open brackets:
+    the answers the model DID finish are perfectly good.
+
+    Returns the salvaged dict, or None when nothing complete can be recovered.
+    Never raises.
+    """
+    try:
+        s = (text or "").strip()
+        start = s.find("{")
+        if start == -1:
+            return None
+        s = s[start:]
+        stack: List[str] = []
+        in_str = esc = False
+        cut = -1
+        cut_stack: List[str] = []
+        for i, ch in enumerate(s):
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                stack.append("}")
+            elif ch == "[":
+                stack.append("]")
+            elif ch in "}]":
+                if stack:
+                    stack.pop()
+            elif ch == "," and stack:
+                # Everything before this comma is a complete element at this depth.
+                cut, cut_stack = i, list(stack)
+        if cut == -1:
+            return None
+        candidate = s[:cut] + "".join(reversed(cut_stack))
+        parsed = json.loads(candidate)
+        return parsed if isinstance(parsed, dict) and parsed else None
+    except Exception:                                      # pragma: no cover
+        return None
+
+
+# ── General field-fill system prompt ─────────────────────────────────────────
+# MODULE-LEVEL AND FORM-AGNOSTIC ON PURPOSE — do not reintroduce an f-string.
+# This is sent as the `system` message of every gap-fill call. It used to be
+# built inside _fill_unmatched_with_gpt with the form id interpolated into line
+# one, which caused two separate defects (improving-ll.md C2):
+#   1. combined_gap_fill passes a BATCH LABEL as form_id, so the model was
+#      literally told "You are filling ACORD form COMBINED_B1of2" — it never
+#      learned which ACORD form it was actually filling.
+#   2. A per-batch system message means the cached prefix diverges at the first
+#      few tokens of every call, so NOTHING cached.
+# The real form identity is now supplied by the user message (see
+# _build_user_prompt), where it is constant within a run and therefore still
+# lands inside the cacheable prefix.
+#
+# ABSENCE CONVENTION: this prompt states OMISSION, and only omission, as the way
+# to say "no value". It previously said "return JSON null" ~12 times against a
+# single "omit" block, so the model emitted explicit nulls that _absorb threw
+# away on arrival — pure waste at 6x the input price (improving-ll.md C5).
+# Omitted and null are already treated identically by the caller
+# (_is_empty_llm_value), so this is a cost change, not a behaviour change.
+_PROMPT_SKELETON = (
+    "You are filling an ACORD insurance form for an insurance submission.\n"
+    "You have two sources to fill fields from:\n"
+    "  1. EXTRACTED FACTS — structured JSON of key/value pairs already extracted from the\n"
+    "     document. Use a fact value when the field meaning matches the fact key.\n"
+    "     Boolean facts (has_general_liability, is_contractor, has_auto_coverage, etc.)\n"
+    "     directly answer Yes/No checkbox fields.\n"
+    "  2. RAW DOCUMENT TEXT — the full document text. Use this for any field not already\n"
+    "     answered by EXTRACTED FACTS.\n\n"
+    "PRIMARY RULE: Fill EVERY field you can from either source. "
+    "Copy values verbatim. Do not invent or paraphrase — if a value is not present in\n"
+    "either source, OMIT that field entirely.\n\n"
+    "Return exactly three keys:\n"
+    '  "values":            {FieldName: <string value>}   (include ONLY fields you filled)\n'
+    '  "raw_text_sourced":  [FieldName, ...]  (list only fields whose value came from raw text)\n'
+    '  "question_grounding":{FieldName: <short verbatim quote>}  (every Question-code field\n'
+    '                        and every checkbox — Yes/No field — see rule 8)\n\n'
+    "ABSENCE PROTOCOL — read carefully:\n"
+    "  When a field's value is not present in the document text, you MUST leave that field "
+    "OUT of the \"values\" object entirely. You MUST NOT return any of the following strings as a "
+    "stand-in: \"null\", \"None\", \"N/A\", \"NA\", \"Not Provided\", \"Not Specified\", "
+    "\"Not Available\", \"Not Applicable\", \"Unknown\", \"TBD\", \"Undefined\", \"\". "
+    "These strings will be discarded as if you had returned no value at all — which makes "
+    "the response useless. If the value is missing, omit the key. If the value "
+    "is present but extremely short (e.g., a single digit, a single letter, a single word), "
+    "return that exact string — short is fine, sentinel strings are not.\n\n"
+    "OMIT-WHEN-UNKNOWN PROTOCOL (REQUIRED — affects response size):\n"
+    "  When you have no value for a field you MUST omit it from the \"values\" object. "
+    "Do NOT emit explicit JSON nulls for absent fields — omission is the required form. "
+    "An omitted field is treated identically to null by the caller. "
+    "This rule is mandatory: a response that lists every field with null will exceed the "
+    "output-token cap and lose answers at the end. Only include fields you actually filled. "
+    "Do NOT include a field in \"raw_text_sourced\" unless you actually copied its value "
+    "from the document text.\n\n"
+    "Rules:\n"
+    "  1. EXACT values only — copy verbatim from the document text. Do not paraphrase or invent.\n"
+    "  2. Omit the field entirely when the value is genuinely absent. Never emit an explicit\n"
+    "     JSON null, and never the string \"null\".\n"
+    "  3. Checkbox/indicator fields (marked 'checkbox — Yes/No'): return \"Yes\" or \"No\" ONLY.\n"
+    "     If the document does not say one way or the other, OMIT the field — do NOT default to \"No\".\n"
+    "     Every Yes/No you give here also needs a grounding quote in \"question_grounding\" — see rule 8.\n"
+    "     Examples of how to fill checkboxes:\n"
+    "     - Policy_Status_BoundIndicator: \"Yes\" if the document is a bound policy, else \"No\"\n"
+    "     - Policy_Status_QuoteIndicator: \"Yes\" if document is a quote/application, else \"No\"\n"
+    "     - Policy_LineOfBusiness_CommercialGeneralLiability: \"Yes\" if GL coverage is requested\n"
+    "     - NamedInsured_LegalEntity_CorporationIndicator: \"Yes\" if entity type is Corporation\n"
+    "     - BusinessInformation_BusinessType_ContractorIndicator: \"Yes\" if business is a contractor\n"
+    "     - LossHistory_NoPriorLossesIndicator: \"Yes\" only if the document clearly indicates the insured has no prior/known losses (by meaning - e.g. \"no known losses\", \"loss-free\", \"clean loss history\"); NEVER infer \"Yes\" from losses simply being unmentioned. If it does not clearly say so, omit the field.\n"
+    "  4. Dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
+    "  5. Do NOT fill premium/rate/underwriter-computed fields — omit them.\n"
+    "  6. List ALL fields you fill in raw_text_sourced. Do NOT list fields you omitted.\n"
+    "  7. REPEATING GROUP fields (shown as '── REPEATING GROUP … ──' blocks in the field list):\n"
+    "     These are sibling fields sharing the same base name but different _A/_B/_C suffixes.\n"
+    "     They represent separate sequential entries — not repeated copies of one value.\n"
+    "       a) Find each separate real value of that type in the document, in the order they appear.\n"
+    "       b) Put the 1st one you find in slot _A, the 2nd in slot _B, the 3rd in slot _C, and so on.\n"
+    "       c) NEVER copy the same value into multiple slots — that is always wrong.\n"
+    "       d) If the document has fewer values than slots, leave the extra slots out entirely.\n"
+    "       e) A slot's value must be copied verbatim from the document (a name, amount, date, …).\n"
+    "          NEVER write text that describes the slot itself (e.g. never output the words\n"
+    "          'first value', '2nd distinct value', or any ordinal/counting phrase as if it were\n"
+    "          the answer — that describes what to do, it is not a value).\n"
+    "     Example: 3 slots for Insurer_FullName but only 2 insurer names found →\n"
+    "       _A = \"Acme Insurance\", _B = \"Beta Insurance\", and _C left out entirely.\n\n"
+    "  8. EVERY Yes/No answer needs a grounding quote. This covers THREE field shapes:\n"
+    "     - Question-code fields (name contains \"_Question_<code>Code_\"; the form's\n"
+    "       compliance Yes/No questions, e.g. \"...any exposure to radioactive materials\").\n"
+    "     - EVERY checkbox field marked 'checkbox — Yes/No' in the field list, whatever it is\n"
+    "       named - auto ownership, building features, coverage accept/reject, entity type, line\n"
+    "       of business, anything else. One additionally marked [HIGH-IMPACT] is a field the\n"
+    "       client specifically flagged (auto ownership / hired-non-owned / leasing /\n"
+    "       hazardous-materials / maintenance) and deserves particular care, but this rule\n"
+    "       applies equally to every checkbox, labeled or not.\n"
+    "     - Any other field whose own description says \"Enter Y for a Yes response... Input\n"
+    "       N for a No response\" (a plain text Yes/No field that is neither a checkbox nor a\n"
+    "       Question-code field, e.g. a spoilage or refrigeration-maintenance Y/N field).\n"
+    "       a) Answer \"Y\"/\"Yes\" or \"N\"/\"No\" ONLY when the document explicitly addresses\n"
+    "          that exact question. If the document never mentions the topic, OMIT the field\n"
+    "          - do NOT answer from silence and do NOT default to \"N\"/\"No\".\n"
+    "       b) For EVERY such answer you give, add an entry to \"question_grounding\":\n"
+    "          {FieldName: quote}, where quote is a short VERBATIM excerpt copied from the\n"
+    "          document that is your specific basis for THAT answer.\n"
+    "          - When the document poses the question and states the answer beside it\n"
+    "            (e.g. \"Are any vehicles leased to others? No\" or \"Is there a vehicle\n"
+    "            maintenance program in operation? Yes\"), cite the WHOLE question-and-answer\n"
+    "            together, and you MUST INCLUDE the \"Yes\"/\"No\"/\"Y\"/\"N\" answer word itself\n"
+    "            inside the quote - the quote is not valid proof without it.\n"
+    "          - Otherwise, for a \"N\", the quote MUST be the sentence where the document\n"
+    "            denies the topic (e.g. \"has no prior cancellations\"); never cite an\n"
+    "            unrelated sentence just to have a quote.\n"
+    "          Do not reuse the same quote for more than one question.\n"
+    "       c) Whenever you answer \"Y\" and the form has a matching \"...Explanation\" or\n"
+    "          \"...OtherDescription\" field for that question, ALSO fill that field with the\n"
+    "          specific detail from the document (the same content as your grounding quote\n"
+    "          is fine).\n\n"
+)
+_SKELETON_CHARS = len(_PROMPT_SKELETON)
+
+
 def _compliance_question_text(tooltip: str) -> str:
     """Extract the human-readable question from an ACORD Yes/No field tooltip.
 
@@ -2798,8 +3395,15 @@ def _fill_unmatched_with_gpt(
     model: str = None,
     raw_text: str = "",
     already_filled: Optional[dict] = None,
+    form_label: Optional[str] = None,
 ) -> dict:
     """GPT form-fill: fills unmatched fields from structured facts + full raw document text.
+
+    ``form_id`` is a LOGGING/telemetry label only. ``combined_gap_fill`` passes a
+    batch label ("COMBINED_B1of2") for it, which is useful in logs and useless to
+    the model. ``form_label`` is what the MODEL is told it is filling — pass the
+    real ACORD form name(s) (e.g. "ACORD_125, ACORD_25"). Defaults to ``form_id``
+    so every existing caller keeps its current behaviour.
 
     Strategy — single-pass chunking:
       Everything (facts + fields + raw text) goes into one prompt per chunk.
@@ -2832,6 +3436,8 @@ def _fill_unmatched_with_gpt(
     already captured, and duplicates it there instead of finding the next one.
     """
     already_filled = already_filled or {}
+    # What the MODEL is told it is filling. Never the batch label — see docstring.
+    form_label = form_label or form_id
     if not unmatched_fields:
         return {"filled_values": {}, "new_mappings": {}, "raw_text_fields": set(), "question_grounding": {}, "model_used": model or GPT_MODEL}
 
@@ -3051,7 +3657,8 @@ def _fill_unmatched_with_gpt(
             f"  RULE: Find up to {n_total} separate real values in the document, in the order\n"
             f"  they appear. Put the 1st one you find in slot _A, the 2nd in slot _B, and so on.\n"
             f"  NEVER copy the same value into more than one slot.\n"
-            f"  If fewer than {n_total} values exist, set the remaining slots to JSON null.\n"
+            f"  If fewer than {n_total} values exist, leave the remaining slots OUT of your\n"
+            f"  response entirely — never invent a value to fill a slot.\n"
             f"  CRITICAL: a slot's value must be an ACTUAL value copied from the document\n"
             f"  (e.g. a name, an amount, a date) - NEVER the words describing which slot it is\n"
             f"  (never write things like 'first value', '2nd distinct value', or any text\n"
@@ -3060,7 +3667,7 @@ def _fill_unmatched_with_gpt(
         for i, slot_field in enumerate(active_slots):
             ordinal = _ORDINALS[i] if i < len(_ORDINALS) else f"{i + 1}th"
             req     = " [REQUIRED]" if (eligible_fields.get(slot_field) or {}).get("required") else ""
-            lines.append(f"  - {slot_field}{req} → slot {i + 1} of {n_total} (null if fewer values exist)")
+            lines.append(f"  - {slot_field}{req} → slot {i + 1} of {n_total} (omit if fewer values exist)")
         lines.append("  ──────────────────────────────────────────")
         return "\n".join(lines)
 
@@ -3143,10 +3750,10 @@ def _fill_unmatched_with_gpt(
             "       row's entry — never reuse or borrow a value that belongs to a\n"
             "       different entry, a different row, or an unrelated part of the document.\n"
             "    b) If a column's data is not stated for an entry you ARE filling (e.g. no\n"
-            "       deductible was given for that item), leave THAT CELL null — do not\n"
-            "       guess, and do not reuse a nearby number or sentence from elsewhere.\n"
-            "    c) If there are fewer distinct entries than rows, leave the REMAINING\n"
-            "       ROWS entirely null (every column null) — never invent an entry.\n"
+            "       deductible was given for that item), OMIT THAT CELL's field entirely — do\n"
+            "       not guess, and do not reuse a nearby number or sentence from elsewhere.\n"
+            "    c) If there are fewer distinct entries than rows, OMIT the REMAINING\n"
+            "       ROWS entirely (every column of them) — never invent an entry.\n"
             "    d) NEVER split one entry's data across two rows, and NEVER duplicate one\n"
             "       entry's data into two rows.\n"
             "    e) A column with no field name listed below for a given row is not part\n"
@@ -3162,102 +3769,11 @@ def _fill_unmatched_with_gpt(
         return "\n".join(lines)
 
     # ── Prompt builder ───────────────────────────────────────────────────────
-    _PROMPT_SKELETON = (
-        f"You are filling ACORD form {form_id} for an insurance submission.\n"
-        "You have two sources to fill fields from:\n"
-        "  1. EXTRACTED FACTS — structured JSON of key/value pairs already extracted from the\n"
-        "     document. Use a fact value when the field meaning matches the fact key.\n"
-        "     Boolean facts (has_general_liability, is_contractor, has_auto_coverage, etc.)\n"
-        "     directly answer Yes/No checkbox fields.\n"
-        "  2. RAW DOCUMENT TEXT — the full document text. Use this for any field not already\n"
-        "     answered by EXTRACTED FACTS.\n\n"
-        "PRIMARY RULE: Fill EVERY field you can from either source. "
-        "Copy values verbatim. Do not invent or paraphrase — if a value is not present in\n"
-        "either source, return JSON null for that field.\n\n"
-        "Return exactly three keys:\n"
-        '  "values":            {FieldName: <string value> OR JSON null}\n'
-        '  "raw_text_sourced":  [FieldName, ...]  (list only fields whose value came from raw text)\n'
-        '  "question_grounding":{FieldName: <short verbatim quote>}  (every Question-code field\n'
-        '                        and every checkbox — Yes/No field — see rule 8)\n\n'
-        "ABSENCE PROTOCOL — read carefully:\n"
-        "  When a field's value is not present in the document text, you MUST use JSON null "
-        "(the unquoted literal null). You MUST NOT return any of the following strings as a "
-        "stand-in for null: \"null\", \"None\", \"N/A\", \"NA\", \"Not Provided\", \"Not Specified\", "
-        "\"Not Available\", \"Not Applicable\", \"Unknown\", \"TBD\", \"Undefined\", \"\". "
-        "These strings will be discarded as if you had returned no value at all — which makes "
-        "the response useless. If the value is missing, write null with no quotes. If the value "
-        "is present but extremely short (e.g., a single digit, a single letter, a single word), "
-        "return that exact string — short is fine, sentinel strings are not.\n\n"
-        "OMIT-WHEN-UNKNOWN PROTOCOL (REQUIRED — affects response size):\n"
-        "  When you have no value for a field you MUST omit it from the \"values\" object. "
-        "Do NOT emit explicit JSON nulls for absent fields — omission is the required form. "
-        "An omitted field is treated identically to null by the caller. "
-        "This rule is mandatory: a response that lists every field with null will exceed the "
-        "output-token cap and lose answers at the end. Only include fields you actually filled. "
-        "Do NOT include a field in \"raw_text_sourced\" unless you actually copied its value "
-        "from the document text.\n\n"
-        "Rules:\n"
-        "  1. EXACT values only — copy verbatim from the document text. Do not paraphrase or invent.\n"
-        "  2. Use JSON null (unquoted) when the value is genuinely absent. Never the string \"null\".\n"
-        "  3. Checkbox/indicator fields (marked 'checkbox — Yes/No'): return \"Yes\" or \"No\" ONLY.\n"
-        "     If the document does not say one way or the other, return null — do NOT default to \"No\".\n"
-        "     Every Yes/No you give here also needs a grounding quote in \"question_grounding\" — see rule 8.\n"
-        "     Examples of how to fill checkboxes:\n"
-        "     - Policy_Status_BoundIndicator: \"Yes\" if the document is a bound policy, else \"No\"\n"
-        "     - Policy_Status_QuoteIndicator: \"Yes\" if document is a quote/application, else \"No\"\n"
-        "     - Policy_LineOfBusiness_CommercialGeneralLiability: \"Yes\" if GL coverage is requested\n"
-        "     - NamedInsured_LegalEntity_CorporationIndicator: \"Yes\" if entity type is Corporation\n"
-        "     - BusinessInformation_BusinessType_ContractorIndicator: \"Yes\" if business is a contractor\n"
-        "     - LossHistory_NoPriorLossesIndicator: \"Yes\" only if the document clearly indicates the insured has no prior/known losses (by meaning - e.g. \"no known losses\", \"loss-free\", \"clean loss history\"); NEVER infer \"Yes\" from losses simply being unmentioned. If it does not clearly say so, return null.\n"
-        "  4. Dollar amounts: include $ and commas as found (e.g. $1,000,000).\n"
-        "  5. Do NOT fill premium/rate/underwriter-computed fields — return null.\n"
-        "  6. List ALL fields you fill in raw_text_sourced. Do NOT list fields you returned null for.\n"
-        "  7. REPEATING GROUP fields (shown as '── REPEATING GROUP … ──' blocks below):\n"
-        "     These are sibling fields sharing the same base name but different _A/_B/_C suffixes.\n"
-        "     They represent separate sequential entries — not repeated copies of one value.\n"
-        "       a) Find each separate real value of that type in the document, in the order they appear.\n"
-        "       b) Put the 1st one you find in slot _A, the 2nd in slot _B, the 3rd in slot _C, and so on.\n"
-        "       c) NEVER copy the same value into multiple slots — that is always wrong.\n"
-        "       d) If the document has fewer values than slots, set the extra slots to JSON null.\n"
-        "       e) A slot's value must be copied verbatim from the document (a name, amount, date, …).\n"
-        "          NEVER write text that describes the slot itself (e.g. never output the words\n"
-        "          'first value', '2nd distinct value', or any ordinal/counting phrase as if it were\n"
-        "          the answer — that describes what to do, it is not a value).\n"
-        "     Example: 3 slots for Insurer_FullName but only 2 insurer names found →\n"
-        "       _A = \"Acme Insurance\", _B = \"Beta Insurance\", _C = null (unquoted).\n\n"
-        "  8. EVERY Yes/No answer needs a grounding quote. This covers THREE field shapes:\n"
-        "     - Question-code fields (name contains \"_Question_<code>Code_\"; the form's\n"
-        "       compliance Yes/No questions, e.g. \"...any exposure to radioactive materials\").\n"
-        "     - EVERY checkbox field marked 'checkbox — Yes/No' above, whatever it is named -\n"
-        "       auto ownership, building features, coverage accept/reject, entity type, line of\n"
-        "       business, anything else. One additionally marked [HIGH-IMPACT] is a field the\n"
-        "       client specifically flagged (auto ownership / hired-non-owned / leasing /\n"
-        "       hazardous-materials / maintenance) and deserves particular care, but the rule\n"
-        "       below applies equally to every checkbox, labeled or not.\n"
-        "     - Any other field whose own description says \"Enter Y for a Yes response... Input\n"
-        "       N for a No response\" (a plain text Yes/No field that is neither a checkbox nor a\n"
-        "       Question-code field, e.g. a spoilage or refrigeration-maintenance Y/N field).\n"
-        "       a) Answer \"Y\"/\"Yes\" or \"N\"/\"No\" ONLY when the document explicitly addresses\n"
-        "          that exact question. If the document never mentions the topic, return null for\n"
-        "          the field - do NOT answer from silence and do NOT default to \"N\"/\"No\".\n"
-        "       b) For EVERY such answer you give, add an entry to \"question_grounding\":\n"
-        "          {FieldName: quote}, where quote is a short VERBATIM excerpt copied from the\n"
-        "          document that is your specific basis for THAT answer.\n"
-        "          - When the document poses the question and states the answer beside it\n"
-        "            (e.g. \"Are any vehicles leased to others? No\" or \"Is there a vehicle\n"
-        "            maintenance program in operation? Yes\"), cite the WHOLE question-and-answer\n"
-        "            together, and you MUST INCLUDE the \"Yes\"/\"No\"/\"Y\"/\"N\" answer word itself\n"
-        "            inside the quote - the quote is not valid proof without it.\n"
-        "          - Otherwise, for a \"N\", the quote MUST be the sentence where the document\n"
-        "            denies the topic (e.g. \"has no prior cancellations\"); never cite an\n"
-        "            unrelated sentence just to have a quote.\n"
-        "          Do not reuse the same quote for more than one question.\n"
-        "       c) Whenever you answer \"Y\" and the form has a matching \"...Explanation\" or\n"
-        "          \"...OtherDescription\" field for that question, ALSO fill that field with the\n"
-        "          specific detail from the document (the same content as your grounding quote\n"
-        "          is fine).\n\n"
-    )
-    _SKELETON_CHARS = len(_PROMPT_SKELETON)
+    # _PROMPT_SKELETON / _SKELETON_CHARS are now MODULE-LEVEL constants (see the
+    # definition above _compliance_question_text). They used to be rebuilt here per
+    # call with the form id interpolated, which broke prefix caching and fed the
+    # model a batch label instead of a real ACORD form name. The form identity now
+    # travels in the user message as `form_label`.
 
     # ── Build a clean, PII-stripped JSON facts block once per call ───────────
     # Strips PII keys, unwraps {value, confidence} envelopes, drops null/empty
@@ -3299,21 +3815,127 @@ def _fill_unmatched_with_gpt(
         len(_facts_block_text) + len(_FACTS_SECTION_WRAPPER) if _facts_block_present else 0
     )
 
-    # Fixed overhead per call: skeleton + fields header + footer + facts block
-    _FIXED_OVERHEAD = _SKELETON_CHARS + 200 + _FACTS_BLOCK_CHARS
+    # Fixed overhead per call: skeleton + form-label line + fields header + the
+    # "CRITICAL - JSON KEYS" block + JSON-return footer + facts block.
+    # 1200 is a deliberate over-estimate of those wrapper strings (~750 actual,
+    # plus the form label twice) so the raw-text budget can never be computed too
+    # large. **Raise this whenever text is added around the field list** — it was
+    # 400, and adding the JSON-keys block silently pushed prompts past the call
+    # budget until `tests/test_full_document_coverage.py` caught it. That is the
+    # same defect class as C12: the budget must know about every byte the prompt
+    # builder emits.
+    _FIXED_OVERHEAD = _SKELETON_CHARS + 1200 + _FACTS_BLOCK_CHARS
+
+    # Cache-routing key for this submission. Every call made by this invocation
+    # shares the same (facts + document) prefix, so they must share one key —
+    # that is what tells OpenAI's router to send them to the same cache. It is
+    # derived from the CONTENT, so two different submissions never collide and a
+    # re-run of the same submission reuses a still-warm cache.
+    import hashlib as _hashlib
+    _prefix_cache_key = _hashlib.md5(
+        (_facts_block_text + "\x00" + raw_text).encode("utf-8", "ignore"),
+        usedforsecurity=False,
+    ).hexdigest()[:24]
+
+    # Roughly how much constant text every call in this invocation will repeat.
+    # Warming only pays for itself once this is substantial — see _PREFIX_WARMUP.
+    _est_prefix_chars = _FIXED_OVERHEAD + len(raw_text)
+    _warmup_worthwhile = _PREFIX_WARMUP and _est_prefix_chars >= _PREFIX_WARMUP_MIN_CHARS
+
+    def _should_warm(stage: str) -> bool:
+        """Warm only if the prefix is big enough to be worth a serialized wave AND
+        nobody in this process has already warmed it (C27)."""
+        if not _warmup_worthwhile:
+            return False
+        return _claim_warmup(stage, _prefix_cache_key)
+    logger.info(
+        "gpt_fill: form=%s prefix~%d chars warmup_worthwhile=%s (threshold %d)",
+        form_id, _est_prefix_chars, _warmup_worthwhile, _PREFIX_WARMUP_MIN_CHARS,
+    )
 
     def _build_user_prompt(active_fields: List[str], raw_chunk: str, chunk_idx: int, total_chunks: int) -> str:
-        """Build the variable portion of the prompt (fields + document text).
+        """Build the user message: form identity + facts + document text + fields.
 
-        The stable instructions live in _PROMPT_SKELETON and are passed as a
-        separate system message so OpenAI's automatic prompt caching can
-        reuse them across calls for the same form_id. On gpt-4o / gpt-4o-mini
-        any prefix ≥1024 tokens is cached automatically — combined with the
-        per-form skeleton + form-id this can cut input token cost ~50% and
-        TTFT noticeably on hot forms (ACORD 125 etc.).
+        ORDER IS LOAD-BEARING — do not rearrange without reading this.
+
+        OpenAI's automatic prefix cache matches from the very FIRST token of the
+        request and bills a hit at ~10%. Everything that is constant for a run
+        must therefore come BEFORE anything that varies per call:
+
+            [system: _PROMPT_SKELETON]   constant  (module-level, form-agnostic)
+            form label                   constant within a run
+            EXTRACTED FACTS              constant within a run
+            RAW DOCUMENT TEXT            constant within a run (see _raw_budget)
+            ---------------------------- cache boundary ----------------------
+            Fields to fill               VARIES per sub-batch
+            JSON return instruction
+
+        This function previously emitted the field list FIRST, so the prefix
+        diverged within a few hundred tokens of every call and nothing ever
+        cached — the single largest line item in this pipeline's bill
+        (improving-ll.md C1). A real 2-form run re-shipped ~23.8k identical
+        chars on each of ~17 calls.
+
+        Facts stay AHEAD of the raw text, exactly as before. That relative order
+        is deliberate: the skeleton labels facts the PRIMARY source and raw text
+        the SECONDARY one, and models weight position as well as labels. Putting
+        the raw text first would have been equally cacheable but would have
+        physically demoted the primary source — an avoidable quality risk, so it
+        was not done. Only the field list moved.
 
         Grouped repeating-slot fields are rendered as visual GROUP blocks so
         the LLM can reason about all siblings at once before assigning values.
+        """
+        fields_block = _render_fields_block(active_fields)
+        facts_section = (
+            "\n\n=== EXTRACTED FACTS (PRIMARY SOURCE — already verified by document analyzer) ===\n"
+            f"{_facts_block_text}\n"
+            "=== END EXTRACTED FACTS ===\n"
+        ) if _facts_block_present else ""
+        raw_section  = (
+            f"\n\n=== RAW DOCUMENT TEXT (SECONDARY SOURCE — chunk {chunk_idx + 1}/{total_chunks}) ===\n{raw_chunk}"
+            if raw_chunk else ""
+        )
+        return (
+            f"ACORD form(s) being filled: {form_label}"
+            + facts_section
+            + raw_section
+            + f"\n\nFields to fill ({form_label}):\n{fields_block}"
+            # Last thing the model reads, and it earns its place. On a very long
+            # document (a 682k-char package is ~170k tokens) the model starts
+            # IGNORING the field list and answering under invented keys of its
+            # own devising - observed live 2026-07-29: a call that sent 39 fields
+            # got back 60 answers named "Producer_Name", "Applicant_Name",
+            # "GL_Limit_EachOccurrence"... none of which exist in any ACORD
+            # schema. The data was right; the keys were made up, so 57 of 60
+            # answers were discarded and the batch filled 3 fields. Restating the
+            # constraint at the very end is the cheapest lever against that, and
+            # it sits after the field list so the cached prefix is unaffected.
+            + "\n\nCRITICAL - JSON KEYS: every key in \"values\" MUST be copied "
+              "CHARACTER-FOR-CHARACTER from the field list above, including its "
+              "_A/_B/_C row suffix. Do NOT invent, shorten, prettify or translate "
+              "a field name. Any key that is not in that list is DISCARDED and "
+              "its answer is lost. If you found a value but cannot match it to a "
+              "listed field name, omit it rather than filing it under a new name."
+            + '\n\nReturn ONLY valid JSON: {"values": {...}, "raw_text_sourced": [...], "question_grounding": {...}}'
+        )
+
+    def _render_fields_block(active_fields: List[str]) -> str:
+        """Render the fields section exactly as it will be sent.
+
+        SINGLE SOURCE OF TRUTH, and it must stay that way. `_raw_budget` sizes
+        the document chunk by subtracting this block's length from the call
+        budget, so if the two ever disagree the budget is wrong. They DID
+        disagree: `_raw_budget` used to estimate with `_field_spec()` (one short
+        line per field) while this rendering routes multi-slot and table fields
+        through `_slot_group_block()` / `_table_group_block()`, which are several
+        times longer. On a group-heavy batch the estimate under-counted, too much
+        raw text was packed in, and the assembled prompt ran ~16% past the call
+        budget - measured at 69,879 chars against a 60,000 budget on ACORD 140.
+        In production that lands as a context-length 400 → three dead retries →
+        `_chat_json` returns {} → the whole batch silently BLANK, which is
+        indistinguishable from the model having nothing to say.
+        See tests/test_full_document_coverage.py.
         """
         # Separate active_fields into singles and per-base slot groups.
         # Bug fix: ACORD's row-letter suffix convention means nearly every field
@@ -3348,23 +3970,7 @@ def _fill_unmatched_with_gpt(
             parts.append(_slot_group_block(_gk, _slots))
         for _bucket, _col_fields in sorted(active_table_buckets.items()):
             parts.append(_table_group_block(_bucket, _col_fields))
-
-        fields_block = "\n".join(parts)
-        facts_section = (
-            "\n\n=== EXTRACTED FACTS (PRIMARY SOURCE — already verified by document analyzer) ===\n"
-            f"{_facts_block_text}\n"
-            "=== END EXTRACTED FACTS ===\n"
-        ) if _facts_block_present else ""
-        raw_section  = (
-            f"\n\n=== RAW DOCUMENT TEXT (SECONDARY SOURCE — chunk {chunk_idx + 1}/{total_chunks}) ===\n{raw_chunk}"
-            if raw_chunk else ""
-        )
-        return (
-            f"Fields to fill ({form_id}):\n{fields_block}"
-            + facts_section
-            + raw_section
-            + '\n\nReturn ONLY valid JSON: {"values": {...}, "raw_text_sourced": [...], "question_grounding": {...}}'
-        )
+        return "\n".join(parts)
 
     # Kept under the old name for any external callers; new code should use
     # _build_user_prompt + _PROMPT_SKELETON as a system message.
@@ -3372,7 +3978,8 @@ def _fill_unmatched_with_gpt(
         return _PROMPT_SKELETON + _build_user_prompt(active_fields, raw_chunk, chunk_idx, total_chunks)
 
     # ── LLM caller with retry (reusable for any system+user+schema) ───────────
-    def _chat_json(system_msg: str, user_msg: str, response_format: dict) -> dict:
+    def _chat_json(system_msg: str, user_msg: str, response_format: dict,
+                   stage: str = "gap_fill") -> dict:
         # Runs on ThreadPoolExecutor worker threads. This is DELIBERATELY fully
         # synchronous: the previous implementation wrapped an async call in
         # asyncio.run(), creating a fresh event loop per call while sharing one
@@ -3382,44 +3989,88 @@ def _fill_unmatched_with_gpt(
         # _get_openai_form_fill_client_sync() for the full analysis.
         from utils.llm_limiter import llm_slot_sync
 
-        def _inner() -> str:
+        def _create(rf: dict) -> str:
+            global _PROMPT_CACHE_KEY_SUPPORTED
+            kwargs = dict(
+                model=llm_model,
+                messages=[
+                    {"role": "system", "content": system_msg},
+                    {"role": "user",   "content": user_msg},
+                ],
+                temperature=GPT_TEMPERATURE,
+                response_format=rf,
+                max_completion_tokens=_FORM_FILL_MAX_TOKENS,
+            )
+            if _PROMPT_CACHE_KEY_SUPPORTED:
+                kwargs["prompt_cache_key"] = f"{stage}:{_prefix_cache_key}"
             with llm_slot_sync():
                 try:
-                    resp = _sync_client.chat.completions.create(
-                        model=llm_model,
-                        messages=[
-                            {"role": "system", "content": system_msg},
-                            {"role": "user",   "content": user_msg},
-                        ],
-                        temperature=GPT_TEMPERATURE,
-                        response_format=response_format,
-                        max_completion_tokens=_FORM_FILL_MAX_TOKENS,
-                    )
-                except Exception as _schema_err:
-                    # Some models/SDKs don't accept the json_schema response_format —
-                    # transparently fall back to json_object so the pipeline never
-                    # breaks. We accept the larger response in that case.
-                    logger.warning(
-                        "gpt_fill: json_schema response_format rejected (%s) — "
-                        "falling back to json_object for this call", _schema_err,
-                    )
-                    resp = _sync_client.chat.completions.create(
-                        model=llm_model,
-                        messages=[
-                            {"role": "system", "content": system_msg},
-                            {"role": "user",   "content": user_msg},
-                        ],
-                        temperature=GPT_TEMPERATURE,
-                        response_format={"type": "json_object"},
-                        max_completion_tokens=_FORM_FILL_MAX_TOKENS,
-                    )
+                    resp = _sync_client.chat.completions.create(**kwargs)
+                except Exception as _ex:
+                    # Never let an unsupported cache-routing hint fail a real fill.
+                    # Gate on THIS call's kwargs, not the module flag: sub-batches
+                    # run concurrently, so a sibling thread can flip the flag to
+                    # False between our kwargs being built and this handler
+                    # running. Reading the flag here would then send us down the
+                    # `raise` branch and burn a full retry-with-backoff on a call
+                    # we could have fixed in place.
+                    if "prompt_cache_key" in kwargs and "prompt_cache_key" in str(_ex).lower():
+                        _PROMPT_CACHE_KEY_SUPPORTED = False
+                        logger.warning(
+                            "gpt_fill: API rejected prompt_cache_key (%s) — disabling it for "
+                            "this process and retrying without it", _ex,
+                        )
+                        kwargs.pop("prompt_cache_key", None)
+                        resp = _sync_client.chat.completions.create(**kwargs)
+                    else:
+                        raise
+            _log_llm_spend(stage, form_id, resp)
             return resp.choices[0].message.content or ""
 
+        def _inner() -> str:
+            try:
+                return _create(response_format)
+            except Exception as _schema_err:
+                # Fall back to json_object ONLY for a genuine response_format
+                # rejection. Falling back on ANY exception (the old behaviour)
+                # meant a timeout or 429 — where OpenAI had already processed and
+                # BILLED the first request — immediately fired a second identical
+                # full-prompt call, and a context-length 400 re-billed a call that
+                # could not succeed either way. See improving-ll.md C7.
+                if not _is_response_format_rejection(_schema_err):
+                    raise
+                logger.warning(
+                    "gpt_fill: json_schema response_format rejected (%s) — "
+                    "falling back to json_object for this call", _schema_err,
+                )
+                return _create({"type": "json_object"})
+
         import time as _time
+        # Transport failures and PARSE failures are handled separately
+        # (improving-ll.md C6). Re-sending the whole prompt because the reply
+        # would not parse re-bills every input token only to get the same
+        # truncation back at temperature 0, so a parse failure now tries
+        # `_salvage_truncated_json` FIRST and returns the completed answers at
+        # zero extra cost — which is the outcome in essentially every real case,
+        # since truncation at the output cap is what produces these.
+        # A reply that is not merely truncated but genuinely malformed is a
+        # different animal (transient model garbage), so those still retry, but
+        # WITHOUT the long 429-oriented backoff — that backoff exists to let a
+        # TPM bucket refill and buys nothing here.
         for attempt in range(_FORM_FILL_BATCH_RETRIES):
             try:
-                return json.loads(_inner())
+                content = _inner()
             except Exception as ex:
+                if _is_context_length_error(ex):
+                    # Not retryable at this size, and retrying identically would
+                    # burn all three attempts and ship the batch BLANK. Shrink
+                    # the budget so the caller can re-split against a size the
+                    # model will actually accept, and flag THIS thread so only
+                    # the batch that actually overflowed re-splits (C28).
+                    _shrink_budget_after_overflow(ex)
+                    _note_context_overflow()
+                    _llm_call_failures.append(f"context_overflow: {str(ex)[:150]}")
+                    return {}
                 if attempt < _FORM_FILL_BATCH_RETRIES - 1:
                     # Backoff is deliberately longer than plain 1/2/4s: the common
                     # failure here is an OpenAI TPM (tokens-per-minute) 429, and a
@@ -3431,21 +4082,49 @@ def _fill_unmatched_with_gpt(
                     logger.warning("gpt_fill: call failed attempt=%d/%d retrying in %ds — %s",
                                    attempt + 1, _FORM_FILL_BATCH_RETRIES, wait, ex)
                     _time.sleep(wait)
-                else:
-                    # A permanently-failed call returns {} — indistinguishable
-                    # downstream from "the model legitimately answered nothing".
-                    # That silence is how a rate-limited run turns into a form
-                    # full of unexplained BLANK Yes/No answers. Count it and log
-                    # at ERROR so the failure is visible instead of looking like
-                    # a correct omission.
-                    _llm_call_failures.append(str(ex)[:200])
-                    logger.error(
-                        "gpt_fill: call PERMANENTLY FAILED after %d attempts — the fields in "
-                        "this batch will be BLANK and that is a FAILURE, not a model omission. "
-                        "form=%s err=%s",
-                        _FORM_FILL_BATCH_RETRIES, form_id, ex,
+                    continue
+                _llm_call_failures.append(str(ex)[:200])
+                logger.error(
+                    "gpt_fill: call PERMANENTLY FAILED after %d attempts — the fields in "
+                    "this batch will be BLANK and that is a FAILURE, not a model omission. "
+                    "form=%s err=%s",
+                    _FORM_FILL_BATCH_RETRIES, form_id, ex,
+                )
+                return {}
+
+            try:
+                return json.loads(content)
+            except Exception as parse_err:
+                salvaged = _salvage_truncated_json(content)
+                if salvaged is not None:
+                    logger.warning(
+                        "gpt_fill: reply was not valid JSON (almost always truncation at the "
+                        "%d-token output cap) — salvaged %d completed key(s) instead of "
+                        "re-billing the whole prompt. form=%s stage=%s",
+                        _FORM_FILL_MAX_TOKENS, len(salvaged), form_id, stage,
                     )
-                    return {}
+                    return salvaged
+                if attempt < _FORM_FILL_BATCH_RETRIES - 1:
+                    logger.warning(
+                        "gpt_fill: reply unparseable and unsalvageable (%d chars) — one retry. "
+                        "form=%s err=%s", len(content or ""), form_id, parse_err,
+                    )
+                    continue
+                # A permanently-failed call returns {} — indistinguishable
+                # downstream from "the model legitimately answered nothing".
+                # That silence is how a rate-limited run turns into a form
+                # full of unexplained BLANK Yes/No answers. Count it and log
+                # at ERROR so the failure is visible instead of looking like
+                # a correct omission.
+                _llm_call_failures.append(str(parse_err)[:200])
+                logger.error(
+                    "gpt_fill: call PERMANENTLY FAILED after %d attempts (unparseable reply) "
+                    "— the fields in this batch will be BLANK and that is a FAILURE, not a "
+                    "model omission. form=%s err=%s",
+                    _FORM_FILL_BATCH_RETRIES, form_id, parse_err,
+                )
+                return {}
+        return {}
 
     # JSON-schema response format for the general field-fill call: typing `values`
     # as a map of string→string (no null permitted) forces the model to OMIT
@@ -3486,17 +4165,43 @@ def _fill_unmatched_with_gpt(
         raw_sourced = set(result.get("raw_text_sourced", []) or [])
         grounding   = result.get("question_grounding", {}) or {}
 
-        # DIAGNOSTIC: log first 30 entries of GPT response to understand what is returned
-        _diag_sample = {k: v for i, (k, v) in enumerate(values.items()) if i < 30}
-        logger.info("gpt_fill DIAG_RESPONSE: form=%s chunk=%s total_returned=%d sample=%s",
-                    form_id, chunk_label, len(values), json.dumps(_diag_sample, default=str)[:2000])
+        # DIAGNOSTIC. At INFO this logged up to 2000 chars of real applicant VALUES
+        # — names, addresses, FEINs, driver licence numbers — on every call, which
+        # contradicts this codebase's own handling of the same data (field-level
+        # encryption in utils/crypto.py) and CLAUDE.md's classification of it as
+        # sensitive (improving-ll.md C16). The field NAMES and the response SIZE are
+        # what makes this diagnostic useful for debugging a bad fill; the values are
+        # not. So INFO now carries names and lengths only, and the values are
+        # available at DEBUG for someone who has deliberately turned it on.
+        logger.info(
+            "gpt_fill DIAG_RESPONSE: form=%s chunk=%s total_returned=%d keys=%s",
+            form_id, chunk_label, len(values),
+            ",".join(list(values)[:30])[:1500],
+        )
+        if logger.isEnabledFor(logging.DEBUG):
+            _diag_sample = {k: v for i, (k, v) in enumerate(values.items()) if i < 30}
+            logger.debug(
+                "gpt_fill DIAG_RESPONSE_VALUES: form=%s chunk=%s sample=%s",
+                form_id, chunk_label, json.dumps(_diag_sample, default=str)[:2000],
+            )
 
         filled_count    = 0
         rejected_count  = 0
         rejected_sample: List[str] = []
         non_null_rejected: List[str] = []
+        unknown_keys: List[str] = []
         for field, value in values.items():
             if field not in sent:
+                # The model answered under a key we never asked for. Silently
+                # skipping these hid a serious failure mode for a long time: on a
+                # very long document the model abandons the field list and
+                # invents its own names ("Producer_Name" instead of
+                # "Producer_FullName_A"), so a batch can return 60 answers, have
+                # 57 thrown away here, and report a low fill rate with no
+                # explanation anywhere. Count them and say so.
+                if len(unknown_keys) < 12:
+                    unknown_keys.append(str(field))
+                rejected_count += 1
                 continue
             if _is_empty_llm_value(value):
                 rejected_count += 1
@@ -3536,16 +4241,69 @@ def _fill_unmatched_with_gpt(
                 "gpt_fill NON_NULL_REJECTED: form=%s chunk=%s (non-null values being filtered) %s",
                 form_id, chunk_label, "; ".join(non_null_rejected),
             )
+        if unknown_keys:
+            _unknown_total = sum(1 for f in values if f not in sent)
+            logger.warning(
+                "gpt_fill UNKNOWN_KEYS: form=%s chunk=%s — the model answered %d of %d "
+                "keys under names that were NOT in the field list, so those answers are "
+                "DISCARDED. This is the long-context failure mode: it stops copying the "
+                "ACORD field names and invents its own. If this is a large fraction of the "
+                "reply, lower CONTEXT_UTILISATION so each call carries less document. "
+                "Examples: %s",
+                form_id, chunk_label, _unknown_total, len(values), "; ".join(unknown_keys),
+            )
 
     # ── Chunk sizing ──────────────────────────────────────────────────────────
     # Budget per call: model context minus reply headroom minus fixed overhead
     # minus fields block chars for the fields active in this call.
     def _raw_budget(active_fields: List[str]) -> int:
-        fields_chars = sum(len(_field_spec(f)) + 1 for f in active_fields)
-        return max(
-            10_000,
-            _GPT_CALL_BUDGET_CHARS - _GPT_REPLY_RESERVE_CHARS - _FIXED_OVERHEAD - fields_chars,
-        )
+        """Chars of raw document text this call may carry.
+
+        The allowance for the fields block is a CONSTANT worst case, not the
+        batch's own size. Subtracting the real per-batch size (the old
+        behaviour) gave a 40-field batch and a 4-field batch different budgets,
+        hence different document chunk BOUNDARIES, hence different prefix text —
+        a guaranteed cache miss even after the reordering above
+        (improving-ll.md C3).
+
+        Never allowed to UNDER-reserve, though. `_pack_field_batches` emits an
+        entire table-group bucket as ONE atomic batch of unbounded size, and
+        group/table blocks are several times longer per field than a plain spec
+        line. A flat constant under-reserves for those, packs in too much raw
+        text, and pushes the prompt past _GPT_CALL_BUDGET_CHARS → context-length
+        400 → 3 dead retries → the whole batch silently BLANK.
+
+        So: measure the block with the SAME renderer that builds it
+        (`_render_fields_block` - never re-estimate, that is what broke before),
+        then round the allowance UP to a multiple of _MAX_FIELDS_BLOCK_CHARS.
+        Rounding is what keeps caching alive: batches of similar size land in
+        the same bucket, get the same budget, and therefore slice the document
+        at the same offsets. An outsized batch just steps up to the next bucket
+        instead of computing a bespoke budget nobody else shares.
+        """
+        fields_chars = len(_render_fields_block(active_fields))
+        step = max(1, _MAX_FIELDS_BLOCK_CHARS)
+        allowance = max(step, -(-fields_chars // step) * step)   # ceil to `step`
+        avail = _effective_budget_chars - _GPT_REPLY_RESERVE_CHARS - _FIXED_OVERHEAD - allowance
+        if avail < _MIN_RAW_CHUNK_CHARS:
+            # The fields block alone nearly fills the call. A generous floor here
+            # DEFEATS the whole guard: it hands back more raw text than the budget
+            # can hold and the prompt overflows anyway — measured at 60,363 chars
+            # against a 60,000 budget on an oversized ACORD 140 table batch, which
+            # in production is a context-length 400 and a silently blank batch.
+            # Clamp to the small floor and say loudly that the configuration, not
+            # the document, is the problem.
+            logger.error(
+                "gpt_fill: field batch of %d fields renders to %d chars, leaving only %d "
+                "chars for the document inside a %d-char call budget. Raw text is being "
+                "clamped to %d chars for this batch — values that appear later in the "
+                "document CANNOT be found. Raise GPT_CALL_BUDGET_CHARS / "
+                "CONTEXT_UTILISATION, or lower FIELD_FILL_BATCH.",
+                len(active_fields), fields_chars, avail,
+                _effective_budget_chars, _MIN_RAW_CHUNK_CHARS,
+            )
+            return _MIN_RAW_CHUNK_CHARS
+        return avail
 
     if not raw_text_used:
         # No raw text available — skip GPT fill entirely
@@ -3554,21 +4312,10 @@ def _fill_unmatched_with_gpt(
 
     # ── Split raw text into chunks sized for a given field sub-batch ───────────
     def _split_raw_text(active_fields: List[str]) -> List[str]:
-        budget = _raw_budget(active_fields)
-        chunks: List[str] = []
-        rest = raw_text
-        while rest:
-            if len(rest) <= budget:
-                chunks.append(rest)
-                break
-            split_at = rest.rfind("\n\n", 0, budget)
-            if split_at == -1:
-                split_at = rest.rfind("\n", 0, budget)
-            if split_at == -1:
-                split_at = budget
-            chunks.append(rest[:split_at])
-            rest = rest[split_at:].lstrip("\n")
-        return chunks or [raw_text]
+        # Chunking itself lives in `_split_text_on_boundaries` (module level) so
+        # this pass, the compliance pass and the umbrella probe cannot drift
+        # apart. Only the BUDGET is local — that part genuinely differs per pass.
+        return _split_text_on_boundaries(raw_text, _raw_budget(active_fields))
 
     # ── Run ONE field sub-batch through the raw-text chunk loop ────────────────
     # The field list is split into focused sub-batches (see _FIELD_FILL_BATCH):
@@ -3579,22 +4326,89 @@ def _fill_unmatched_with_gpt(
     # accumulators, so sub-batches can run on parallel worker threads with zero
     # shared mutation and merge cleanly afterward (sub-batches are disjoint).
     def _run_field_batch(batch_fields: List[str], batch_label: str):
+        # Outer loop exists ONLY for the context-overflow path: if the model
+        # rejects a chunk as too long, `_chat_json` halves the process budget and
+        # returns {}. Re-splitting against the smaller budget recovers the batch
+        # instead of leaving those fields silently blank.
+        # The attempt count must cover a badly wrong guess, not just a near miss:
+        # halving from 400k to a model that only accepts ~120k takes THREE steps
+        # (400 -> 200 -> 100), and stopping at two left the batch blank — which is
+        # exactly the failure this exists to prevent. 5 attempts spans a 32x
+        # over-estimate, and `_shrink_budget_after_overflow` floors at 40k, so
+        # this always terminates.
         local_counts: Dict[str, Dict[str, int]] = {}
         local_raw: set = set()
         local_grounding: Dict[str, str] = {}
-        chunks = _split_raw_text(batch_fields)
-        for chunk_idx, raw_chunk in enumerate(chunks):
-            active_fields = [f for f in batch_fields if f not in local_counts]
-            if not active_fields:
-                break
-            prompt = _build_prompt(active_fields, raw_chunk, chunk_idx, len(chunks))
-            logger.info(
-                "gpt_fill: batch=%s chunk %d/%d form=%s active_fields=%d prompt_chars=%d",
-                batch_label, chunk_idx + 1, len(chunks), form_id, len(active_fields), len(prompt),
+        _consume_context_overflow()        # start clean; ignore another batch's flag
+        for _attempt in range(max(1, _CONTEXT_SHRINK_ATTEMPTS)):
+            budget_before = _effective_budget_chars
+            local_counts = {}
+            local_raw = set()
+            local_grounding = {}
+            chunks = _split_raw_text(batch_fields)
+            _rescan = _rescan_enabled(len(chunks))
+            _chunks_sent = 0
+            _overflowed = False
+            for chunk_idx, raw_chunk in enumerate(chunks):
+                active_fields = [f for f in batch_fields if f not in local_counts]
+                if not active_fields and not _rescan:
+                    # Every field in this batch already has an answer, and this is
+                    # a SINGLE-chunk document (see `_rescan_enabled`), so there is
+                    # no remaining text to skip. Reached on a multi-chunk document
+                    # only when GAP_FILL_FULL_RESCAN=0 explicitly forces the legacy
+                    # first-answer-wins behaviour — which measurably drops document
+                    # text, so it is logged loudly rather than assumed away.
+                    #
+                    # NO CONDITION ON THIS LOG. We break BEFORE sending
+                    # chunks[chunk_idx], and `chunk_idx < len(chunks)` always holds
+                    # inside the loop, so reaching here ALWAYS means at least one
+                    # chunk is being skipped. An earlier `chunk_idx < len(chunks)-1`
+                    # guard here suppressed exactly the two-chunk case — the most
+                    # common one — and a test caught it. (Contrast the compliance
+                    # pass, which breaks AFTER processing its chunk and therefore
+                    # does need the -1.)
+                    logger.warning(
+                        "gpt_fill COVERAGE_PARTIAL: batch=%s form=%s stopped after "
+                        "%d of %d document chunks — all %d fields answered early. "
+                        "Values are first-answer-wins and were NOT checked against "
+                        "the remaining %d chunk(s). This only happens with "
+                        "GAP_FILL_FULL_RESCAN=0; unset it to restore automatic "
+                        "full-document rescanning on multi-chunk documents.",
+                        batch_label, form_id, _chunks_sent, len(chunks),
+                        len(batch_fields), len(chunks) - chunk_idx,
+                    )
+                    break
+                if not active_fields:
+                    # Full-rescan mode: re-ask every field against this chunk so a
+                    # later endorsement can supersede an earlier value and the
+                    # majority-vote resolver actually receives more than one vote.
+                    active_fields = list(batch_fields)
+                _chunks_sent += 1
+                prompt = _build_prompt(active_fields, raw_chunk, chunk_idx, len(chunks))
+                logger.info(
+                    "gpt_fill: batch=%s chunk %d/%d form=%s active_fields=%d prompt_chars=%d rescan=%s",
+                    batch_label, chunk_idx + 1, len(chunks), form_id,
+                    len(active_fields), len(prompt), _rescan,
+                )
+                result = _call_llm_sync(prompt)
+                _absorb(result, active_fields, local_counts, local_raw, local_grounding,
+                        chunk_label=f"{batch_label}:{chunk_idx + 1}/{len(chunks)}")
+                if _consume_context_overflow():
+                    # OUR OWN call overflowed (not a sibling thread's — see
+                    # `_overflow_state`). Re-split against the reduced budget.
+                    _overflowed = True
+                    break
+            if not _overflowed:
+                # Either every chunk was sent, or the batch answered everything
+                # early on a single-chunk document. Both are success — an explicit
+                # flag is required here because BOTH of those exits and the
+                # overflow exit use `break`, so a `for/else` cannot tell them
+                # apart and would re-run a batch that had already succeeded.
+                return local_counts, local_raw, local_grounding
+            logger.warning(
+                "gpt_fill: batch=%s re-splitting against the reduced budget (%d -> %d chars)",
+                batch_label, budget_before, _effective_budget_chars,
             )
-            result = _call_llm_sync(prompt)
-            _absorb(result, active_fields, local_counts, local_raw, local_grounding,
-                    chunk_label=f"{batch_label}:{chunk_idx + 1}/{len(chunks)}")
         return local_counts, local_raw, local_grounding
 
     def _merge(local_counts, local_raw, local_grounding):
@@ -3635,18 +4449,11 @@ def _fill_unmatched_with_gpt(
     # of which only 46 are genuine disclosure questions — routing all 192 would
     # both waste ~14 extra LLM calls per form on fields with no false-N risk and
     # dilute this pass's focus away from what it exists to protect.
-    _DISCLOSURE_QUESTION_MARKER = "response to the question,"
-
     def _is_compliance_question(f: str) -> bool:
-        info = eligible_fields.get(f) or {}
-        info = info if isinstance(info, dict) else {}
-        tu = info.get("tu")
-        tu_str = str(tu or "")
-        if tu_str.startswith(_YES_NO_TOOLTIP_PREFIX):
-            return True
-        if _DISCLOSURE_QUESTION_MARKER in tu_str:
-            return True
-        return _is_high_impact_checkbox_field(f, tu, info.get("ft"))
+        # Delegates to the module-level predicate so `combined_gap_fill` can make
+        # the SAME partition one level up, before outer batching. The two must
+        # never drift — see `is_compliance_question`.
+        return is_compliance_question(f, eligible_fields.get(f))
 
     compliance_fields = [f for f in field_list if _is_compliance_question(f)]
     other_fields      = [f for f in field_list if not _is_compliance_question(f)]
@@ -3686,27 +4493,21 @@ def _fill_unmatched_with_gpt(
         questions_block = (
             "\n\nQUESTIONS — answer using ONLY the document above. Follow every HARD RULE. "
             "Omit any question the document does not specifically address; most of the time "
-            f"that is the correct choice. (ACORD form {form_id}.)\n" + "\n".join(lines)
+            f"that is the correct choice. (ACORD form {form_label}.)\n" + "\n".join(lines)
         )
         # Budget the document so (system + document + questions + reply headroom)
-        # stays inside one call.
-        _overhead = len(_COMPLIANCE_SYSTEM_PROMPT) + len(questions_block) + 2_000
-        _doc_budget = max(10_000, _GPT_CALL_BUDGET_CHARS - _GPT_REPLY_RESERVE_CHARS - _overhead)
-        _doc_chunks: List[str] = []
-        _rest = raw_text
-        while _rest:
-            if len(_rest) <= _doc_budget:
-                _doc_chunks.append(_rest)
-                break
-            _cut = _rest.rfind("\n\n", 0, _doc_budget)
-            if _cut == -1:
-                _cut = _rest.rfind("\n", 0, _doc_budget)
-            if _cut == -1:
-                _cut = _doc_budget
-            _doc_chunks.append(_rest[:_cut])
-            _rest = _rest[_cut:].lstrip("\n")
-        if not _doc_chunks:
-            _doc_chunks = [raw_text]
+        # stays inside one call. The questions allowance is a CONSTANT worst case
+        # for the same reason _raw_budget's is: deriving it from THIS batch's own
+        # question text would give each batch different document chunk
+        # boundaries, and the document is the cached prefix here. max() keeps the
+        # overflow guard for an unusually long batch.
+        _overhead = (
+            len(_COMPLIANCE_SYSTEM_PROMPT)
+            + max(_MAX_COMPLIANCE_BLOCK_CHARS, len(questions_block))
+            + 2_000
+        )
+        _doc_budget = max(10_000, _effective_budget_chars - _GPT_REPLY_RESERVE_CHARS - _overhead)
+        _doc_chunks = _split_text_on_boundaries(raw_text, _doc_budget)
         if len(_doc_chunks) > 1:
             logger.info("gpt_fill COMPLIANCE: form=%s document split into %d chunks (%d chars)",
                         form_id, len(_doc_chunks), len(raw_text))
@@ -3715,7 +4516,8 @@ def _fill_unmatched_with_gpt(
         quotes:  dict = {}
         for _ci, _chunk in enumerate(_doc_chunks):
             user_msg = f"=== DOCUMENT TEXT ===\n{_chunk}" + questions_block
-            result = _chat_json(_COMPLIANCE_SYSTEM_PROMPT, user_msg, _COMPLIANCE_RESPONSE_FORMAT)
+            result = _chat_json(_COMPLIANCE_SYSTEM_PROMPT, user_msg,
+                                _COMPLIANCE_RESPONSE_FORMAT, stage="compliance")
             _a = (result.get("answers") or {}) if isinstance(result, dict) else {}
             _q = (result.get("quotes")  or {}) if isinstance(result, dict) else {}
             for _f, _v in _a.items():
@@ -3724,7 +4526,32 @@ def _fill_unmatched_with_gpt(
                     if _q.get(_f):
                         quotes[_f] = _q[_f]
             if len(answers) >= len(q_fields):
-                break                            # every question answered already
+                # DELIBERATELY NOT given the general fill's auto-rescan treatment.
+                # This absorber is strictly FIRST-WINS (`if _f not in answers`), so
+                # once every question in the batch has a grounded answer, sending
+                # the remaining chunks cannot change a single one of them — it is
+                # pure spend. The general fill differs: in rescan mode it re-asks
+                # and majority-votes, so extra chunks there can actually move a
+                # value.
+                #
+                # The residual risk is real and is NOT fixed here: a question
+                # answered "N" from chunk 1 is never revisited against a chunk-3
+                # endorsement that makes it "Y". Fixing that means changing this
+                # pass's merge semantics (majority or latest-wins), and this pass
+                # is the one that was carefully tuned to stop a false-"N" flood
+                # (see _COMPLIANCE_SYSTEM_PROMPT). Changing its merge rule to buy
+                # a rare supersession, at the cost of possibly reopening that
+                # flood, is a bad trade to make blind. Logged so it is visible.
+                if _ci < len(_doc_chunks) - 1:
+                    logger.warning(
+                        "gpt_fill COMPLIANCE_PARTIAL: form=%s all %d question(s) "
+                        "answered by chunk %d of %d — remaining %d chunk(s) not sent "
+                        "for these questions. Answers are first-answer-wins and were "
+                        "NOT rechecked against later pages.",
+                        form_id, len(q_fields), _ci + 1, len(_doc_chunks),
+                        len(_doc_chunks) - _ci - 1,
+                    )
+                break
         return answers, quotes
 
     def _run_compliance_pass(q_fields: List[str]) -> None:
@@ -3752,13 +4579,21 @@ def _fill_unmatched_with_gpt(
         if len(batches) <= 1:
             _absorb_compliance(*_run_one_compliance_batch(q_fields))
         else:
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=min(_FIELD_BATCH_POOL, len(batches)),
-                thread_name_prefix="gpt-fill-compliance",
-            ) as _pool:
-                _futs = [_pool.submit(_run_one_compliance_batch, b) for b in batches]
-                for _fut in concurrent.futures.as_completed(_futs):
-                    _absorb_compliance(*_fut.result())
+            # Warm the shared (system + document) prefix with one completed call
+            # before fanning out — but only ONCE per process for this prefix, not
+            # once per outer batch (see _claim_warmup / C27).
+            _rest = batches
+            if _should_warm("compliance"):
+                _absorb_compliance(*_run_one_compliance_batch(batches[0]))
+                _rest = batches[1:]
+            if _rest:
+                with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=min(_FIELD_BATCH_POOL, len(_rest)),
+                    thread_name_prefix="gpt-fill-compliance",
+                ) as _pool:
+                    _futs = [_pool.submit(_run_one_compliance_batch, b) for b in _rest]
+                    for _fut in concurrent.futures.as_completed(_futs):
+                        _absorb_compliance(*_fut.result())
         logger.info("gpt_fill COMPLIANCE_DONE: form=%s answered=%d/%d", form_id, kept, len(q_fields))
 
     _run_compliance_pass(compliance_fields)
@@ -3772,25 +4607,113 @@ def _fill_unmatched_with_gpt(
     # everything else is bin-packed into ordinary _FIELD_FILL_BATCH-sized
     # batches exactly as before.
     def _pack_field_batches(fields: List[str], batch_size: int) -> List[List[str]]:
-        placed_buckets: set = set()
-        batches: List[List[str]] = []
-        current: List[str] = []
+        """Bin-pack fields into sub-batches, keeping every table group WHOLE.
+
+        The row-alignment invariant (improving-ll.md C19) is that all columns of a
+        table must be visible to ONE call — otherwise the call filling row D cannot
+        see what rows A-C already claimed, and it borrows values. That invariant
+        says a table must not be SPLIT. It does not say a table must be ALONE.
+
+        This function used to emit each table group as its own dedicated batch,
+        which is a much stronger condition than the invariant requires, and it was
+        expensive. Measured on the real 5-form union: **46 gap-fill calls, 34 of
+        them partial, many carrying only 3-5 fields** — each paying a full call's
+        fixed prompt overhead and a round trip to ask about four cells. 820 fields
+        went out in 46 calls where 21 would hold them.
+
+        So table groups are now packed as INDIVISIBLE UNITS into the same bins as
+        ordinary fields: a group either fits in the current batch or starts a new
+        one, but it is never cut. Every column of every table still lands in
+        exactly one call. The prompt is unchanged — `_render_fields_block` renders
+        each group as its own `_table_group_block`, so two tables in one call are
+        still presented as two distinct tables.
+
+        A single table group LARGER than `batch_size` still gets its own batch and
+        still exceeds the size cap, exactly as before — splitting it would break
+        the invariant, and that trade was already made.
+
+        `FIELD_BATCH_PACK_TABLES=0` restores the old one-table-per-call behaviour.
+        It is here because `_FIELD_FILL_BATCH=40` was tuned by accuracy work, and
+        while this change never puts more than 40 fields in a batch, it does make a
+        40-field batch denser (table blocks are longer per field than a plain spec
+        line). That is the one plausible quality risk, so it stays revertible until
+        an accuracy baseline confirms it.
+        """
+        # Collect indivisible UNITS in first-appearance order. A unit is either a
+        # detected table bucket, a multi-slot repeating group, or a lone field.
+        #
+        # SLOT GROUPS ARE UNITS TOO, and that is a fix, not a side effect. A slot
+        # group is rendered with "find up to N separate real values ... put the 1st
+        # in _A, the 2nd in _B ... NEVER copy the same value into more than one
+        # slot". A call that can see _A and _B but not _C cannot honour that: it
+        # has no idea _C exists, and the call that gets _C has no idea _A and _B
+        # were already claimed. That is the C19 failure mode one level down, and it
+        # was already happening — measured on the real 5-form union, **27
+        # repeating groups were split across separate calls** by plain 40-field
+        # slicing, before any change in this work. Only detected TABLE buckets
+        # (>=3 co-occurring columns) were ever protected.
+        #
+        # "Group" means `repeating_group_key` = (base, TOOLTIP), never base alone.
+        # ACORD 25's insurer tooltips end "As used here, this is Insurer B." — a
+        # per-row suffix — so Insurer_FullName_B..F are six separate one-slot
+        # groups that need no joint reasoning. Counting by base name instead
+        # inflates the figure above to 92 and flags those as violations; it is the
+        # wrong denominator.
+        buckets: Dict[Any, List[str]] = {}
+        order: List[Any] = []
+        seen: set = set()
         for f in fields:
             _gk = _group_key(f)
-            _bucket = _table_group_membership.get(_gk) if _gk else None
-            if _bucket is not None:
-                if _bucket in placed_buckets:
-                    continue  # this table's fields were already placed as a unit
-                placed_buckets.add(_bucket)
+            _key = None
+            if _gk:
+                _tb = _table_group_membership.get(_gk)
+                if _tb is not None:
+                    _key = ("table", _tb)
+                elif len(_base_to_slots.get(_gk, [])) > 1:
+                    _key = ("slots", _gk)
+            if _key is None:
+                order.append(f)
+                continue
+            buckets.setdefault(_key, []).append(f)
+            if _key not in seen:
+                seen.add(_key)
+                order.append(_key)
+
+        if not _PACK_TABLES_WITH_FIELDS:
+            # Legacy: every table group is its own call; slot groups unprotected.
+            batches: List[List[str]] = []
+            current: List[str] = []
+            for item in order:
+                if isinstance(item, tuple) and item[0] == "table":
+                    batches.append(buckets[item])
+                    continue
+                unit = buckets[item] if item in buckets else [item]
+                current.extend(unit)
+                if len(current) >= batch_size:
+                    batches.append(current)
+                    current = []
+            if current:
+                batches.append(current)
+            return batches
+
+        batches: List[List[str]] = []
+        current: List[str] = []
+        for item in order:
+            unit = buckets[item] if item in buckets else [item]
+            if len(unit) > batch_size:
+                # A single group larger than the cap: its own batch, over the cap by
+                # necessity. Splitting it would break the alignment invariant, and
+                # that trade was already made for tables. (Slot groups top out at 14
+                # slots — ACORD's row letters are A-N — so only tables reach here.)
                 if current:
                     batches.append(current)
                     current = []
-                batches.append([ff for ff in fields if _table_group_membership.get(_group_key(ff)) == _bucket])
+                batches.append(unit)
                 continue
-            current.append(f)
-            if len(current) >= batch_size:
+            if current and len(current) + len(unit) > batch_size:
                 batches.append(current)
                 current = []
+            current.extend(unit)
         if current:
             batches.append(current)
         return batches
@@ -3807,16 +4730,25 @@ def _fill_unmatched_with_gpt(
         if field_batches:
             _merge(*_run_field_batch(other_fields, "1/1"))
     else:
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(_FIELD_BATCH_POOL, len(field_batches)),
-            thread_name_prefix="gpt-fill-fbatch",
-        ) as _pool:
-            _futs = [
-                _pool.submit(_run_field_batch, bf, f"{bi + 1}/{len(field_batches)}")
-                for bi, bf in enumerate(field_batches)
-            ]
-            for _fut in concurrent.futures.as_completed(_futs):
-                _merge(*_fut.result())
+        _n = len(field_batches)
+        _start = 0
+        # Warm the shared (system + facts + document) prefix with one completed
+        # call before fanning out — but only ONCE per process for this prefix, not
+        # once per outer batch (see _claim_warmup / C27).
+        if _should_warm("gap_fill"):
+            _merge(*_run_field_batch(field_batches[0], f"1/{_n}"))
+            _start = 1
+        if _start < _n:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(_FIELD_BATCH_POOL, _n - _start),
+                thread_name_prefix="gpt-fill-fbatch",
+            ) as _pool:
+                _futs = [
+                    _pool.submit(_run_field_batch, field_batches[bi], f"{bi + 1}/{_n}")
+                    for bi in range(_start, _n)
+                ]
+                for _fut in concurrent.futures.as_completed(_futs):
+                    _merge(*_fut.result())
 
     # ── Conflict resolution ───────────────────────────────────────────────────
     # Among candidates from multiple chunks, the most-frequent value wins (majority vote).
@@ -3834,7 +4766,46 @@ def _fill_unmatched_with_gpt(
     # earlier sibling.  Comparison is case-insensitive and whitespace-normalised.
     # Groups are keyed by (base, tooltip), so different roles that share a base
     # (e.g. lienholder rows vs vehicle-owner rows) are NOT cross-deduped.
-    for _gk, _slots in _base_to_slots.items():
+    #
+    # TABLE groups are EXCLUDED and handled row-wise below. Applying per-value
+    # dedup to a table column destroys correct data: a fleet of three trucks
+    # garaged in the same city legitimately has City_A = City_B = City_C =
+    # "Denver", and the same is true of deductible, radius, territory, rate
+    # class and every coverage indicator. Observed live on a real ACORD 127 run
+    # (2026-07-29): 40+ correct cells were deleted in a single generation,
+    # leaving row A complete and rows B/C almost entirely blank. The two prompts
+    # are asking for different things and the safety nets must match — a slot
+    # group is told "find N DISTINCT values, never repeat one", while a table is
+    # told "fill one COMPLETE ROW per real entry", where repetition across rows
+    # is expected and correct.
+    # Schedule roots: the leading token of every prefix that WAS detected as a
+    # real table on this form (e.g. "Vehicle" from Vehicle_PhysicalAddress,
+    # "CommercialProperty" from CommercialProperty_Premises). Any group under
+    # such a root is a per-ROW column of that schedule, so repetition down the
+    # column is expected — even when the group itself has only ONE column and
+    # therefore never qualified as a "table" on its own. That single-column case
+    # is what made the first version of this fix insufficient:
+    # Vehicle_RadiusOfUse_A/B/C is one column, is rendered as a "find N distinct
+    # values" slot group, and had its correct 50/50/50 deleted down to just row
+    # A. Groups outside every detected schedule root (Insurer_FullName,
+    # additional-insured name lists, …) keep the original per-value dedup, which
+    # is correct for them — those really are lists of distinct entities.
+    _schedule_roots = {
+        _p.split("_", 1)[0] for _p, _gks in _table_buckets.items()
+        if any(g in _table_group_keys for g in _gks)
+    }
+    if _schedule_roots:
+        logger.info("gpt_fill: dedup exempting schedule roots %s (per-row columns)",
+                    sorted(_schedule_roots))
+
+    def _under_schedule_root(base: str) -> bool:
+        return any(base.startswith(r + "_") for r in _schedule_roots)
+
+    for _gk, _slots in (_base_to_slots.items() if _ENABLE_SLOT_VALUE_DEDUP else []):
+        if _gk in _table_group_keys:
+            continue
+        if _under_schedule_root(_gk[0] if isinstance(_gk, tuple) else str(_gk)):
+            continue
         _seen: Dict[str, str] = {}  # normalised_value -> first slot that claimed it
         for _slot_field in _slots:  # already sorted _A, _B, _C, …
             _val = all_filled.get(_slot_field)
@@ -3849,6 +4820,21 @@ def _fill_unmatched_with_gpt(
                 del all_filled[_slot_field]
             else:
                 _seen[_key] = _slot_field
+
+    # NO row-level dedup for tables. This was tried and DELIBERATELY REMOVED —
+    # do not reintroduce it. The idea was to catch the one real table failure
+    # (the model writing the SAME entry into two rows) by clearing a row whose
+    # filled cells are identical to an earlier row's. It cannot work, because a
+    # call only ever sees a SUBSET of a table's columns: Pass 1/1.5 resolves
+    # some, `_COMBINED_FIELD_BATCH` splits others across outer batches. Ask
+    # about City/State/PostalCode alone and three trucks genuinely garaged in
+    # one city produce three byte-identical rows — real data that the check
+    # would delete. "Same entry twice" and "two entries that match on the
+    # columns we happened to ask about" are indistinguishable from here.
+    # The table prompt already forbids duplicating an entry, and `already_filled`
+    # tells the model which rows Pass 1 spoke for; those are the right places to
+    # prevent it. Deleting verified document data to guard a hypothetical is the
+    # wrong trade.
 
     # ── Audit log ─────────────────────────────────────────────────────────────
     for field, value in all_filled.items():
@@ -4176,6 +5162,82 @@ def compute_form_gaps(form_id: str, schema: dict, facts: dict) -> Tuple[dict, di
     return mapped, unmatched, deterministic_filled
 
 
+_SCHEDULE_ROW_RE = re.compile(r"^(.+?)_([A-N])$")
+# Hard ceiling on a schedule-aware outer batch. A schedule is kept whole even
+# when that overshoots _COMBINED_FIELD_BATCH, but not without limit — beyond
+# this it is split and the row-alignment risk is accepted rather than building
+# one enormous call.
+_COMBINED_BATCH_HARD_MAX = int(os.getenv("COMBINED_BATCH_HARD_MAX", "600"))
+
+
+def _pack_schedule_aware_batches(field_items: List[tuple]) -> List[List[tuple]]:
+    """Split the cross-form union into outer batches WITHOUT cutting a schedule.
+
+    Why this is not a plain slice (improving-ll.md C19): the naive
+    `field_items[i:i+200]` put ACORD 127's vehicle rows A-C in one outer batch
+    and row D in the next. Each outer batch is a separate
+    `_fill_unmatched_with_gpt` invocation, so the call filling row D could not
+    see rows A-C and had no way to know which real vehicle was still unclaimed.
+    Measured live 2026-07-29, and it put WRONG values on the form:
+    `Vehicle_CostNewAmount_D = $58,900` (vehicle 1's cost; vehicle 4 is $41,800)
+    and `Vehicle_RateClassCode_D = 91560` / `Vehicle_SpecialIndustryClassCode_D
+    = 92478` — the two General Liability class codes, borrowed from a different
+    page entirely. `_pack_field_batches` already keeps a table atomic one level
+    down; this applies the same rule at the level that was breaking it.
+
+    A "schedule" is any leading name segment (Vehicle, Driver,
+    CommercialProperty, …) that appears with MORE THAN ONE row letter across the
+    union — i.e. something that really does have multiple rows to align. Fields
+    with no row suffix, and roots that only ever appear as a single row, are
+    packed normally.
+    """
+    root_rows: Dict[str, set] = {}
+    for name, _meta in field_items:
+        m = _SCHEDULE_ROW_RE.match(name)
+        if m:
+            root_rows.setdefault(name.split("_", 1)[0], set()).add(m.group(2))
+    schedule_roots = {r for r, rows in root_rows.items() if len(rows) > 1}
+
+    # Preserve first-appearance order so batch contents stay readable in logs.
+    groups: List[List[tuple]] = []
+    index_of: Dict[str, int] = {}
+    for name, meta in field_items:
+        m = _SCHEDULE_ROW_RE.match(name)
+        root = name.split("_", 1)[0] if m else None
+        if root in schedule_roots:
+            if root not in index_of:
+                index_of[root] = len(groups)
+                groups.append([])
+            groups[index_of[root]].append((name, meta))
+        else:
+            groups.append([(name, meta)])
+
+    batches: List[List[tuple]] = []
+    current: List[tuple] = []
+    for g in groups:
+        if len(g) > _COMBINED_BATCH_HARD_MAX:
+            # Pathologically large schedule: flush, then split it on its own.
+            if current:
+                batches.append(current)
+                current = []
+            for i in range(0, len(g), _COMBINED_BATCH_HARD_MAX):
+                batches.append(g[i : i + _COMBINED_BATCH_HARD_MAX])
+            continue
+        if current and len(current) + len(g) > _COMBINED_FIELD_BATCH:
+            batches.append(current)
+            current = []
+        current.extend(g)
+    if current:
+        batches.append(current)
+
+    if schedule_roots:
+        logger.info(
+            "combined_gap_fill: schedule-aware batching kept %d schedule(s) whole: %s",
+            len(schedule_roots), sorted(schedule_roots),
+        )
+    return batches or [field_items]
+
+
 def combined_gap_fill(
     forms_to_unmatched: Dict[str, dict],
     facts: dict,
@@ -4238,6 +5300,16 @@ def combined_gap_fill(
     if not forms_to_unmatched:
         return per_form
 
+    # Per-SUBMISSION state resets. Both of these are process-global caches whose
+    # whole purpose is to be shared across the outer batches of ONE run, and both
+    # were previously left to leak into the next run on the same worker:
+    #   * the call budget only ever shrank, so one oversized document doubled the
+    #     chunk count and cost of every later submission until restart (C28);
+    #   * the warm-up set would grow without bound and, worse, suppress the
+    #     warm-up a genuinely new prefix needs (C27).
+    reset_call_budget()
+    reset_prefix_warmup()
+
     # Merge every form's Pass 1/1.5 results into one already_filled dict (see
     # docstring above) - passed through unchanged to every batch below.
     merged_already_filled: dict = {}
@@ -4274,19 +5346,60 @@ def combined_gap_fill(
     # raw text budget per chunk (3 chunks for a 671k doc) — the full document
     # is still scanned; we do NOT truncate the document here.
     field_items = list(union_unmatched.items())
-    batches = [
-        dict(field_items[i : i + _COMBINED_FIELD_BATCH])
-        for i in range(0, len(field_items), _COMBINED_FIELD_BATCH)
-    ]
+
+    # ── Split compliance questions from general fields BEFORE outer batching ──
+    # Each outer batch is a separate `_fill_unmatched_with_gpt` invocation, and
+    # each invocation re-partitions ITS OWN slice into compliance questions
+    # (answered in groups of `_COMPLIANCE_BATCH`) and general fields (groups of
+    # `_FIELD_FILL_BATCH`). Slicing the mixed union first therefore cut BOTH
+    # streams at arbitrary points, and every cut leaves a runt batch that pays a
+    # full call's fixed overhead for a handful of fields.
+    #
+    # Measured on the real 5-form union (1,359 fields, 133 of them compliance):
+    #   before — compliance 18 calls with sizes [4, 10, 10, 9, 1, 10, ... 4, 2, 4, 5]
+    #            and ~36 general calls
+    #   ideal  — compliance 14, general 31
+    # i.e. 9 of 63 calls (14%) existed only because of where the slice landed.
+    #
+    # Partitioning first makes every batch full except the last of each stream.
+    # It changes NOTHING the model sees: the compliance pass is already a separate
+    # call with a different system prompt, so a compliance field never shared a
+    # call with a general field anyway. Batch sizes (40 / 10) are untouched — they
+    # are frozen by prior accuracy work.
+    _compliance_items = [(n, m) for n, m in field_items if is_compliance_question(n, m)]
+    _general_items    = [(n, m) for n, m in field_items if not is_compliance_question(n, m)]
+
+    batches: List[dict] = []
+    # General fields keep schedule-aware packing (a schedule must stay whole — C19).
+    if _general_items:
+        batches += [dict(b) for b in _pack_schedule_aware_batches(_general_items)]
+    # Compliance questions have no rows to align, so plain chunking is correct.
+    # `_COMBINED_FIELD_BATCH` is a multiple of `_COMPLIANCE_BATCH`, so each outer
+    # group divides into full inner batches.
+    for _i in range(0, len(_compliance_items), _COMBINED_FIELD_BATCH):
+        batches.append(dict(_compliance_items[_i : _i + _COMBINED_FIELD_BATCH]))
+    if not batches:
+        batches = [dict(field_items)]
     logger.info(
-        "combined_gap_fill: field_batches=%d batch_size=%d total_fields=%d",
+        "combined_gap_fill: field_batches=%d batch_size=%d total_fields=%d "
+        "(general=%d compliance=%d, partitioned so neither stream is cut mid-batch)",
         len(batches), _COMBINED_FIELD_BATCH, len(field_items),
+        len(_general_items), len(_compliance_items),
     )
 
     all_filled_values: dict = {}
     all_raw_text_fields: set = set()
     all_question_grounding: dict = {}
     used_model = model or GPT_MODEL
+
+    # What the MODEL is told it is filling. `batch_id` below is a LOGGING label;
+    # it used to be passed as `form_id` and interpolated straight into the system
+    # prompt, so every combined run told the model "You are filling ACORD form
+    # COMBINED_B1of2" — it could not tell a Workers Comp form from a Commercial
+    # Auto one, and the per-batch system message killed prefix caching outright
+    # (improving-ll.md C2). This label is constant across batches, so it also
+    # stays inside the cacheable prefix.
+    form_label = ", ".join(sorted(forms_to_unmatched.keys()))
 
     import time as _time
     for batch_idx, batch_fields in enumerate(batches):
@@ -4300,7 +5413,7 @@ def combined_gap_fill(
         try:
             gpt_result = _fill_unmatched_with_gpt(
                 batch_fields, facts, batch_id, model=model, raw_text=raw_text,
-                already_filled=merged_already_filled,
+                already_filled=merged_already_filled, form_label=form_label,
             )
         except Exception as exc:                      # noqa: BLE001
             logger.warning("combined_gap_fill: batch %s failed — %s", batch_id, exc)
@@ -4410,6 +5523,191 @@ def _looks_like_declared_number_value(s: str) -> bool:
     it (e.g. "1", "2", "B-1", "#12") - a location name, address, or any other
     entity label always contains a run of 4+ letters and is rejected."""
     return not re.search(r"[A-Za-z]{4,}", s or "")
+
+
+# ── Tooltip-declared field types (Guard 3b) ──────────────────────────────────
+# ACORD states the expected type of a field IN THE FIELD'S OWN TOOLTIP: "Enter
+# code:", "Enter year:", "Enter identifier:", "Enter amount:", ... Measured across
+# all 17 schemas: **3,888 of 5,852 fields (66%) declare a type this way.** Until
+# now the code read exactly ONE of the twelve (`_tooltip_declares_number`, 607
+# fields), so the other 3,281 had no type check at all.
+#
+# That gap is what let a real ACORD 127 run ship:
+#     Driver_TaxIdentifier_A = "4S4BRCGC9C3217772"   (a VIN)
+#     Driver_TaxIdentifier_I = "ERIN ROYAL"          (a person's name)
+#     Driver_GenderCode_A    = "ERIN ROYAL"
+#     Driver_LicensedYear_A  = "2012"                (the vehicle's model year)
+# None of those fields is caught by `_is_numeric_or_date_field`: its hints list
+# `YearBuilt`/`ModelYear` but not plain `Year`, and `_PROSE_FIELD_TOKENS` contains
+# "Name", so `Driver_OtherGivenNameInitial_A` is classified as PROSE and a full
+# first name passes straight through (improving-ll.md C22).
+#
+# DESIGN RULE, and the reason this is safe to run on every field: each check may
+# only reject what CANNOT POSSIBLY be right for that declared type. It is not a
+# format validator and must never become one. Insurance amount fields legitimately
+# hold "Statutory", "Included", "Excluded"; code fields legitimately hold short
+# words; identifier fields legitimately hold alphanumeric soup. So the checks key
+# off two narrow, high-confidence shapes — a personal NAME and a VIN — plus a real
+# range check for years. Anything unrecognised is left alone.
+#
+# Zero LLM cost, deterministic, and it cannot be argued with by a model.
+_TOOLTIP_TYPE_RE = re.compile(r"^\s*enter\s+([a-z]+)\s*:", re.I)
+
+# A VIN: exactly 17 chars, alphanumeric, no I/O/Q (excluded by the VIN standard
+# precisely so they cannot be confused with 1/0), and mixing letters and digits.
+_VIN_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$", re.I)
+# 2-4 purely alphabetic words (hyphens/apostrophes allowed inside a word), each at
+# least two letters. "ERIN ROYAL", "Mary-Jane O'Neill". Requires NO digits, so an
+# alphanumeric identifier or a coded value can never match.
+#
+# UNICODE-AWARE ON PURPOSE. An ASCII `[A-Za-z]` class was tried first and an
+# adversarial pass caught it: "JOSÉ GARCÍA" contains no ASCII-only word and so
+# bypassed the check entirely, meaning a Hispanic driver's name would still land in
+# a gender-code box. US commercial-lines submissions are full of accented names, so
+# an ASCII-only name detector fails exactly the people it most needs to catch.
+# `[^\W\d_]` is Python's unicode "letter" class: not a non-word char, not a digit,
+# not an underscore.
+# One name word: a unicode letter, then letters/apostrophes/hyphens. The
+# apostrophe and hyphen must be ALTERNATED IN, not added to the negated class —
+# `[^\W\d_'\-]` would EXCLUDE them and break "O'Neill" and "Mary-Jane", which a
+# test caught immediately after the unicode change.
+_NAME_WORD = r"[^\W\d_](?:[^\W\d_]|['\-])+"
+_PERSON_NAME_RE = re.compile(
+    r"^%s(?:\s+%s){1,3}$" % (_NAME_WORD, _NAME_WORD), re.UNICODE
+)
+# The shape above alone is NOT enough, and a self-test caught why: "See schedule"
+# is two alphabetic words with no digits, so it matched — and it is a completely
+# legitimate value in an ACORD limit box. Blanking it would be exactly the
+# "deleted the broker's real data" failure this guard exists to avoid.
+#
+# A personal name never contains one of these words. Any value that does is not
+# treated as a name, whatever its shape. Extend this list rather than loosening
+# the regex, and prefer a missed catch over a false one.
+_NOT_A_NAME_WORDS = frozenset({
+    "see", "per", "not", "no", "none", "nil", "all", "any", "each", "and", "or",
+    "of", "the", "to", "for", "as", "at", "by", "in", "on", "with", "if",
+    "included", "excluded", "exclude", "include", "waived", "waiver", "statutory",
+    "schedule", "scheduled", "policy", "coverage", "coverages", "covered",
+    "limit", "limits", "form", "forms", "endorsement", "endorsements",
+    "attached", "applicable", "above", "below", "same", "various", "refer",
+    "declined", "rejected", "accepted", "pending", "unknown", "other",
+    "blanket", "aggregate", "occurrence", "deductible", "premium", "amount",
+    "annual", "total", "subject", "review", "quote", "bound", "renewal",
+    "primary", "excess", "umbrella", "liability", "property", "auto", "insured",
+})
+_MONTH_WORDS = (
+    "jan", "feb", "mar", "apr", "may", "jun",
+    "jul", "aug", "sep", "oct", "nov", "dec",
+)
+
+
+def _tooltip_declared_type(meta: Any) -> Optional[str]:
+    """The type ACORD declares in this field's tooltip, e.g. "code", "year"."""
+    tu = (meta.get("tu") or "") if isinstance(meta, dict) else ""
+    m = _TOOLTIP_TYPE_RE.match(tu)
+    return m.group(1).lower() if m else None
+
+
+def _looks_like_vin(s: str) -> bool:
+    t = re.sub(r"[\s-]", "", s or "")
+    if not _VIN_RE.match(t):
+        return False
+    return bool(re.search(r"\d", t)) and bool(re.search(r"[A-Za-z]", t))
+
+
+def _looks_like_person_name(s: str) -> bool:
+    t = (s or "").strip()
+    if len(t) > 40 or re.search(r"\d", t):
+        return False
+    if not _PERSON_NAME_RE.match(t):
+        return False
+    # A single insurance/English function word disqualifies it. See
+    # _NOT_A_NAME_WORDS for the self-test that made this necessary.
+    return not any(
+        w.strip("'-").lower() in _NOT_A_NAME_WORDS for w in t.split()
+    )
+
+
+def _is_vin_field(field: str) -> bool:
+    """A field that legitimately holds a VIN, so the VIN check must not fire."""
+    f = field.lower()
+    return "vin" in f or "serial" in f or "identificationnumber" in f
+
+
+def _rejects_declared_type(field: str, meta: Any, value: str) -> Optional[str]:
+    """Reason string if `value` cannot possibly be valid for this field's
+    ACORD-declared type; None to accept.
+
+    Conservative by construction — see the block comment above. Returning None
+    for an unrecognised type is deliberate: a missing check costs nothing, a
+    wrong check blanks a broker's real data.
+    """
+    dtype = _tooltip_declared_type(meta)
+    if not dtype:
+        return None
+    s = (value or "").strip()
+    if not s:
+        return None
+
+    vin_ok = _is_vin_field(field)
+    is_vin = (not vin_ok) and _looks_like_vin(s)
+    is_name = _looks_like_person_name(s)
+
+    if dtype == "year":
+        # A year is a year. This is the one place a real format check is safe:
+        # all 43 year-typed fields across the 17 schemas were checked by hand and
+        # every one is a single-year field ("The year for which you are providing
+        # information", "The original year in which a driver's license was
+        # issued"). A YEAR RANGE is still accepted — a broker writing "2024-2025"
+        # in PriorCoverage_PolicyYear is being reasonable, and blanking that would
+        # be wrong-over-blank, which is just as bad as the reverse.
+        t = re.sub(r"\s", "", s).strip(".")
+        parts = re.split(r"[-/]", t)
+        if not parts or len(parts) > 2 or not all(re.fullmatch(r"\d{2}|\d{4}", p) for p in parts):
+            return f"declared 'year' but value is not a year or year range: {s[:40]!r}"
+        for p in parts:
+            if len(p) == 4 and not (1900 <= int(p) <= 2100):
+                return f"declared 'year' but {p} is outside 1900-2100"
+        return None
+
+    if dtype == "number":
+        # Pre-existing rule, kept verbatim so behaviour does not change for the
+        # 607 fields it already covered.
+        if not _looks_like_declared_number_value(s):
+            return f"declared 'number' but value contains prose: {s[:40]!r}"
+        return None
+
+    if dtype in ("code", "identifier"):
+        if is_name:
+            return f"declared '{dtype}' but value looks like a person's name: {s[:40]!r}"
+        if is_vin:
+            return f"declared '{dtype}' but value is a 17-character VIN: {s[:40]!r}"
+        if dtype == "code" and len(s) > 64:
+            return f"declared 'code' but value is {len(s)} chars of prose"
+        return None
+
+    if dtype == "date":
+        if is_name:
+            return f"declared 'date' but value looks like a person's name: {s[:40]!r}"
+        if is_vin:
+            return f"declared 'date' but value is a 17-character VIN: {s[:40]!r}"
+        if not re.search(r"\d", s) and not any(w in s.lower() for w in _MONTH_WORDS):
+            return f"declared 'date' but value has no digits and no month: {s[:40]!r}"
+        return None
+
+    if dtype in ("amount", "limit", "deductible", "percentage", "rate"):
+        # Deliberately minimal. "Statutory", "Included", "Excluded", "Waived" and
+        # "See schedule" are all REAL values in these boxes on real ACORD forms,
+        # so requiring a digit here would blank correct data. Only a name or a VIN
+        # is impossible.
+        if is_name:
+            return f"declared '{dtype}' but value looks like a person's name: {s[:40]!r}"
+        if is_vin:
+            return f"declared '{dtype}' but value is a 17-character VIN: {s[:40]!r}"
+        return None
+
+    # "text", "time", and anything else: no check.
+    return None
 
 
 # ── Guard 4 similarity helpers (paraphrased-boilerplate detection) ──────────
@@ -4550,6 +5848,40 @@ def _is_high_impact_checkbox_field(field: str, tooltip: Optional[str], ft: Optio
     except Exception:                              # noqa: BLE001
         return False
     return is_high_impact_field(field, tooltip)
+
+
+_DISCLOSURE_QUESTION_MARKER = "response to the question,"
+
+
+def is_compliance_question(field: str, meta: Any) -> bool:
+    """True if `field` is a Yes/No underwriting question for the dedicated
+    compliance pass. Module-level and pure, so both levels of batching classify a
+    field identically.
+
+    Three field shapes route here — deliberately NOT every /Btn checkbox:
+      1. Tooltip begins with the ACORD "Enter Y for a Yes response…" convention
+         (Question-code TEXT fields + …YesNoCode_ fields on ACORD 140/25).
+      2. Tooltip contains "response to the question," — the CHECKBOX-PAIR form of
+         the same convention, used on 125/126/127/130/131/133/141/160/186. ACORD
+         133 has ZERO shape-1 fields and 38 shape-2 ones, which reached the
+         general fill unprotected until this was added.
+      3. A genuine disclosure checkbox missing that wording
+         (`_is_high_impact_checkbox_field` — hired/non-owned auto, leasing,
+         hazardous materials, maintenance program on 137/138).
+
+    Generic /Btn coverage-SELECTION checkboxes ("which auto symbol applies") are
+    excluded on purpose: on ACORD 137_CA only 46 of 192 /Btn fields reaching
+    gap-fill are real disclosure questions, so routing all of them would waste
+    ~14 calls per form and dilute this pass's focus.
+    """
+    info = meta if isinstance(meta, dict) else {}
+    tu = info.get("tu")
+    tu_str = str(tu or "")
+    if tu_str.startswith(_YES_NO_TOOLTIP_PREFIX):
+        return True
+    if _DISCLOSURE_QUESTION_MARKER in tu_str:
+        return True
+    return _is_high_impact_checkbox_field(field, tu, info.get("ft"))
 
 
 def _is_evidence_required_field(field: str) -> bool:
@@ -4884,16 +6216,21 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict) -> None:
         elif prose_like and _is_numeric_or_date_field(field):
             mapped[field] = None
             logger.info("post_fill_guard type_reject blanked=%s (numeric/date got prose %r)", field, s[:40])
-        elif _tooltip_declares_number(meta) and not _looks_like_declared_number_value(s):
+        else:
+            # ── Guard 3b: ACORD's own declared type ──────────────────────────
             # Field-name-based hints (_is_numeric_or_date_field) deliberately
-            # exclude "Number" (policy numbers are legitimately alphanumeric) -
-            # this catches the same class of error via the field's own SCHEMA
-            # TOOLTIP instead, which is authoritative regardless of naming (a
-            # live test found "Location 1"/"Location 2" stamped into a
-            # BlanketNumberIdentifier field whose tooltip explicitly says
-            # "Enter number:").
-            mapped[field] = None
-            logger.info("post_fill_guard type_reject blanked=%s (tooltip declares number, got %r)", field, s[:40])
+            # exclude "Number" (policy numbers are legitimately alphanumeric).
+            # This catches the same class of error via the field's own SCHEMA
+            # TOOLTIP, which is authoritative regardless of naming — and covers
+            # all twelve declared types, not just "Enter number:" (C22). See
+            # `_rejects_declared_type` for why it only ever rejects a personal
+            # name, a VIN, or an out-of-range year.
+            _reason = _rejects_declared_type(field, meta, s)
+            if _reason:
+                mapped[field] = None
+                logger.warning(
+                    "post_fill_guard type_reject blanked=%s — %s", field, _reason,
+                )
 
     # ── Guard 4: cross-field boilerplate bleed ───────────────────────────────
     # The same generic sentence pasted into several UNRELATED fields is boilerplate
@@ -5446,7 +6783,24 @@ def _quote_expresses_negative(quote: str) -> bool:
 # not reuse the compliance pass's evidence-quote machinery — mirrors that
 # pass's core idea instead: pull the one thing the crowded prompt keeps
 # missing OUT of the crowd and ask it alone.
-_UMBRELLA_PERIOD_MAX_CHARS = 60_000  # generous single-call budget; this is one small question, not the full doc pipeline
+# Document chars per umbrella-probe CALL. This is a chunk size, NOT a ceiling on
+# how much of the document the probe reads — it reads all of it (C14).
+#
+# It used to be `raw_text[:60_000]`, i.e. a hard truncation, and that was the
+# worst possible place for one. This probe is a FALLBACK: it fires only when the
+# main extraction pass already failed to find the umbrella's period. Truncating
+# it to the first 60,000 chars pointed the backup at the opening ~9% of the
+# package — the part we already know did not yield the dates — so on any document
+# larger than that the backup read strictly less than the thing it was backing
+# up, and umbrella dates came back blank on ACORD 125/131/25.
+#
+# Sized to extraction's measured-good regime (~14k tokens/call), not to the
+# gap-fill call budget. A two-key question does not need 170k tokens of context,
+# and improving-ll.md C21 measured instruction-following degrading up there.
+# Chunks are scanned in order and the loop stops as soon as both dates are found,
+# so the overwhelmingly common case — dates on a declarations page near the front
+# — still costs exactly ONE call, the same as before.
+_UMBRELLA_PERIOD_CHUNK_CHARS = int(os.getenv("UMBRELLA_PERIOD_CHUNK_CHARS", "56000"))
 
 _UMBRELLA_PERIOD_SYSTEM_PROMPT = (
     "You are an expert commercial-insurance underwriter reading an insurance application or "
@@ -5492,6 +6846,14 @@ def _fetch_umbrella_period_sync(raw_text: str) -> Optional[dict]:
     module-level AsyncOpenAI client, which is the same cross-event-loop deadlock
     documented on `_get_openai_form_fill_client_sync()`.
 
+    The WHOLE document is scanned, chunked against
+    `_UMBRELLA_PERIOD_CHUNK_CHARS` — see the note on that constant for why the
+    previous `raw_text[:60_000]` was the worst possible place for a truncation.
+    Chunks are read in order and the scan stops the moment both dates are known,
+    so a normal submission with its umbrella dec page near the front still costs
+    exactly one call. A chunk that fails is skipped, not fatal: the remaining
+    chunks may still hold the answer, and a partial answer beats none.
+
     Returns {"umbrella_effective_date": ..., "umbrella_expiration_date": ...}
     (either value may be None) or None on any failure — advisory only, never
     raises past this function so a call-site failure can't block form generation.
@@ -5502,33 +6864,63 @@ def _fetch_umbrella_period_sync(raw_text: str) -> Optional[dict]:
         logger.warning("gpt_fill UMBRELLA_PERIOD: %s — skipping", exc)
         return None
 
-    text = raw_text[:_UMBRELLA_PERIOD_MAX_CHARS]
-    user_msg = f"=== DOCUMENT TEXT ===\n{text}"
+    chunks = _split_text_on_boundaries(raw_text or "", _UMBRELLA_PERIOD_CHUNK_CHARS)
+    if len(chunks) > 1:
+        logger.info(
+            "gpt_fill UMBRELLA_PERIOD: document split into %d chunk(s) (%d chars) — "
+            "scanning in order until both dates are found",
+            len(chunks), len(raw_text or ""),
+        )
 
-    try:
-        from utils.llm_limiter import llm_slot_sync
-        with llm_slot_sync():
-            resp = _client.chat.completions.create(
-                model=GPT_MODEL,
-                messages=[
-                    {"role": "system", "content": _UMBRELLA_PERIOD_SYSTEM_PROMPT},
-                    {"role": "user",   "content": user_msg},
-                ],
-                temperature=GPT_TEMPERATURE,
-                response_format=_UMBRELLA_PERIOD_RESPONSE_FORMAT,
-                max_completion_tokens=500,
+    found: Dict[str, Optional[str]] = {
+        "umbrella_effective_date":  None,
+        "umbrella_expiration_date": None,
+    }
+    any_call_succeeded = False
+
+    for _ci, _chunk in enumerate(chunks):
+        user_msg = f"=== DOCUMENT TEXT ===\n{_chunk}"
+        try:
+            from utils.llm_limiter import llm_slot_sync
+            with llm_slot_sync():
+                resp = _client.chat.completions.create(
+                    model=GPT_MODEL,
+                    messages=[
+                        {"role": "system", "content": _UMBRELLA_PERIOD_SYSTEM_PROMPT},
+                        {"role": "user",   "content": user_msg},
+                    ],
+                    temperature=GPT_TEMPERATURE,
+                    response_format=_UMBRELLA_PERIOD_RESPONSE_FORMAT,
+                    max_completion_tokens=500,
+                )
+            _log_llm_spend("umbrella", "-", resp)
+            content = resp.choices[0].message.content or ""
+            result = json.loads(content)
+        except Exception as exc:                          # noqa: BLE001 — advisory only
+            # One bad chunk must not abandon the rest of the document. That is
+            # the difference between "the answer is on page 200 and we stopped
+            # at page 40" and "the answer is on page 200 and we found it".
+            logger.warning(
+                "gpt_fill UMBRELLA_PERIOD: chunk %d/%d failed — %s",
+                _ci + 1, len(chunks), exc,
             )
-        content = resp.choices[0].message.content or ""
-        result = json.loads(content)
+            continue
+
         if not isinstance(result, dict):
-            return None
-        return {
-            "umbrella_effective_date":  result.get("umbrella_effective_date")  or None,
-            "umbrella_expiration_date": result.get("umbrella_expiration_date") or None,
-        }
-    except Exception as exc:                              # noqa: BLE001 — advisory only
-        logger.warning("gpt_fill UMBRELLA_PERIOD: call failed — %s", exc)
+            continue
+        any_call_succeeded = True
+        # First chunk that states a date wins it. The two dates are resolved
+        # independently: a package can state the umbrella's effective date on its
+        # dec page and its expiration only in a later endorsement.
+        for _k in found:
+            if found[_k] is None and (result.get(_k) or None):
+                found[_k] = result[_k]
+        if all(found.values()):
+            break
+
+    if not any_call_succeeded:
         return None
+    return dict(found)
 
 
 async def _fetch_umbrella_period(raw_text: str) -> Optional[dict]:

@@ -9,6 +9,7 @@ from models.schemas import (
     DismissRecommendationRequest,
     ResolveRecommendationRequest,
     AnswerRecommendationRequest,
+    ReopenRecommendationRequest,
     ResolveIssueRequest,
     ReopenIssueRequest,
     DownloadAnywayRequest,
@@ -18,9 +19,13 @@ from repositories.session_repository import get_processing_session
 from services.audit_service import (
     get_open_recommendations,
     get_dismissed_recommendations,
+    get_reviewed_recommendations,
+    get_recommendation_audit_row,
     get_audit_summary,
     mark_recommendation_dismissed,
     mark_recommendation_resolved,
+    mark_recommendation_answer_recorded,
+    reopen_recommendation as _reopen_recommendation_row,
     log_download_with_open_recs,
     log_field_change,
     get_marketing_reason,
@@ -81,6 +86,24 @@ def _credited_score(base: int, impact: int, cap: int) -> int:
     submission-wide hard stop no longer drags every score onto 60.
     """
     return min(min(100, base + impact), cap)
+
+
+def _dismiss_earned_credit(override_reason, score_impact) -> bool:
+    """Did this dismissal earn a score credit?
+
+    A plain "Dismiss" with no reason intentionally hides the card without crediting
+    the score - the gap remains on record. Only a real typed reason (not the default
+    sentinel) with a positive impact credits.
+
+    Single source of truth on purpose: the dismiss route uses it to decide whether to
+    APPLY a credit and the reopen path uses it to decide whether to REVERSE and replay
+    one. If the two predicates ever drifted, scores would silently mis-restore.
+    """
+    return (
+        override_reason not in (None, "", "No reason provided")
+        and score_impact is not None
+        and score_impact > 0
+    )
 
 
 async def _apply_dismiss_score_credit(
@@ -292,13 +315,7 @@ async def dismiss_recommendation(
     # reason intentionally does NOT credit the score — the card is hidden but
     # the gap remains on record.
     credit: dict = {}
-    if (
-        success
-        and req.override_reason
-        and req.override_reason != "No reason provided"
-        and req.score_impact is not None
-        and req.score_impact > 0
-    ):
+    if success and _dismiss_earned_credit(req.override_reason, req.score_impact):
         credit = await _apply_dismiss_score_credit(
             session_id=req.session_id,
             rec_id=req.rec_id,
@@ -380,6 +397,26 @@ async def answer_recommendation(
                        "document or dismiss it with a note.",
         })
 
+    # Record the typed value BEFORE the recalculation. The recalculation's
+    # auto-resolve pass may stamp action='resolved', and this writer is latched on
+    # `action IS NULL` - recording afterwards would silently no-op and the answer
+    # would never be persisted. It deliberately does not set `action` itself; see
+    # mark_recommendation_answer_recorded.
+    try:
+        await mark_recommendation_answer_recorded(
+            session_id=req.session_id,
+            rec_id=req.rec_id,
+            producer_answer=str(req.answer).strip(),
+            model_version=SQS_MODEL_VERSION,
+            field=req.field,
+            message=req.message,
+            score_impact=req.score_impact,
+            user_id=str(current_user["id"]),
+            form_id=req.form_id,
+        )
+    except Exception as _ae:
+        logger.warning(f"answer_recommendation: answer record failed: {_ae}")
+
     try:
         await log_field_change(
             session_id=req.session_id,
@@ -431,6 +468,169 @@ async def answer_recommendation(
         "new_package_sqs_score": impact.get("score_after"),
         "new_package_tier":      impact.get("tier"),
         "open_recommendations":  open_recs,
+    })
+
+
+async def _reapply_dismiss_credits(session_id: str, exclude_rec_id: str) -> None:
+    """Re-apply the score credit of every STILL-dismissed recommendation, except one.
+
+    recalculate_session_scores replaces each form's `sqs` dict wholesale, and the
+    dismiss credits were written destructively into that dict with no baseline stored
+    anywhere. So any recalculation silently erases every outstanding credit. Before
+    reopen that was rare; reopen would make it routine - dismissing three recs
+    (+8, +12, +5) and reopening the +8 one would drop the score by all 25.
+
+    Replaying is safe because _credited_score compounds from whatever the current base
+    is, so applying the surviving dismissals in their original order reproduces the
+    same sequence of credits. The reopened rec is already action=NULL (or is excluded
+    here), so it can never be double-credited.
+    """
+    try:
+        for row in await get_dismissed_recommendations(session_id):
+            if row.get("rec_id") == exclude_rec_id:
+                continue
+            if not _dismiss_earned_credit(row.get("override_reason"), row.get("score_impact")):
+                continue
+            await _apply_dismiss_score_credit(
+                session_id=session_id,
+                rec_id=row["rec_id"],
+                # Only a fallback for a NULL stored score. The recalculation that just
+                # ran always writes live per-form and package scores, so the real base
+                # is read from the session and this value is never reached.
+                score_at_action=0,
+                score_impact=int(row["score_impact"]),
+            )
+    except Exception as ex:
+        logger.error(f"_reapply_dismiss_credits failed for {session_id}: {ex}")
+
+
+async def _forms_payload_with_recs(session_id: str) -> tuple:
+    """(updated_forms, package_score, package_tier) read back from the session.
+
+    Same {new_sqs_score/new_grade/new_tier/new_tier_color} shape the dismiss and
+    answer paths already return, plus each form's recommendations so the panel can
+    restore its open card list without guessing which recs came back.
+    """
+    updated_forms: dict = {}
+    pkg_score = None
+    pkg_tier = None
+    try:
+        sess = await get_processing_session(session_id)
+        for fid, fdata in (sess.get("generated_forms") or {}).items():
+            if not isinstance(fdata, dict):
+                continue
+            sqs = fdata.get("sqs") or {}
+            score = sqs.get("sqs_score")
+            if score is None:
+                continue
+            g, t, c = _grade_from_score(int(score))
+            updated_forms[fid] = {
+                "new_sqs_score":   int(score),
+                "new_grade":       g,
+                "new_tier":        t,
+                "new_tier_color":  c,
+                "recommendations": sqs.get("recommendations") or [],
+            }
+        pkg = sess.get("package_sqs") or {}
+        pkg_score = pkg.get("package_sqs_score")
+        if pkg_score is not None:
+            pkg_score = int(pkg_score)
+            pkg_tier = _grade_from_score(pkg_score)[1]
+    except Exception as ex:
+        logger.error(f"_forms_payload_with_recs failed for {session_id}: {ex}")
+    return updated_forms, pkg_score, pkg_tier
+
+
+@router.post("/api/audit/reopen-recommendation")
+async def reopen_recommendation(
+    req: ReopenRecommendationRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Reopen a dismissed or producer-answered recommendation from "Reviewed".
+
+    Undoes whatever that review actually did:
+      * answered -> retracts the producer-provenance fact and blanks it on every form
+        it was stamped into, so the gap and the score genuinely come back;
+      * dismissed-with-a-reason -> reverses the score credit by rescoring from facts
+        (no pre-credit baseline is stored, so a rescore is the only honest restore),
+        then replays the OTHER dismissals' credits;
+      * dismissed without a reason -> nothing was written and nothing was credited, so
+        no rescore is needed at all.
+
+    `override_reason` / `producer_answer` are preserved throughout - see
+    audit_service.reopen_recommendation.
+    """
+    await _verify_session_owner(req.session_id, current_user)
+
+    row = await get_recommendation_audit_row(req.session_id, req.rec_id)
+    if not row:
+        raise HTTPException(404, "Recommendation not found")
+
+    was_answered = row.get("action") == "resolved" and row.get("producer_answer") is not None
+    credit_applied = _dismiss_earned_credit(row.get("override_reason"), row.get("score_impact"))
+
+    cleared = False
+    if was_answered and row.get("field"):
+        from services.arq_service import clear_producer_answer_from_session
+        try:
+            cleared, _ = await clear_producer_answer_from_session(
+                req.session_id, row["field"],
+            )
+        except Exception as ex:
+            logger.error(f"reopen_recommendation: clear failed for {row.get('field')}: {ex}")
+
+    if cleared or credit_applied:
+        from services.arq_service import recalculate_session_scores
+        await recalculate_session_scores(req.session_id)
+        await _reapply_dismiss_credits(req.session_id, exclude_rec_id=req.rec_id)
+
+    # Only reopen the audit row if the gap actually came back. Several recs are
+    # satisfied by a COMBINATION of facts (rec_gl_class_codes, rec_min_cope,
+    # rec_auto_vin_schedule), so retracting one value may leave the rec legitimately
+    # closed. Nulling `action` regardless would create a row that is open to
+    # get_unresolved_recommendations - and so blocks the download preflight forever -
+    # while rendering nowhere in the panel, leaving the producer no way to clear it.
+    updated_forms, pkg_score, pkg_tier = await _forms_payload_with_recs(req.session_id)
+    active_rec_ids = {
+        r.get("rec_id")
+        for f in updated_forms.values()
+        for r in f.get("recommendations") or []
+        if isinstance(r, dict)
+    }
+
+    reopened = req.rec_id in active_rec_ids
+    if reopened:
+        # Nulled LAST, deliberately: recalculate_session_scores' auto-resolve pass only
+        # touches rows with action IS NULL, so clearing it earlier would let that pass
+        # immediately re-stamp 'resolved' and defeat the reopen.
+        await _reopen_recommendation_row(req.session_id, req.rec_id)
+
+    return JSONResponse({
+        "success":               True,
+        "reopened":              reopened,
+        "cleared":               cleared,
+        "previous_answer":       row.get("producer_answer"),
+        "previous_reason":       row.get("override_reason"),
+        "updated_forms":         updated_forms,
+        "new_package_sqs_score": pkg_score,
+        "new_package_tier":      pkg_tier,
+    })
+
+
+@router.get("/api/audit/reviewed/{session_id}")
+async def get_reviewed(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Recommendations the producer has dismissed or answered - the "Reviewed"
+    section of the SQS panel. Distinct from /api/audit/dismissed/, which stays
+    dismissals-only because it backs the E&O audit-trail export."""
+    await _verify_session_owner(session_id, current_user)
+    rows = await get_reviewed_recommendations(session_id)
+    return JSONResponse({
+        "success":                  True,
+        "reviewed_recommendations": rows,
+        "count":                    len(rows),
     })
 
 

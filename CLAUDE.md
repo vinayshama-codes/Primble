@@ -215,6 +215,21 @@ OCR_PROVIDER=google   # google | google_vision | vision (all mean Google Cloud V
 # backend/config/settings.py. Nothing to set in any environment.
 ENABLE_SCHEDULE_CAPTURE=true           # Figure 15: bulk vehicle/driver/location/loss tables
 
+# Cost / coverage knobs (all have safe derived or auto defaults - see improving-ll.md)
+# Nothing below needs to be set in any environment. They exist to be turned OFF.
+GAP_FILL_FULL_RESCAN=auto     # auto = re-scan every chunk iff the document split (>1 chunk).
+                              # Free on one chunk; correct on two. 0 = legacy first-answer-wins
+                              # (measured dropping 46% of a document), 1 = always.
+FIELD_BATCH_PACK_TABLES=1     # Pack table groups alongside ordinary fields instead of giving
+                              # each table its own LLM call. 0 reverts the COST change only -
+                              # repeating-group atomicity holds either way.
+TEXT_DEDUP_MIN_REPEATS=0      # clean_text paragraph de-dup. OFF: it was deleting real fleet
+                              # rows. >0 requires that many repeats AND <=TEXT_DEDUP_MAX_LEN.
+CONTEXT_UTILISATION=0.75      # Fraction of the model context one call may occupy. THE
+                              # cost-versus-accuracy dial - see C21 before changing it.
+COMBINED_FIELD_BATCH=200      # Outer batch size. 600 was measured to save 4 more calls and
+                              # DECLINED - it touches the C19 schedule invariant.
+
 # Job queue
 JOB_QUEUE_BACKEND=db          # db | memory | local_file | sqs
 ENABLE_ASYNC_PROCESSING=false
@@ -259,6 +274,12 @@ legacy "off" paths survive at the call sites only as import-failure fallbacks.
 | `DEV_ROUTES_ENABLED` | false | Enables dev/test endpoints |
 
 ---
+
+## Handoff
+
+**`HANDOFF.md` at the repo root is the current entry point** for the LLM cost/quality work:
+problem statement, what shipped 2026-07-30, measured before/after, the three chunkers and
+their limits, and the ranked open-issue list. Read it with `improving-ll.md`.
 
 ## Critical Issues & Roadmap
 
@@ -420,8 +441,366 @@ baseline 608 passed / 3 failed at HEAD - the same three pre-existing failures
 (`test_arq_acord125_missing_only`, `test_download_gate`, `test_normalization`), zero
 regressions.
 
-### Active Performance Bug (Priority #1)
-**Combined gap fill is slow (17+ minutes for 3 forms).**
+### Gap-Fill Prompt Defeated OpenAI's Prefix Cache, And Told The Model The Wrong Form - FIXED (2026-07-29)
+**A cost audit traced ~80% of input spend to the same constant block of text being
+re-uploaded on every LLM call in a run. Full detail, before/after numbers and the issue
+IDs (C1-C11) are in `improving-ll.md` - read that before touching any prompt here.**
+
+Two of the findings were defects, not just waste:
+
+1. **The model was told it was filling "ACORD form COMBINED_B1of2".** `_PROMPT_SKELETON` was
+   an f-string built per call with `form_id` interpolated into line one, and
+   `combined_gap_fill` passes a BATCH LABEL as `form_id`. So on every combined run - which
+   is every run - the model could not tell a Workers Comp form from a Commercial Auto one.
+   Confirmed in production logs (`form=COMBINED_B1of2`). Fixed: the skeleton is now a
+   module-level, form-agnostic constant, and a new `form_label` parameter carries the real
+   names ("ACORD_125, ACORD_25") in the user message. `form_id` stays the logging label.
+2. **`_raw_budget` under-reserved and could silently blank a whole batch.** Found in QA
+   review, pre-existing and latent. It sized the document chunk by estimating the fields
+   block with `_field_spec()` - one short line per field - while `_build_user_prompt`
+   renders multi-slot and table fields through `_slot_group_block()` / `_table_group_block()`,
+   which are several times longer. Group-heavy batches therefore packed in too much raw text:
+   **measured 69,879 chars against a 60,000 budget on ACORD 140 (+16%)**. In production that
+   is a context-length 400 -> 3 dead retries -> `_chat_json` returns {} -> the whole batch
+   silently BLANK, indistinguishable from the model having nothing to say. Latent only
+   because `GPT_CALL_BUDGET_CHARS` (380k) currently sits well under the model's real context.
+   Fixed by extracting **`_render_fields_block()` as the single source of truth** - both the
+   prompt builder and the budget call it, so they can never drift again - then rounding the
+   allowance UP to a multiple of `_MAX_FIELDS_BLOCK_CHARS` so chunk boundaries stay shared
+   (cacheable) without ever under-reserving. **Never re-estimate this block; always render
+   it.** Guarded by `backend/tests/test_full_document_coverage.py`.
+
+**Prompt order is now load-bearing.** `_build_user_prompt` emits
+`form label -> EXTRACTED FACTS -> RAW DOCUMENT TEXT -> fields -> JSON footer`. Everything
+before the field list is constant within a run and therefore cacheable. **Facts deliberately
+stay AHEAD of the raw text** - the skeleton labels facts the PRIMARY source, and models
+weight position as well as labels, so demoting it below the secondary source was an
+avoidable quality risk and was not taken. Only the field list moved.
+
+**Also fixed:** the prompt asked for `null` ~12 times against one "omit" instruction, so the
+model emitted nulls that `_is_empty_llm_value` discarded on arrival (behaviour-neutral to
+change, pure waste at 6x the input price); a parse failure re-sent the entire prompt up to
+3x instead of salvaging the completed portion of a truncated reply; and a timeout or 429
+triggered a second full-prompt `json_object` call that OpenAI had already billed once.
+
+**One condition the audit missed:** OpenAI populates a cached prefix only when a request
+COMPLETES, so firing sub-batches `_FIELD_BATCH_POOL`-wide made the first 4 guaranteed
+misses - capping a 6-batch run near 33% no matter how correct the prompt order was.
+`_PREFIX_WARMUP` (default on) runs one call to completion before fanning out: ~33% -> ~83%
+on that run. It is **not** unconditional - warming always adds one serialized wave, which is
+a bad trade on a small document (buys ~half a cent, costs a full round trip of user-visible
+latency), so it is gated on `LLM_PREFIX_WARMUP_MIN_CHARS` (default 40,000). Each invocation
+logs `warmup=True/False` with the measured prefix size. `LLM_PREFIX_WARMUP=0` disables it.
+
+**Full-document coverage is a standing requirement with executable proof.**
+`backend/tests/test_full_document_coverage.py` plants ~400 unique sentinels through a
+document larger than one call budget and asserts every one reaches the model - separately for
+the general fill and the compliance pass, since they chunk independently. OCR reads all pages;
+extraction chunks with a `_verify_coverage` that raises on any gap; both gap-fill stages are
+sentinel-verified. Known remaining gaps are logged as C14-C17 in `improving-ll.md` (the
+umbrella probe truncates at 60k chars; the chunk loop stops early once every field is
+answered, so a later endorsement cannot supersede an earlier value; `DIAG_RESPONSE` logs
+applicant PII at INFO; documents over 500k tokens are rejected outright rather than truncated).
+
+**Measured offline, reproducibly** (`py backend/scripts/inspect_gap_fill_prompts.py`, zero
+API cost - it swaps the OpenAI client for a recorder and inspects the actual prompt bytes).
+ACORD 125 + 25 fixture: **29 -> 23 total calls, 421k -> 350k input chars, and the `gap_fill`
+stage went from 3 different system prompts and a 26-char shared prefix (0% cacheable) to one
+identical system prompt and an 11,774-char / ~2,943-token prefix (64% cacheable).** The
+compliance pass was already correct - document-first, constant system prompt - and is
+unchanged at 70%.
+
+**Do not verify prompt changes by diffing two live runs.** The pipeline is non-deterministic,
+so jitter hides the regression. Verify shape offline with the inspector, then sanity-check
+one live run. `backend/tests/test_prompt_prefix_caching.py` (14 tests) fails the build if the
+system prompt splits into variants, if the field list moves ahead of the constant blocks, if
+the shared prefix drops under OpenAI's 1024-token floor, or if batches re-fragment.
+Suite: 984 pass / 2 pre-existing failures, zero regressions.
+
+### Currency "Magnitude Tiebreak" Picked Umbrella Limits As GL Limits - FIXED (2026-07-30, C23)
+**Was putting wrong limits on ACORD 125/126/25.** `extraction_service._merge_list_fields`
+broke a near-tie between two candidate values for a currency fact by re-sorting on dollar
+magnitude. On a real package with both a GL part ($1M/$2M) and a Commercial Liability
+Umbrella ($3M) it filled the GL facts from the UMBRELLA, while the composite `gl_limits`
+fact from the same run said $1,000,000 - two facts from one document contradicting each
+other, and the wrong one stamping the certificate.
+
+**Three defects in six lines, all confirmed:**
+1. Across coverage parts the rule is inverted. Umbrella/excess limits are BY DEFINITION the
+   larger ones, so "bigger wins" is wrong precisely where two parts coexist - most real
+   packages.
+2. The re-sort was **global**, not a top-two swap, so a candidate ranked 5th on score could
+   win on size alone, discarding the scoring entirely.
+3. `_currency_magnitude` strips non-digits and parses the remainder, so on the COMPOSITE
+   `gl_limits` (which IS in `_CURRENCY_FIELDS`) it returns **1.0e+20**. The tiebreak was
+   literally "whichever string contains the most digits".
+
+**Fix, in two parts.** The magnitude rule is reduced to the single case its own comment cited:
+a real limit beating a literal **zero**. Everything else was coincidence.
+
+Killing it alone was not enough, though - it left the outcome decided by **which chunk
+mentioned the amount first**, i.e. a coin flip on a figure with legal exposure. So a
+**composite-consistency** check now settles the tie: `_CURRENCY_COMPOSITE_PARENT` maps
+`gl_each_occurrence`/`gl_aggregate` to `gl_limits`, the composite is resolved FIRST, and only
+the tied candidate whose amount actually appears in it survives. The composite is the better
+witness for its own children because it was extracted as ONE coherent block.
+
+**It refuses to guess.** It acts only when EXACTLY ONE tied candidate appears in the
+composite. If both appear it cannot separate them and the ordinary scoring stands; if NEITHER
+appears the scalar and the composite genuinely disagree, and that is logged as
+`composite MISMATCH` at WARNING rather than silently stamped. No composite, no action.
+
+Verified order-independent in both document orders (`umbrella_first` parametrised).
+Tests: `backend/tests/test_currency_tiebreak.py` - **rewritten to drive the real
+`_merge_list_fields`**. The first version reimplemented the tiebreak in a local harness plus a
+string-matching "drift check", which then failed the build for a comment reword rather than a
+behaviour change. A copy of production logic in a test only proves the copy is self-consistent.
+
+### C23 Round 2 - The Composite Itself Was The Umbrella (2026-07-30)
+**Round 1 did not work, and a real run proved it.** Reconciling each scalar against the
+composite `gl_limits` only helps if the composite is right. On ORBIN CONTRACTING it was not:
+
+```
+merge field='gl_limits' chosen='each occurrence limit (liability coverage) $ 3,000,000;
+  personal & advertising injury limit $ 3,000,000; aggregate limit (liability coverage) $ 3,000,000'
+merge field='gl_each_occurrence' chosen='$ 3,000,000'  rejected=['$ 1,000,000','$1,000,000']
+merge field='gl_aggregate'       chosen='$ 3,000,000'  rejected=['$ 2,000,000','$2,000,000']
+```
+
+The real GL part is $1M/$2M; the $3M is a Commercial Liability Umbrella. Every scalar agreed
+with a wrong witness, and **no tiebreak line appeared in the log at all** - the check was not
+misfiring, it was blind, because the top candidate already matched the wrong parent.
+
+**Two further defects, both fixed:**
+1. **Nothing chose between competing COMPOSITES.** `_score_composite_candidate` now ranks tied
+   composites by `(children explained, distinct dollar amounts)`. A real GL block enumerates
+   several limits ($1M occurrence, $2M aggregate, $500k premises, $10k medical); an umbrella
+   block repeats one number. That separates them with **no coverage-part vocabulary** - the
+   keyword approach has failed here three times and is still not being used. `explained` is
+   ordered first so a long endorsement listing many dollar figures cannot outrank a composite
+   that actually accounts for the scalars.
+2. **The scalar check required EXACTLY ONE consistent candidate.** `'$ 1,000,000'` and
+   `'$1,000,000'` are two candidates for the SAME amount, so the count was 2 and it declined to
+   act. It now groups by AMOUNT: ambiguity means two DIFFERENT figures, not two spellings.
+
+`gl_products_aggregate` and `gl_personal_advertising_injury` were being filled from the umbrella
+too and are now children of the same reconciliation (and members of `_CURRENCY_FIELDS`).
+
+Verified on the run's verbatim strings across **all 6 orderings of the three composite
+candidates - 6/6 correct**, where round 1 scored 0/6. Tests: `test_currency_tiebreak.py` (23).
+
+**Lesson worth keeping:** round 1's tests all fed a CORRECT composite. A reconciliation is only
+as good as the witness it trusts, and the test must include the case where the witness is wrong.
+
+### Silent Data Destruction Before Any LLM Saw It - FIXED (2026-07-30, C24)
+**`utils/text_cleaner.py::clean_text` runs on EVERY upload at `ocr_service.py:1704` - before
+extraction, before gap fill, before anything - and it was deleting content.** Four filters:
+any line of >8 words that was >80% uppercase (declarations pages are written in capitals);
+any paragraph under 10 chars; every repeat of any paragraph, MD5-hashed document-wide; and
+any line of only digits. **Measured on a realistic dec page: 56% deleted**, including the
+named insured, both GL limits, and a vehicle schedule row.
+
+It was also arbitrary: whether a line survived depended on how many of its tokens were pure
+digits (which are not `.isupper()`), so one vehicle row scored 83% and died while the next
+scored 75% and lived.
+
+**This invalidated the headline "no data is lost" claim.** `_verify_coverage` reporting
+`671654/671654 chars - 100%` was 100% of **what survived this function**. The denominator was
+wrong, and that figure had been quoted as proof.
+
+Three filters deleted; de-duplication is default OFF and, if re-enabled, needs >=5 repeats AND
+<=120 chars so a running header goes and a fleet row stays. **The loss metric counts
+non-whitespace characters only** - a raw-length metric reports 22.1% "removed" on an intact
+layout-extracted page purely from the lossless whitespace collapse, and an alarm that fires on
+the normal case gets ignored, then disbelieved on the day it is real. Threshold: 2% of content.
+
+### The Coverage Test Was Blind, And Fixing The Shredder Armed The Hole - FIXED (2026-07-30, C25)
+`tests/test_full_document_coverage.py` proved "every word reaches the model" with a recorder
+that always returned `{"values": {}}`. Nothing answered means `active_fields` never shrinks,
+the chunk loop never stops early, and every chunk always ships - so the test passed over a
+pipeline that dropped **185 of 400 markers (46%)** as soon as a model actually answered.
+
+A "run-level coverage is still complete" defence was offered and does not hold as a property:
+that run came out clean only because two of its five batches had their answers discarded as
+`UNKNOWN_KEYS` and so happened to read every chunk. Coverage by luck is not coverage.
+
+**Rescan is now automatic whenever the document actually split** (`_rescan_enabled`,
+`GAP_FILL_FULL_RESCAN=auto`). Zero cost on a single chunk - there is nothing to re-read - and
+correct the moment there are two. The previous OFF default relied on documents staying under
+~890k chars, and **fixing C24 removed up to 25% of deletion from every document, pushing large
+packages toward that line.** The two "leave it as default" decisions were coupled.
+`GAP_FILL_FULL_RESCAN=0` keeps the legacy path as a kill switch and logs `COVERAGE_PARTIAL`.
+
+### Type-Aware Rejection From ACORD's Own Declared Types - ADDED (2026-07-30, C22)
+A real ACORD 127 run shipped `Driver_TaxIdentifier_A = "4S4BRCGC9C3217772"` (a VIN in a tax-ID
+box) and `Driver_GenderCode_A = "ERIN ROYAL"`. Neither was caught: `_NUMERIC_DATE_FIELD_HINTS`
+lists `YearBuilt`/`ModelYear` but not plain `Year`, and `_PROSE_FIELD_TOKENS` contains "Name",
+so a name-ish field is classed as prose and anything passes.
+
+**ACORD states each field's type in its own tooltip** - "Enter code:", "Enter year:",
+"Enter identifier:", ... - for **3,888 of 5,852 fields (66%)**. The code read exactly one of the
+twelve (`Enter number:`, 607 fields). `_rejects_declared_type` now covers all of them, wired in
+as Guard 3b of `_enforce_post_fill_guards`. Zero LLM cost, deterministic.
+
+**Conservative by construction, and it must stay that way.** It rejects only a personal NAME, a
+VIN (never in a vin/serial/identificationnumber field), or an out-of-range year - because
+amount boxes legitimately hold "Statutory", "Included", "See schedule". Validated by a
+**~49,000-pair sweep** (every type-appropriate legitimate value x every typed field in all 17
+schemas) with zero false positives; that sweep IS the test. It caught one during development:
+"See schedule" matched the person-name shape, hence `_NOT_A_NAME_WORDS`.
+
+**Honest scope - 3 fixed, 3 not, and one of those was never a defect.**
+`Driver_LicensedYear_A = "2012"` is a valid year (it was the wrong ENTITY's year) and
+`Vehicle_RateClassCode_A = "7383"` is a validly-shaped code - neither is visible to a type
+check. And `Driver_OtherGivenNameInitial_A = "Erin"` **was mis-reported**: ACORD's tooltip reads
+"middle name **or initial**", so a first name is permitted and rejecting it would blank
+legitimate data. Do not "fix" it.
+
+### Gap-Fill Batching Was Paying For Calls It Did Not Need - FIXED (2026-07-30, C29/C30)
+Two independent shapes of waste, both measured on the real 5-form union (1,359 fields), both
+fixed without touching a batch size, a prompt, or what any single call asks the model.
+
+**C30 - outer batching cut both inner streams mid-flow.** `combined_gap_fill` sliced the mixed
+union, then each outer batch re-partitioned ITS OWN slice into compliance questions (groups of
+10) and general fields (groups of 40). Every slice boundary left a runt on each side:
+compliance ran **18 calls with sizes [4, 10, 10, 9, 1, 10, ..., 4, 2, 4, 5] where 14 suffice**.
+The union is now partitioned into the two streams BEFORE outer batching. This changes nothing
+the model sees - the compliance pass was always a separate call with its own system prompt, so
+a compliance field never shared a call with a general field. **18 -> 14.**
+
+**C29 - every table group got its own dedicated call, and the wrong things were protected.**
+`_pack_field_batches` emitted each detected table bucket as a standalone batch: **46 gap-fill
+calls, 34 of them partial, many carrying 3-5 fields.** The C19 invariant requires a table to be
+visible to ONE call; it does not require the table to be ALONE in it. Meanwhile only >=3-column
+TABLE buckets were kept atomic, so plain multi-slot groups were sliced freely - **27 repeating
+groups were being split across separate calls**, which is the C19 failure mode one level down
+(a call that sees `_A`/`_B` but not `_C` cannot honour "find N distinct values, never repeat
+one"). Now everything bin-packs as **indivisible units** - table bucket, multi-slot group, or
+lone field. **46 -> 33 calls AND 27 -> 0 split groups: cheaper and more correct.**
+
+**"Group" means `repeating_group_key` = (base, TOOLTIP), never base alone.** ACORD 25's insurer
+tooltips end "As used here, this is Insurer B.", so `Insurer_FullName_B..F` are six separate
+one-slot groups needing no joint reasoning. Counting by base name inflates the split figure to
+92 and wrongly flags those six - an earlier version of the test did exactly that and was wrong.
+
+**Net, on a realistic 680k-char package: 64 -> 46 calls, ~$1.30 -> ~$0.98 (-24%).** Output
+tokens in that figure are an estimate (500/call) and are the weakest number - real output scales
+with fields answered, not calls. The solid savings are the removed round trips and the repeated
+cached prefix. Raising `_COMBINED_FIELD_BATCH` 200 -> 600 was measured (~4 fewer calls) and
+**declined**: a ~6% gain that touches the C19 schedule invariant is the wrong trade without the
+accuracy baseline. `FIELD_BATCH_PACK_TABLES=0` reverts the cost change; group atomicity holds on
+both paths and that is asserted.
+
+### Long Context Degrades Fill Quality - OPEN, MITIGATED (2026-07-29, C21/C22)
+**Read this before raising `CONTEXT_UTILISATION` and before assuming a big document behaves
+like a small one.** Fitting a whole 682,726-char package into one call is cheap (99% cache
+hit, 1 chunk) but the model gets measurably sloppier at ~170k tokens:
+
+1. **It stops using the ACORD field names and invents its own.** A batch that sent 39 fields
+   returned 60 answers keyed `Producer_Name`, `Applicant_Name`, `GL_Limit_EachOccurrence`,
+   `Carrier_NAIC` - none of which exist in any ACORD schema. `_absorb` discards unrecognised
+   keys, so `filled=3` of 39. The DATA was right; the KEYS were fabricated. Whole-form:
+   `fields_filled=38/171` (22%). The same pipeline on a 15k-char document does not do this.
+2. **It borrows values across field types.** `Driver_TaxIdentifier = "4S4BRCGC9C3217772"` (a
+   VIN), `Driver_TaxIdentifier = "ERIN ROYAL"` and `Driver_GenderCode = "ERIN ROYAL"` (a
+   person's name), `Driver_LicensedYear = "2012"` (the vehicle's model year). Not a batching
+   bug - C19 is fixed and `Driver_*` was whole in one batch.
+
+**Mitigations shipped (not a cure):** a `CRITICAL - JSON KEYS` instruction is now the LAST
+thing in the prompt, after the field list, so the cached prefix is unaffected; and `_absorb`
+logs `UNKNOWN_KEYS` at WARNING with a sample, so this failure can never be invisible again.
+**Grep every large run for `UNKNOWN_KEYS`.**
+
+**`CONTEXT_UTILISATION` is the real dial, and it is a cost-versus-accuracy trade.** On a
+682k-char package: `0.75` (default) = 1 chunk / ~224k doc tokens per call; `0.50` = 2 chunks
+/ ~137k; `0.35` = 3 chunks / ~84k; `0.25` = 4 chunks / ~49k. Fewer chunks is cheaper and
+faster; smaller chunks follow the field list better. This has NOT been A/B'd on a live run -
+do that before choosing a production value.
+
+**The durable fix for #2 is type-aware validation**, not prompting: a tax-identifier field
+must never accept a 17-character VIN or a two-word personal name; a gender code must never
+accept a name. That is deterministic and cannot be argued with by a model.
+
+### Call Budget Was Using 24% Of The Model's Context Window - FIXED (2026-07-29, C20)
+**`gpt-5.4-mini` has a 400,000-token context window and a 128,000-token max output.**
+`GPT_CALL_BUDGET_CHARS` was hand-set to 380,000 chars (~95k tokens) - about a quarter of
+what the model can take. That matters far more than it looks: **every extra document chunk
+multiplies the call count by the number of field sub-batches.** A real 671,654-char /
+271-page package across 5 forms split into 3 chunks and made **172 LLM calls where 63
+suffice** - roughly 3x the cost and 3x the wall-clock time for identical output.
+
+**The budget is now derived, not guessed.** `MODEL_CONTEXT_TOKENS` (400,000) x
+`CONTEXT_UTILISATION` (0.75) minus `FORM_FILL_MAX_TOKENS`, times `CHARS_PER_TOKEN_FLOOR`
+(3.5, pessimistic - measured 4.01 on a real package with o200k_base) = **994,000 chars**.
+That is 75% window utilisation worst-case, 66% at the measured ratio. An explicit override
+above what the window holds is **clamped** with a warning rather than failing every call.
+**When the model changes, change `MODEL_CONTEXT_TOKENS` - everything else follows.**
+
+`GPT_REPLY_RESERVE_CHARS` was also wrong: a flat 30,000 chars against a 16,000-token
+(~64,000-char) reply cap, under-reserving by more than half. Now derived from the output cap.
+
+**Nothing is truncated by any of this.** The budget controls how many PIECES the document is
+cut into, never whether a piece is dropped - proven by `tests/test_full_document_coverage.py`,
+which plants 400 unique markers through a 671k-char document and asserts every one reaches
+the model at multiple budget settings.
+
+**Belt and braces:** the budget also self-tunes. A genuine context-length rejection (and only
+that - a 429, a timeout or a `response_format` 400 still take the normal path) halves
+`_effective_budget_chars` process-wide and `_run_field_batch` re-splits and retries, up to
+`CONTEXT_SHRINK_ATTEMPTS` (5, spanning a 32x over-estimate, floored at 40k). Two retries was
+tried first and was NOT enough - going from 400k to a model accepting ~120k takes three
+halvings, and stopping early left the batch blank, which is the exact failure this prevents.
+
+### Post-Fill Slot Dedup Was Deleting Correct Fleet Data - DISABLED (2026-07-29)
+**Found in the first live run after the caching work. Read `improving-ll.md` C18/C19.**
+The post-fill dedup cleared any `_A/_B/_C` field whose value already appeared in an earlier
+sibling. On a real ACORD 127 3-vehicle fleet it deleted **40+ correct cells** in one
+generation - garaging city/county/state/postal code, radius of use, rating territory, rate
+class, both deductibles, most coverage indicators - for rows B and C, because three trucks
+garaged at one address legitimately repeat those values down the column. Row A came out
+complete; rows B and C came out near-empty. Pre-existing bug; the caching work did not cause
+it but **exposed** it, since better prompts meant far more sibling cells got filled.
+
+**Now default OFF** (`SLOT_VALUE_DEDUP=1` restores it). It cannot be made correct at that
+point in the pipeline: a gap-fill call only ever sees a SUBSET of a schedule's columns (Pass
+1/1.5 resolves some, `_COMBINED_FIELD_BATCH` splits others across outer batches), so "the
+model copied a value" and "the document really does say that for every row" are
+indistinguishable. **A row-level variant was implemented, tested and removed** - ask about
+City/State/PostalCode alone and three trucks in one city produce three byte-identical rows,
+so it deleted the same data by a different route. Do not reintroduce either form.
+Decided on asymmetry: a wrongly REPEATED value is visible on the form and the broker fixes
+it; a wrongly DELETED value is invisible and reads exactly like "the document didn't say".
+Guarded by `backend/tests/test_table_row_dedup.py`.
+
+### An Outer Batch Was Cutting Schedules In Half - FIXED (2026-07-29, C19)
+**This was putting WRONG VALUES on the form**, which is the one outcome that is not
+negotiable. Unmasked by the C18 fix above - the per-value dedup had been accidentally
+deleting the borrowed value as a "duplicate".
+
+`combined_gap_fill` sliced the cross-form union with a plain `field_items[i:i+200]`. Each
+outer batch is a SEPARATE `_fill_unmatched_with_gpt` invocation - separate LLM calls that
+never see each other - so any schedule cut by that slice left the stranded rows with no view
+of their siblings. Measured on the real 5-form union (1,354 fields): **`Vehicle_*` split
+across 3 outer batches, `Driver_*` across 2, `CommercialProperty_*` across 3.** Result on the
+PDF: `Vehicle_CostNewAmount_D = $58,900` (vehicle **1's** cost - vehicle 4 is $41,800), and
+`Vehicle_RateClassCode_D = 91560` / `Vehicle_SpecialIndustryClassCode_D = 92478`, which are
+the two **General Liability** class codes borrowed from an unrelated page.
+
+**Fix - `_pack_schedule_aware_batches`.** A "schedule" is any leading name segment that
+appears with more than one row letter across the union (Vehicle, Driver, CommercialProperty,
+...); all its fields go in ONE outer batch, bounded by `_COMBINED_BATCH_HARD_MAX` (600) so a
+pathological schedule cannot build an unbounded call. Single-row roots are packed normally -
+they have no rows to align, and holding them together would drag unrelated fields into one
+giant batch. **This is the same rule `_pack_field_batches` already applied one level down;
+the bug was that the level ABOVE it was doing the cutting.** Verified against the real union
+(all three schedules now whole) and guarded by `backend/tests/test_schedule_aware_batching.py`.
+
+### Active Performance Bug - HISTORICAL, all three items now closed
+**Combined gap fill was slow (17+ minutes for 3 forms).** Kept for history; items 1 and 2 were
+implemented in 2026-07-10, item 3 via `_COMBINED_FIELD_BATCH` (the "truncate raw text" half was
+deliberately NOT done - full-document chunking is used so no text is dropped). The dominant cost
+levers since then have been prefix caching (C1-C11), call-budget sizing (C20) and batch packing
+(C29/C30). Read improving-ll.md, not this section, for current numbers.
 Three specific bugs in `backend/services/pdf_service.py`:
 
 1. No `max_tokens` cap in `_call_llm_sync()` → model returns ~174k output tokens per call,
@@ -784,6 +1163,13 @@ Fix (surgical, not yet applied): in the `active_groups` partition inside
 - **Data is sensitive:** PII, insurance claims, financial data, signed documents.
   Any change touching facts, form output, or signatures needs a security review.
 - **Ask Brent** about compliance requirements before any data-handling changes.
+- **LLM calls and cost:** `improving-ll.md` (repo root) is the registry of every LLM call
+  site, the token/cost model, and all known cost issues. Any PR that adds/removes/modifies
+  an LLM call, edits a prompt, or changes batching/chunking **must update it in the same
+  commit**. Read it before touching `pdf_service.py`'s gap-fill or any prompt - in
+  particular §2's five conditions for prefix caching, any one of which silently returns the
+  pipeline to full price. Verify with `py backend/scripts/inspect_gap_fill_prompts.py`
+  (offline, zero API cost), never by diffing two live runs.
 
 ## Database Schema Conventions
 

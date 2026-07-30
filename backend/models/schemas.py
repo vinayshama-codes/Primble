@@ -26,6 +26,7 @@ SQS_RECOMMENDATION_AUDIT_STATEMENTS = [
         sqs_score_at_presentation INTEGER,
         sqs_score_at_action       INTEGER,
         override_reason           TEXT,
+        producer_answer           TEXT,
         model_version             TEXT NOT NULL,
         UNIQUE(session_id, rec_id)
     )
@@ -33,6 +34,15 @@ SQS_RECOMMENDATION_AUDIT_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_sqs_rec_session ON sqs_recommendation_audit(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_sqs_rec_user    ON sqs_recommendation_audit(user_id)",
     "CREATE INDEX IF NOT EXISTS idx_sqs_rec_action  ON sqs_recommendation_audit(action)",
+    # The value a producer typed on a recommendation card. Also the discriminator
+    # that separates "the producer answered this" (reopenable, and clearing it must
+    # retract a fact) from "auto-resolved because the client's questionnaire closed
+    # the gap" (nothing of the producer's to undo). Deliberately a new column rather
+    # than a new `action` value: get_unresolved_recommendations() is written as
+    # `action IS DISTINCT FROM 'resolved'/'dismissed'`, so an 'answered' action would
+    # silently land in the download-audit and cover-page Red Flags sets.
+    # ALTER as well as the CREATE above, so existing databases pick it up on restart.
+    "ALTER TABLE sqs_recommendation_audit ADD COLUMN IF NOT EXISTS producer_answer TEXT",
 ]
 
 DOWNLOAD_AUDIT_STATEMENTS = [
@@ -393,6 +403,20 @@ class AnswerRecommendationRequest(BaseModel):
     field: str
     answer: str
     sqs_score_at_action: Optional[int] = None
+    form_id: Optional[str] = None
+    # Carried so the answer can be recorded on a rec whose audit row was never
+    # seeded by log_recommendations_presented (recs that first appear on a
+    # recalculation). `message` is NOT NULL in sqs_recommendation_audit, so an
+    # insert without it would fail.
+    message: Optional[str] = None
+    score_impact: Optional[int] = None
+
+
+class ReopenRecommendationRequest(BaseModel):
+    # Reopen a dismissed or producer-answered recommendation from the SQS panel's
+    # "Reviewed" section, putting the card back in the open list.
+    session_id: str
+    rec_id: str
     form_id: Optional[str] = None
 
 

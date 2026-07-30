@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { AdminInfoTooltip } from "../account/adminModalStyles";
 
 const ChevronDown = ({ rotated }) => (
   <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
@@ -42,18 +43,21 @@ export default function AdminNavDropdown({ onResetLicense, onAuditExport, onMana
                 onClick={() => { setOpen(false); onResetLicense(); }}
               >
                 <span className="udrop-item-label">Reset License Confirmation</span>
+                <AdminInfoTooltip text="Ask one user to re-accept the ACORD license on their next download." />
               </button>
               <button
                 className="udrop-item"
                 onClick={() => { setOpen(false); onAuditExport(); }}
               >
                 <span className="udrop-item-label">Audit Export</span>
+                <AdminInfoTooltip text="Download all license confirmations and resets as a compliance record." />
               </button>
               <button
                 className="udrop-item"
                 onClick={() => { setOpen(false); onManageAdmins(); }}
               >
                 <span className="udrop-item-label">Manage Admins</span>
+                <AdminInfoTooltip text="Grant or revoke admin access by email." />
               </button>
             </div>
           </div>

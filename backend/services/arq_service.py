@@ -3566,11 +3566,27 @@ async def clear_producer_answer_from_session(
         return False, []
 
     generated = proc_session.get("generated_forms", {}) or {}
-    del facts[canon]
     cleared = _clear_canonical_from_forms(generated, canon)
 
+    # Retract the flags apply_producer_answer_to_session derived FROM this answer -
+    # a conclusion must not outlive the premise it was drawn from. Popped rather
+    # than set False: the honest post-retraction state is "unknown", and every
+    # consumer reads these with .get() truthiness, so absent behaves as False
+    # without asserting we affirmatively determined it.
+    flags = dict(proc_session.get("flags", {}) or {})
+    flags_changed = False
+    if canon == NO_LOSS_INDICATOR_FIELD:
+        flags_changed = flags.pop("no_prior_losses", None) is not None
+    elif canon == CARRIER_MARKETING_FIELD:
+        flags_changed = flags.pop("prior_carrier_adverse_action", None) is not None
+
+    _update_payload = {"generated_forms": generated}
+    if flags_changed:
+        _update_payload["flags"] = flags
+    # delete_facts, not {"facts": facts}: the facts merge is additive and would
+    # simply preserve the key we are trying to retract.
     await upd_processing_session(
-        processing_session_id, {"generated_forms": generated, "facts": facts},
+        processing_session_id, _update_payload, delete_facts=[canon],
     )
     logger.info(
         f"Producer answer cleared: session={processing_session_id} "

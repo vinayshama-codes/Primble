@@ -1579,8 +1579,11 @@ function RemediationDiffBand({ diff, compact = false }) {
 }
 
 // ── Side panel recommendation row - own local state avoids shared-state race ──
-function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer }) {
-  const [reason, setReason] = useState("");
+function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue = "" }) {
+  // `initialValue` carries the value this rec was previously answered with, when the
+  // producer has just reopened it - so the input opens ready to edit instead of blank.
+  // Only meaningful on the answerable path, where `reason` holds the typed answer.
+  const [reason, setReason] = useState(initialValue || "");
   const [otherReason, setOtherReason] = useState("");
   const [busy, setBusy]     = useState(false);
   const [result, setResult] = useState(null);
@@ -2406,6 +2409,9 @@ const AcordModal = forwardRef(function AcordModal({
   const closeProv = () => setProvCard(null);
   const [dismissedRecs, setDismissedRecs] = useState(new Set());
   const [dismissedRecDetails, setDismissedRecDetails] = useState(new Map());
+  // rec_id -> the value the producer previously submitted, used to prefill a card
+  // that has just been reopened so they can edit rather than retype it.
+  const [reopenedRecValues, setReopenedRecValues] = useState({});
   const [showDownloadPreflight, setShowDownloadPreflight] = useState(false);
   const [preflightRecs, setPreflightRecs] = useState([]);
   const [preflightHardBlock, setPreflightHardBlock] = useState(false);
@@ -2590,24 +2596,33 @@ const AcordModal = forwardRef(function AcordModal({
     setFiles(prev => [...prev, ...uploaded]);
   };
 
+  // Everything the producer has reviewed - dismissed AND answered. Answered recs
+  // used to live only in SidePanelRec's local state, so they reappeared as open on
+  // every reload with the value already written; they are now server-backed.
   const loadDismissedRecs = async (sid) => {
     if (!sid) return;
     try {
-      const r = await fetch(`${API_BASE}/api/audit/dismissed/${sid}`, { credentials: "include" });
+      const r = await fetch(`${API_BASE}/api/audit/reviewed/${sid}`, { credentials: "include" });
       const d = r.ok ? await r.json() : null;
       if (!d?.success) return;
       const next = new Map();
-      for (const rec of (d.dismissed_recommendations || [])) {
+      for (const rec of (d.reviewed_recommendations || [])) {
         // "No reason provided" is the sentinel sent for a plain dismiss (no typed
         // reason). The backend credits the score only when a real reason was given,
         // so treat the sentinel as empty and suppress the +pts badge in that case -
         // keeping this consistent with the optimistic local update on dismiss.
         const hasReason = rec.override_reason && rec.override_reason !== "No reason provided";
+        const answered  = rec.producer_answer != null && rec.producer_answer !== "";
         next.set(rec.rec_id, {
           message: rec.message,
           reason:  hasReason ? rec.override_reason : "",
           formId:  rec.form_id,
-          impact:  hasReason ? rec.score_impact : 0,
+          field:   rec.field,
+          kind:    answered ? "answered" : "dismissed",
+          answer:  answered ? rec.producer_answer : "",
+          // An answered rec earns its points by actually closing the gap, so it has
+          // no dismiss credit to advertise.
+          impact:  answered ? 0 : (hasReason ? rec.score_impact : 0),
         });
       }
       setDismissedRecs(new Set(next.keys()));
@@ -3932,6 +3947,10 @@ const AcordModal = forwardRef(function AcordModal({
           answer: trimmed,
           sqs_score_at_action: scoreAtAction,
           form_id: formIdAtAnswer ?? null,
+          // Needed to record the answer on a rec whose audit row was never seeded
+          // at presentation (message is NOT NULL server-side).
+          message: rec?.message ?? null,
+          score_impact: rec?.score_impact ?? null,
         }),
       });
       const data = await res.json();
@@ -3969,10 +3988,98 @@ const AcordModal = forwardRef(function AcordModal({
           };
         });
       }
+      // Move the card into "Reviewed", mirroring dismiss. Without this the answer
+      // lived only in SidePanelRec's local state and the card came back as open on
+      // the next reload. loadDismissedRecs then reconciles against the server, which
+      // is what decides whether the answer actually closed the gap.
+      setDismissedRecs(prev => new Set(prev).add(id));
+      setDismissedRecDetails(prev => {
+        const next = new Map(prev);
+        next.set(id, {
+          message: rec?.message ?? "",
+          reason:  "",
+          formId:  formIdAtAnswer ?? null,
+          field,
+          kind:    "answered",
+          answer:  trimmed,
+          impact:  0,
+        });
+        return next;
+      });
+      loadDismissedRecs(sessionId);
       return { ok: true, impact: data.impact || null };
     } catch (e) {
       return { ok: false, error: "Network error. Please try again." };
     }
+  };
+
+  // Reopen a dismissed or answered recommendation from "Reviewed". The server
+  // retracts the producer's stored value (answered) and/or reverses the dismiss
+  // score credit, then tells us whether the gap actually came back - a rec that is
+  // satisfied by a combination of facts can stay closed, in which case the card
+  // stays in Reviewed rather than becoming an open card with nothing behind it.
+  const handleReopenRec = async (recId) => {
+    if (!recId || !sessionId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/audit/reopen-recommendation`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, rec_id: recId }),
+      });
+      const data = await res.json();
+      if (!data?.success) return;
+
+      if (data.updated_forms && Object.keys(data.updated_forms).length > 0) {
+        setGeneratedForms(prev => {
+          const next = { ...prev };
+          for (const [fid, upd] of Object.entries(data.updated_forms)) {
+            const form = next[fid];
+            if (!form?.sqs) continue;
+            next[fid] = {
+              ...form,
+              sqs: {
+                ...form.sqs,
+                sqs_score:  upd.new_sqs_score  ?? form.sqs.sqs_score,
+                grade:      upd.new_grade      ?? form.sqs.grade,
+                tier:       upd.new_tier       ?? form.sqs.tier,
+                tier_color: upd.new_tier_color ?? form.sqs.tier_color,
+                // Replace the list wholesale from the recomputed truth rather than
+                // splicing the card back in by hand - the reopen may have changed
+                // which other recs are live too.
+                recommendations: upd.recommendations ?? form.sqs.recommendations,
+              },
+            };
+          }
+          return next;
+        });
+      }
+      if (data.new_package_sqs_score != null) {
+        setPackageSqs(prev => prev ? {
+          ...prev,
+          package_sqs_score: data.new_package_sqs_score,
+          tier: data.new_package_tier ?? prev.tier,
+        } : prev);
+      }
+
+      if (data.reopened) {
+        setDismissedRecs(prev => { const n = new Set(prev); n.delete(recId); return n; });
+        setDismissedRecDetails(prev => { const n = new Map(prev); n.delete(recId); return n; });
+        // Carry the previously submitted text into the reopened card so the producer
+        // edits it instead of retyping.
+        if (data.previous_answer) {
+          setReopenedRecValues(prev => ({ ...prev, [recId]: data.previous_answer }));
+        }
+      } else {
+        // Nothing to reopen - the gap is still closed by other data. Relabel in place.
+        setDismissedRecDetails(prev => {
+          const n = new Map(prev);
+          const cur = n.get(recId);
+          if (cur) n.set(recId, { ...cur, stillSatisfied: true });
+          return n;
+        });
+      }
+    } catch { /* non-fatal */ }
   };
 
   // Producer resolves a Cross-Form Validation issue inline (SQS panel "Open" ->
@@ -4258,11 +4365,25 @@ const AcordModal = forwardRef(function AcordModal({
     finally { setLiteCoverLoading(false); setShowDownloadOverlay(false); }
   };
 
-  // E&O audit record (Figure 6 client clarification, 2026-07-17): not pushed to
-  // underwriters - just a plain-text export of every reason the producer gave
-  // on this submission (marketing reason + dismissed items + issue overrides +
-  // download-anyway notes), downloadable on demand. Never gated by open
-  // recommendations - it's most useful exactly when there are open items.
+  // Friendly labels for the provenance values stored on facts / field changes,
+  // so the E&O record reads as English rather than internal enum values.
+  const _AUDIT_SOURCE_LABEL = {
+    ai: "AI extraction from document",
+    producer: "Entered/edited by producer",
+    client_arq: "Answered by client (questionnaire)",
+    deterministic: "AI extraction (deterministic match)",
+    filled: "AI gap fill",
+    ai_high: "AI extraction (high confidence)",
+    ai_low: "AI extraction (low confidence)",
+  };
+  const _auditSource = (s) => (s ? (_AUDIT_SOURCE_LABEL[s] || s) : "unspecified");
+
+  // E&O audit record (Figure 6 + client follow-up 2026-07-28): not pushed to
+  // underwriters - a plain-text record the producer downloads on demand,
+  // covering BOTH halves the client asked for: every decision/reason given, and
+  // a record of all inputs (with their source) and modifications to the
+  // package. Never gated by open recommendations - it's most useful exactly
+  // when there are open items.
   const handleDownloadAuditRecord = async () => {
     if (!sessionId) return;
     setAuditExportLoading(true);
@@ -4274,6 +4395,15 @@ const AcordModal = forwardRef(function AcordModal({
       lines.push("PRIMBLE - SUBMISSION AUDIT RECORD");
       lines.push(`Session: ${sessionId}`);
       lines.push(`Generated: ${new Date().toISOString()}`);
+      lines.push("");
+      lines.push("This record is intended as a supplement to your traditional E&O");
+      lines.push("documentation. It covers the decisions made on this submission, the");
+      lines.push("inputs it was built from and where each came from, and every recorded");
+      lines.push("modification to the package.");
+      lines.push("");
+      lines.push("=".repeat(70));
+      lines.push("PART 1 - DECISIONS");
+      lines.push("=".repeat(70));
       lines.push("");
       lines.push("WHY THIS ACCOUNT IS BEING MARKETED");
       if (d.marketing_reason) {
@@ -4315,6 +4445,51 @@ const AcordModal = forwardRef(function AcordModal({
       } else {
         lines.push("  (none)");
       }
+      lines.push("");
+      lines.push("=".repeat(70));
+      lines.push("PART 2 - INPUTS AND MODIFICATIONS");
+      lines.push("=".repeat(70));
+      lines.push("");
+      lines.push("SOURCE DOCUMENTS");
+      if (d.documents?.length) {
+        for (const doc of d.documents) {
+          lines.push(`  - ${doc.filename || "(unnamed)"}`);
+          lines.push(`    Identified as: ${doc.doc_type || "unknown"}${doc.confidence ? ` (confidence: ${doc.confidence})` : ""}`);
+          if (doc.overridden) lines.push("    Document type was manually corrected by the user");
+          if (doc.excluded) lines.push("    Excluded from extraction");
+        }
+      } else {
+        lines.push("  (none recorded)");
+      }
+      lines.push("");
+      lines.push("FORMS IN THIS PACKAGE");
+      lines.push(d.generated_forms?.length ? `  ${d.generated_forms.join(", ")}` : "  (none generated yet)");
+      lines.push("");
+      lines.push("CAPTURED INPUTS AND THEIR SOURCE");
+      if (d.inputs?.length) {
+        lines.push(`  ${d.inputs.length} value(s) captured for this submission.`);
+        lines.push("");
+        for (const f of d.inputs) {
+          lines.push(`  - ${f.fact}: ${f.value}`);
+          lines.push(`    Source: ${_auditSource(f.source || f.confidence)}`);
+        }
+      } else {
+        lines.push("  (none available - session data may have been cleared by the retention policy)");
+      }
+      lines.push("");
+      lines.push("MODIFICATION HISTORY");
+      if (d.field_modifications?.length) {
+        for (const m of d.field_modifications) {
+          lines.push(`  - ${m.field_name}${m.form_id ? ` (${m.form_id})` : ""}`);
+          lines.push(`    ${m.previous_value ? `"${m.previous_value}"` : "(blank)"} -> ${m.new_value ? `"${m.new_value}"` : "(blank)"}`);
+          lines.push(`    Changed by: ${_auditSource(m.source)}  |  ${m.changed_at}`);
+        }
+      } else {
+        lines.push("  (no modifications recorded)");
+      }
+      lines.push("");
+      lines.push("=".repeat(70));
+      lines.push("End of record.");
       const blob = new Blob([lines.join("\n")], { type: "text/plain" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = `Primble_Audit_Record_${sessionId}.txt`;
@@ -6359,6 +6534,7 @@ const AcordModal = forwardRef(function AcordModal({
                                   sqsScore={activeSqs.sqs_score}
                                   onDismiss={handleDismissRec}
                                   onAnswer={handleAnswerRec}
+                                  initialValue={typeof rec === "object" && rec !== null ? (reopenedRecValues[rec.rec_id] || "") : ""}
                                 />
                               ))}
                           </div>
@@ -6504,9 +6680,15 @@ const AcordModal = forwardRef(function AcordModal({
                             <div key={rid} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 10px" }}>
                               <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
                                 <span style={{ fontSize: 11, color: "#475569", fontWeight: 600, lineHeight: 1.4, flex: 1, minWidth: 0, textDecoration: "line-through", textDecorationColor: "#cbd5e1" }}>{d.message}</span>
+                                <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: "1px 7px", borderRadius: 10, whiteSpace: "nowrap", ...(d.kind === "answered" ? { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }) }}>{d.kind === "answered" ? "Answered" : "Dismissed"}</span>
                                 {d.impact > 0 && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#10b981", background: "#dcfce7", border: "1px solid #86efac", borderRadius: 10, padding: "1px 6px", flexShrink: 0, whiteSpace: "nowrap" }}>+{d.impact} pts credited</span>}
                               </div>
-                              {d.reason ? (
+                              {d.kind === "answered" ? (
+                                <div style={{ marginTop: 4, fontSize: 10, color: "#64748b", display: "flex", alignItems: "flex-start", gap: 4 }}>
+                                  <span style={{ flexShrink: 0, color: "#94a3b8" }}>Your answer:</span>
+                                  <span style={{ fontWeight: 600, color: "#0f172a", wordBreak: "break-word" }}>{d.answer}</span>
+                                </div>
+                              ) : d.reason ? (
                                 <div style={{ marginTop: 4, fontSize: 10, color: "#64748b", display: "flex", alignItems: "flex-start", gap: 4 }}>
                                   <span style={{ flexShrink: 0, color: "#94a3b8" }}>Reason:</span>
                                   <span style={{ fontStyle: "italic" }}>{d.reason}</span>
@@ -6514,6 +6696,21 @@ const AcordModal = forwardRef(function AcordModal({
                               ) : (
                                 <div style={{ marginTop: 4, fontSize: 10, color: "#94a3b8" }}>Dismissed without reason</div>
                               )}
+                              <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                <button
+                                  onMouseDown={e => { e.preventDefault(); handleReopenRec(rid); }}
+                                  title={d.kind === "answered"
+                                    ? "Clear the value you entered and put this back on the list"
+                                    : "Put this back on the list so you can enter a value"}
+                                  style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #cbd5e1", background: "#fff", fontSize: 10, fontWeight: 600, color: "#475569", cursor: "pointer", whiteSpace: "nowrap" }}>
+                                  Reopen
+                                </button>
+                                {d.stillSatisfied && (
+                                  <span style={{ fontSize: 9.5, color: "#94a3b8", fontStyle: "italic" }}>
+                                    Already satisfied by other data - nothing to reopen.
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -6662,11 +6859,12 @@ const AcordModal = forwardRef(function AcordModal({
                               {liteCoverLoading && <span style={{ width: 9, height: 9, border: "2px solid #f9a8d4", borderTopColor: "#be185d", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />}
                             </button>
 
-                            {/* Audit Record - E&O record of every reason given on this submission */}
+                            {/* Audit Record - E&O supplement: decisions + all inputs (with
+                                source) + every recorded modification to the package */}
                             <button
                               onClick={handleDownloadAuditRecord}
                               disabled={auditExportLoading}
-                              title="Download a record of the marketing reason and every dismissed/overridden item's reason, for your own E&amp;O records"
+                              title="Download a record of the decisions made on this submission, the documents and inputs it was built from (including the source of each), and every recorded change - to supplement your E&amp;O documentation"
                               style={{ width: "100%", padding: "7px 10px", borderRadius: 7, border: "1px solid #f9a8d4", background: "#fce7f3", color: "#9d174d", fontSize: 11, fontWeight: 600, cursor: auditExportLoading ? "wait" : "pointer", opacity: auditExportLoading ? 0.6 : 1, fontFamily: "inherit", transition: "all 0.15s", textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
                               onMouseEnter={e => { if (!auditExportLoading) e.currentTarget.style.background = "#f9a8d4"; }}
                               onMouseLeave={e => { e.currentTarget.style.background = "#fce7f3"; }}>

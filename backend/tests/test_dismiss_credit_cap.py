@@ -74,6 +74,46 @@ def test_subsequent_credits_accumulate_until_cap():
     assert s == 60
 
 
+def test_replaying_surviving_credits_reproduces_the_original_sequence():
+    """Reopening a recommendation must cost only ITS points, not everyone else's.
+
+    The credits are written destructively into the stored score with no baseline
+    kept, so reopening rescores from facts (wiping all of them) and then replays
+    the dismissals that are still standing. Because _credited_score compounds from
+    the running base, replaying the survivors in order lands on exactly the score
+    the producer would have had if the reopened rec had never been dismissed.
+    """
+    cap  = _cap_from(0, 0)
+    base = 62
+
+    # Producer dismisses three recs with reasons: +8, +12, +5.
+    running = base
+    for impact in (8, 12, 5):
+        running = _credited_score(running, impact, cap)
+    assert running == 87
+
+    # Reopen the +8 one: rescore back to base, replay only the survivors.
+    replayed = base
+    for impact in (12, 5):
+        replayed = _credited_score(replayed, impact, cap)
+    assert replayed == 79, "reopening +8 must cost 8, not all 25"
+
+    # And it matches never having dismissed it in the first place.
+    never = base
+    for impact in (12, 5):
+        never = _credited_score(never, impact, cap)
+    assert replayed == never
+
+
+def test_replay_respects_the_cap_it_originally_hit():
+    # Survivors that collectively cross the ceiling still clamp to it on replay.
+    cap = _cap_from(1, 0)            # hard stop -> 60
+    replayed = 50
+    for impact in (8, 12):
+        replayed = _credited_score(replayed, impact, cap)
+    assert replayed == 60
+
+
 def test_scorer_hard_stop_is_a_ceiling_not_a_floor():
     # The ARQ / field-edit recompute re-runs calculate_sqs, whose hard-stop cap is
     # also a ceiling: a low-scoring form with a hard stop keeps its low score (it is
