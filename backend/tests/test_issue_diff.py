@@ -147,7 +147,13 @@ def test_cleared_ocr_warning_reports_as_resolved_in_the_diff():
 
 def test_refresh_handles_empty_and_missing_inputs():
     assert replace_recomputed_issues(None, None) == []
-    assert replace_recomputed_issues([], _legacy(hard=[COPE_HARD]))[0]["code"] == "legacy_hard_0"
+    # A legacy stop carries its REAL rule code (not the old throwaway
+    # `legacy_hard_<index>`), which is what lets resolution_for() find its fix
+    # mode. The shared "legacy_" prefix is what replace_recomputed_issues keys
+    # off, so it must survive.
+    refreshed = replace_recomputed_issues([], _legacy(hard=[COPE_HARD]))
+    assert refreshed[0]["code"] == "legacy_minimum_viable_cope"
+    assert refreshed[0]["code"].startswith("legacy_")
 
 
 # ── 2. cross-form issues cluster properly ────────────────────────────────────

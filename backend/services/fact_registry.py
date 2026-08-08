@@ -68,6 +68,21 @@ def _is_valuation(v: str) -> bool:
     return v.strip().upper() in {"RCV", "ACV"}
 
 
+def _is_covered_auto_symbols(v: str) -> bool:
+    """At least one parseable covered-auto symbol number.
+
+    Deliberately permissive about SHAPE (a producer may type "Liability 1,
+    Comp 7", "1/7/7", or just "1") and strict about SUBSTANCE - the answer must
+    contain a symbol number that ACORD actually defines, so a free-text
+    non-answer like "see policy" is rejected rather than stored as a coverage
+    designation. Parsing is owned by services.auto_symbols, which is also what
+    every reader of this fact uses.
+    """
+    from services.auto_symbols import ALL_NUMBERS, parse_symbols
+    nums = {n for group in parse_symbols(v).values() for n in group}
+    return bool(nums) and bool(nums & ALL_NUMBERS)
+
+
 # ---------------------------------------------------------------------------
 # FACT_REGISTRY
 # ---------------------------------------------------------------------------
@@ -525,10 +540,14 @@ FACT_REGISTRY: dict[str, dict] = {
     },
     "auto_covered_symbols": {
         "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
-        "question":    "Which vehicle coverage symbols apply?",
+        # Asked as a transfer, not a decision: the carrier already designated
+        # the covered autos on the declarations. See services/auto_symbols.py.
+        "question":    "Which covered-auto symbols does the policy show for each "
+                       "coverage? (e.g. Liability 1, Comprehensive 7, Collision 7)",
         "tier": None, "required": False,
-        "validate":    None,
-        "format_hint": None,
+        "validate":    _is_covered_auto_symbols,
+        "format_hint": "Coverage and symbol number, e.g. 'Liability 1, "
+                       "Comprehensive 7, Collision 7'",
     },
     "auto_um_uim_limit": {
         "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},
@@ -934,10 +953,12 @@ FACT_REGISTRY: dict[str, dict] = {
     },
     "auto_covered_symbols": {
         "forms":       {"ACORD_127"},
-        "question":    "Which vehicle coverage symbols apply?",
+        "question":    "Which covered-auto symbols does the policy show for each "
+                       "coverage? (e.g. Liability 1, Comprehensive 7, Collision 7)",
         "tier": None, "required": False,
-        "validate":    None,
-        "format_hint": None,
+        "validate":    _is_covered_auto_symbols,
+        "format_hint": "Coverage and symbol number, e.g. 'Liability 1, "
+                       "Comprehensive 7, Collision 7'",
     },
     "auto_um_uim_limit": {
         "forms":       {"ACORD_127"},

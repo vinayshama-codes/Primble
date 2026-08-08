@@ -26,8 +26,12 @@ logger = logging.getLogger(__name__)
 # what forces a stale cached extraction to be discarded instead of silently
 # served forever. v10: added umbrella_effective_date/umbrella_expiration_date
 # to the schema and a RULE 1 umbrella-policy-namespace instruction to the prompt.
-PROMPT_VERSION = "v11"
-SCHEMA_VERSION = "v11"
+# v12: added RULE 14 disambiguating naics_code (business industry classification)
+# from carrier_naic/prior_carrier_naic (insurer's NAIC company number) - both are
+# called "NAIC" in real documents and the prompt previously gave the model no
+# description at all for naics_code to tell them apart.
+PROMPT_VERSION = "v12"
+SCHEMA_VERSION = "v12"
 
 # ── Extraction chunk sizing ───────────────────────────────────────────────────
 # This used to be one hand-typed literal:
@@ -199,7 +203,7 @@ _EXTRACT_SCHEMA = (
     '  "auto_liability_structure": string or null, "auto_deductible_comp": string or null,\n'
     '  "auto_deductible_collision": string or null,\n'
     # Vehicle schedule: one object per vehicle row
-    '  "auto_vin_schedule": [{"year": string, "make": string, "model": string, "vin": string, "body_type": string or null, "gvw": string or null}],\n'
+    '  "auto_vin_schedule": [{"year": string, "make": string, "model": string, "vin": string, "body_type": string or null, "gvw": string or null, "comp_symbol": string or null, "coll_symbol": string or null}],\n'
     '  "auto_garaging_addresses": [string],\n'
     # WC class codes: one object per class code row
     '  "wc_payroll": string or null, "wc_payroll_by_state": {}, "wc_class_codes": [{"code": string, "description": string, "state": string or null, "payroll": string or null, "rate": string or null}],\n'
@@ -223,7 +227,11 @@ _EXTRACT_SCHEMA = (
     '  "auto_drivers": [{"name": string, "dob": string or null, "license_number": string or null, "license_state": string or null, "hire_date": string or null, "experience_years": string or null, "vehicle_use_percent": string or null}],\n'
     '  "auto_radius_of_operation": string or null,\n'
     '  "auto_physical_damage_valuation": string or null,\n'
-    '  "auto_covered_symbols": [int],\n'
+    # Covered-auto symbols, attributed to the coverage line they sit against on
+    # the declarations. A bare [1, 7] cannot tell a validator or a form field
+    # WHICH coverage each number designates, which is the whole point of a
+    # symbol - see services/auto_symbols.py.
+    '  "auto_covered_symbols": [{"coverage": string, "symbols": [int]}],\n'
     '  "auto_um_uim_limit": string or null,\n'
     '  "auto_med_pay_limit": string or null,\n'
     '  "auto_hired_nonowned": string or null,\n'
@@ -409,6 +417,15 @@ _EXTRACT_PROMPT_PREFIX = (
     '  • Property locations    → one entry per DISTINCT physical location in property_locations. '
     'The SAME address printed on multiple pages (dec page, attached schedule, certificate) is still '
     'ONE location — do not emit a duplicate entry for a repeated mention of the same address.\n\n'
+    'RULE 2b — Covered-auto symbols. A commercial auto declarations page designates which autos each '
+    'coverage applies to using a symbol NUMBER printed against that coverage line (e.g. "Liability 01", '
+    '"Comprehensive 07", "Collision 07"). For auto_covered_symbols, emit one object per coverage line, '
+    'copying the number EXACTLY as designated: '
+    '[{"coverage": "liability", "symbols": [1]}, {"coverage": "comprehensive", "symbols": [7]}]. '
+    'Use the coverage wording the document itself uses. If a covered-autos grid lists symbols without '
+    'making the coverage line clear, use "coverage": "unspecified" rather than guessing. NEVER infer a '
+    'symbol that is not printed — a covered-auto symbol is a coverage designation with legal effect, so '
+    'an absent symbol must stay absent.\n\n'
     'RULE 3 — Never hallucinate. If a value is not visible in the document, set the field to null '
     '(or [] for list fields). Do not invent or infer values that are not explicitly stated.\n\n'
     'RULE 4 — Extract ALL financial figures exactly as printed: limits, premiums, payrolls, '
@@ -530,6 +547,18 @@ _EXTRACT_PROMPT_PREFIX = (
     'DOCUMENTATION was actually supplied. Only extract loss_history_years from a phrase that '
     'describes an actual loss run/claims history document, not from the disclosure window in an '
     'unanswered or narrative-only question.\n\n'
+    'RULE 14 — naics_code vs. carrier_naic/prior_carrier_naic: these are UNRELATED numbers '
+    'that both get called "NAIC" in real documents - do not confuse them.\n'
+    '  naics_code is the INSURED BUSINESS\'s own industry classification code (NAICS - North '
+    'American Industry Classification System, e.g. "238160" for roofing contractors), typically '
+    'labeled "NAICS Code" or "SIC Code" near the applicant/business information.\n'
+    '  carrier_naic and prior_carrier_naic are the INSURANCE COMPANY\'s identifier (NAIC - '
+    'National Association of Insurance Commissioners company code, e.g. "41982"), typically '
+    'labeled "NAIC #" or "NAIC Number" next to the carrier/insurer name (or the prior carrier\'s '
+    'name for prior_carrier_naic).\n'
+    '  If a document shows a number labeled just "NAIC #" or "NAIC Number" next to a carrier, '
+    'insurer, or insurance company name, it belongs in carrier_naic (or prior_carrier_naic) - '
+    'NEVER in naics_code, even though the label looks similar.\n\n'
     'Return ONLY a valid JSON object with exactly these two top-level keys:\n\n'
     + _EXTRACT_SCHEMA
     + '\n\nReturn ONLY the JSON object. No markdown fences, no explanation, no extra text. '

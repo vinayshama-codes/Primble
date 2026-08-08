@@ -124,6 +124,14 @@ SCHEDULE_DEFS: Dict[str, ScheduleDef] = {
             Column("vin",        "VIN",        "vin",   placeholder="1FTFW1ET5DFC10312", width=190),
             Column("body_type",  "Body type",  "text",  placeholder="Pickup", width=110),
             Column("gvw",        "GVW",        "text",  placeholder="6,500", width=90),
+            # Covered-auto symbols (2026-08-07). Bound to the real ACORD 127
+            # fields Vehicle_ComprehensiveSymbolCode / Vehicle_CollisionSymbolCode
+            # - the only symbol boxes that form has. Optional on purpose: a
+            # declarations page normally states ONE symbol per coverage for the
+            # whole schedule, which pdf_service inherits into every row, so these
+            # only need filling when a fleet genuinely varies by vehicle.
+            Column("comp_symbol", "Comp symbol",      "text", placeholder="7", width=110),
+            Column("coll_symbol", "Collision symbol", "text", placeholder="7", width=125),
         ],
     ),
     "auto_drivers": ScheduleDef(

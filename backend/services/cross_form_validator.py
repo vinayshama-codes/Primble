@@ -748,12 +748,30 @@ def _check_auto_hired_nonowned_symbols(
     facts: dict, flags: dict, triggered_ids: set
 ) -> List[dict]:
     """
-    If Hired/Non-Owned auto exposure is detected, coverage symbols must be
-    defined on ACORD 127.
+    If Hired/Non-Owned auto exposure is detected, the liability covered-auto
+    symbol must actually reach that exposure.
 
     Spec: "Symbols must align with exposure (e.g., hired/non-owned symbols
     present when exposure exists)."
+
+    REWRITTEN 2026-08-07 - the previous version read `hired_auto_symbol` and
+    `non_owned_symbol`, two fact keys that NOTHING in this codebase has ever
+    written (not the extraction prompt, not FACT_REGISTRY, not any stamper).
+    They were permanently empty, so this warning fired on every submission with
+    hired/non-owned exposure regardless of what the policy said, and demanded
+    Symbols 8 and 9 specifically. That demand is also wrong underwriting:
+    Symbol 1 (any auto) is BROADER than 8 and 9 and already designates hired
+    and non-owned autos for liability, which is the ordinary structure on a
+    real dec page. Both defects are fixed by reasoning over the symbols the
+    document actually carries (`auto_covered_symbols`) through
+    `services.auto_symbols`.
+
+    Silence is the default. The check only speaks when the symbols are known
+    AND genuinely fail to reach the exposure. Unknown or unrecognised symbols
+    (`covers()` returning None) leave it quiet - "blank over wrong".
     """
+    from services import auto_symbols as sym
+
     issues: List[dict] = []
 
     if "ACORD_127" not in triggered_ids:
@@ -761,21 +779,120 @@ def _check_auto_hired_nonowned_symbols(
     if not flags.get("auto_has_hired_nonowned"):
         return issues
 
-    hired_sym    = _fv(facts, "hired_auto_symbol")
-    nonowned_sym = _fv(facts, "non_owned_symbol")
+    numbers = sym.liability_symbols(facts)
+    if not numbers:
+        return issues  # handled once, centrally, by _check_auto_symbols_captured
 
-    if not hired_sym or not nonowned_sym:
-        missing = []
-        if not hired_sym:
-            missing.append("Hired Auto symbol")
-        if not nonowned_sym:
-            missing.append("Non-Owned Auto symbol")
+    gaps = [
+        label for exposure, label in ((sym.HIRED, "hired"), (sym.NONOWNED, "non-owned"))
+        if sym.covers(numbers, exposure) is False
+    ]
+    if gaps:
         issues.append(_issue(
             "soft_warning",
             "auto_hired_nonowned_symbols_missing",
             (
-                f"Hired/Non-Owned auto exposure detected but coverage symbol(s) not "
-                f"defined: {', '.join(missing)}. Define symbols on ACORD 127."
+                f"Hired/Non-Owned auto exposure detected, but the liability "
+                f"covered-auto symbol on this policy - {sym.describe_all(numbers)} - "
+                f"does not designate {' or '.join(gaps)} autos. Confirm the "
+                f"liability symbol, or add Symbol 8 (hired) / Symbol 9 (non-owned)."
+            ),
+            ["ACORD_127"],
+        ))
+
+    return issues
+
+
+def _check_auto_symbols_captured(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """
+    One advisory when an auto submission carries NO covered-auto symbol at all.
+
+    This is a data-transfer gap, not a coverage decision: the carrier has
+    already designated the covered autos on the declarations, and the number
+    simply has not reached the ACORD. Worded that way, and resolvable inline by
+    entering the symbols (see issue_registry.RESOLUTION_MAP), because it is.
+
+    Deliberately ONE issue rather than one per coverage line - a submission with
+    no symbols anywhere would otherwise emit the same complaint three times.
+    """
+    from services import auto_symbols as sym
+
+    issues: List[dict] = []
+
+    if "ACORD_127" not in triggered_ids:
+        return issues
+    if not flags.get("has_auto_coverage"):
+        return issues
+    if sym.all_numbers(facts):
+        return issues
+
+    issues.append(_issue(
+        "soft_warning",
+        "auto_symbols_not_captured",
+        (
+            "No covered-auto symbols were found for this commercial auto policy. "
+            "The declarations designate covered autos by symbol (e.g. 1 = any auto, "
+            "7 = specifically described autos, 8 = hired, 9 = non-owned); enter the "
+            "symbols shown on the policy so they carry onto the ACORD forms."
+        ),
+        ["ACORD_127"],
+    ))
+
+    return issues
+
+
+def _check_auto_owned_fleet_symbol_gap(
+    facts: dict, flags: dict, triggered_ids: set
+) -> List[dict]:
+    """
+    The business schedules owned vehicles, but the liability symbol only reaches
+    hired and/or non-owned autos - i.e. the fleet on the schedule is not covered
+    for liability by the designation on the policy.
+
+    This is the check the old phantom-key code was reaching for and could never
+    perform, and it is the one that matters: a real, expensive coverage hole
+    rather than a paperwork complaint. Symbol 8 and/or 9 alone against a
+    scheduled fleet is the classic version of it.
+
+    Silent unless the symbols are known AND recognised - `covers()` returns None
+    on anything this table does not define, and None is never treated as a gap.
+    """
+    from services import auto_symbols as sym
+
+    issues: List[dict] = []
+
+    if "ACORD_127" not in triggered_ids:
+        return issues
+    if not flags.get("has_auto_coverage"):
+        return issues
+
+    fleet = _fv(facts, "auto_vin_schedule") or []
+    if not isinstance(fleet, list) or not fleet:
+        return issues
+
+    numbers = sym.liability_symbols(facts)
+    if not numbers:
+        return issues
+
+    reaches_fleet = (
+        sym.covers(numbers, sym.OWNED) is True
+        or sym.covers(numbers, sym.SCHEDULED) is True
+    )
+    if sym.covers(numbers, sym.OWNED) is None:
+        return issues  # unknown / unrecognised symbol - say nothing
+
+    if not reaches_fleet:
+        issues.append(_issue(
+            "hard_stop",
+            "auto_owned_fleet_not_covered_by_symbol",
+            (
+                f"{len(fleet)} scheduled vehicle(s) are listed, but the liability "
+                f"covered-auto symbol - {sym.describe_all(numbers)} - does not "
+                f"designate owned or specifically described autos. As written, the "
+                f"scheduled fleet has no auto liability coverage. Verify the symbol "
+                f"against the declarations."
             ),
             ["ACORD_127"],
         ))
@@ -792,6 +909,8 @@ def _check_auto_symbol_to_exposure_alignment(
 
     Spec: "Coverage symbols must align with exposure"
     """
+    from services import auto_symbols as sym
+
     issues: List[dict] = []
 
     if "ACORD_127" not in triggered_ids:
@@ -800,21 +919,29 @@ def _check_auto_symbol_to_exposure_alignment(
     if not flags.get("has_auto_coverage"):
         return issues
 
-    # Check physical damage symbols vs requested coverage
-    if flags.get("auto_has_physical_damage"):
-        comp_sym = _fv(facts, "auto_physical_damage_comp_symbol")
-        coll_sym = _fv(facts, "auto_physical_damage_coll_symbol")
-
-        if not comp_sym or not coll_sym:
-            missing = []
-            if not comp_sym:
-                missing.append("comprehensive")
-            if not coll_sym:
-                missing.append("collision")
+    # ── Physical damage symbols vs requested coverage ────────────────────────
+    # REWRITTEN 2026-08-07, same root cause as _check_auto_hired_nonowned_
+    # symbols above: `auto_physical_damage_comp_symbol` / `..._coll_symbol` were
+    # never written by anything, so this fired on every physical-damage
+    # submission. A dec page showing "Comprehensive 07 / Collision 07" now
+    # satisfies it. When the whole submission has no symbols at all,
+    # _check_auto_symbols_captured says so once instead of this firing too.
+    if flags.get("auto_has_physical_damage") and sym.all_numbers(facts):
+        missing = [
+            sym.COVERAGE_LABEL[cov].lower()
+            for cov in (sym.COMPREHENSIVE, sym.COLLISION)
+            if not sym.symbols_for(facts, cov, sym.PHYSICAL_DAMAGE)
+        ]
+        if missing:
             issues.append(_issue(
                 "soft_warning",
                 "auto_physical_damage_symbols_missing",
-                f"Physical damage coverage requested but symbols undefined: {', '.join(missing)}",
+                (
+                    f"Physical damage coverage is requested but no covered-auto symbol "
+                    f"was found for: {', '.join(missing)}. The declarations normally "
+                    f"show Symbol 7 (specifically described autos) for physical damage; "
+                    f"enter the symbol shown on the policy."
+                ),
                 ["ACORD_127"],
             ))
 
@@ -835,14 +962,33 @@ def _check_auto_symbol_to_exposure_alignment(
                     ["ACORD_127"],
                 ))
 
-    # Check drive other car (DOC) symbol if requested
-    if flags.get("auto_has_drive_other_car") and not _fv(facts, "drive_other_car_symbol"):
-        issues.append(_issue(
-            "soft_warning",
-            "auto_doc_symbol_missing",
-            "Drive Other Car coverage referenced but symbol not defined on ACORD 127",
-            ["ACORD_127"],
-        ))
+    # ── Drive Other Car ──────────────────────────────────────────────────────
+    # REWRITTEN 2026-08-07. This read `drive_other_car_symbol`, the third fact
+    # key in this function that nothing ever wrote - but it was also wrong at
+    # the concept level: Drive Other Car is an ENDORSEMENT naming individual
+    # insureds (CA 99 10), not a covered-auto symbol. ACORD 127 records it as
+    # `Driver_Coverage_DriverOtherCarCode_<row>`, a per-driver Y/N box, and
+    # there is no DOC symbol field on any of the 17 schemas. So the check now
+    # asks the only question the form can answer: DOC was referenced - is it
+    # attached to anybody?
+    if flags.get("auto_has_drive_other_car"):
+        drivers = _fv(facts, "auto_drivers") or []
+        doc_named = any(
+            str((d or {}).get("drive_other_car", "")).strip().lower()
+            in {"y", "yes", "true", "1"}
+            for d in drivers if isinstance(d, dict)
+        )
+        if not doc_named and not _fv(facts, "auto_drive_other_car"):
+            issues.append(_issue(
+                "soft_warning",
+                "auto_doc_symbol_missing",
+                (
+                    "Drive Other Car coverage is referenced but no driver is marked "
+                    "as covered by it. DOC is an endorsement naming individual "
+                    "insureds - indicate which drivers it applies to on ACORD 127."
+                ),
+                ["ACORD_127"],
+            ))
 
     return issues
 
@@ -1250,40 +1396,30 @@ def _check_umbrella_auto_minimum_limits(
     return issues
 
 
-def _check_umbrella_sir_vs_auto_deductible(
-    facts: dict, flags: dict, triggered_ids: set
-) -> List[dict]:
-    """
-    Umbrella SIR must also be consistent with Auto deductible - not just GL.
-
-    Spec: "Validate deductibles and SIRs are consistent across ACORD 126/127,
-    ACORD 131, and dec page representations. Flag unexplained discrepancies."
-    """
-    issues: List[dict] = []
-
-    if not _umbrella_in_scope(flags):
-        return issues
-    if "ACORD_127" not in triggered_ids or not flags.get("has_auto_coverage"):
-        return issues
-
-    sir      = _to_int(_fv(facts, "umbrella_sir"))
-    auto_ded = _to_int(
-        _fv(facts, "auto_deductible_comp") or _fv(facts, "auto_deductible_collision")
-    )
-
-    if sir is not None and auto_ded is not None and sir < auto_ded:
-        issues.append(_issue(
-            "soft_warning",
-            "umbrella_sir_below_auto_deductible",
-            (
-                f"Umbrella SIR (${sir:,}) is lower than Auto deductible "
-                f"(${auto_ded:,}). Verify attachment consistency across Auto and "
-                "Umbrella to prevent coverage gaps."
-            ),
-            ["ACORD_127", "ACORD_131"],
-        ))
-
-    return issues
+# _check_umbrella_sir_vs_auto_deductible was REMOVED (2026-08-07), not retired - it
+# compared Umbrella SIR (a liability-side retention, only relevant when a claim isn't
+# covered by the underlying liability policy) against Auto's comp/collision deductible
+# (a physical-damage figure for repairing the insured's own vehicle). No underwriting
+# rule relates those two amounts - a $0 SIR is the NORMAL, healthy structure, so this
+# fired a false "coverage gap" warning on ordinary Auto+Umbrella submissions. The fact
+# registry has no "auto liability deductible" field (primary Auto Liability is
+# conventionally $0 deductible), so there was never a valid Auto-side figure to compare
+# SIR against - do not reintroduce this check under any threshold.
+#
+# Decision_Tree.txt lines 226-231 ("Deductible/SIR Consistency ... across ACORD 126/127,
+# ACORD 131, Dec page representations") is what this function was built to satisfy - read
+# plainly, that line asks whether the SAME figure agrees across documents (e.g. the SIR
+# the dec page states vs. what got extracted for ACORD 131), not whether SIR and a
+# physical-damage deductible should track each other. THAT feature now exists properly:
+# umbrella_sir / gl_deductible / auto_deductible_comp / auto_deductible_collision are
+# registered in underwriting_consistency.RECONCILABLE_FIELDS, so a genuine cross-document
+# disagreement on any of these is flagged for review with source attribution - the
+# existing Data Consistency picker engine, not a bespoke comparison here.
+#
+# The attachment requirement this form actually needs IS already enforced, correctly, by
+# `_check_umbrella_auto_minimum_limits` (Umbrella limit vs. underlying Auto LIABILITY
+# limit - the two figures that legitimately have to stack). See CLAUDE.md Critical Issues
+# & Roadmap, "Umbrella SIR vs Auto Deductible False-Positive Warning" (2026-08-07).
 
 
 def _check_auto_optional_coverages(
@@ -1681,7 +1817,18 @@ def _check_builders_risk_project_value(
     """
     issues: List[dict] = []
 
-    if "ACORD_133" not in triggered_ids and not flags.get("has_builders_risk"):
+    # The flag alone is not sufficient corroboration - same principle as the
+    # ACORD 133 form-trigger fix in form_service.py (client report 2026-08-07):
+    # `has_builders_risk` with zero extracted project evidence and ACORD 133 not
+    # even in the package must not manufacture a hard stop out of nothing. A
+    # package where ACORD 133 IS selected still reaches this check normally -
+    # form_service.py now only adds it when real evidence already exists.
+    _br_evidence = bool(
+        _fv(facts, "builders_risk_project_address")
+        or _fv(facts, "builders_risk_project_cost")
+        or _fv(facts, "builders_risk_completion_date")
+    )
+    if "ACORD_133" not in triggered_ids and not (flags.get("has_builders_risk") and _br_evidence):
         return issues
 
     project_cost = _to_float(_fv(facts, "builders_risk_project_cost"))
@@ -1942,7 +2089,6 @@ _RULE_FUNCTIONS = [
     _check_umbrella_attachment_stack,
     _check_umbrella_gl_minimum_limits,
     _check_umbrella_auto_minimum_limits,
-    _check_umbrella_sir_vs_auto_deductible,
     _check_umbrella_period_vs_auto_wc,
     _check_gl_missing_when_umbrella,
     _check_claims_made_prior_acts,
@@ -1954,6 +2100,8 @@ _RULE_FUNCTIONS = [
     _check_peril_specific_deductibles_referenced,  # NEW: Peril deductible hard stops
     _check_acord186_subcontracting_vs_gl_wc,
     _check_auto_hired_nonowned_symbols,
+    _check_auto_symbols_captured,              # NEW (2026-08-07): symbols absent entirely
+    _check_auto_owned_fleet_symbol_gap,        # NEW (2026-08-07): real coverage hole
     _check_auto_symbol_to_exposure_alignment,  # NEW: Enhanced symbol validation
     _check_auto_optional_coverages,
     _check_property_valuation_consistency,

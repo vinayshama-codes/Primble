@@ -1553,15 +1553,24 @@ def match_forms_deterministic(facts: dict, flags: dict, text: str = "",
     }
     _has_br = flags.get("has_builders_risk")
     _br_kw_in_text = any(kw in text for kw in _133_kw)
-    # When triggered by flag alone, require at least one extracted builders-risk
-    # fact as corroboration. This prevents the flag from firing on general
-    # contractor submissions that mention "construction" without an active project.
+    # Require at least one extracted builders-risk fact as corroboration, no
+    # matter which signal (flag or keyword) got there first. This prevents a
+    # BARE keyword match from adding ACORD 133 on its own - "builders risk"
+    # showing up in an exclusions clause, a coverage checklist, an endorsement
+    # schedule, or a sentence denying the coverage ("does NOT include builders
+    # risk") all contain the keyword with zero real exposure behind them.
+    # `_br_kw_in_text or (...)` used to make the keyword alone sufficient,
+    # silently skipping the corroboration this comment already promised -
+    # that was the actual bug (client report 2026-08-07: ACORD 133 hard stop
+    # fired on a package with no builders risk exposure at all). A real BR
+    # submission always yields at least one of these facts, so requiring one
+    # costs nothing on genuine cases and closes the false-positive path.
     _br_facts = any([
         _fv(facts, "builders_risk_project_address"),
         _fv(facts, "builders_risk_project_cost"),
         _fv(facts, "builders_risk_completion_date"),
     ])
-    if _br_kw_in_text or (_has_br and (_br_facts or _br_kw_in_text)):
+    if _br_facts and (_has_br or _br_kw_in_text):
         _add("ACORD_133",
              "ACORD 133 - Builders Risk Application",
              trigger_weight=0.85,

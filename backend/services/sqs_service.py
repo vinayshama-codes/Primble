@@ -1101,12 +1101,17 @@ def cross_validate(facts: dict, flags: dict, selected_form_ids: List[str]) -> Li
     if "ACORD_131" in selected_form_ids and not _fv(facts, "gl_each_occurrence") and not _fv(facts, "gl_limits"):
         issues.append({"type": "hard_stop", "message": "Umbrella selected but GL limits missing"})
 
+    # Covered-auto symbols: delegate to the SINGLE implementation in
+    # cross_form_validator (2026-08-07). This used to be a second, independent
+    # copy of the hired/non-owned symbol rule reading `hired_auto_symbol` /
+    # `non_owned_symbol` - two fact keys nothing has ever written - so it fired
+    # a warning on EVERY submission with hired/non-owned exposure and docked the
+    # Auto pillar for it. Having two copies of one rule is why the defect
+    # survived; there is now one.
     if flags.get("has_auto_coverage") and flags.get("auto_has_hired_nonowned"):
-        if not _fv(facts, "hired_auto_symbol") or not _fv(facts, "non_owned_symbol"):
-            issues.append({
-                "type":    "warning",
-                "message": "Hired/Non-Owned exposure detected but coverage symbols not defined.",
-            })
+        from services.cross_form_validator import _check_auto_hired_nonowned_symbols
+        for _iss in _check_auto_hired_nonowned_symbols(facts, flags, {"ACORD_127"}):
+            issues.append({"type": "warning", "message": _iss["message"]})
 
     # NOTE: Location-count reconciliation is owned by cross_form_validator._check_location_address_reconciliation
     # (gates on ACORD_140 trigger which matches the spec wording "ACORD 125 ↔ ACORD 140").

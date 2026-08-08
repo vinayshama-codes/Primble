@@ -148,9 +148,46 @@ def test_141_recommended_property_schedule():
     assert _tier(recs, "ACORD_141") == TIER_RECOMMENDED
 
 
-def test_133_recommended_builders_risk():
+def test_133_not_recommended_from_bare_keyword_alone():
+    """Client report 2026-08-07: "builders risk" / "course of construction"
+    appearing anywhere in the document text - an exclusions clause, a coverage
+    checklist, a schedule of endorsements, even a sentence denying the coverage
+    - must NOT add ACORD 133 by itself. Before the fix, a bare keyword match
+    was sufficient on its own (the corroboration the code's own comment
+    promised was never actually enforced), which put a Builders Risk hard stop
+    on packages with zero builders risk exposure."""
     recs = _recs(text="builders risk course of construction project value")
+    assert _tier(recs, "ACORD_133") is None
+
+
+def test_133_recommended_with_keyword_and_real_project_data():
+    """Keyword text PLUS an actual extracted builders-risk fact (address, cost,
+    or completion date) is genuine corroboration - a real active construction
+    project must still get ACORD 133 recommended."""
+    recs = _recs(
+        facts={"builders_risk_project_cost": "500000"},
+        text="builders risk course of construction project value",
+    )
     assert _tier(recs, "ACORD_133") == TIER_RECOMMENDED
+
+
+def test_133_recommended_from_flag_and_facts_without_keyword_text():
+    """The careful has_builders_risk LLM flag plus real extracted project data
+    is also sufficient even when the raw keyword phrasing never appears
+    verbatim in the document text."""
+    recs = _recs(
+        facts={"builders_risk_project_address": "123 Main St, Denver, CO"},
+        flags={"has_builders_risk": True},
+    )
+    assert _tier(recs, "ACORD_133") == TIER_RECOMMENDED
+
+
+def test_133_not_recommended_from_flag_alone_without_facts():
+    """Mirrors the original intent of the pre-fix comment ("flag alone requires
+    fact corroboration") - which the old code never actually enforced. A flag
+    with no address/cost/completion date behind it must not trigger the form."""
+    recs = _recs(flags={"has_builders_risk": True})
+    assert _tier(recs, "ACORD_133") is None
 
 
 # ── Situational forms → Optional ──────────────────────────────────────────────

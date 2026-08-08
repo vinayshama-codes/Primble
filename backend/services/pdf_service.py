@@ -185,6 +185,16 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     "Vehicle_GrossVehicleWeight":    _ScheduleDef("auto_vin_schedule", "gvw"),
     "Vehicle_GVW":                   _ScheduleDef("auto_vin_schedule", "gvw"),
     "Vehicle_GaragingAddress":       _ScheduleDef("auto_garaging_addresses", None),
+    # Per-vehicle covered-auto symbol codes (2026-08-07). These three ARE real
+    # ACORD 127 fields (rows A-D) and were the only symbol boxes on the form -
+    # every one of them blank on every submission we have ever produced, because
+    # no fact was bound to them. A row that states its own symbol wins; a row
+    # that does not inherits the policy-level symbol for that coverage via
+    # `_resolve_vehicle_symbol` below (a dec page normally prints ONE
+    # "Comprehensive 07" that applies to every scheduled vehicle).
+    "Vehicle_ComprehensiveSymbolCode": _ScheduleDef("auto_vin_schedule", "comp_symbol"),
+    "Vehicle_CollisionSymbolCode":     _ScheduleDef("auto_vin_schedule", "coll_symbol"),
+    "Vehicle_SymbolCode":              _ScheduleDef("auto_vin_schedule", "symbol"),
 
     # ── Drivers (ACORD 127) ─────────────────────────────────────────────────
     # NOTE: "Driver_FullName" is a DIFFERENT real schema field used by ACORD 133
@@ -360,6 +370,39 @@ def _split_driver_name(full: Optional[str]):
     return " ".join(parts[:-1]), parts[-1]
 
 
+# Vehicle-schedule columns that hold a covered-auto symbol. A declarations page
+# normally prints ONE symbol per coverage line that applies to every scheduled
+# vehicle ("Comprehensive 07"), and only rarely varies it per row - so an empty
+# row cell inherits the policy-level symbol rather than falling through to a
+# gap-fill guess. Inheritance is the documented carrier convention, not an
+# inference: symbol 7 means "the autos specifically described in the
+# declarations", i.e. all of them.
+_VEHICLE_SYMBOL_SUBKEYS = frozenset({"comp_symbol", "coll_symbol", "symbol"})
+
+# Which coverage lines each column may draw its policy-level symbol from, in
+# priority order.
+_VEHICLE_SYMBOL_COVERAGES: Dict[str, tuple] = {
+    "comp_symbol": ("comprehensive", "physical_damage"),
+    "coll_symbol": ("collision", "physical_damage"),
+    "symbol":      ("physical_damage", "comprehensive", "collision"),
+}
+
+
+def _policy_level_vehicle_symbol(sub_key: str, facts: dict) -> Optional[str]:
+    """The policy-level covered-auto symbol for this column, or None.
+
+    Returns a value ONLY when exactly one symbol is designated for the relevant
+    coverage. Two competing numbers means the schedule genuinely varies by row
+    and we must not pick one - blank, and let the producer supply it.
+    """
+    try:
+        from services import auto_symbols as _sym
+    except Exception:            # pragma: no cover - import-failure fallback
+        return None
+    nums = _sym.symbols_for(facts, *_VEHICLE_SYMBOL_COVERAGES.get(sub_key, ()))
+    return str(nums[0]) if len(nums) == 1 else None
+
+
 def _resolve_schedule_row(field_name: str, facts: dict):
     """Resolve a repeating-row field (e.g. Vehicle_Year_B) to its list-indexed value.
 
@@ -407,9 +450,13 @@ def _resolve_schedule_row(field_name: str, facts: dict):
             val = given if defn.sub_key == _NAME_GIVEN_KEY else surname
         else:
             val = item.get(defn.sub_key)
+        if val in (None, "") and defn.sub_key in _VEHICLE_SYMBOL_SUBKEYS:
+            val = _policy_level_vehicle_symbol(defn.sub_key, facts)
         if isinstance(val, bool):
             return "Yes" if val else "No"
         return str(val) if val is not None else None
+    if defn.sub_key in _VEHICLE_SYMBOL_SUBKEYS:
+        return _policy_level_vehicle_symbol(defn.sub_key, facts)
     return str(item) if item is not None else None
 
 
@@ -1516,12 +1563,129 @@ def _derive_no_prior_losses_indicator(facts: dict) -> Optional[str]:
     return "Yes" if attested else None
 
 
+_SYMBOL_INDICATOR_RE = re.compile(
+    r"^Vehicle_(BusinessAuto|Truckers|MotorCarrier|GarageAndDealers)Symbol_"
+    r"(?P<word>[A-Za-z]+)Indicator_(?P<row>[A-Z]{1,2})$"
+)
+
+# ACORD 137/138 do not print ONE symbol grid - they print one grid PER COVERAGE
+# LINE, stacked as rows A, B, C, E, F, G, H, and each row offers only the
+# symbols that are legal for that coverage. Verified against the real schemas:
+#
+#   row A -> symbols 1,2,3,4,7,8,9   (the only row offering 1 and 9 - liability)
+#   row C -> adds symbol 6           ("owned autos subject to a compulsory
+#                                      uninsured motorists law" - so, UM)
+#   rows B,E,F,G,H -> {2,3,4,7,8} or {3,7}, i.e. INDISTINGUISHABLE from each
+#                     other by their symbol offerings alone.
+#
+# So only row A can be identified from the schema without guessing, and a guess
+# here would stamp the liability symbol into a physical-damage row - a wrong
+# value on a form, which is the one outcome that is not negotiable. Row A is
+# stamped deterministically; every other row is left to gap fill exactly as it
+# was before. Mapping the remaining rows means reading the printed form layout,
+# not inferring it.
+_SYMBOL_GRID_LIABILITY_ROW = "A"
+
+# Symbol 1 expressed as a checkbox. Both are real fields, verified against the
+# schemas: ACORD 25's certificate ANY AUTO box, and ACORD 131's underlying-
+# coverage box whose ACORD tooltip reads "...covers any automobile (symbol 1)".
+_ANY_AUTO_INDICATOR_FIELDS = frozenset({
+    "Vehicle_AnyAutoIndicator_A",
+    "UnderlyingCoverage_Coverage_AnyAutoIndicator_A",
+})
+
+
+def _derive_symbol_indicator(field_name: str, facts: dict) -> Optional[str]:
+    """Tick the covered-auto symbol checkboxes on ACORD 137/138/160 from the
+    symbols the document actually carries.
+
+    ADDED 2026-08-07. These 37 checkboxes (8 business auto, 9 truckers, 10 motor
+    carrier, 10 garage) carry ACORD's own symbol definitions in their tooltips,
+    and until now nothing in Python read either the tooltips or the extracted
+    `auto_covered_symbols` - so a coverage designation with legal effect was
+    left entirely to a gap-fill guess. It is deterministic data; it is now
+    stamped deterministically.
+
+    Returns None (→ untouched, still gap-fill eligible) when no symbols were
+    captured at all, so a document we could not read is not silently declared
+    to have no coverage. Once we DO have symbols for the family, every box in
+    that family is answered - "Yes" for the designated ones, "No" for the rest,
+    which is what makes the grid readable to a carrier.
+    """
+    m = _SYMBOL_INDICATOR_RE.match(field_name)
+    is_any_auto = field_name in _ANY_AUTO_INDICATOR_FIELDS
+    if not m and not is_any_auto:
+        return None
+    try:
+        from services import auto_symbols as _sym
+    except Exception:            # pragma: no cover - import-failure fallback
+        return None
+
+    numbers = _sym.all_numbers(facts)
+    if not numbers:
+        return None
+
+    if is_any_auto:
+        # ACORD 25's ANY AUTO box and ACORD 131's underlying any-auto box are
+        # Symbol 1 in checkbox form. A certificate that leaves ANY AUTO blank on
+        # a Symbol 1 policy UNDERSTATES the insured's coverage to whoever relies
+        # on it - so this is stamped, not guessed.
+        liability = _sym.liability_symbols(facts) or numbers
+        return "Yes" if any(n in _sym.ANY_AUTO_NUMBERS for n in liability) else "No"
+
+    # Only the liability row can be identified from the schema - see the
+    # _SYMBOL_GRID_LIABILITY_ROW note above. Everything else falls through.
+    if m.group("row") != _SYMBOL_GRID_LIABILITY_ROW:
+        return None
+
+    family = {
+        "BusinessAuto":     _sym.BUSINESS_AUTO,
+        "Truckers":         _sym.TRUCKERS,
+        "MotorCarrier":     _sym.MOTOR_CARRIER,
+        "GarageAndDealers": _sym.GARAGE,
+    }[m.group(1)]
+
+    # Only speak for the family this policy is actually written on. A business
+    # auto policy must not have "No" stamped across the truckers grid.
+    if _sym.family_for(facts) != family:
+        return None
+
+    liability = _sym.liability_symbols(facts)
+    if not liability:
+        return None
+
+    word = m.group("word")
+    if word == "OtherSymbol":
+        # Ticked only when the policy carries a symbol ACORD does not print on
+        # the grid (ISO 5/19, or a company-unique symbol) - the exact case the
+        # box exists for.
+        return "Yes" if _sym.unrecognised(liability) else "No"
+
+    designated = {
+        n for n in liability
+        if n in _sym.BY_NUMBER and _sym.BY_NUMBER[n].family == family
+    }
+    match = next(
+        (s for s in _sym.BY_FAMILY[family].values() if s.word == word), None
+    )
+    if match is None:
+        return None
+    return "Yes" if match.number in designated else "No"
+
+
 def _derive_indicator(field_name: str, facts: dict) -> Optional[str]:
     """Return 'Yes'/'No' for indicator/checkbox fields based on extracted facts.
 
     Covers both fields with 'Indicator' in the name and LOB checkboxes like
     Policy_LineOfBusiness_CommercialGeneralLiability_A (no 'Indicator' suffix).
     """
+    # Covered-auto symbol grids (ACORD 137/138/160) - resolved from the symbol
+    # table before the generic substring rules, which cannot express "which of
+    # 37 mutually-exclusive boxes".
+    sym_ind = _derive_symbol_indicator(field_name, facts)
+    if sym_ind is not None:
+        return sym_ind
+
     fn_lower = field_name.lower()
     # Loss-history "No Prior Losses" is evidence-driven and multi-input — resolve
     # it deterministically before the generic single-key substring rules below.

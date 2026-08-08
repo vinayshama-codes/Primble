@@ -173,7 +173,17 @@
       "PowerShell($py = \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\\\\venv\\\\Scripts\\\\python.exe\"; Set-Location \"C:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\backend\"; & $py -m pytest tests/test_sqs_scoring.py tests/test_form_recommendation.py tests/test_question_controls.py tests/test_workstream3_closure.py -q 2>&1 | Select-Object -Last 6)",
       "Bash(python -m py_compile services/sqs_service.py services/form_service.py services/arq_service.py services/extraction_pipeline.py services/extraction_service.py services/question_classifier.py)",
       "PowerShell($py = \\(Get-Command python -ErrorAction SilentlyContinue\\); if \\($py\\) { $py.Source } else { \"no python\" }; $py3 = \\(Get-Command py -ErrorAction SilentlyContinue\\); if \\($py3\\) { \"py launcher: \" + $py3.Source } else { \"no py launcher\" })",
-      "Bash(./venv/Scripts/python.exe -m py_compile services/sqs_service.py services/form_service.py services/arq_service.py services/extraction_pipeline.py services/extraction_service.py services/question_classifier.py)"
+      "Bash(./venv/Scripts/python.exe -m py_compile services/sqs_service.py services/form_service.py services/arq_service.py services/extraction_pipeline.py services/extraction_service.py services/question_classifier.py)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('services/extraction_service.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK - syntax valid'\\)\")",
+      "Bash(py -c \"import ast; ast.parse\\(open\\('services/extraction_service.py', encoding='utf-8'\\).read\\(\\)\\); print\\('OK - syntax valid'\\)\")",
+      "Bash(py -m pytest tests/test_underwriting_consistency.py -v)",
+      "Bash(py -m pytest tests/test_producer_answer_validation.py tests/test_issue_resolution.py tests/test_declared_type_guard.py -q)",
+      "Bash(py -m pytest tests/test_builders_risk_hard_stop.py tests/test_form_recommendation.py -v)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(py -m py_compile services/cross_form_validator.py services/issue_registry.py)",
+      "Bash(py -m py_compile services/underwriting_consistency.py)",
+      "Bash(py -m pytest -q tests/test_underwriting_consistency.py tests/test_cross_engine_unification.py tests/test_sqs_scoring.py tests/test_issue_resolution.py tests/test_workstream2_integration.py tests/test_location_consolidation.py tests/test_question_controls.py tests/test_producer_answer_validation.py)",
+      "Bash(py -m pytest tests/test_auto_symbols.py -q)"
     ],
     "additionalDirectories": [
       "\\tmp",

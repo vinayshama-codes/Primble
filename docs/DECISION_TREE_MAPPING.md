@@ -158,10 +158,27 @@ if flags.get("has_umbrella"):
         hard.append("auto_umbrella_attachment_failure: Auto liability too low")
 ```
 
-**Enhanced Symbol Validation:** `cross_form_validator.py:660-715`
-- `_check_auto_symbol_to_exposure_alignment()` (NEW v2.1.0)
+**Covered-Auto Symbol Validation:** `cross_form_validator.py`
+- `_check_auto_hired_nonowned_symbols()` - REWRITTEN 2026-08-07
+- `_check_auto_symbols_captured()` - NEW 2026-08-07
+- `_check_auto_owned_fleet_symbol_gap()` - NEW 2026-08-07
+- `_check_auto_symbol_to_exposure_alignment()`
+- Symbol table and reasoning: `services/auto_symbols.py` (37 symbols, four
+  ACORD families, definitions lifted verbatim from the real schema tooltips)
 
-**Status:** ✅ COMPLIANT
+**Status:** ✅ COMPLIANT (was ❌ - see below)
+
+**Correction 2026-08-07:** the three symbol rules previously read five fact keys
+(`hired_auto_symbol`, `non_owned_symbol`, `auto_physical_damage_comp_symbol`,
+`auto_physical_damage_coll_symbol`, `drive_other_car_symbol`) that no code in
+this repository has ever written, so they were unsatisfiable and fired on every
+auto submission. The hired/non-owned rule additionally required Symbols 8 and 9
+specifically, which is wrong underwriting - Symbol 1 (any auto) is broader and
+already designates hired and non-owned autos for liability. Both are fixed; the
+rules now reason over `auto_covered_symbols`, the symbols the document actually
+carries. Drive Other Car was also conceptually wrong (it is an endorsement
+naming individual insureds, recorded per driver on ACORD 127, not a symbol) and
+now checks the driver schedule instead.
 
 ---
 
@@ -275,8 +292,20 @@ if umb_eff != gl_eff:
 **Cross-form Validation:** `cross_form_validator.py`
 - `_check_umbrella_attachment_stack()` — Full stack integrity
 - `_check_umbrella_gl_minimum_limits()` — Minimum limits verification
-- `_check_umbrella_sir_vs_auto_deductible()` — SIR/deductible alignment
+- `_check_umbrella_auto_minimum_limits()` — Auto minimum limits verification
 - `_check_umbrella_period_vs_auto_wc()` — Period alignment across all lines
+
+**Deductible/SIR Consistency (lines 226-231 above) — FIXED 2026-08-07:** originally
+implemented as `_check_umbrella_sir_vs_auto_deductible()`, comparing Umbrella SIR
+against Auto's comp/collision deductible — two unrelated coverage concepts (liability
+retention vs. physical-damage deductible), so a healthy $0 SIR read as a false
+"coverage gap". Removed. The line read plainly asks whether the SAME figure (the SIR,
+a deductible) agrees across documents, not whether SIR and a deductible should track
+each other — that's now handled correctly by `underwriting_consistency.py`'s existing
+Data Consistency engine: `umbrella_sir` / `gl_deductible` / `auto_deductible_comp` /
+`auto_deductible_collision` are registered in `RECONCILABLE_FIELDS`, so a genuine
+cross-document disagreement on any of them is flagged for review with source
+attribution, same as Gross Sales.
 
 **Status:** ✅ FULLY COMPLIANT
 
@@ -602,7 +631,7 @@ SPEC_PILLAR_WEIGHTS = {
 | Property Deductible Structure | ACORD 140 | cross_form_validator.py:1173-1231 | ✅ NEW |
 | Coinsurance Enforcement | ACORD 140 | cross_form_validator.py:1234-1289 | ✅ NEW |
 | Peril Deductible Hard Stop | ACORD 140 | cross_form_validator.py:1292-1340 | ✅ NEW |
-| Auto Symbol Alignment | ACORD 127 | cross_form_validator.py:660-715 | ✅ ENHANCED |
+| Auto Symbol Alignment | ACORD 127 | cross_form_validator.py + services/auto_symbols.py | ✅ REWRITTEN 2026-08-07 |
 | BI Period of Restoration | ACORD 140 | cross_form_validator.py:395-430 | ✅ |
 | Builders Risk Deduplication | ACORD 133/140 | cross_form_validator.py:440-480 | ✅ |
 | Inland Marine Deduplication | ACORD 160/140 | cross_form_validator.py:490-530 | ✅ |

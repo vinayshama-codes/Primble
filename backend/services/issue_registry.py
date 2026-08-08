@@ -109,7 +109,6 @@ CLUSTER_MAP: Dict[str, str] = {
     "umbrella_gl_limits_not_found": "Umbrella attachment limits",
     "umbrella_auto_attachment_failure": "Umbrella attachment limits",
     "umbrella_auto_limits_not_found": "Umbrella attachment limits",
-    "umbrella_sir_below_auto_deductible": "Umbrella attachment limits",
     "umbrella_missing_employers_liability": "Umbrella Employers Liability",
     "umbrella_el_below_minimum": "Umbrella Employers Liability",
     # Claims-made
@@ -119,6 +118,8 @@ CLUSTER_MAP: Dict[str, str] = {
     "auto_split_limits_incomplete": "Auto liability structure",
     "auto_hired_nonowned_symbols_missing": "Auto symbols / coverage alignment",
     "auto_physical_damage_symbols_missing": "Auto symbols / coverage alignment",
+    "auto_symbols_not_captured": "Auto symbols / coverage alignment",
+    "auto_owned_fleet_not_covered_by_symbol": "Auto symbols / coverage alignment",
     "auto_doc_symbol_missing": "Auto symbols / coverage alignment",
     "auto_agreed_value_requires_schedule": "Auto symbols / coverage alignment",
     "auto_um_uim_not_specified": "Auto optional coverage gaps",
@@ -161,7 +162,6 @@ TIER_MAP: Dict[str, str] = {
     "umbrella_gl_limits_not_found": "recommended",
     "umbrella_auto_attachment_failure": "recommended",
     "umbrella_auto_limits_not_found": "recommended",
-    "umbrella_sir_below_auto_deductible": "recommended",
     "claims_made_missing_retro_date": "recommended",
     "claims_made_missing_prior_acts": "recommended",
     "property_aop_deductible_missing": "recommended",
@@ -174,6 +174,7 @@ TIER_MAP: Dict[str, str] = {
     "property_valuation_method_missing": "recommended",
     "auto_hired_nonowned_symbols_missing": "recommended",
     "auto_physical_damage_symbols_missing": "recommended",
+    "auto_symbols_not_captured": "recommended",
     "auto_doc_symbol_missing": "recommended",
     "auto_agreed_value_requires_schedule": "recommended",
     "crime_silent_exposure": "recommended",
@@ -225,6 +226,18 @@ TIER_MAP: Dict[str, str] = {
 
 def _r_field(*facts: str) -> dict:
     return {"mode": "field", "facts": list(facts)}
+
+
+def _copy_resolution(res: dict) -> dict:
+    """Independent copy of a resolution descriptor.
+
+    `dict(res)` alone is NOT enough: it duplicates the mapping but leaves the
+    `facts` LIST shared with the template, so a caller appending to
+    resolution["facts"] silently corrupts every future issue with that code.
+    Latent since the feature shipped - test_resolution_for_returns_a_copy only
+    reassigned a scalar key, which a shallow copy does isolate. Found by the
+    legacy-rule guard tests (2026-08-08) and fixed here, for every mode."""
+    return {k: (list(v) if isinstance(v, list) else v) for k, v in res.items()}
 
 
 def _r_schedule(schedule_key: str) -> dict:
@@ -289,7 +302,12 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "acord186_high_sub_high_wc_payroll": _r_field("percent_subcontracted", "wc_payroll"),
     "high_subcontracting_no_wc_payroll": _r_field("wc_payroll"),
     # ── Umbrella ──
-    "umbrella_no_underlying_coverage": _R_NONE,           # add underlying GL/Auto
+    # The rule clears as soon as ANY underlying limit is on record, and all three
+    # are writable canonical facts - so this is typed, not "add a form". It was
+    # _R_NONE until 2026-08-08, which meant a HARD STOP capping the package at 60
+    # rendered a dead button. Its legacy twin is typed the same way.
+    "umbrella_no_underlying_coverage": _r_field(
+        "gl_each_occurrence", "gl_limits", "auto_liability_limit"),
     "umbrella_sir_below_gl_deductible": _r_field("umbrella_sir", "gl_deductible"),
     "umbrella_gl_period_misaligned": _r_field("umbrella_effective_date", "effective_date"),
     "umbrella_gl_expiration_misaligned": _r_field("umbrella_expiration_date", "expiration_date"),
@@ -302,7 +320,6 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "umbrella_gl_limits_not_found": _r_field("gl_each_occurrence", "gl_limits"),
     "umbrella_auto_attachment_failure": _r_field("auto_liability_limit"),
     "umbrella_auto_limits_not_found": _r_field("auto_liability_limit"),
-    "umbrella_sir_below_auto_deductible": _r_field("umbrella_sir"),
     "umbrella_missing_employers_liability": _r_field("employers_liability_limits"),
     "umbrella_el_below_minimum": _r_field("employers_liability_limits"),
     # ── Claims-made continuity ──
@@ -310,14 +327,27 @@ RESOLUTION_MAP: Dict[str, dict] = {
     # `prior_acts_confirmation` is not a writable canonical fact - explain via 101
     "claims_made_missing_prior_acts": _R_NARRATIVE,
     # ── Auto ──
-    # Split-limit components and coverage symbols are not writable canonical
-    # facts; they are set on ACORD 127 directly, so these are read-only here.
+    # Split-limit components are not writable canonical facts; that one stays
+    # read-only. The three symbol rules below used to be _R_NONE on the stated
+    # grounds that "coverage symbols are not writable canonical facts" - which
+    # was never true: `auto_covered_symbols` has been in FACT_REGISTRY all
+    # along. That comment is why the client saw a Resolve button that could not
+    # resolve anything. Corrected 2026-08-07: the carrier has already made and
+    # documented the coverage decision, so the fix is a TRANSFER of an existing
+    # value, which is precisely what a field resolution is for.
     "auto_split_limits_incomplete": _R_NONE,
-    "auto_hired_nonowned_symbols_missing": _R_NONE,
-    "auto_physical_damage_symbols_missing": _R_NONE,
-    "auto_doc_symbol_missing": _R_NONE,
+    "auto_symbols_not_captured": _r_field("auto_covered_symbols"),
+    "auto_hired_nonowned_symbols_missing": _r_field("auto_covered_symbols"),
+    "auto_physical_damage_symbols_missing": _r_field("auto_covered_symbols"),
+    "auto_owned_fleet_not_covered_by_symbol": _r_field("auto_covered_symbols"),
+    # Drive Other Car is an endorsement naming individual insureds, recorded per
+    # driver on ACORD 127 - so it clears by editing the driver schedule.
+    "auto_doc_symbol_missing": _r_schedule("auto_drivers"),
     "auto_agreed_value_requires_schedule": _r_schedule("auto_vin_schedule"),
-    "auto_um_uim_not_specified": _R_NONE,                 # advisory (UM/UIM limits not writable)
+    # `auto_um_uim_limit` IS a writable canonical fact - the previous comment
+    # here claimed otherwise and was wrong (verified against _canonical_key),
+    # which left a typeable advisory rendering a dead button.
+    "auto_um_uim_not_specified": _r_field("auto_um_uim_limit"),
     "auto_pip_medpay_not_specified": _r_field("auto_med_pay_limit"),
     "auto_drive_other_car_not_specified": _R_NONE,        # advisory (DOC symbol not writable)
     # ── Silent exposure (coverage decisions - handled on their own forms) ──
@@ -355,9 +385,9 @@ def resolution_for(code: Optional[str]) -> Optional[dict]:
     """
     if not code:
         return None
-    res = RESOLUTION_MAP.get(code)
+    res = RESOLUTION_MAP.get(code) or _LEGACY_CODE_RESOLUTIONS.get(code)
     if res:
-        return dict(res)
+        return _copy_resolution(res)
     if code.startswith("tier1_missing_"):
         return _tier1_resolution(code[len("tier1_missing_"):])
     if code.startswith("source_conflict_"):
@@ -486,69 +516,192 @@ def _lookup(code: str) -> tuple:
 # (COPE completeness, WC/umbrella/auto domain checks, and format/range
 # validation), called first inside extraction_pipeline._finalize_pipeline
 # (``hard_stops, soft_stops = evaluate_stops(...)``). It produces the bulk of
-# real-world stops, including the exact "Property Minimum Viable COPE
-# incomplete" message the client screenshotted - so unlike the smaller sources
-# above, this one is classified by matching known substrings against the
-# message text itself (there is no code to key off). Checked in order, most
-# specific phrase first, so a specific rule is never shadowed by a generic one
-# later in the list (e.g. "Umbrella SIR" before a generic "limit" match).
+# real-world stops, including the exact "Carrier-Grade COPE incomplete" warning
+# the client screenshotted - so unlike the smaller sources above, this one is
+# classified by matching known substrings against the message text itself
+# (there is no code on the wire). Checked in order, most specific phrase first,
+# so a specific rule is never shadowed by a generic one later in the list
+# (e.g. "Umbrella SIR" before a generic "limit" match).
+#
+# COLUMNS: (phrase, cluster, tier, code, resolution)
+#
+# `code` (added 2026-08-08) is the fix for the client report "Resolve opens
+# nothing". Until now these stops were tagged with a THROWAWAY index code
+# (`legacy_soft_0`, `legacy_soft_1`, ...) generated at the call site, so
+# resolution_for() had nothing to look up and every one of them rendered a
+# work-tracking-only Resolve/Dismiss row - even when the fix was literally
+# "type the number". Each rule now carries a stable, semantic code, and the
+# `resolution` column states how it is fixed, using the SAME four modes and the
+# same _r_field/_r_schedule/_R_NARRATIVE/_R_NONE helpers as RESOLUTION_MAP.
+#
+# Keeping code+resolution in THIS table rather than in RESOLUTION_MAP is
+# deliberate: RESOLUTION_MAP is keyed by cross-form rule code and is guarded by
+# test_no_orphan_resolution_codes (every entry must be a live CLUSTER_MAP code).
+# Legacy stops have no CLUSTER_MAP entry - their cluster lives in this row - so
+# they own their resolution here and resolution_for() consults both. One
+# authored source per rule, no parallel table to drift.
+#
+# The `legacy_` code prefix is also load-bearing: it namespaces these away from
+# the cross-form codes so _LEGACY_SUPERSEDED_BY_CODE's duplicate-suppression
+# (which hides the legacy twin when the CODED twin is present) keeps working
+# exactly as before. Never reuse a cross-form code here or a rule will suppress
+# itself and both twins will render.
+#
+# Adding a rule to evaluate_stops()/run_field_validations() means adding a row
+# here. test_legacy_rules.py fails the build if a message the engine can emit
+# matches no row, matches the WRONG row, or carries a resolution naming a fact
+# the producer-answer path cannot write.
 _LEGACY_MESSAGE_RULES: List[tuple] = [
-    # Property COPE / deductibles / valuation / BI
-    ("Minimum Viable COPE incomplete", "Property COPE completeness", "required"),
-    ("Carrier-Grade COPE incomplete", "Property COPE quality", "binder_followup"),
-    ("Peril-specific deductibles referenced but not defined", "Property deductible completeness", "required"),
-    ("Property valuation method not specified", "Property valuation method", "recommended"),
-    ("Valuation basis conflict", "Property valuation advisories", "binder_followup"),
-    ("Business Income coverage detected", "Business Income coverage", "recommended"),
-    ("Coinsurance percentage", "Property coinsurance", "recommended"),
-    # Umbrella (specific phrases before the generic "Umbrella ..." ones below)
-    ("Umbrella detected but no underlying", "Umbrella underlying coverage", "required"),
-    ("Umbrella SIR", "Umbrella underlying coverage", "required"),
-    ("Umbrella attaches over WC but Employers Liability", "Umbrella Employers Liability", "binder_followup"),
-    ("Employers Liability limit (", "Umbrella Employers Liability", "binder_followup"),
-    ("Claims-made GL policy requires retro date for umbrella", "Claims-made continuity", "recommended"),
-    ("Umbrella and GL policy periods misaligned", "Umbrella policy period alignment", "required"),
-    ("Umbrella and GL expiration dates misaligned", "Umbrella policy period alignment", "required"),
-    ("Underlying limits may not meet umbrella requirements", "Umbrella attachment limits", "recommended"),
-    ("Umbrella limit", "Umbrella attachment limits", "recommended"),
-    # GL / claims-made
-    ("GL policy is claims-made - retro date is required", "Claims-made continuity", "recommended"),
-    ("GL coverage detected but no class codes found", "WC / GL class code alignment", "recommended"),
-    ("GL coverage detected but no revenue or payroll found", "GL exposure basis", "recommended"),
-    ("GL each occurrence limit", "GL exposure basis", "recommended"),
-    ("GL aggregate limit", "GL exposure basis", "recommended"),
-    # Workers Comp
-    ("Monopolistic WC state detected but wc_monopolistic_payroll", "Monopolistic WC state requirements", "required"),
-    ("Monopolistic WC state (ND/OH/WA/WY) requires the state fund", "Monopolistic WC state requirements", "required"),
-    ("Monopolistic WC state detected", "Monopolistic WC state requirements", "recommended"),
-    ("Multi-state WC", "WC payroll reconciliation", "required"),
-    ("Workers Comp detected but payroll is missing", "WC payroll reconciliation", "recommended"),
-    ("Revenue-to-payroll ratio", "WC payroll reconciliation", "recommended"),
-    ("WC payroll", "WC payroll reconciliation", "recommended"),
-    # Auto
-    ("Split liability limits incomplete", "Auto liability structure", "required"),
-    ("Physical damage coverage present but deductibles not specified", "Auto symbols / coverage alignment", "recommended"),
-    ("Auto liability limit", "Auto symbols / coverage alignment", "recommended"),
-    # Prior carrier / narrative
-    ("Carrier adverse action indicated", "Prior carrier / marketing context", "recommended"),
-    # Format / range validation (utils/validators.py) - data-quality issues, not
-    # domain-coverage gaps, so they get their own two clusters rather than being
-    # forced into a domain bucket above.
-    ("Effective date", "Date format & range", "recommended"),
-    ("Expiration date", "Date format & range", "recommended"),
-    ("effective date", "Date format & range", "recommended"),
-    ("FEIN", "Contact & identity field format", "recommended"),
-    ("Address missing", "Contact & identity field format", "recommended"),
-    ("Phone", "Contact & identity field format", "recommended"),
-    ("Email", "Contact & identity field format", "recommended"),
-    ("Subcontracted work percentage", "Monetary & percentage field format", "recommended"),
-    ("Building ITV percentage", "Monetary & percentage field format", "recommended"),
-    ("Total revenue", "Monetary & percentage field format", "recommended"),
-    ("Total payroll", "Monetary & percentage field format", "recommended"),
-    ("Building value", "Monetary & percentage field format", "recommended"),
-    ("BPP value", "Monetary & percentage field format", "recommended"),
-    ("Business income limit", "Monetary & percentage field format", "recommended"),
+    # ── Property COPE / deductibles / valuation / BI ─────────────────────────
+    ("Minimum Viable COPE incomplete", "Property COPE completeness", "required",
+     "legacy_minimum_viable_cope", _r_field(
+         "occupancy_type", "construction_type",
+         "property_building_value", "property_bpp_value")),
+    # The client's screenshot. evaluate_stops() checks SIX facts here (two more
+    # than the cross-form twin), so all six are offered.
+    ("Carrier-Grade COPE incomplete", "Property COPE quality", "binder_followup",
+     "legacy_carrier_grade_cope", _r_field(
+         "year_built", "roof_year", "sprinkler_system",
+         "fire_protection_class", "valuation_method", "coinsurance_percentage")),
+    ("Peril-specific deductibles referenced but not defined", "Property deductible completeness", "required",
+     "legacy_peril_deductibles_undefined", _r_field(
+         "property_deductible_wind", "property_deductible_earthquake",
+         "property_deductible_flood")),
+    ("Property valuation method not specified", "Property valuation method", "recommended",
+     "legacy_valuation_method_missing", _r_field("valuation_method")),
+    ("Valuation basis conflict", "Property valuation advisories", "binder_followup",
+     "legacy_valuation_basis_conflict", _r_field("valuation_method")),
+    ("Business Income coverage detected", "Business Income coverage", "recommended",
+     "legacy_bi_no_limit", _r_field("business_income_limit", "period_of_restoration")),
+    ("Coinsurance percentage", "Property coinsurance", "recommended",
+     "legacy_coinsurance_percentage", _r_field("coinsurance_percentage")),
+    # ── Umbrella (specific phrases before the generic "Umbrella ..." ones) ───
+    ("Umbrella detected but no underlying", "Umbrella underlying coverage", "required",
+     "legacy_umbrella_no_underlying", _r_field(
+         "gl_each_occurrence", "gl_limits", "auto_liability_limit")),
+    ("Umbrella SIR", "Umbrella underlying coverage", "required",
+     "legacy_umbrella_sir_below_gl_deductible", _r_field("umbrella_sir", "gl_deductible")),
+    ("Umbrella attaches over WC but Employers Liability", "Umbrella Employers Liability", "binder_followup",
+     "legacy_umbrella_missing_el", _r_field("employers_liability_limits")),
+    ("Employers Liability limit (", "Umbrella Employers Liability", "binder_followup",
+     "legacy_umbrella_el_below_minimum", _r_field("employers_liability_limits")),
+    ("Claims-made GL policy requires retro date for umbrella", "Claims-made continuity", "recommended",
+     "legacy_umbrella_retro_date_required", _r_field("retro_date")),
+    ("Umbrella and GL policy periods misaligned", "Umbrella policy period alignment", "required",
+     "legacy_umbrella_gl_period_misaligned", _r_field("umbrella_effective_date", "effective_date")),
+    ("Umbrella and GL expiration dates misaligned", "Umbrella policy period alignment", "required",
+     "legacy_umbrella_gl_expiration_misaligned", _r_field("umbrella_expiration_date", "expiration_date")),
+    ("Underlying limits may not meet umbrella requirements", "Umbrella attachment limits", "recommended",
+     "legacy_umbrella_underlying_below_minimum", _r_field("auto_liability_limit")),
+    ("Umbrella limit", "Umbrella attachment limits", "recommended",
+     "legacy_umbrella_limit", _r_field("umbrella_limit")),
+    # ── GL / claims-made ─────────────────────────────────────────────────────
+    ("GL policy is claims-made - retro date is required", "Claims-made continuity", "recommended",
+     "legacy_gl_claims_made_retro_date", _r_field("retro_date")),
+    # GL class codes are a per-location SCHEDULE with no live capture table
+    # (schedule_capture.SCHEDULE_DEFS has none), so there is nothing to type
+    # into and nothing to open - an honest note beats a dead button.
+    ("GL coverage detected but no class codes found", "WC / GL class code alignment", "recommended",
+     "legacy_gl_no_class_codes", _r_review(
+         "GL class codes are captured per location on ACORD 126. Add them there, "
+         "then mark this resolved - there is no single value to enter here.")),
+    ("GL coverage detected but no revenue or payroll found", "GL exposure basis", "recommended",
+     "legacy_gl_no_exposure_basis", _r_field("total_revenue", "total_payroll")),
+    ("GL each occurrence limit", "GL exposure basis", "recommended",
+     "legacy_gl_each_occurrence", _r_field("gl_each_occurrence")),
+    ("GL aggregate limit", "GL exposure basis", "recommended",
+     "legacy_gl_aggregate", _r_field("gl_aggregate")),
+    # ── Workers Comp ─────────────────────────────────────────────────────────
+    ("Monopolistic WC state detected but wc_monopolistic_payroll", "Monopolistic WC state requirements", "required",
+     "legacy_wc_monopolistic_payroll_missing", _r_field("wc_monopolistic_payroll")),
+    ("Monopolistic WC state (ND/OH/WA/WY) requires the state fund", "Monopolistic WC state requirements", "required",
+     "legacy_wc_monopolistic_private_carrier", _r_review(
+         "This clears by changing the WC placement - remove the private-carrier "
+         "request or acknowledge state-fund handling. No value can be typed here.")),
+    ("Monopolistic WC state detected", "Monopolistic WC state requirements", "recommended",
+     "legacy_wc_monopolistic_state", _r_review(
+         "Advisory: WC in ND/OH/WA/WY must be placed with the state fund. "
+         "Confirm the placement, then mark this resolved.")),
+    # Per-state payroll has no live capture schedule and no writable scalar -
+    # same call as the cross-form twin wc_multi_state_no_breakdown.
+    ("Multi-state WC", "WC payroll reconciliation", "required",
+     "legacy_wc_multi_state_no_breakdown", _R_NARRATIVE),
+    ("Workers Comp detected but payroll is missing", "WC payroll reconciliation", "recommended",
+     "legacy_wc_payroll_missing", _r_field("wc_payroll", "total_payroll")),
+    ("Revenue-to-payroll ratio", "WC payroll reconciliation", "recommended",
+     "legacy_revenue_payroll_ratio", _r_field("total_revenue", "total_payroll")),
+    ("WC payroll", "WC payroll reconciliation", "recommended",
+     "legacy_wc_payroll_format", _r_field("wc_payroll")),
+    # ── Auto ─────────────────────────────────────────────────────────────────
+    # bi_per_person / bi_per_accident / pd_per_accident are NOT writable
+    # canonical facts (verified against arq_service._canonical_key) - they are
+    # set on ACORD 127 directly. Same call as the cross-form twin.
+    ("Split liability limits incomplete", "Auto liability structure", "required",
+     "legacy_auto_split_limits_incomplete", _r_review(
+         "Split limits are entered as three components on ACORD 127. Set them "
+         "there, then mark this resolved - they cannot be typed here.")),
+    ("Physical damage coverage present but deductibles not specified", "Auto symbols / coverage alignment", "recommended",
+     "legacy_auto_physical_damage_deductibles", _r_field(
+         "auto_deductible_comp", "auto_deductible_collision")),
+    ("Auto liability limit", "Auto symbols / coverage alignment", "recommended",
+     "legacy_auto_liability_limit", _r_field("auto_liability_limit")),
+    # ── Prior carrier / narrative ────────────────────────────────────────────
+    # This rule is gated on _narrative_remarks_text(facts) being empty, so an
+    # ACORD 101 note is LITERALLY what clears it - narrative, not a typed value.
+    ("Carrier adverse action indicated", "Prior carrier / marketing context", "recommended",
+     "legacy_carrier_adverse_action", _R_NARRATIVE),
+    # ── Format / range validation (utils/validators.py + sqs_service's two
+    #    standalone validators) - data-quality issues, not domain-coverage gaps,
+    #    so they get their own clusters rather than a domain bucket above.
+    ("Effective date", "Date format & range", "recommended",
+     "legacy_effective_date_format", _r_field("effective_date")),
+    ("Expiration date", "Date format & range", "recommended",
+     "legacy_expiration_date_format", _r_field("expiration_date")),
+    # sqs_service.validate_effective_date_window(), a THIRD message source beyond
+    # the two named at the top of this block. Its messages use the RAW FACT KEY
+    # ("effective_date is more than 2 years in the past", "effective_date format
+    # unrecognized"). This row read "effective date" with a SPACE and therefore
+    # matched none of them - the warning had been falling into the "Other
+    # validations" default bucket unnoticed. Found by
+    # test_every_emittable_message_matches_a_rule_row; fixed 2026-08-08.
+    ("effective_date", "Date format & range", "recommended",
+     "legacy_effective_date_window", _r_field("effective_date")),
+    # sqs_service.validate_naics_code(). Had NO row here until 2026-08-08, so it
+    # silently fell through to the "Other validations" default bucket - found by
+    # the coverage test below, which is exactly what that test exists to catch.
+    ("NAICS code", "Contact & identity field format", "recommended",
+     "legacy_naics_code_format", _r_field("naics_code")),
+    ("NAICS prefix", "Contact & identity field format", "recommended",
+     "legacy_naics_prefix_invalid", _r_field("naics_code")),
+    ("FEIN", "Contact & identity field format", "recommended",
+     "legacy_fein_format", _r_field("fein")),
+    ("Address missing", "Contact & identity field format", "recommended",
+     "legacy_address_missing", _r_field("mailing_address")),
+    ("Phone", "Contact & identity field format", "recommended",
+     "legacy_phone_format", _r_field("contact_phone")),
+    ("Email", "Contact & identity field format", "recommended",
+     "legacy_email_format", _r_field("contact_email")),
+    ("Subcontracted work percentage", "Monetary & percentage field format", "recommended",
+     "legacy_percent_subcontracted_format", _r_field("percent_subcontracted")),
+    ("Building ITV percentage", "Monetary & percentage field format", "recommended",
+     "legacy_building_itv_format", _r_field("building_ITV_percentage")),
+    ("Total revenue", "Monetary & percentage field format", "recommended",
+     "legacy_total_revenue_format", _r_field("total_revenue")),
+    ("Total payroll", "Monetary & percentage field format", "recommended",
+     "legacy_total_payroll_format", _r_field("total_payroll")),
+    ("Building value", "Monetary & percentage field format", "recommended",
+     "legacy_building_value_format", _r_field("property_building_value")),
+    ("BPP value", "Monetary & percentage field format", "recommended",
+     "legacy_bpp_value_format", _r_field("property_bpp_value")),
+    ("Business income limit", "Monetary & percentage field format", "recommended",
+     "legacy_business_income_limit_format", _r_field("business_income_limit")),
 ]
+
+# code -> resolution, derived from the single authored table above. Built once
+# at import; never edited by hand (that is what would let it drift).
+_LEGACY_CODE_RESOLUTIONS: Dict[str, dict] = {
+    _code: _res for _phrase, _cluster, _tier, _code, _res in _LEGACY_MESSAGE_RULES
+}
 
 
 # ── Cross-engine twin registry (client review #4) ────────────────────────────
@@ -580,53 +733,70 @@ _LEGACY_SUPERSEDED_BY_CODE: Dict[str, str] = {
 }
 
 
+def classify_legacy(message: str, severity: str) -> tuple:
+    """(code, cluster, tier) for a plain-string message from evaluate_stops()/
+    run_field_validations() (these predate cross_form_validator.py and carry no
+    code on the wire). First matching phrase wins - the table is ordered most
+    specific first. Falls through to the same default bucket as an unrecognized
+    code, with code None, so nothing is ever dropped.
+
+    Callers pass the returned code straight to make_issue(), which is what lets
+    resolution_for() find the rule's fix mode and render "Open to fix". Before
+    2026-08-08 they passed a throwaway `legacy_soft_<index>` instead and every
+    legacy stop rendered as a dead Resolve/Dismiss row."""
+    for phrase, cluster, tier, code, _res in _LEGACY_MESSAGE_RULES:
+        if phrase in (message or ""):
+            return code, cluster, (tier if severity != "hard_stop" else "required")
+    return None, DEFAULT_CLUSTER, DEFAULT_TIER
+
+
 def classify_legacy_message(message: str, severity: str) -> tuple:
-    """Cluster/tier a plain-string message from evaluate_stops()/
-    run_field_validations() by matching known substrings (these two functions
-    predate cross_form_validator.py and carry no code). Falls through to the
-    same default bucket as an unrecognized code so nothing is ever dropped."""
-    for phrase, cluster, tier in _LEGACY_MESSAGE_RULES:
-        if phrase in message:
-            return cluster, (tier if severity != "hard_stop" else "required")
-    return DEFAULT_CLUSTER, DEFAULT_TIER
+    """(cluster, tier) only - the pre-existing signature, kept so any caller that
+    does not need the code is unaffected."""
+    _code, cluster, tier = classify_legacy(message, severity)
+    return cluster, tier
 
 
-# ── Typeable legacy stops (client review #5) ─────────────────────────────────
-# evaluate_stops() emits uncoded strings, so make_issue() gets no code to key a
-# resolution off - which is why several genuinely single-value-fixable stops
-# ("...no revenue or payroll found", "...payroll is missing", "...deductibles not
-# specified") rendered as bare Resolve/Dismiss with no "Open to fix", even though
-# the fix is exactly "type the value". This maps the identifying phrase of each
-# such stop to the writable canonical fact(s) that fix it, so make_issue() can
-# attach a field resolution from the MESSAGE (it has no code). Checked most-
-# specific first; each fact is a verified-writable scalar (never a list/dict, so
-# a typed value can never corrupt a schedule-backed field). Deliberately NOT
-# mapped: "no class codes found" (a class-code SCHEDULE, no live capture table)
-# and symbol/structure stops - those have no clean single-value fix, so they
-# correctly keep work-tracking-only rather than get a button that opens onto
-# nothing. Legacy phrases already owned by a coded twin (_LEGACY_SUPERSEDED_BY_
-# CODE) are suppressed from the view when the coded one is present, so a resolved
-# duplicate never shows; when the legacy shows alone, this makes it fixable too.
-_LEGACY_STOP_RESOLUTIONS: List[Tuple[str, dict]] = [
-    ("no revenue or payroll found",           _r_field("total_revenue", "total_payroll")),
-    ("Workers Comp detected but payroll is missing", _r_field("wc_payroll", "total_payroll")),
-    ("Physical damage coverage present but deductibles not specified",
-                                              _r_field("auto_deductible_comp", "auto_deductible_collision")),
-    ("retro date is required",                _r_field("retro_date")),
-    ("requires retro date for umbrella",      _r_field("retro_date")),
-    ("Business Income coverage detected",     _r_field("business_income_limit")),
-]
+# ── Message-derived resolution for legacy stops ──────────────────────────────
+# A legacy stop that reached make_issue() through the normal path now carries a
+# real `legacy_*` code, so resolution_for(code) answers directly. This MESSAGE
+# route is the backstop for the two places where no code is available:
+#   * build_grouped_view()'s "uncovered_hard_stop"/"uncovered_soft_stop" safety
+#     net, which represents any final-list message that never went through
+#     make_issue() at all;
+#   * sqs_service.cross_validate()'s uncoded {type, message} dicts.
+# It reads the SAME single table, so there is no second list to keep in sync.
 
 
 def _legacy_message_resolution(message: str) -> Optional[dict]:
-    """Field resolution derived from a legacy stop's MESSAGE (it carries no code).
-    First matching phrase wins; None when nothing matches (unchanged behaviour)."""
+    """Resolution derived from a legacy stop's MESSAGE, for the paths that have
+    no code. First matching phrase wins; None when nothing matches."""
     if not message:
         return None
-    for phrase, res in _LEGACY_STOP_RESOLUTIONS:
-        if phrase in message:
-            return dict(res)
-    return None
+    code, _cluster, _tier = classify_legacy(message, "soft_warning")
+    res = _LEGACY_CODE_RESOLUTIONS.get(code) if code else None
+    return _copy_resolution(res) if res else None
+
+
+def _fallback_resolution(code: Optional[str], message: str) -> Optional[dict]:
+    """Message-derived resolution, but ONLY for issues that are actually legacy
+    field-level stops.
+
+    Deliberately narrow. Before the legacy rules carried codes, the phrase table
+    held 6 entries and a message fallback was harmless for every other source.
+    It now holds every legacy rule, including short phrases like "FEIN" and
+    "Effective date" - which appear verbatim inside cross-document conflict and
+    low-OCR-confidence messages. Those families are resolved through the Data
+    Consistency picker (see _CONFLICT_REVIEW_NOTE) and must NOT be handed a
+    typed-value box by an accidental substring hit. Gating on the code keeps
+    their behaviour byte-identical to before this change."""
+    if code and not (
+        code.startswith("legacy_")
+        or code.startswith("uncovered_")
+        or code == "cross_form_legacy"
+    ):
+        return None
+    return _legacy_message_resolution(message)
 
 
 def make_issue(
@@ -645,12 +815,12 @@ def make_issue(
     which has no `code` to key a registry lookup off of). When omitted,
     build_grouped_view() derives them from `code` via the registry as usual.
     """
-    # Prefer a code-keyed resolution; fall back to a MESSAGE-keyed one for the
-    # uncoded legacy stops that are single-value fixable (client #5). The message
-    # fallback only fires when the code has no resolution, and its phrases are
-    # specific to legacy stop wording, so it never overrides or collides with a
-    # coded/cross-form/source-conflict resolution.
-    resolution = resolution_for(code) or _legacy_message_resolution(message)
+    # Prefer a code-keyed resolution (which now covers legacy stops too, since
+    # they carry a real `legacy_*` code). The MESSAGE fallback only fires for
+    # legacy/uncovered codes - see _fallback_resolution for why that gate is
+    # load-bearing - so it can never override or collide with a cross-form,
+    # tier-1 or source-conflict resolution.
+    resolution = resolution_for(code) or _fallback_resolution(code, message)
     return {
         "code": code,
         "severity": severity,
@@ -825,7 +995,7 @@ def build_grouped_view(
             "cluster": cluster,
             "tier": tier,
             "resolution": issue.get("resolution") or resolution_for(code)
-                          or _legacy_message_resolution(message),
+                          or _fallback_resolution(code, message),
         })
 
     # Safety net: guarantee every message the caller is actually about to show
@@ -958,15 +1128,19 @@ def build_structured_from_sources(
                 forms=iss.get("forms") or [], cluster=_cluster, tier=_tier,
             ))
 
+    # Real rule codes, not the old throwaway index (`legacy_hard_<i>`), so
+    # resolution_for() can find each rule's fix mode. The index form is kept only
+    # as the fallback for a message no rule matches - it must stay unique per
+    # message so two unclassified stops never collapse into one code.
     for _i, _msg in enumerate(legacy_hard or []):
-        _cluster, _tier = classify_legacy_message(_msg, "hard_stop")
+        _code, _cluster, _tier = classify_legacy(_msg, "hard_stop")
         structured.append(make_issue(
-            f"legacy_hard_{_i}", "hard_stop", _msg, cluster=_cluster, tier=_tier,
+            _code or f"legacy_hard_{_i}", "hard_stop", _msg, cluster=_cluster, tier=_tier,
         ))
     for _i, _msg in enumerate(legacy_soft or []):
-        _cluster, _tier = classify_legacy_message(_msg, "soft_warning")
+        _code, _cluster, _tier = classify_legacy(_msg, "soft_warning")
         structured.append(make_issue(
-            f"legacy_soft_{_i}", "soft_warning", _msg, cluster=_cluster, tier=_tier,
+            _code or f"legacy_soft_{_i}", "soft_warning", _msg, cluster=_cluster, tier=_tier,
         ))
     return structured
 
@@ -1014,7 +1188,17 @@ def count_distinct_issues(
 # from any OTHER source (doc conflicts, source conflicts, OCR confidence,
 # Tier-1 gaps) are preserved untouched, because recalculate_session_scores does
 # not re-run those detectors and therefore cannot know whether they cleared.
-_RECOMPUTED_CODE_PREFIXES = ("legacy_hard_", "legacy_soft_")
+#
+# Must stay in sync with what evaluate_stops()-sourced issues are actually coded
+# as. It was ("legacy_hard_", "legacy_soft_") - the throwaway INDEX codes - and
+# had to widen to the shared "legacy_" prefix when those stops gained real rule
+# codes (2026-08-08). Left un-widened, a resolved stop would never be swapped
+# out and the producer would keep seeing a blocker that is already gone, which
+# is the exact failure this function exists to prevent. The wider prefix still
+# matches the old index codes, so sessions persisted before that change keep
+# recalculating correctly. No cross-form / doc-conflict / OCR / tier-1 code
+# begins with "legacy_" (guarded by test_legacy_rules.py).
+_RECOMPUTED_CODE_PREFIXES = ("legacy_",)
 
 
 def replace_recomputed_issues(

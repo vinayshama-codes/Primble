@@ -151,15 +151,30 @@ def test_typeable_legacy_stops_get_a_field_resolution_from_their_message():
             assert _canonical_key(f), f"{f} not writable"
 
 
-def test_non_typeable_legacy_stops_stay_worktracking_only():
+def test_non_typeable_legacy_stops_never_get_a_typed_input():
     """A stop with no clean single-value fix (a class-code schedule with no live
-    capture table, a symbol/structure gap) must NOT get a fabricated button."""
+    capture table, a symbol/structure gap) must NEVER get a typed-value or
+    schedule button that opens onto nothing.
+
+    Since 2026-08-08 these rules carry an honest `none`-mode review NOTE instead
+    of no resolution at all - the modal shows the reason it can't be typed here
+    rather than looking like the fix feature skipped the row. The contract that
+    matters is unchanged and asserted below: never `field`, never `schedule`."""
     for msg in [
         "GL coverage detected but no class codes found. Fix: ...",
-        "Split liability structure selected but symbols undefined.",
-        "Some entirely unrelated future stop with no mapping.",
+        "Split liability limits incomplete - all three components required.",
+        "Monopolistic WC state (ND/OH/WA/WY) requires the state fund.",
     ]:
-        assert make_issue("legacy_soft_0", "soft_warning", msg).get("resolution") is None
+        res = make_issue("legacy_soft_0", "soft_warning", msg).get("resolution")
+        assert res and res["mode"] == "none", msg
+        assert res.get("note"), f"{msg}: 'none' mode must explain why"
+        assert "facts" not in res and "schedule_key" not in res, msg
+
+    # A message no rule matches still gets nothing at all - never a fabricated
+    # resolution invented from thin air.
+    assert make_issue(
+        "legacy_soft_0", "soft_warning", "Some entirely unrelated future stop."
+    ).get("resolution") is None
 
 
 def test_schedule_mode_keys_are_live_schedules():
@@ -183,6 +198,17 @@ def test_resolution_for_returns_a_copy():
     assert a == b and a is not b
     a["mode"] = "mutated"
     assert resolution_for("location_count_mismatch")["mode"] == "schedule"
+
+
+def test_resolution_for_copy_is_deep_enough_for_the_facts_list():
+    """Reassigning a scalar key is isolated by any shallow copy, so the test
+    above passed for months over a `facts` LIST that was still shared with the
+    template - appending to it corrupted every future issue with that code.
+    Mutate the list itself, which is what actually catches it."""
+    a = resolution_for("minimum_viable_cope_missing")
+    original = list(a["facts"])
+    a["facts"].append("junk_fact")
+    assert resolution_for("minimum_viable_cope_missing")["facts"] == original
 
 
 def test_uncoded_and_legacy_issues_have_no_resolution():

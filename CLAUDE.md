@@ -28,6 +28,21 @@ Primble: ACORD Form Processing Platform
 
 ---
 
+
+
+## Behavior & Mindset
+
+Identity: You're Harvey Specter, applied to engineering, architecture, and strategy. You own this project completely — zero loose ends. I'm your equal, not a client — don't perform or soften for me. Confidence backed by results, not ego.
+
+Voice: Cocky, sharp, one-liners over paragraphs. No hedging ("maybe," "I think"). No over-explaining. State decisions, not suggestions. Blunt when it's true. Talk to me like Harvey talks to Donna, not a nervous associate.
+
+Mindset (run this before responding): Strip the noise → find the real problem (rarely what's literally asked) → pick the strongest approach, not the safest → check blast radius across the whole project, not just this feature → call out the one real risk if it exists. Don't manufacture drama that isn't there.
+
+Standards: Never agree just to agree. Never leave a loose end unnamed. Lead with the answer, not the reasoning. Never assume a fix is isolated — verify it. No code/architecture detail unless asked — strategy and decisions only.
+NOTE: Every feature in this project is yours to protect — not just the one I'm asking about right now.
+
+---
+
 ## Technical Stack
 
 ### Backend
@@ -307,6 +322,329 @@ this area again):**
   document doesn't address a question. Full details, exact numbers, and the one known
   residual (~2-3 borrowed false "N"s per run, an LLM limitation, not a bug) are in
   "Dedicated Compliance Yes/No Question Pass" and the two sections above it, below.
+
+### Data Consistency Picker Suggested Legal Boilerplate As The Real Value - FIXED (2026-08-08)
+**Client report: the "Applicant / Named Insured" Data Consistency picker suggested "c. Any person or
+organization having proper..." instead of the real company name** - a sentence lifted straight out of
+the CGL "WHO IS AN INSURED" policy section, ranked ahead of "ORBIN CONTRACTING LLC" and shown as
+"Suggested" at MEDIUM confidence. Reported again minutes later with a *different* garbage sentence
+("any architects, engineers or surveyors not...", a professional-services exclusion clause) after the
+first patch - then reproduced live by the client on `mailing_address` too ("of such notice will be
+sufficient proof of notice. in compliance with laws, rules, or", a notice-of-mailing clause). Same bug,
+three fields, three patches attempted before the real cause was found.
+
+**Root cause: `underwriting_consistency.py`'s text-scan safety net has no concept of value shape.**
+Pass 1 is the Stage-1 LLM extraction (trustworthy, full-document). Pass 2 is a regex "safety net" that
+re-scans each document's OWN raw text for a label word ("insured", "mailing", "carrier") followed by
+`:`/`-`, to catch cases where the LLM copied one document's value onto another's. For a NAME or an
+ADDRESS this is unsafe by construction: any run of words can match, and insurance boilerplate uses
+those exact trigger words dozens of times per document for reasons that have nothing to do with the
+field. Patching the symptom (`_looks_like_name` denylisting connector words, then list markers, then a
+lowercase-start check) closed each reported case and left the *next* boilerplate phrasing free to get
+through - confirmed whack-a-mole, not a fix, after the second incident.
+
+**Real fix, in two parts, both derived and neither hardcoded to a specific field:**
+
+1. **`_scan_shape(fact_key, cfg)` decides whether a field is safe to regex-scan at all**, derived from
+   the field's own `kind` (currency/integer get a numeric capture shape) and from Workstream-2's own
+   `DATE_FIELDS`/`FEIN_FIELDS`/`_infer_field_category` tables for identity fields - never a second local
+   copy of "which fields are dates," since that divergence is exactly what let this bug recur. Returns
+   `None` (never scanned) for anything free-text: `applicant_name`, `dba_name`, `carrier_name`,
+   `mailing_address`, `physical_address` (exempted pre-emptively, same shape, not yet reported broken),
+   and `entity_type` (found by a follow-up sweep, not a report - `normalize_entity_type` is a synonym
+   passthrough, not a validator, so garbage text survived it unrejected). `_TEXT_SCAN_EXEMPT_FIELDS` is
+   now DERIVED from this function instead of a hand-maintained list.
+2. **Numeric fields (`num_employees` + 4 currency fields with no bespoke pattern) were routed through
+   the SAME loose prose capture as addresses**, because the generic label-fallback pattern never varied
+   by field kind - `"Employee Count - varies seasonally based on staffing needs"` captured cleanly and
+   was then validated by the generic TEXT normalizer, with zero numeric check anywhere on that path.
+   Fixed by making the capture group itself kind-aware (currency/integer/date/FEIN each get their own
+   checkable shape), so a sentence is now structurally unable to match, not filtered after the fact.
+
+**A second, independent defect found in the same fields while fixing #2: the $10,000 scan floor was
+global and wrong for retentions.** `umbrella_sir`/`gl_deductible`/`auto_deductible_comp`/
+`auto_deductible_collision` are ordinary at $0-$1,000 - the client's own reported Auto case was a
+$1,000 deductible - so the floor built for business-scale revenue/payroll silently discarded every
+realistic value on all four fields; their safety net had never once fired. Fixed the same way as #1:
+`_scan_min_amount()` DERIVES a field's money role (exposure vs. retention) from whole tokens in its key
+*and* label ("deductible", "sir", "retention"...), not a per-field number - verified against field
+names that don't exist yet (`cyber_retention`, `wc_sir`) to prove it is a rule, not a list in disguise.
+
+**Two standing guards, not just a fix, because three of these four incidents were the SAME root cause
+recurring:** `test_every_reconcilable_field_has_a_resolved_scan_shape` and
+`test_every_numeric_field_resolves_a_floor` fail the build if a future `RECONCILABLE_FIELDS` entry (the
+module's own docstring calls adding one "a one-line config add") lands without anyone deciding its scan
+shape or money role. Proved they actually bite: simulated adding a free-text field the naive way
+(correctly exempted, scanned nothing) and simulated reintroducing a loose prose pattern for an exempt
+field (caught).
+
+**Swept the rest of the codebase for the same signature** (a regex scanning raw OCR text for a label
+then capturing a free-form value) - found in exactly two places, both in this one file. Every other
+`re.search`/`re.finditer` in `services/`/`utils/` either operates on already-extracted facts, matches a
+field *name* (not raw document text), or returns a boolean. Nothing else needed a decision.
+
+**Verified live for every finding, not just unit-tested:** each client-reported/swept sentence
+reproduced verbatim now returns `[]`; every real value (`"Employee Count: 47"`, `"Umbrella SIR: $0"`,
+the client's literal $1,000 Auto deductible, revenue/payroll/building-value/date/FEIN) still scans
+correctly - the fix gained coverage on the retention fields and lost none anywhere else. 26 tests in
+`test_underwriting_consistency.py` (up from 10 before this arc), full suite 1316 passed / 2 failed -
+the same two pre-existing unrelated failures as every entry above, zero regressions.
+
+**Known, not touched:** `_COMPLETENESS_MARGIN` (the HIGH-confidence ranking threshold) is scale-
+mismatched against `_value_completeness`'s wildly different per-field ranges (addresses 0-3.5, FEIN 0
+or 1.0, currency/integer flat 0.0) - checked deliberately, not missed. Every mismatch there fails
+toward asking the user, never toward a wrong stamped value, so it is lower-priority than everything
+above and left alone until it actually misfires.
+
+### Auto Symbol Warnings Fired On Every Submission - FIXED (2026-08-07)
+**Client report: two warnings on a submission where nothing was wrong** - "Hired/Non-Owned
+auto exposure detected but coverage symbol(s) not defined" and "Physical damage coverage
+requested but symbols undefined", on a policy whose dec page plainly shows Symbol 01 for
+Auto Liability and Symbol 07 for Comprehensive and Collision. The client's analysis was
+correct on every point, including the underwriting: **Symbol 1 (any auto) is BROADER than
+8 and 9 and already designates hired and non-owned autos for liability**, so requiring 8
+and 9 separately is wrong. Same class of defect as the Umbrella SIR bug below, found the
+same day.
+
+**Root cause: five phantom fact keys.** `_check_auto_hired_nonowned_symbols` and
+`_check_auto_symbol_to_exposure_alignment` read `hired_auto_symbol`, `non_owned_symbol`,
+`auto_physical_damage_comp_symbol`, `auto_physical_damage_coll_symbol` and
+`drive_other_car_symbol`. **Grepped the whole repo: those five names appear ONLY in the
+code that reads them.** Nothing writes them - not the extraction prompt, not
+`FACT_REGISTRY`, not any stamper or alias map. They were empty on every submission ever
+processed, so both checks were unsatisfiable and fired unconditionally. `sqs_service.py`
+had a **second, independent copy** of the hired/non-owned check reading the same two
+phantom keys, silently docking the Auto pillar on every package we have ever scored - two
+copies of one rule is why this survived. `issue_registry` compounded it: the three symbol
+codes were `_R_NONE` with a comment claiming "coverage symbols are not writable canonical
+facts", which was never true (`auto_covered_symbols` has been in `FACT_REGISTRY` all
+along) - so the client's Resolve button was decorative.
+
+**The definitions were already in the repo, unused.** All **37** covered-auto symbols
+(business auto 1,2,3,4,6,7,8,9 / truckers 41-50 / motor carrier 61-71 / garage 21-31) ship
+inside `forms_schemas/ACORD_137_CA|CO` and `ACORD_138_CA|CO` as ACORD's own `/TU` tooltip
+wording. They arrived as a side effect of generating those schemas from the template PDFs
+and **no Python ever read them** - they reached the gap-fill LLM as prompt text and nowhere
+else. `auto_covered_symbols` was likewise extracted since day one and never stamped, never
+validated, never read by either check. New `services/auto_symbols.py` is that table plus
+the reasoning helpers; `test_every_symbol_description_matches_acord_tooltip` re-reads the
+real schemas and fails the build on a one-word drift (it caught 4 of my own typos).
+
+**Fix, seven parts.** (1) Both checks now reason over `auto_covered_symbols` - Symbol 1
+satisfies hired/non-owned, Symbol 7 satisfies comp/collision. (2) The SQS duplicate
+delegates to the single implementation. (3) `_R_NONE` -> `_r_field("auto_covered_symbols")`,
+so Resolve TRANSFERS the carrier's existing symbols exactly as the client asked (validated
+by `_is_covered_auto_symbols`, which parses free text but rejects a non-answer). (4)
+Extraction captures symbols ATTRIBUTED to their coverage line
+(`[{"coverage": ..., "symbols": [...]}]`) - a bare `[1, 7]` cannot say WHICH coverage a
+number designates, which is the entire point of a symbol; `parse_symbols` still accepts the
+legacy bare list, a dict, and producer free text. (5) Comp/collision symbols stamp onto
+`Vehicle_ComprehensiveSymbolCode`/`Vehicle_CollisionSymbolCode` (real ACORD 127 fields,
+blank on every form we have ever produced), with policy-level inheritance - a dec page
+prints ONE "Comprehensive 07" for the whole schedule - and two competing symbols leave the
+cell blank rather than picking one. (6) `_derive_symbol_indicator` ticks the 137/138/160
+grid and the ACORD 25 / 131 ANY AUTO boxes deterministically. (7) NEW
+`_check_auto_owned_fleet_symbol_gap` - the real check the phantom code was reaching for: a
+scheduled fleet whose liability symbol only reaches hired/non-owned autos has NO liability
+coverage. We were throwing false alarms while the true alarm went unbuilt.
+
+**Three things deliberately NOT done, all verified rather than assumed:**
+- **ACORD 127 has no liability covered-auto box, and that is ACORD's design.** Audited all
+  634 fields: the 127 records liability per vehicle as `Vehicle_Coverage_LiabilityIndicator_*`,
+  and its only symbol fields are the 13 per-vehicle physical damage / comp / collision codes.
+  Symbol 1 lands on the 137 grid, ACORD 25's `Vehicle_AnyAutoIndicator_A`, and ACORD 131's
+  `UnderlyingCoverage_Coverage_AnyAutoIndicator_A` (whose tooltip literally reads
+  "(symbol 1)"). The old message text said "Define symbols on ACORD 127" - wrong form.
+- **Only the LIABILITY row of the symbol grid is stamped.** ACORD 137 prints one grid PER
+  COVERAGE LINE (rows A, B, C, E-H), each offering only the symbols legal for that coverage.
+  Row A is the only row carrying symbols 1 and 9, so it is provably liability; row C is
+  provably UM (only row with symbol 6); **rows E-H offer identical sets and cannot be told
+  apart from the schema.** Stamping them would risk a liability symbol in a physical-damage
+  row - a wrong value on a legal document. Rows other than A fall through to gap fill
+  exactly as before. Mapping them needs the printed form layout, not more inference.
+- **ISO Symbols 5 and 19 are absent on purpose.** They are real, but ACORD does not print
+  them on the grid - they belong in the "Other symbol" box, which `_derive_symbol_indicator`
+  ticks when `unrecognised()` is non-empty. Inventing rows for them would tick a checkbox
+  that does not exist.
+
+**Everything declines to guess.** `covers()` returns None ("cannot say") on unknown or
+unrecognised symbols and callers must never read None as a gap; `family_for` reads the
+NUMBERS (the four ACORD sets are disjoint) before falling back to flags; no LLM is involved
+anywhere - a fabricated covered-auto symbol is a coverage misstatement, which is exactly
+what the standing blank-over-wrong rule exists to prevent. Cost impact is negative: ~90
+words added to the cached extraction prefix, up to 40 fields per auto form removed from
+gap fill (logged as C33 in `improving-ll.md`).
+
+**Blast radius handled:** `cross_form_validator` (3 rules rewritten, 2 added),
+`sqs_service` (duplicate removed), `issue_registry` (2 new codes, 5 resolutions corrected),
+`fact_registry` (question/validator), `extraction_service` (prompt + schema),
+`pdf_service` (schedule bindings + indicator derivation), `schedule_capture` (2 columns),
+`docs/DECISION_TREE_MAPPING.md`, `improving-ll.md`.
+**Scores on past auto submissions will rise** once these two permanent warnings stop
+firing - a correction, but tell Brent before he notices. Written up for him in
+`docs/AUTO_SYMBOLS_BRIEF.md`.
+
+Tests: `backend/tests/test_auto_symbols.py` (46), including
+`test_client_reported_case_is_silent` (the client's literal values - must never fail) and
+`test_no_check_reads_a_fact_nothing_writes`, which greps both modules for the five phantom
+keys so this class of defect cannot be reintroduced. Full suite **1236 passed / 2 failed**,
+the same two pre-existing unrelated failures, zero regressions.
+
+**Also fixed while in there (nobody reported it):** `auto_doc_symbol_missing` read the
+fifth phantom key AND was conceptually wrong - Drive Other Car is an endorsement naming
+individual insureds (recorded per driver as `Driver_Coverage_DriverOtherCarCode_*` on
+ACORD 127), not a covered-auto symbol. There is no DOC symbol field on any of the 17
+schemas. It now checks the driver schedule.
+
+### "Resolve" Opened Nothing On Every Legacy Warning - FIXED (2026-08-08)
+**Client report: a "Carrier-Grade COPE incomplete - SQS capped at 85. Missing: year built,
+roof year, sprinkler system, fire protection class" warning could not be resolved - "there
+is nothing that pops up to fill in the missing info".** The inline-resolution feature
+(RESOLUTION_MAP, ResolutionModal) keys off an issue's rule CODE. Two engines produce
+warnings: `cross_form_validator` emits coded issues; `sqs_service.evaluate_stops()` /
+`utils.validators.run_field_validations()` emit plain strings, and the call sites tagged
+them with a THROWAWAY INDEX (`legacy_soft_0`, `legacy_soft_1`, ...). No real code meant
+`resolution_for()` had nothing to look up, so **40 of the 46 legacy rules rendered a
+Resolve/Dismiss row that opened onto nothing** - including the one screenshotted.
+
+**Do not "just delete the old engine" - it is the primary one.** Measured before deciding:
+`cross_form_validator` has 33 checks and **all 33 are gated on a specific ACORD form being
+selected** (`triggered_ids`); only 7 of the 46 legacy rules have any coded equivalent; the
+legacy engine owns **all 9** format/range validators (the coded engine has zero); and
+`extraction_pipeline.py`'s own comment confirms the coded issues are a display MIRROR -
+`hard_stops`/`soft_stops` from the legacy engine are what drive the 60/85 SQS caps. The
+client saw the legacy twin precisely because the coded COPE check sits behind "is ACORD 140
+selected" and hers was not.
+
+**Fix - one column on the table that already existed.** `_LEGACY_MESSAGE_RULES` already
+classified every legacy message (cluster + tier) and was already mandatory to maintain. It
+now carries `(phrase, cluster, tier, code, resolution)`; `classify_legacy()` returns the real
+code; the two call sites pass it to `make_issue()` instead of the index. **Not extraction,
+not SQS scoring** - message strings are byte-identical, so caps, dedup and issue_id hashing
+(which keys off MESSAGE, not code - `issue_id_for`) are untouched and stored resolution
+statuses still re-attach. ~30 rules became typed inputs, 2 narrative, and the rest carry an
+honest `_r_review()` note instead of a dead button. Frontend needed nothing: `AcordModal`
+renders the affordance from `!!iss.resolution`.
+
+**Codes are namespaced `legacy_*` on purpose.** Reusing a cross-form code would make the
+legacy row look like its own coded twin, protect it from `_LEGACY_SUPERSEDED_BY_CODE`'s
+duplicate suppression, and render both near-identical bullets. Guarded by test.
+
+**Four defects found while doing it, three of them pre-existing:**
+1. `_RECOMPUTED_CODE_PREFIXES` was `("legacy_hard_", "legacy_soft_")` - it identifies which
+   persisted issues a recalculation throws away and rebuilds. Left un-widened to `("legacy_",)`,
+   a stop the client had already fixed would be preserved forever and keep rendering as an
+   open blocker. The wider prefix still matches pre-2026-08-08 sessions.
+2. `resolution_for()` returned `dict(res)` - a SHALLOW copy that left the `facts` LIST shared
+   with the template, so any caller appending to it corrupted every future issue with that
+   code. Latent since the feature shipped, because `test_resolution_for_returns_a_copy` only
+   reassigned a scalar key. Fixed for both maps via `_copy_resolution()`.
+3. The `"effective date"` row had a SPACE but `validate_effective_date_window()` emits the raw
+   fact key (`"effective_date is more than 2 years in the past"`), so it never matched and that
+   warning had been falling into the "Other validations" default bucket unnoticed.
+4. `validate_naics_code()`'s two messages had no row at all - same silent fall-through.
+   Both found by the new coverage test on its first run.
+
+**Two coded rules were also wrongly marked unfixable** and are now typed: `umbrella_no_
+underlying_coverage` (a HARD STOP capping the package at 60, whose three underlying-limit
+facts are all writable) and `auto_um_uim_not_specified` (its comment claimed
+`auto_um_uim_limit` was not writable - verified false). `auto_split_limits_incomplete` stays
+`none`-mode: `bi_per_person`/`bi_per_accident`/`pd_per_accident` are genuinely NOT writable,
+verified, so that comment was right.
+
+**The anti-rot layer is the point** (`backend/tests/test_legacy_rules.py`, 65 tests). It
+HARVESTS what the engine can actually emit - AST-walking `evaluate_stops`' append sites (its
+branches are mutually exclusive, so driving it would silently under-cover) plus really running
+`run_field_validations` and the two standalone validators - and fails the build if any message
+matches no row, lands in the default bucket, or is SHADOWED by an earlier row's substring
+(the table is first-match-wins, so "WC payroll" sitting above "Total payroll" would ask the
+producer for the wrong field). Plus: every `field` fact is writable and not schedule-backed,
+every `none` explains itself, no legacy/cross-form code namespace collision, and
+`_RECOMPUTED_CODE_PREFIXES` covers every legacy code. There is also a harvester self-check -
+an empty harvest would make the coverage test pass vacuously, which is exactly the trap C25
+documents.
+
+**Verified end-to-end**, not just by unit test: replayed the client's literal string through
+`evaluate_stops -> build_structured_from_sources -> build_grouped_view` and confirmed the row
+renders `mode: field` with all six facts its own rule checks. Suite: **1301 passed / 2 failed**,
+the same two pre-existing unrelated failures as baseline (`test_arq_acord125_missing_only`,
+`test_normalization`), zero regressions.
+
+**Known, deliberately not done:** filling a fact after DISMISSING the related recommendation
+could stack `_apply_dismiss_score_credit` on top of the recompute. Pre-existing, not touched
+by this change, and not proven either way - worth a dedicated test before it matters.
+
+### Umbrella SIR vs Auto Deductible False-Positive Warning - FIXED (2026-08-07)
+**Client report: a cross-form warning read "Umbrella SIR ($0) is lower than Auto
+deductible ($1,000). Verify attachment consistency..." on a submission where nothing
+was actually wrong** - Auto Liability limit ($1,000,000) matched the Umbrella's
+scheduled underlying Auto Liability limit ($1,000,000) exactly. Client's own analysis
+nailed the root cause: the $1,000 Auto deductible is a comp/collision (physical-damage)
+figure - what the insured pays to repair their own vehicle - while Umbrella SIR is a
+liability-side retention that only applies when a claim the Umbrella covers isn't
+covered by the underlying liability policy. The two numbers protect entirely different
+exposures; there is no underwriting rule that relates them, and a $0 SIR is the normal,
+healthy structure. The warning was comparing two unrelated coverage concepts and calling
+disagreement a coverage gap.
+
+**Root cause, confirmed in code:** `cross_form_validator._check_umbrella_sir_vs_auto_
+deductible` compared `umbrella_sir` against `auto_deductible_comp` /
+`auto_deductible_collision`. The fact registry has no "auto liability deductible" field
+at all - primary Auto Liability is conventionally $0 deductible - so there was never a
+valid Auto-side figure to compare SIR against; the function reached for the only "auto
+deductible" fields that exist, which happen to be the wrong coverage part. This fired on
+ordinary Auto+Umbrella submissions generically, not just this one, and (being a
+`soft_warning`) quietly dinged SQS scores project-wide every time it did. The correct
+attachment check - Umbrella limit vs. underlying Auto LIABILITY limit - already existed
+and already worked (`_check_umbrella_auto_minimum_limits`); it stayed silent here
+because $1M matched $1M.
+
+**Fix - two parts, not one.** (1) Deleted the broken function outright (not
+threshold-tuned - no version of "SIR vs. physical-damage deductible" is ever correct)
+and its `_RULE_FUNCTIONS` registration, plus the 3 orphaned `issue_registry.py` entries
+tied to its issue id (`umbrella_sir_below_auto_deductible`) and the stale
+`docs/DECISION_TREE_MAPPING.md` line that documented it as compliant. (2) Traced the
+function back to its actual spec source (`Decision_Tree.txt` lines 226-231:
+"Validate deductibles and SIRs are consistent across ACORD 126/127, ACORD 131, and dec
+page representations. Flag unexplained discrepancies") and found it was misread from day
+one - read plainly, that line asks whether the SAME figure agrees across its multiple
+mentions (e.g. the SIR the dec page states vs. what got extracted onto ACORD 131), not
+whether SIR and a deductible should be compared to each other. That real feature already
+has a home: `underwriting_consistency.py`'s Data Consistency engine (Beta Report §4.3),
+already live for Gross Sales, Building Value, and 9 identity fields. `umbrella_sir`,
+`gl_deductible`, `auto_deductible_comp`, and `auto_deductible_collision` are now
+registered in its `RECONCILABLE_FIELDS` as proper `"currency"` entries - a genuine
+cross-document disagreement on any of them is flagged for review with source
+attribution, non-blocking, matching the spec's own "flag" wording (not added to
+`HARD_STOP_RECONCILABLE_KEYS` or `GENERATION_BLOCKING_RECONCILABLE_KEYS`).
+
+**Not a redundant add - closes a real quality gap in the existing auto-discovery
+fallback.** `ENABLE_FULL_FIELD_RECONCILIATION` was already sweeping these 4 facts in
+generically (any scalar fact not curated gets auto-discovered), but forced them into
+"identity" kind, which: (a) ranks candidates by raw string length
+(`_value_completeness`) - meaningless for a dollar figure, and the exact scoring
+currency/integer fields are deliberately excluded from; (b) can't produce the real
+"applied to N forms" list (`_forms_for_field`'s dynamic lookup only runs for
+currency/integer kind); (c) validates a confirmation with the loose general-text
+normalizer instead of rejecting non-numeric input outright. Curating them properly as
+`"currency"` fixes all three at once.
+
+**Blast radius, verified not assumed:** grepped every reference to the dead issue id
+and to `auto_deductible_comp`/`auto_deductible_collision` project-wide before touching
+anything. Frontend has zero references (renders whatever the backend sends - nothing to
+update). `sqs_service.py` has 4 other uses of these deductible facts - a presence-only
+completeness check, the correct liability-limit-vs-liability-limit attachment
+comparison (a second, independent implementation of the same correct check, untouched),
+and two plain field-list entries - none of them the broken comparison, all confirmed
+unrelated and left alone. `RECONCILABLE_FIELDS` has no test asserting its exact key set
+(only membership checks), so the two new curated entries add cleanly.
+
+**Known, deliberately out of scope today:** `_check_umbrella_attachment_stack`'s
+sibling check (`umbrella_sir_below_gl_deductible`, hard_stop) compares SIR to the GL
+deductible - liability-to-liability, a defensible comparison unlike the Auto one, and
+not something the client flagged. Worth a second look given the same conflation
+pattern caused this bug, but not touched here - no reported failure, no unilateral
+rewrite of a hard_stop nobody asked about.
 
 ### NAICS/SIC Help Text Showed The Same Roofing Example To Every Business - FIXED (2026-07-21)
 **Client report (Figure 20): the Form Assistant's answer about NAICS codes was praised for

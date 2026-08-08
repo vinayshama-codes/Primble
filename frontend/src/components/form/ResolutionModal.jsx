@@ -144,7 +144,16 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   };
 
   const applyField = async () => {
-    const filled = Object.entries(values).filter(([, v]) => String(v || '').trim());
+    // Only send fields the producer actually typed into. `values` also carries
+    // whatever the async pre-fill loaded from the current session facts (so a
+    // reopened validation shows what's already on file) - those are display
+    // only. Submitting an untouched pre-filled value back through this endpoint
+    // re-validates it as a fresh producer answer, which can reject a value the
+    // extraction pipeline already accepted as legitimate (e.g. a peril marked
+    // "Not covered") purely because the producer never meant to change it.
+    const filled = Object.entries(values).filter(
+      ([k, v]) => touched.current.has(k) && String(v || '').trim()
+    );
     if (!filled.length) { setErr('Enter at least one value.'); return; }
     setBusy(true); setErr('');
     let last = null;

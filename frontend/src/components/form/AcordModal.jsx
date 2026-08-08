@@ -5442,7 +5442,11 @@ const AcordModal = forwardRef(function AcordModal({
               <div className="tier2-bar">
                 <div className="tier2-header"><span className="tier2-label">Submission Readiness</span><span className="tier2-score" style={{ color: barColor(tier2Score) }}>{tier2Score}%</span></div>
                 <div className="metric-bar"><div className="metric-fill" style={{ width: `${tier2Score}%`, background: barColor(tier2Score) }} /></div>
-                {tier2Missing.length > 0 && <div className="tier2-missing">Missing: {tier2Missing.join(" · ")}</div>}
+                {/* Single line, no "Missing" vs "Needs client input" split (client
+                    feedback: the two-line version was confusing). Every field this
+                    check tracks ends up asked via the client questionnaire if the
+                    document doesn't have it, so one label covers all of them. */}
+                {tier2Missing.length > 0 && <div className="tier2-missing">Needs client input: {tier2Missing.join(" · ")}</div>}
               </div>
             )}
             {/* Submission Integrity status (Beta Report §4.1): advisory banner for

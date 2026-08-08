@@ -48,7 +48,7 @@ from services.sqs_service import (
     _has_explicit_follow_form,
 )
 from services.cross_form_validator import run_cross_form_validation, split_cross_form_issues
-from services.issue_registry import make_issue, classify_legacy_message
+from services.issue_registry import make_issue, classify_legacy
 from services.submission_integrity import assess_submission_integrity
 from services.underwriting_consistency import (
     assess_underwriting_consistency, apply_confirmations, validate_confirmation,
@@ -558,16 +558,23 @@ async def _finalize_pipeline(
     # against known phrases via classify_legacy_message() instead of a code
     # lookup - this must happen HERE, immediately, before any further stops are
     # appended below, so only what evaluate_stops() itself produced is tagged.
+    # classify_legacy() returns the rule's REAL code (e.g.
+    # "legacy_carrier_grade_cope"), which is what make_issue() needs to attach an
+    # inline resolution and render "Open to fix". The f-string index code is only
+    # a fallback for a message no rule matches - it stays unique per message so
+    # two unclassified stops can never collapse onto one code.
     structured_issues: list[dict] = []
     hard_stops = _ensure_fix_hint(hard_stops)
     for _i, _msg in enumerate(hard_stops):
-        _cluster, _tier = classify_legacy_message(_msg, "hard_stop")
-        structured_issues.append(make_issue(f"legacy_hard_{_i}", "hard_stop", _msg, cluster=_cluster, tier=_tier))
+        _code, _cluster, _tier = classify_legacy(_msg, "hard_stop")
+        structured_issues.append(make_issue(
+            _code or f"legacy_hard_{_i}", "hard_stop", _msg, cluster=_cluster, tier=_tier))
 
     soft_stops = _ensure_fix_hint(_enrich_stops_with_source(soft_stops, active_docs))
     for _i, _msg in enumerate(soft_stops):
-        _cluster, _tier = classify_legacy_message(_msg, "soft_warning")
-        structured_issues.append(make_issue(f"legacy_soft_{_i}", "soft_warning", _msg, cluster=_cluster, tier=_tier))
+        _code, _cluster, _tier = classify_legacy(_msg, "soft_warning")
+        structured_issues.append(make_issue(
+            _code or f"legacy_soft_{_i}", "soft_warning", _msg, cluster=_cluster, tier=_tier))
 
     # DEBUG (Beta Report §5): dump each document's extracted identity/policy
     # values. The cross-doc detectors compare EXACTLY these per-doc values, so a

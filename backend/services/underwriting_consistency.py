@@ -42,7 +42,17 @@ from typing import Any, Dict, List, Optional
 # Workstream-2 normalization layer (leaf module — no cycle). "identity" fields
 # (name/date/entity/address/carrier/fein) compare via this so the picker uses
 # the exact same equivalence rules as the cross-document conflict detectors.
-from services.normalization import normalize_value
+#
+# DATE_FIELDS / FEIN_FIELDS / _infer_field_category are imported for
+# ``_scan_shape`` below: deciding whether a field's value has a machine-
+# checkable shape is the SAME question WS-2 already answers when it picks a
+# normalizer, so it is answered from WS-2's own tables rather than a second
+# copy of the "..._date means a date" convention living here. A local copy
+# would be free to drift, and a field captured by one rule but validated by
+# another is precisely the defect class this module has now hit three times.
+from services.normalization import (
+    normalize_value, DATE_FIELDS, FEIN_FIELDS, _infer_field_category,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,132 +73,218 @@ _CONFIRMED_SOURCE = "user_confirmed"
 # a doc that the LLM reported as agreeing, the text-scan value is surfaced for
 # review alongside the LLM-extracted value.
 #
-# Pattern design: label keyword(s) + optional whitespace/colon/dash + currency.
-# Captures the currency string only (group 1).
+# Pattern design: label keyword(s) + optional whitespace/colon/dash + a VALUE
+# SHAPE. Captures the value only (group 1).
+#
+# ── Value shapes ─────────────────────────────────────────────────────────────
+# The single definition of what each type of value may look like in raw text.
+# Shared by the bespoke patterns below AND by the generic fallback, so the two
+# can never capture different things for the same kind of field — that
+# divergence is exactly what let a prose sentence become a candidate Employee
+# Count. Each is a single capture group.
+_SCAN_SHAPE_CURRENCY = r"(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)"
+_SCAN_SHAPE_INTEGER  = r"(\d[\d,]*)"
+_SCAN_SHAPE_FEIN     = r"(\d{2}-?\d{7})"
 # Date token shared by the effective/expiration scanners (MM/DD/YY[YY],
 # MM-DD-YY[YY], YYYY-MM-DD, with '.' separators too).
 _DATE_RX = r"(\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}|\d{4}[/.\-]\d{1,2}[/.\-]\d{1,2})"
+_SCAN_SHAPE_DATE = _DATE_RX
 
 _TEXT_SCAN_PATTERNS: Dict[str, List[str]] = {
     "total_revenue": [
         # Explicit "Annual Revenue" / "Gross Sales" / "Gross Revenue" labels
         r"(?:annual\s+(?:gross\s+)?(?:revenue|sales|receipts)|gross\s+(?:sales|revenue|receipts))"
-        r"\s*[:\-–]?\s*(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)",
+        r"\s*[:\-–]?\s*" + _SCAN_SHAPE_CURRENCY,
         # "Revenue: $X" / "Total Revenue: $X"
-        r"(?:total\s+)?revenue\s*[:\-–]\s*(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)",
+        r"(?:total\s+)?revenue\s*[:\-–]\s*" + _SCAN_SHAPE_CURRENCY,
         # "Gross Sales: $X" / "Projected Gross Sales: $X" / "Current Year ... Sales: $X"
         r"(?:projected\s+|current\s+year\s+)?gross\s+sales\s*[:\-–]?\s*"
-        r"(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)",
+        + _SCAN_SHAPE_CURRENCY,
         # "Sales / Revenue: $X"
-        r"sales\s*/\s*revenue\s*[:\-–]\s*(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)",
+        r"sales\s*/\s*revenue\s*[:\-–]\s*" + _SCAN_SHAPE_CURRENCY,
     ],
     # Payroll — "(Total/Estimated/Annual) Payroll: $X" and "Remuneration: $X".
-    # Currency kind, so it uses the same min-amount-floored numeric path as
-    # revenue. Employee Count is integer (not supported by this currency-oriented
-    # scanner) and intentionally relies on LLM extraction only.
     "total_payroll": [
         r"(?:total\s+|estimated\s+|annual\s+){0,2}payroll\s*[:\-–]?\s*"
-        r"(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)",
+        + _SCAN_SHAPE_CURRENCY,
         r"(?:estimated\s+|annual\s+){0,2}remuneration\s*[:\-–]?\s*"
-        r"(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)",
+        + _SCAN_SHAPE_CURRENCY,
     ],
     # Building value — building-specific labels only (the word "building" must
     # precede the amount) so a contents/BPP figure can't masquerade as a conflict.
     "property_building_value": [
         r"building\s+(?:value|limit|coverage|replacement\s+cost|amount)\s*[:\-–]?\s*"
-        r"(\$[\d,]+(?:\.\d{1,2})?|\d[\d,]+(?:\.\d{1,2})?)",
+        + _SCAN_SHAPE_CURRENCY,
     ],
     # ── Identity / policy fields (label-anchored; first labelled match wins) ──
     # These recover the real per-document value when the LLM collapsed it. Each
     # capture is validated/deduped through the field's WS-2 normalizer, so a
-    # formatting-only difference (07/15/25 vs 7/15/2025, LLC vs Limited Liability
-    # Company, Travelers vs Travelers Insurance Company) never surfaces a conflict.
+    # formatting-only difference (07/15/25 vs 7/15/2025) never surfaces a conflict.
+    # Only BOUNDED-shape identity fields appear here — see ``_scan_shape``.
     "effective_date": [
-        r"\b(?:policy\s+)?effective(?:\s+date)?\s*[:\-]?\s*" + _DATE_RX,
+        r"\b(?:policy\s+)?effective(?:\s+date)?\s*[:\-]?\s*" + _SCAN_SHAPE_DATE,
     ],
     "expiration_date": [
-        r"\b(?:policy\s+)?expir\w*(?:\s+date)?\s*[:\-]?\s*" + _DATE_RX,
+        r"\b(?:policy\s+)?expir\w*(?:\s+date)?\s*[:\-]?\s*" + _SCAN_SHAPE_DATE,
     ],
     "fein": [
         r"\b(?:fein|f\.e\.i\.n|ein|fed(?:eral)?\s*(?:employer\s*)?"
         r"(?:id|tax\s*id|identification)|tax\s*id(?:entification)?"
-        r"(?:\s*(?:no|number|#))?)\b\s*[:#]?\s*(\d{2}-?\d{7})",
+        r"(?:\s*(?:no|number|#))?)\b\s*[:#]?\s*" + _SCAN_SHAPE_FEIN,
     ],
-    "entity_type": [
-        r"\b(?:legal\s+entity|entity|business|organization)\s+type\s*[:\-]?\s*"
-        r"([A-Za-z][A-Za-z .'&/\-]{1,45}?)\s*(?:\r?\n|$|[,;])",
-    ],
-    "carrier_name": [
-        r"\b(?:insurance\s+carrier|carrier\s+name|current\s+carrier|carrier|insurer)\s*[:\-]\s*"
-        r"([A-Za-z][A-Za-z0-9 .,'&/\-]{2,60}?)\s*(?:\r?\n|$)",
-    ],
-    # Applicant / Named Insured — label-anchored so we never mistake an
-    # unrelated proper noun (e.g. a carrier or contact name) for the insured.
-    "applicant_name": [
-        r"\b(?:named\s+insured|applicant\s+name|applicant|insured\s+name|insured)\s*[:\-]\s*"
-        r"([A-Za-z0-9][A-Za-z0-9 .,'&/\-]{1,80}?)\s*(?:\r?\n|$)",
-    ],
-    "dba_name": [
-        r"\b(?:d\s*/\s*b\s*/\s*a|dba|doing\s+business\s+as|trade\s+name)\s*[:\-]?\s*"
-        r"([A-Za-z0-9][A-Za-z0-9 .,'&/\-]{1,80}?)\s*(?:\r?\n|$)",
-    ],
-    # Addresses — same label-anchoring approach as the other identity fields.
-    # Mailing is checked before Physical in the value; both patterns require
-    # the label so a bare street line elsewhere in the doc is never captured.
-    "mailing_address": [
-        r"\b(?:mailing\s+address|mailing)\s*[:\-]?\s*"
-        r"([A-Za-z0-9][A-Za-z0-9 .,'#/\-]{4,90}?)\s*(?:\r?\n|$)",
-    ],
-    "physical_address": [
-        r"\b(?:physical\s+address|premises\s+address|location\s+address|property\s+address)\s*[:\-]?\s*"
-        r"([A-Za-z0-9][A-Za-z0-9 .,'#/\-]{4,90}?)\s*(?:\r?\n|$)",
-    ],
+    # Free-text identity fields (applicant/DBA/carrier name, mailing/physical
+    # address, entity type) are DELIBERATELY absent — ``_scan_shape`` returns
+    # None for them and they are never text-scanned at all. A bespoke pattern
+    # here would be unreachable. See the comment above ``_scan_shape``.
 }
 
 # Fields with NO bespoke pattern above still get a text-scan safety net via this
-# generic fallback: <field label words> optionally followed by ":"/"-", then a
-# captured value up to end of line. This is what makes the safety net apply to
-# EVERY reconcilable field (current and future — adding a new entry to
-# RECONCILABLE_FIELDS is enough), not just the fields the client happened to
-# name as examples. Deliberately conservative (requires a colon/dash after the
-# label) so it only fires on an explicitly labelled line, never a stray mention.
-def _generic_label_pattern(label: str) -> str:
+# generic fallback: <field label words> + ":"/"-" + the field's OWN value shape.
+# This is what makes the safety net apply to EVERY reconcilable field (current
+# and future — adding a new entry to RECONCILABLE_FIELDS is enough), not just
+# the fields the client happened to name as examples. Deliberately conservative
+# (requires a colon/dash after the label) so it only fires on an explicitly
+# labelled line, never a stray mention.
+#
+# The ``shape`` argument is mandatory and comes from ``_scan_shape``: there is
+# no "default" capture, because a capture loose enough to fit any field is a
+# capture loose enough to swallow a sentence. It is not anchored to end-of-line
+# — the shape is self-delimiting, and requiring EOL would miss the very common
+# "Employee Count: 47 full-time" form.
+def _generic_label_pattern(label: str, shape: str) -> str:
     words = re.escape(label.strip()).replace(r"\ ", r"\s+")
-    return rf"\b{words}\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9 .,'#/\-]{{1,90}}?)\s*(?:\r?\n|$)"
+    return rf"\b{words}\s*[:\-]\s*{shape}"
 
-# Minimum amount (as int after stripping formatting) to be a plausible business
-# revenue figure — filters out stray small numbers like zip codes or page refs.
-_TEXT_SCAN_MIN_AMOUNT = 10_000
+# ── Plausibility floor for a scanned numeric value ───────────────────────────
+# The floor rejects a stray small number that happens to follow a label-ish
+# word ("Sales: 5" inside a ratio table). What counts as "stray" depends on
+# what the money MEANS, not on which field it is — so it is DERIVED from the
+# field's money role, not listed per field. A per-field number would be one
+# more thing to remember, and forgetting is how every defect in this module
+# happened.
+#
+# EXPOSURE figures (revenue, payroll, property values, limits) are
+# business-scale and are reached by LOOSE labels ("revenue", "sales"), so they
+# keep a real floor.
+#
+# RETENTION figures (deductibles, SIRs, self-insured retentions) are small BY
+# NATURE — $0, $250, $500 and $1,000 are all ordinary, and the client's own
+# reported Auto case was a $1,000 deductible. Sharing the exposure floor meant
+# every retention field silently failed the check on realistic values: their
+# safety net had never once fired. They carry no magnitude floor, because
+# their label anchor ("GL Deductible:", "Umbrella SIR:") is specific enough to
+# be the entire check — unlike the bare word "revenue".
+_SCAN_FLOOR_EXPOSURE  = 10_000
+_SCAN_FLOOR_RETENTION = 0        # 0 == no magnitude filter; the label is the check
 
-# ── Name plausibility guard (text-scan safety net only) ───────────────────────
-# The identity text-scan patterns are label-anchored ("insured -", "carrier:",
-# ...) but the trigger word can also appear mid-sentence in ordinary policy
-# prose (e.g. "...the insured - if either makes a written demand for...") and
-# the regex cannot tell that apart from a real label. Confirmed cause of a
-# client-reported bad suggestion: that exact fragment was captured as a
-# candidate Applicant Name and, being longer than the real name, outranked it.
-# Applies only to fields whose value MUST be an organization/person name
-# (applicant/DBA/carrier all share the same one-word-label regex shape above);
-# a real legal name is short and never contains ordinary sentence/legal-
-# boilerplate connector words.
-_NAME_LIKE_FIELDS = frozenset({"applicant_name", "dba_name", "carrier_name"})
-
-_NAME_IMPLAUSIBLE_WORDS = frozenset({
-    "if", "either", "whether", "shall", "hereby", "whereas", "pursuant",
-    "notwithstanding", "unless", "thereof", "herein", "hereto", "wherein",
-    "whereby", "aforesaid", "hereinafter", "hereunder", "thereunder",
+# Whole snake_case/label tokens that mark a money field as a RETENTION. Token
+# matching (never substring) so "sir" cannot fire inside another word. A
+# future property_deductible / cyber_retention / wc_sir is classified correctly
+# on the day it is added, with no edit here.
+_RETENTION_MONEY_TOKENS = frozenset({
+    "deductible", "deductibles", "sir", "sirs", "retention", "retentions",
 })
 
-_NAME_MAX_WORDS = 8
+
+def _scan_min_amount(fact_key: str, cfg: dict) -> int:
+    """Smallest value a text-scan may accept for this numeric field.
+
+    Counts (``integer``) have no meaningful magnitude floor — "Employee Count:
+    3" is an ordinary answer — so they return 0. Currency fields are floored
+    by their money role (see the comment above). Reads BOTH the fact key and
+    the human label, so an abbreviated key still classifies correctly if its
+    label spells the role out.
+    """
+    cfg = cfg or {}
+    if cfg.get("kind") != "currency":
+        return 0
+    tokens = set(re.split(r"[^a-z0-9]+", f"{fact_key} {cfg.get('label') or ''}".lower()))
+    if tokens & _RETENTION_MONEY_TOKENS:
+        return _SCAN_FLOOR_RETENTION
+    return _SCAN_FLOOR_EXPOSURE
 
 
-def _looks_like_name(value: str) -> bool:
-    """False when ``value`` reads as a sentence fragment rather than a name."""
-    words = value.split()
-    if not words or len(words) > _NAME_MAX_WORDS:
-        return False
-    stripped = {w.strip(".,'\"();:").lower() for w in words}
-    return not (stripped & _NAME_IMPLAUSIBLE_WORDS)
+def _below_scan_floor(normalized_amount: str, floor: int) -> bool:
+    """True when a normalized numeric string falls under an ACTIVE floor.
+
+    An unparseable amount under an active floor is rejected — it cannot be
+    shown to clear the bar. Callers skip this entirely when ``floor`` is 0.
+    """
+    try:
+        return int(str(normalized_amount).split(".")[0]) < floor
+    except (ValueError, IndexError):
+        return True
+
+
+def _scan_shape(fact_key: str, cfg: dict) -> Optional[str]:
+    """The regex shape this field's value must match to be text-scannable, or
+    ``None`` when the field has no machine-checkable shape (→ never scanned).
+
+    THIS IS THE WHOLE SAFETY RULE, in one place, derived rather than listed.
+    A text-scan is a context-blind regex reading raw policy prose. It is only
+    ever safe when the field's value has a shape that ordinary prose cannot
+    accidentally produce — digits, "$", a date separator. When the value is
+    free text, ANY run of words matches, and insurance documents are wall-to-
+    wall legal boilerplate using the same trigger words the labels do.
+
+    FOUR incidents, one root cause: applicant_name captured "c. Any person or
+    organization having proper..." (a CGL "WHO IS AN INSURED" list item), then
+    "any architects, engineers or surveyors not..." (a professional-services
+    exclusion); mailing_address captured "of such notice will be sufficient
+    proof of notice. in compliance with laws, rules, or" (a notice-of-mailing
+    clause); entity_type captured "not otherwise classified for rating
+    purposes". Each outranked the real value because a sentence is longer than
+    a name. Denylisting each clause's words is whack-a-mole against an
+    unbounded set of legal prose — the FIELD, not the clause, is the bug.
+
+    The same rule cuts the other way for numerics: a headcount or a dollar
+    figure DOES have a checkable shape, so those keep their safety net (its
+    original purpose — catching the LLM collapsing one document's number onto
+    another's — is real and still needed). They were previously broken in the
+    opposite direction: routed through the prose-shaped generic fallback, so
+    "Employee Count - varies seasonally based on staffing needs" captured
+    cleanly. Numeric fields now capture a numeric shape, which makes that
+    match structurally impossible rather than filtered after the fact.
+
+    Fail-safe by construction: anything not POSITIVELY identified as bounded
+    returns None. A new field added to RECONCILABLE_FIELDS with an unforeseen
+    type is exempted, never scanned with a guessed pattern — consistent with
+    the standing blank-over-wrong rule. ``test_every_reconcilable_field_has_a_
+    resolved_scan_shape`` fails the build if a new field lands here silently.
+
+    Boundedness for identity fields is answered from WS-2's own field tables
+    (see the import note at the top of this module), so "scannable" and
+    "normalized as a bounded type" can never disagree.
+    """
+    kind = (cfg or {}).get("kind")
+    # Numeric kinds are authoritative — their shape follows from the kind alone.
+    if kind == "currency":
+        return _SCAN_SHAPE_CURRENCY
+    if kind == "integer":
+        return _SCAN_SHAPE_INTEGER
+    # Identity fields: only the bounded subtypes (FEIN, dates) are scannable.
+    if fact_key in FEIN_FIELDS:
+        return _SCAN_SHAPE_FEIN
+    if fact_key in DATE_FIELDS or _infer_field_category(fact_key) == "date":
+        return _SCAN_SHAPE_DATE
+    # Everything else — names, addresses, entity type, carrier, kind "text",
+    # and any future unrecognised field — is free text. Not scannable.
+    return None
+
+
+# Fields with NO structural completeness signal at all — a name is either
+# longer or it isn't, with no way to tell "more descriptive" from "a longer
+# garbage string" the way a ZIP+4 or a 9-digit FEIN can be checked. These
+# fields rank candidates by DOCUMENT AGREEMENT first in _suggest_for_field
+# (see there) rather than by raw length, so a single document's outlier can
+# never outrank a value multiple real documents agree on.
+#
+# Deliberately NOT the same set as the text-scan exemption (``_scan_shape``
+# returning None): addresses and entity type are also exempt from scanning,
+# but addresses DO have a real completeness signal (ZIP+4, street number) and
+# keep completeness-first ranking. Merging the two sets would silently change
+# how address conflicts are ranked as a side effect of a scanning fix.
+_NAME_LIKE_FIELDS = frozenset({"applicant_name", "dba_name", "carrier_name"})
 
 
 def _text_scan_values(text: str, fact_key: str) -> List[str]:
@@ -196,53 +292,62 @@ def _text_scan_values(text: str, fact_key: str) -> List[str]:
 
     This is the safety net for the LLM COLLAPSING per-document values — it may
     extract the dec-page value for every document even when a document's own
-    text clearly states a different one (observed for Gross Sales, and confirmed
-    for the identity fields via the doc_consistency_input logs). Scanning each
-    document's raw text recovers the real value regardless of what the LLM
-    returned — so cross-document conflicts surface even when extraction (or its
-    cache) flattened them.
+    text clearly states a different one (observed for Gross Sales). Scanning
+    each document's raw text recovers the real value regardless of what the
+    LLM returned — so cross-document conflicts surface even when extraction
+    (or its cache) flattened them.
 
-    Currency fields return every distinct figure found (with a min-amount floor).
-    Identity/date/fein fields return only the FIRST labelled match in the doc, so
-    a prior/renewal date or a second mention can't manufacture an intra-document
-    false conflict. Every value is validated/deduplicated through the field's
-    Workstream-2 normalizer, so formatting-only differences never leak through.
+    NUMERIC fields (currency/integer) return every distinct figure found — the
+    whole point is to surface a second, different number the LLM missed —
+    with a min-amount floor on currency. Date/FEIN fields return only the
+    FIRST labelled match in the doc, so a prior/renewal date or a second
+    mention can't manufacture an intra-document false conflict. Every value is
+    validated through the field's OWN normalizer (never the loose text
+    fallback), so a capture that isn't really a value of this type is dropped.
+
+    Fields whose value has no machine-checkable shape are excluded entirely —
+    ``_scan_shape`` returns None for them. See its docstring for why.
     """
     cfg = RECONCILABLE_FIELDS.get(fact_key, {})
+    shape = _scan_shape(fact_key, cfg)
+    if shape is None:
+        return []
     patterns = _TEXT_SCAN_PATTERNS.get(fact_key)
-    if not patterns and cfg.get("kind") in ("identity", "currency", "integer") and cfg.get("label"):
+    if not patterns and cfg.get("label"):
         # Generic safety net for any reconcilable field without a bespoke
         # pattern — keeps this module a "reusable engine" (see module docstring)
-        # instead of only covering the fields called out by name.
-        patterns = [_generic_label_pattern(cfg["label"])]
+        # instead of only covering the fields called out by name. It uses the
+        # field's own value shape, so it can never capture more loosely than a
+        # bespoke pattern would.
+        patterns = [_generic_label_pattern(cfg["label"], shape)]
     if not patterns or not text:
         return []
-    is_currency = cfg.get("kind") == "currency"
+    kind = cfg.get("kind")
+    is_numeric = kind in ("currency", "integer")
+    floor = _scan_min_amount(fact_key, cfg)
     found: Dict[str, str] = {}   # normalized -> first raw match (insertion order)
     for pattern in patterns:
         for m in re.finditer(pattern, text, re.IGNORECASE):
             raw = (m.group(1) or "").strip()
             if not raw:
                 continue
-            if fact_key in _NAME_LIKE_FIELDS and not _looks_like_name(raw):
-                continue
-            if is_currency:
+            if kind == "currency":
                 norm = _normalize_currency(raw)
-                if not norm:
-                    continue
-                try:
-                    if int(norm.split(".")[0]) < _TEXT_SCAN_MIN_AMOUNT:
-                        continue
-                except (ValueError, IndexError):
-                    continue
+            elif kind == "integer":
+                # NATIVE integer normalizer, not normalize_value's generic text
+                # fallback — a count must be a number or it is not a count.
+                norm = _normalize_integer(raw)
             else:
-                # Identity/date/fein → validate + dedupe via the WS-2 normalizer.
+                # Date/FEIN → validate + dedupe via the WS-2 normalizer, which
+                # returns '' for anything that isn't really a date/FEIN.
                 norm = normalize_value(fact_key, raw)
-                if not norm:
-                    continue
+            if not norm:
+                continue
+            if floor and _below_scan_floor(norm, floor):
+                continue
             found.setdefault(norm, raw)
-            if not is_currency:
-                # One labelled value per document for identity/date/fein fields.
+            if not is_numeric:
+                # One labelled value per document for date/FEIN fields.
                 return [raw]
     return list(found.values())
 
@@ -314,6 +419,54 @@ RECONCILABLE_FIELDS: Dict[str, Dict[str, Any]] = {
         "kind":  "integer",
         "forms": ["ACORD_125", "ACORD_126", "ACORD_131", "ACORD_186"],
     },
+    # ── Deductible / SIR consistency (Decision_Tree.txt lines 226-231: "Validate
+    # deductibles and SIRs are consistent across ACORD 126/127, ACORD 131, and dec
+    # page representations. Flag unexplained discrepancies.") — added 2026-08-07.
+    # This is the ONLY correct reading of that spec line: it asks whether the SAME
+    # figure agrees across its multiple mentions (dec page vs. the form it stamps),
+    # not whether SIR and a deductible should be compared to EACH OTHER. That wrong
+    # comparison was `cross_form_validator._check_umbrella_sir_vs_auto_deductible`
+    # (removed the same day — GL deductible, Auto deductible, and Umbrella SIR cover
+    # different coverage parts and are never compared to one another, here or
+    # anywhere else in the codebase).
+    #
+    # ENABLE_FULL_FIELD_RECONCILIATION was already sweeping these fields in
+    # generically (any scalar fact not curated here gets auto-discovered — see
+    # `_auto_scalar_keys`), but only as a blanket "identity" kind. That silently
+    # degrades them: identity's completeness scoring ranks candidates by raw
+    # STRING LENGTH (`_value_completeness`), which is meaningless for a dollar
+    # figure ("$1,000,000" isn't more "complete" than "1000000"); currency/integer
+    # fields are deliberately excluded from that scoring for exactly this reason.
+    # Auto-discovery also can't derive the real "applied to N forms" list
+    # (`_forms_for_field` only does the dynamic lookup for kind in
+    # currency/integer) and validates a confirmation with the loose text
+    # normalizer instead of rejecting a non-numeric value outright. Curating
+    # these properly as "currency" fixes all four at once - not a duplicate of
+    # what auto-discovery was already doing, a correctly-typed replacement of it.
+    #
+    # Non-blocking by design, matching total_revenue/total_payroll/num_employees
+    # above and the spec's own wording ("Flag unexplained discrepancies") - not
+    # added to HARD_STOP_RECONCILABLE_KEYS or GENERATION_BLOCKING_RECONCILABLE_KEYS.
+    "umbrella_sir": {
+        "label": "Umbrella SIR",
+        "kind":  "currency",
+        "forms": ["ACORD_131"],
+    },
+    "gl_deductible": {
+        "label": "GL Deductible",
+        "kind":  "currency",
+        "forms": ["ACORD_126"],
+    },
+    "auto_deductible_comp": {
+        "label": "Auto Comprehensive Deductible",
+        "kind":  "currency",
+        "forms": ["ACORD_127"],
+    },
+    "auto_deductible_collision": {
+        "label": "Auto Collision Deductible",
+        "kind":  "currency",
+        "forms": ["ACORD_127"],
+    },
     # ── Extend here (no other code change needed) ────────────────────────────
     # Add a one-line entry: {"label": ..., "kind": "currency"|"integer", "forms": [...]}.
 }
@@ -337,6 +490,15 @@ GENERATION_BLOCKING_RECONCILABLE_KEYS = frozenset({
 # Keys excluded from the crude cross-doc conflict detectors so this engine is
 # the single source of truth for them (prevents un-normalized false positives).
 RECONCILABLE_FIELD_KEYS = frozenset(RECONCILABLE_FIELDS.keys())
+
+# Which curated fields are NOT text-scanned, DERIVED from _scan_shape rather
+# than hand-listed — a hand-list is a thing to forget, which is how three of
+# the four incidents happened. Introspection/documentation surface (and what
+# the regression tests assert against); the live gate is _scan_shape itself,
+# so this can never drift from real behaviour.
+_TEXT_SCAN_EXEMPT_FIELDS = frozenset(
+    k for k, c in RECONCILABLE_FIELDS.items() if _scan_shape(k, c) is None
+)
 
 
 # ── Value extraction (handles the {value, confidence} envelope) ───────────────
@@ -511,14 +673,13 @@ def _suggest_for_field(fact_key: str, kind: str, values: List[dict]) -> Optional
 
     Ranks candidate value groups by completeness (primary) then document
     frequency (tiebreak) — EXCEPT for name-like fields (``_NAME_LIKE_FIELDS``),
-    where document agreement is the primary signal and completeness (raw
-    string length) is only the tiebreak. Those fields pull candidates from a
-    loose, label-anchored text-scan regex that can occasionally capture a
-    stray sentence fragment instead of a real name (see ``_looks_like_name``);
-    a fragment is often long, so scoring by length first let one bad text-scan
-    hit outrank a name multiple real documents agreed on. Document count is
-    much harder for a single bad match to win. Returns ``{value, normalized,
-    confidence, preselect}``, or None when there is nothing to suggest.
+    which have no structural completeness signal (unlike addresses' ZIP+4 or
+    FEIN's digit count), so document agreement is the primary signal there and
+    raw string length is only the tiebreak. Every free-text field (names,
+    addresses, entity type — see ``_scan_shape``) now takes its candidates
+    exclusively from real Stage-1 LLM extractions, never from the text-scan
+    regex. Returns ``{value, normalized, confidence, preselect}``, or None
+    when there is nothing to suggest.
     """
     if not values or len(values) < 2:
         return None

@@ -339,6 +339,17 @@ def _validate_producer_answer(field: str, answer: str) -> tuple:
     everything else is treated as free text and only needs to be non-empty and of
     reasonable length. Deliberately lenient - the validators strip formatting like
     "$" and "," - so a real value is never rejected, only genuine garbage is.
+
+    Monetary/deductible fields are a special case: real ACORD boxes of this type
+    legitimately hold non-numeric answers - "Not covered", "Waived", "Statutory",
+    "See schedule" - exactly the shapes services/pdf_service.py's declared-type
+    guard (`_rejects_declared_type`) already treats as valid data, never garbage
+    to blank. That guard is permissive-by-default (reject only a known-bad shape,
+    allow everything else) rather than whitelist-based, so this mirrors it instead
+    of hand-maintaining a second word list that would drift from the first: a
+    monetary-field answer with no digits at all is accepted as a legitimate
+    descriptive value, and validate_monetary only gets to reject values that
+    contain digits and still fail to parse - i.e. an actual malformed number.
     """
     from utils.validators import (
         validate_monetary, validate_percent, validate_date_format,
@@ -358,7 +369,11 @@ def _validate_producer_answer(field: str, answer: str) -> tuple:
     if any(t in f for t in ("limit", "value", "payroll", "revenue", "premium",
                             "amount", "deductible", "income", "receipts", "sales")):
         ok, msg = validate_monetary(text, "Amount")
-        return (True, "") if ok else (False, msg)
+        if ok:
+            return True, ""
+        if not any(ch.isdigit() for ch in text):
+            return True, ""  # legitimate non-numeric convention, not garbage
+        return False, msg
     return True, ""
 
 
