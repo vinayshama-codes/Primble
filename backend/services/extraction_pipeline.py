@@ -36,7 +36,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from services.ocr_service import extract_text
 from services.extraction_service import (
     extract_facts_long, classify_document, merge_facts, select_primary_truth,
-    detect_source_conflicts, ALLOWED_DOC_TYPES,
+    detect_source_conflicts, ALLOWED_DOC_TYPES, apply_declared_absent_downgrades,
 )
 from utils.table_extractor import extract_tables_from_pdf
 from services.form_service import (
@@ -377,6 +377,28 @@ async def _finalize_pipeline(
             _umb_scan,
         ):
             mflags["has_umbrella"] = True
+
+    # ── Declared-absent coverage lines (client report: Property / Crime / Cyber)
+    # The mirror of the safety net above, and the ONLY thing allowed to turn a
+    # coverage flag off. The flags are keyword-presence booleans OR'd across
+    # every chunk, so a declarations page reading "PROPERTY - NO COVERAGE" set
+    # has_property_coverage TRUE and the client got three lines ticked on a
+    # policy that explicitly excludes all three. See
+    # `apply_declared_absent_downgrades` for why it is hard to trigger: tight
+    # proximity, unambiguous denial phrases only, and `coverage_lines` vetoes it.
+    # Silence never downgrades anything.
+    try:
+        _absent_scan = " ".join(
+            str(d.get("text", "") or "") for d in active_docs if not d.get("excluded")
+        )
+        _downgraded = apply_declared_absent_downgrades(mflags, merged_facts, _absent_scan)
+        if _downgraded:
+            logger.info(
+                "declared-absent downgrade: %s — the document states these lines "
+                "are not covered", ", ".join(sorted(_downgraded)),
+            )
+    except Exception as _ex:                       # noqa: BLE001 — advisory only
+        logger.warning("declared-absent downgrade skipped: %s", _ex)
 
     # ── Dedicated umbrella-period pass (Umbrella / Excess period-alignment) ──
     # umbrella_effective_date / umbrella_expiration_date feed the cross-form

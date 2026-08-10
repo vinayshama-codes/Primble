@@ -168,6 +168,57 @@ There is also a fifth, non-obvious condition that is easy to lose:
 
 ## 3. Open issues
 
+### C35 — RULE 16 gained a "what a line premium is not" clause (2026-08-09), cost ~neutral
+
+~450 chars added to the EXTRACTION system prompt, which is constant per run and therefore
+sits in the cached prefix (billed at 10% after the first call of a run).
+
+**Why.** A live run put `$35` in the ACORD 125 Business Auto premium box. The figure is on
+the page; it is a fee or surcharge line, not the coverage part's annual premium. RULE 16
+now says a line premium is the annual premium charged for that coverage part, and is not a
+terrorism (TRIA/TRIPRA) charge, a policy or service fee, a state surcharge or tax, a
+minimum premium, an endorsement or audit adjustment, or one vehicle's or location's share -
+and that if the only amount against a line is one of those, `premium` must be null.
+
+**A deterministic guard was considered and rejected.** The same document has a legitimate
+$300 Inland Marine premium, so any absolute floor or relative-magnitude rule that catches
+$35 also destroys $300. Prompt-side is the only place this distinction is visible.
+
+**Cost direction is still negative**, for the same reason as C34: a correct per-line
+premium keeps those boxes on the deterministic path instead of returning them to gap fill.
+
+---
+
+### C34 — extraction prompt grew two rules (2026-08-09), cost impact ~neutral
+
+Logged here because CLAUDE.md requires any prompt edit to be recorded, not because it
+costs anything measurable.
+
+**Added to the EXTRACTION system prompt** (constant per run, so it sits in the cached
+prefix and is billed at 10% after the first call of a run):
+* **RULE 15 - ENTITY DISCIPLINE** (~1,200 chars). Names the owning party for every
+  identity fact and states that `null` is correct when a party's own value is absent.
+  Generalises RULE 14, which already did exactly this for the single
+  `naics_code` / `carrier_naic` pair.
+* **RULE 16 - coverage_lines** (~800 chars). Per-line premium/carrier/policy breakdown.
+
+**Net effect is expected to be negative cost.** Both rules move work OFF the gap-fill
+LLM and onto deterministic stamping: the 15 ACORD 125 line-of-business premium boxes and
+the producer identity block now resolve in Pass 1. `_is_nonfillable_field` still blocks
+premium boxes inside `compute_form_gaps`, so the gap-fill LLM is never asked for a
+premium - the deterministic path was unblocked in `map_facts_to_form` only.
+
+**Verified with the inspector, not a live diff** (`py backend/scripts/inspect_gap_fill_prompts.py`):
+`PASS - prefix is stable and cacheable`, system prompt IDENTICAL across all 13 gap-fill
+calls, cacheable prefix 11,774 chars / ~2,943 tokens - unchanged from the C1-C11 baseline,
+as expected since none of the gap-fill prompt was touched.
+
+**Still to come in this workstream** (will need re-verification when it lands): the
+gap-fill skeleton's Rule 3 examples currently say `"Yes" ... else "No"` two lines after
+Rule 3 itself forbids defaulting to "No", and Rule 5 forbids filling any premium field.
+Both are being corrected; the plan is to DELETE the bad examples while adding the new
+rules so the skeleton does not grow.
+
 | ID | Sev | Issue | Location | Status |
 |---|---|---|---|---|
 | **C21** | **CRITICAL — fill quality** | **At very long context the model stops using the ACORD field names and invents its own.** Observed live on a real 682,726-char / 280-page package (one call = ~170k tokens): a batch that `sent=39` fields got back `total_returned=60` answers keyed `Producer_Name`, `Applicant_Name`, `Contact_Name`, `GL_Limit_EachOccurrence`, `Carrier_NAIC`, `Umbrella_Limit`, … **none of which exist in any ACORD schema.** `_absorb` skipped every unrecognised key, so `filled=3` of 39. The extracted DATA was correct; the keys were fabricated, so 57 of 60 answers were thrown away. Whole-form effect: `COMBINED_B3of7 fields_filled=38/171` (22%). **This is the cost of a single huge chunk** — the same pipeline on a 15k-char document does not do this. Mitigated, not solved: a `CRITICAL - JSON KEYS` instruction is now the LAST thing in the prompt (after the field list, so caching is unaffected), and `_absorb` logs `UNKNOWN_KEYS` at WARNING so it can never be invisible again. **The real lever is `CONTEXT_UTILISATION`** — lower it to trade cost for instruction-following. | `pdf_service.py` → `_build_user_prompt`, `_absorb` | **OPEN — mitigated, needs a live A/B on `CONTEXT_UTILISATION`** |

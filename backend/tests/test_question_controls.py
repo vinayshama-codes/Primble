@@ -297,8 +297,13 @@ def test_canonical_key_resolution():
     # Raw ACORD schema field -> mapped fact via _ACORD_FIELD_RULES.
     assert _canonical_key("NamedInsured_FullName") == "applicant_name"
     assert _canonical_key("NamedInsured_AnnualRevenue") == "total_revenue"
-    # Producer fax maps to nothing (no fact behind it).
-    assert _canonical_key("Producer_FaxNumber") is None
+    # CHANGED 2026-08-09: Producer_FaxNumber used to map to nothing because no
+    # fact existed for it, which left it to gap fill - and gap fill copied the
+    # producer's PHONE number into it (client report #1). It now has its own
+    # `producer_fax` fact, so a fax is stamped only when the document labels one.
+    assert _canonical_key("Producer_FaxNumber") == "producer_fax"
+    # A field belonging to one party must never resolve to another party's fact.
+    assert _canonical_key("Producer_ContactPerson_Phone") == "producer_contact_phone"
 
 
 def test_is_curated_client_field():

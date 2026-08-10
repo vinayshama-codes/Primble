@@ -144,12 +144,44 @@ _EXTRACT_SCHEMA = (
     '  "dba_name": string or null, "mailing_address": string or null,\n'
     '  "physical_address": string or null, "contact_name": string or null,\n'
     '  "contact_phone": string or null, "contact_email": string or null,\n'
+    '  "applicant_website": string or null,\n'
+    # Producer-scoped identity. These exist because `contact_*` above means the
+    # APPLICANT (see RULE 11 and arq_service's own client-facing wording, "the
+    # best phone number to reach YOU"). Before these existed, the producer's
+    # contact details were written into `contact_*` and then stamped onto BOTH
+    # the Producer and the Named Insured blocks of every form - the client-
+    # reported "mixture of client and carrier information".
+    '  "producer_contact_name": string or null, "producer_contact_phone": string or null,\n'
+    '  "producer_contact_email": string or null, "producer_fax": string or null,\n'
+    '  "producer_address": string or null,\n'
+    '  "carrier_website": string or null,\n'
     '  "fein": string or null, "entity_type": string or null,\n'
     # CURRENT policy dates/number — NEVER mix with prior policy fields below
     '  "effective_date": string or null, "expiration_date": string or null,\n'
     '  "policy_number": string or null, "lines_of_business": [string],\n'
+    # A package is written PER COVERAGE LINE, and a dec page prints it that way:
+    # each line has its own premium, and often its own carrier and policy number
+    # (a "single" package can be issued by two affiliated carriers). The scalar
+    # carrier_name / policy_number above hold the package-level values and stay
+    # exactly as they were; this list carries the per-line breakdown that a
+    # single scalar structurally cannot represent.
+    '  "coverage_lines": [{"line": string, "carrier": string or null, '
+    '"naic": string or null, "policy_number": string or null, '
+    '"premium": string or null, "effective_date": string or null, '
+    '"expiration_date": string or null}],\n'
     '  "total_revenue": string or null, "total_payroll": string or null,\n'
-    '  "num_employees": string or null, "locations": [string],\n'
+    '  "num_employees": string or null,\n'
+    # num_employees is the TOTAL. The full/part-time SPLIT is a different number
+    # and needs its own facts: mapping the total into both the "full time" and
+    # "part time" boxes stamped the same figure twice, which is wrong unless one
+    # of them is zero.
+    '  "num_employees_full_time": string or null, "num_employees_part_time": string or null,\n'
+    # years_in_business is a COUNT OF YEARS; business_start_date is a DATE. The
+    # ACORD box "NamedInsured_BusinessStartDate" declares itself "Enter date: The
+    # date the applicant began in business", so the duration fact never belonged
+    # in it.
+    '  "business_start_date": string or null,\n'
+    '  "locations": [string],\n'
     '  "operations_description": string or null,\n'
     # Narrative-only: high-level account/executive summary distinct from operations.
     # Populated ONLY for underwriting narrative / submission narrative docs; null elsewhere.
@@ -201,6 +233,11 @@ _EXTRACT_SCHEMA = (
     '  "property_deductible_earthquake": string or null, "property_deductible_flood": string or null,\n'
     '  "mortgagee_name": string or null, "auto_liability_limit": string or null,\n'
     '  "auto_liability_structure": string or null, "auto_deductible_comp": string or null,\n'
+    # A split-limit auto policy (100/300/50) has THREE different figures. Without
+    # these, one `auto_liability_limit` was stamped into the combined-single-limit
+    # box AND all three split boxes at once, which reads as $1M for every part.
+    '  "auto_bi_per_person": string or null, "auto_bi_per_accident": string or null,\n'
+    '  "auto_pd_per_accident": string or null,\n'
     '  "auto_deductible_collision": string or null,\n'
     # Vehicle schedule: one object per vehicle row
     '  "auto_vin_schedule": [{"year": string, "make": string, "model": string, "vin": string, "body_type": string or null, "gvw": string or null, "comp_symbol": string or null, "coll_symbol": string or null}],\n'
@@ -361,6 +398,7 @@ _EXTRACT_SCHEMA = (
     '  "has_primary_noncontributory": boolean,\n'
     '  "has_builders_risk": boolean,\n'
     '  "has_inland_marine": boolean,\n'
+    '  "has_open_cargo": boolean,\n'
     '  "has_crime": boolean,\n'
     '  "has_cyber": boolean,\n'
     '  "has_commercial_auto": boolean,\n'
@@ -431,7 +469,7 @@ _EXTRACT_PROMPT_PREFIX = (
     'RULE 4 — Extract ALL financial figures exactly as printed: limits, premiums, payrolls, '
     'deductibles, values. Include currency symbols and formatting as-is.\n\n'
     'RULE 5 — For addresses: extract the full address string including city, state, ZIP.\n\n'
-    'RULE 6 — Flag definitions. Judge each boolean flag by the MEANING of the document, not the mere presence of exact keywords - the example terms listed are illustrative, not an exhaustive checklist, so set a flag true for clear equivalents and paraphrases too (e.g. "ransomware incident response" or "we hold customer health and card data" implies cyber even without the word "cyber"). This does NOT relax any "Do NOT set true" restriction below - those guards still apply in full. Criteria:\n'
+    'RULE 6 — Flag definitions. Judge each boolean flag by the MEANING of the document, not the mere presence of exact keywords - the example terms listed are illustrative, not an exhaustive checklist, so set a flag true for clear equivalents and paraphrases too (e.g. a coverage part named "Network Security and Privacy Liability" or "ransomware incident response coverage" is cyber coverage even without the word "cyber"). Judge by meaning, but the meaning that matters is WHAT THE POLICY COVERS. A coverage flag describes coverage the document GRANTS - never an exposure the applicant merely has, and never a coverage the document names in order to EXCLUDE or decline it. "We hold customer health and card data" is a cyber EXPOSURE and does not by itself make has_cyber true; a "Cyber Incident and Data Privacy Exclusion" attached to a liability form makes it explicitly FALSE. This does NOT relax any "Do NOT set true" restriction below - those guards still apply in full. Criteria:\n'
     '  is_commercial_policy: true if document is a commercial insurance policy, application, dec page, certificate, or quote (not personal lines).\n'
     '  has_general_liability: true if document mentions "General Liability", "GL", "premises/operations", "products/completed operations", "personal and advertising injury", GL limits, or GL premiums.\n'
     '  has_property_coverage: true if document explicitly lists a building limit or BPP (business personal property) value, commercial property premium, or COPE data (construction type, year built, occupancy, protection class) for a covered location. Do NOT set true based on mailing addresses alone, certificate holder addresses, or GL-only premises descriptions.\n'
@@ -446,7 +484,7 @@ _EXTRACT_PROMPT_PREFIX = (
     '  is_certificate_doc: true if the document IS itself an ACORD 25 Certificate of Liability Insurance or ACORD 28 Evidence of Property — identifiable by "Certificate of Liability Insurance" or "Evidence of Commercial Property Insurance" as the document title.\n'
     '  gl_is_claims_made: true if GL coverage is written on a claims-made basis (document shows "Claims Made" selected or "Retro Date" present for GL).\n'
     '  auto_has_physical_damage: true if document shows comprehensive and/or collision coverage for autos.\n'
-    '  auto_split_limits: true if auto liability is expressed as split limits (BI per person / BI per accident / PD per accident) rather than a combined single limit (CSL).\n'
+    '  auto_split_limits: true if auto liability is expressed as split limits (BI per person / BI per accident / PD per accident) rather than a combined single limit (CSL). When true, ALSO fill auto_bi_per_person, auto_bi_per_accident and auto_pd_per_accident with the three separate figures (e.g. "100/300/50" means $100,000 / $300,000 / $50,000). When the policy carries a single combined limit, leave those three null and put the figure in auto_liability_limit only - a CSL is NOT the same amount as each split part.\n'
     '  auto_has_hired_nonowned: true if document mentions "hired auto", "non-owned auto", "HNOA", or hired and non-owned coverage.\n'
     '  auto_has_um_uim: true if document mentions uninsured motorist (UM) or underinsured motorist (UIM) coverage.\n'
     '  wc_multi_state: true if the insured has payroll or employees in more than one U.S. state.\n'
@@ -458,8 +496,9 @@ _EXTRACT_PROMPT_PREFIX = (
     '  has_primary_noncontributory: true if document mentions "Primary and Non-Contributory" or "PNC" coverage requirement.\n'
     '  has_builders_risk: true if the document explicitly covers property that is CURRENTLY UNDER CONSTRUCTION — identified by a Builders Risk or Course of Construction section listing a project address, construction value, or completion date for a specific active project. Do NOT set true for a general contractor\'s GL/WC submission, for completed property coverage, or when "construction" appears only in the insured\'s trade description.\n'
     '  has_inland_marine: true if the document explicitly includes a distinct inland marine coverage line, floater policy, or scheduled equipment endorsement WITH stated limits or values (e.g. contractor\'s equipment schedule with item values, motor truck cargo with a per-load limit, installation floater). Do NOT set true if equipment or cargo is mentioned incidentally in operations descriptions or loss history without stated inland marine limits.\n'
-    '  has_crime: true if document mentions crime coverage, employee dishonesty, money and securities, forgery, fidelity bond, ERISA bond, or commercial crime policy.\n'
-    '  has_cyber: true if document mentions cyber liability, data breach, network security, ransomware, cyber insurance, PCI, PHI, or cyber/privacy coverage.\n'
+    '  has_open_cargo: true ONLY if the document shows an OPEN CARGO or OCEAN CARGO policy or section - the ocean-marine coverage for goods shipped by sea, typically labeled "Open Cargo Policy", "Ocean Cargo", or "Marine Cargo Certificate" - with a stated limit or premium. Do NOT set true for inland transit coverage of any kind: a motor truck cargo limit, a transit or property-in-transit extension inside an installation floater or an inland marine schedule, or a contractors-equipment floater are all INLAND marine, not open cargo. If in doubt, false.\n'
+    '  has_crime: true if the document shows a DISTINCT crime or fidelity coverage part, policy or endorsement WITH a stated limit or premium (e.g. "Employee Dishonesty $50,000", a Commercial Crime coverage part, a money-and-securities limit). Do NOT set true when crime terms appear only as an EXCLUSION, as a fidelity or ERISA bond a contract REQUIRES the applicant to carry elsewhere, or on a line the document lists as not covered ("Crime and Fidelity - No Coverage").\n'
+    '  has_cyber: true if the document shows a DISTINCT cyber or privacy coverage part, policy or endorsement WITH a stated limit or premium (e.g. "Cyber Liability $1,000,000", a Cyber and Privacy section carrying its own premium). Do NOT set true when cyber terms appear only as: an EXCLUSION or disclaimer (a "Cyber Incident and Data Privacy Exclusion" notice attached to a general liability form), a limited virus, hacking or data-restoration extension inside ANOTHER line such as Electronic Data Processing or inland marine, or a description of the applicant\'s operations and data holdings (that is an exposure, not coverage).\n'
     '  has_commercial_auto: true if document shows a commercial auto policy, business auto coverage symbol, or fleet policy.\n'
     '  has_auto_liability: true if document shows auto liability limits (CSL or split limits) on a commercial auto policy.\n'
     '  has_truckers_coverage: true if document mentions truckers coverage, motor truckers, long-haul trucking, or ICC/MC authority numbers.\n'
@@ -559,6 +598,48 @@ _EXTRACT_PROMPT_PREFIX = (
     '  If a document shows a number labeled just "NAIC #" or "NAIC Number" next to a carrier, '
     'insurer, or insurance company name, it belongs in carrier_naic (or prior_carrier_naic) - '
     'NEVER in naics_code, even though the label looks similar.\n\n'
+    # RULE 15 generalises RULE 14 from one confusable pair to every identity field.
+    # A dec page prints the agency's phone in the largest block on page 1 and the
+    # insured's phone often not at all, so an undefined "contact_phone" reliably
+    # captured the AGENCY's number and every downstream stamper then wrote it into
+    # the applicant's box too. Naming the owning party for each field is what makes
+    # a null possible; without it the model has no way to know a value is not its.
+    'RULE 16 — coverage_lines (the per-line breakdown of THIS policy):\n'
+    '  Output one entry per coverage line the document actually shows as covered - General '
+    'Liability, Business Auto, Inland Marine, Umbrella, Property, Crime, Cyber, and so on. '
+    'Use the line name as the document prints it.\n'
+    '  Put that line\'s OWN premium, carrier, NAIC and policy number in its entry. In a '
+    'package issued by affiliated companies these genuinely differ per line - copy what is '
+    'printed against each line, never the package total or the first carrier you saw.\n'
+    '  A line the document lists as NOT covered ("Property - No Coverage", "Crime and '
+    'Fidelity - No Coverage") is NOT a coverage line. Leave it out.\n'
+    '  Set premium to null when only a package total is shown; never divide or estimate one. '
+    'These are amounts that appear on a signed application.\n'
+    '  A line premium is the ANNUAL PREMIUM CHARGED FOR THAT COVERAGE PART. It is not a '
+    'terrorism (TRIA/TRIPRA) charge, a policy or service fee, a state surcharge or tax, a '
+    'minimum premium, an endorsement or audit adjustment, or one vehicle\'s or one '
+    'location\'s share. Those figures print in the same column and are far smaller; if the '
+    'only amount you can find against a line is one of them, set premium to null.\n\n'
+    'RULE 15 — ENTITY DISCIPLINE. A submission names several DIFFERENT parties. Never copy '
+    'one party\'s detail into another party\'s field.\n'
+    '  PRODUCER (the agency/brokerage submitting the business - the "Producer", "Agency" or '
+    '"Agent" block): producer_name, producer_address, producer_contact_name, '
+    'producer_contact_phone, producer_contact_email, producer_fax.\n'
+    '  CARRIER (the insurance company issuing the policy - the "Insurer", "Carrier" or '
+    '"Company" block): carrier_name, carrier_naic, carrier_website.\n'
+    '  APPLICANT (the insured named on the policy): applicant_name, dba_name, fein, '
+    'mailing_address, physical_address, applicant_website, contact_name, contact_phone, '
+    'contact_email. The contact_* fields are the APPLICANT\'s own contact person - never the '
+    'agency\'s and never the carrier\'s.\n'
+    '  Fill each of these ONLY from a value the document labels as belonging to THAT party. '
+    'A phone, email, address or website printed inside the producer\'s or carrier\'s block '
+    'belongs to that party alone: put it in that party\'s field and leave the other parties\' '
+    'fields null. Do NOT reuse one party\'s value to fill another party\'s empty field. '
+    'null is the CORRECT answer when a party\'s own value is not stated - a borrowed value is '
+    'a defect, a null is not.\n'
+    '  Never derive one field from another: a fax number counts only if the document labels it '
+    'as a fax (never copy the phone number into it), and an email address must contain "@" '
+    '(a person\'s name is not an email address).\n\n'
     'Return ONLY a valid JSON object with exactly these two top-level keys:\n\n'
     + _EXTRACT_SCHEMA
     + '\n\nReturn ONLY the JSON object. No markdown fences, no explanation, no extra text. '
@@ -1377,6 +1458,7 @@ _LIST_FIELDS = frozenset({
     "additional_named_insureds", "auto_covered_symbols",
     "loss_history", "prior_coverage_by_line", "wc_officers",
     "inland_marine_items", "contractor_high_hazard_ops",
+    "coverage_lines",
 })
 
 
@@ -1672,12 +1754,24 @@ def _parse_flat_json(raw: str, context: str = "") -> dict:
 
 # ── Chunking ──────────────────────────────────────────────────────────────────
 _LONG_DOC_LIST_KEYS = [
+    # `lines_of_business` was in _LIST_FIELDS but NOT here, so the cross-chunk
+    # merge scored it as a scalar and kept ONE chunk's list. A line named only in
+    # a later chunk was discarded, taking its ACORD 125 line-of-business checkbox
+    # with it (_INDICATOR_RULES reads this fact for BOP / garage / truckers /
+    # liquor / fiduciary / yacht / motor carrier). Found 2026-08-09 by
+    # test_every_list_shaped_extraction_fact_is_registered. Merging is a union
+    # with dedup, so this can only preserve lines, never invent one.
+    "lines_of_business",
     "locations", "property_locations", "auto_vin_schedule", "auto_garaging_addresses",
     "auto_drivers", "gl_class_codes_by_location", "gl_class_code_schedule",
     "wc_class_codes", "underlying_policies",
     "additional_named_insureds", "auto_covered_symbols",
     "loss_history", "prior_coverage_by_line", "wc_officers",
     "inland_marine_items", "contractor_high_hazard_ops",
+    # Without this the cross-chunk merge treats coverage_lines as a scalar and
+    # keeps ONE chunk's list, so a dec page split across chunks silently loses
+    # every line mentioned in the other chunks.
+    "coverage_lines",
 ]
 
 DOC_TYPE_CHUNK_LIMITS: Dict[str, int] = {
@@ -2230,6 +2324,75 @@ def _score_composite_candidate(cand_text: str, child_candidates: Dict[str, dict]
     return (explained, len(amts))
 
 
+# ── Shape-qualified candidate partition ──────────────────────────────────────
+# `_score_value` below ranks competing values for a fact by
+# `log1p(repetitions) + confidence`. `tier_weight` multiplies every candidate of
+# the same field equally, so it cancels out of the ordering entirely - which
+# means the ranking contains NOTHING ABOUT THE VALUE ITSELF. The most-repeated
+# candidate wins. On a declarations page the thing that repeats on every page is
+# the carrier's letterhead.
+#
+# Two measurements that make the point:
+#   * one extra repetition is worth log1p(2)-log1p(1) = 0.405, while the whole
+#     gap between `ai_high` (0.85) and `ai_low` (0.50) is 0.35 - so a
+#     low-confidence value seen twice beats a high-confidence value seen once;
+#   * nothing checks whether the value can even BE the thing (a 7-digit string
+#     competing for a 9-digit FEIN wins if it appears more often).
+#
+# This is a PARTITION, not another weight. Candidates that pass their fact's own
+# registry validator are ranked ahead of ones that cannot possibly be valid; if
+# NONE qualify the whole list is returned untouched, so it can only ever reorder
+# and never drops the last value. No magic number to calibrate.
+#
+# Only the four HARD shapes are enforced - FEIN, email, phone, URL - the same set
+# `pdf_service._shape_violation` uses, for the same reason: C22's ~49,000-pair
+# sweep showed an amount box legitimately holds "Statutory" or "Included", so a
+# currency validator must never disqualify a candidate. Currency ordering stays
+# entirely with the C23 composite-consistency logic below.
+_HARD_SHAPE_FACTS: Optional[Dict[str, Any]] = None
+
+
+def _hard_shape_facts() -> Dict[str, Any]:
+    """{fact_key: validator} for facts whose shape is legally defined."""
+    global _HARD_SHAPE_FACTS
+    if _HARD_SHAPE_FACTS is None:
+        out: Dict[str, Any] = {}
+        try:
+            from services.fact_registry import (
+                FACT_REGISTRY, _is_email, _is_fein, _is_phone, _is_url,
+            )
+            hard = {_is_email, _is_fein, _is_phone, _is_url}
+            for key, meta in FACT_REGISTRY.items():
+                fn = (meta or {}).get("validate")
+                if fn in hard:
+                    out[key] = fn
+        except Exception as exc:                          # noqa: BLE001
+            logger.warning("shape-partition: validators unavailable — %s", exc)
+        _HARD_SHAPE_FACTS = out
+    return _HARD_SHAPE_FACTS
+
+
+def _partition_by_shape(field: str, scored: list) -> list:
+    """Stable-reorder `scored` so shape-valid candidates come first.
+
+    Returns the input unchanged when the fact has no hard shape, when every
+    candidate passes, or when every candidate fails - the last case being the
+    one that guarantees a value is never lost to this.
+    """
+    validator = _hard_shape_facts().get(field)
+    if validator is None or len(scored) < 2:
+        return scored
+    good, bad = [], []
+    for entry in scored:
+        try:
+            (good if validator(str(entry[0])) else bad).append(entry)
+        except Exception:                                 # noqa: BLE001
+            good.append(entry)
+    if not good or not bad:
+        return scored
+    return good + bad
+
+
 def _score_value(field: str, record: Any, freq: int) -> float:
     tier_weight = _TIER_WEIGHTS[_get_field_tier(field)]
 
@@ -2380,12 +2543,32 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
         val_candidates, key=lambda f: (f not in _CURRENCY_COMPOSITES, f)
     )
 
+    # Read once per merge, not once per field.
+    _partition_mode = os.getenv("SCORE_SHAPE_PARTITION", "shadow").strip().lower()
+
     for field in _ordered_fields:
         candidates = val_candidates[field]
         scored = sorted(
             [(nk, _score_value(field, c["record"], c["freq"]), c) for nk, c in candidates.items()],
             key=lambda x: x[1], reverse=True,
         )
+
+        # Shape partition (see _partition_by_shape). SHADOW BY DEFAULT: the old
+        # winner still ships and the disagreement is logged, because this reorders
+        # candidates for every scalar fact in the system and that blast radius
+        # deserves evidence from real documents before it changes output.
+        # Set SCORE_SHAPE_PARTITION=on to enforce, off to silence.
+        if _partition_mode != "off":
+            _repartitioned = _partition_by_shape(field, scored)
+            if _repartitioned and _repartitioned[0][0] != scored[0][0]:
+                logger.warning(
+                    "SHAPE_PARTITION field=%r would_choose=%r instead_of=%r "
+                    "(mode=%s) — the rejected value is not a valid %s",
+                    field, _repartitioned[0][0][:80], scored[0][0][:80],
+                    _partition_mode, field,
+                )
+            if _partition_mode == "on":
+                scored = _repartitioned
 
         # Tiebreaker for currency fields — NARROW ON PURPOSE. Read before widening.
         #
@@ -3341,6 +3524,179 @@ _FIELD_CONFIDENCE_SOURCES: Dict[str, Tuple[str, ...]] = {
     "locations":            ("schedule", "application"),
     "inland_marine_items":  ("schedule",),
 }
+
+
+# ── Declared-absent coverage lines ───────────────────────────────────────────
+# A declarations page states what it does NOT cover as plainly as what it does:
+# "PROPERTY - NO COVERAGE", "CRIME AND FIDELITY - NO COVERAGE". The coverage
+# flags are keyword-presence booleans (has_crime is documented as "true if
+# document mentions crime coverage ... fidelity bond"), and they OR across every
+# chunk and document - so one such line sets the flag TRUE forever and the
+# client gets Commercial Property, Crime and Cyber ticked on a policy that
+# explicitly excludes all three.
+#
+# This is the only mechanism allowed to turn a coverage flag OFF, and it is
+# deliberately hard to trigger:
+#   * the line name and the denial must sit within _ABSENT_PROXIMITY characters
+#     of each other with no sentence break, i.e. one row of a dec-page grid;
+#   * the phrase must be an unambiguous denial. "excluded" and "none" are NOT in
+#     the list: a Cyber Incident EXCLUSION inside a General Liability form does
+#     not mean the GL line is absent, and "none" appears all over a dec page;
+#   * a line named in `coverage_lines` is NEVER downgraded, whatever the prose
+#     says - positive structured evidence always beats a text scan.
+# SILENCE NEVER DOWNGRADES ANYTHING. Absence of a mention leaves the flag alone.
+_ABSENT_PROXIMITY = 40
+
+_COVERAGE_DENIAL_RE = re.compile(
+    r"no\s+coverage|not\s+covered|coverage\s+not\s+provided|no\s+coverage\s+provided",
+    re.I,
+)
+
+# flag -> the words a document uses to name that line. Kept to unambiguous line
+# names; a word that also appears in unrelated prose is not eligible.
+_FLAG_LINE_WORDS: Dict[str, Tuple[str, ...]] = {
+    "has_property_coverage": ("commercial property", "property"),
+    "has_crime":             ("crime and fidelity", "crime", "fidelity"),
+    "has_cyber":             ("cyber and privacy", "cyber liability", "cyber"),
+    "has_inland_marine":     ("inland marine",),
+    "has_workers_comp":      ("workers compensation", "workers' compensation"),
+    "has_umbrella":          ("umbrella",),
+}
+
+
+def _lines_declared_absent(text: str) -> set:
+    """Flags whose coverage line the document explicitly declares NOT covered."""
+    if not text:
+        return set()
+    lowered = text.lower()
+    found: set = set()
+    for match in _COVERAGE_DENIAL_RE.finditer(lowered):
+        start = max(0, match.start() - _ABSENT_PROXIMITY)
+        window = lowered[start:match.end()]
+        # Cut the window back to its own row/sentence. A NEWLINE counts: a
+        # declarations page is a grid and each denial belongs to exactly one
+        # row. Without this the window reaches into the PREVIOUS row - measured
+        # on the client's own dec page, "Umbrella $3,418" one line above
+        # "Property - No Coverage" was enough to downgrade has_umbrella, the
+        # precise opposite of what that page says.
+        window = re.split(r"[.;\n\r]+", window)[-1]
+        # Within one row, the NEAREST line name owns the denial. Splitting on
+        # column whitespace instead was tried and is wrong in the other
+        # direction: it discards the name in the very common two-column layout
+        # "PROPERTY      NO COVERAGE". Nearest-wins handles both, and picking
+        # exactly one flag per denial means a row can never silence two lines.
+        nearest_flag, nearest_pos = None, -1
+        for flag, words in _FLAG_LINE_WORDS.items():
+            for w in words:
+                pos = window.rfind(w)
+                if pos > nearest_pos:
+                    nearest_flag, nearest_pos = flag, pos
+        if nearest_flag:
+            found.add(nearest_flag)
+    return found
+
+
+# Keys on a `coverage_lines` entry that CORROBORATE the line beyond its own
+# name. A declarations page that actually grants a line prints at least one of
+# them next to it; a line the page DENIES has nothing but the name.
+# Only a PREMIUM or a LIMIT is strong enough to override an explicit written
+# denial. Measured on a real run (2026-08-09): the dec page says
+# "PROPERTY - NO COVERAGE", and extraction still produced a `coverage_lines`
+# entry named "Property" carrying the INLAND MARINE policy number - so a policy
+# number alone vetoed the denial and Commercial Property stayed ticked, appeared
+# in an "Other line of business" row, AND filled a Q4 row. One weak signal, three
+# visible defects.
+#
+# A carrier, a NAIC code, a policy number or a date can all appear against a line
+# a schedule merely REFERENCES. Money changing hands is what distinguishes a
+# granted coverage from a mentioned one - and an explicit "NO COVERAGE" printed
+# on the declarations page outranks every inference.
+_LINE_EVIDENCE_KEYS: Tuple[str, ...] = ("premium", "limit")
+
+
+def _line_entry_grants_coverage(entry: dict) -> bool:
+    """True when a `coverage_lines` entry is positive evidence of a GRANT, not
+    merely a mention of the line's name.
+
+    Why this exists, measured on a real run (2026-08-09): the declared-absent
+    downgrade was vetoed for `has_property_coverage` and the Commercial Property
+    box stayed ticked on a package whose dec page reads "PROPERTY - NO
+    COVERAGE". RULE 16 tells the model to leave a denied line OUT of
+    `coverage_lines`; it does not always obey, and the veto trusted the bare
+    name. So the arrival of `coverage_lines` DISABLED the fix for exactly the
+    line the client reported - a mention was being read as a grant, which is the
+    project's oldest root cause (see fix-form-stamping.md, GRANT qualifier)
+    reappearing one layer up.
+
+    Two ways an entry fails to be evidence:
+      * it carries no corroborating detail at all - just a line name;
+      * a corroborating value is ITSELF a coverage denial. The client's own run
+        stamped the literal string "No Coverage" into the Property and Crime
+        premium boxes, so this is observed behaviour, not a hypothetical.
+    """
+    if not isinstance(entry, dict):
+        return False
+    for key in _LINE_EVIDENCE_KEYS:
+        val = entry.get(key)
+        if val is None:
+            continue
+        text = str(val).strip()
+        if not text or text.lower() in _NULL_STRINGS:
+            continue
+        if _COVERAGE_DENIAL_RE.search(text):
+            return False                    # the detail denies the line outright
+        return True
+    return False
+
+
+def _line_name_is_a_carrier(name: str) -> bool:
+    """True when a `coverage_lines` name is really a CARRIER name.
+
+    "EMC Property & Casualty Company" contains the token "property" and would
+    otherwise veto `has_property_coverage` forever. Uses the shared carrier
+    shape heuristic rather than a second local copy; never raises, because a
+    detector fault must not change extraction behaviour.
+    """
+    try:
+        from services.field_mapping_integrity import looks_like_carrier
+        return bool(looks_like_carrier(name))
+    except Exception:                       # noqa: BLE001 - advisory only
+        return False
+
+
+def apply_declared_absent_downgrades(
+    flags: dict, facts: dict, text: str,
+) -> List[str]:
+    """Turn OFF coverage flags the document explicitly denies. Returns the flags
+    changed, for logging. Never turns a flag ON.
+
+    A flag is vetoed only by a `coverage_lines` entry that actually GRANTS the
+    line (see `_line_entry_grants_coverage`) - a bare name is a mention, and a
+    mention has never been proof of coverage anywhere else in this pipeline.
+    """
+    covered_words: set = set()
+    lines = facts.get("coverage_lines")
+    if isinstance(lines, list):
+        for entry in lines:
+            if not isinstance(entry, dict) or not entry.get("line"):
+                continue
+            name = str(entry["line"]).strip()
+            if not _line_entry_grants_coverage(entry):
+                continue
+            if _line_name_is_a_carrier(name):
+                continue
+            covered_words.add(name.lower())
+
+    changed: List[str] = []
+    for flag in _lines_declared_absent(text):
+        if not flags.get(flag):
+            continue                        # already false - nothing to do
+        words = _FLAG_LINE_WORDS[flag]
+        if any(w in cl for cl in covered_words for w in words):
+            continue                        # positive evidence vetoes the scan
+        flags[flag] = False
+        changed.append(flag)
+    return changed
 
 
 def _get_authoritative_doc(docs: List[dict], field: str) -> Optional[dict]:

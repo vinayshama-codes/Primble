@@ -331,9 +331,32 @@ def test_employee_count_falls_back_to_the_scalar_total_when_no_breakdown_exists(
     assert pdf_service._deterministic_map(
         "BusinessInformation_FullTimeEmployeeCount_A", facts,
     ) == "41"
+
+
+def test_part_time_count_is_blank_rather_than_a_copy_of_the_total():
+    """CHANGED 2026-08-09 - this assertion used to require the PART-TIME box to
+    receive the overall total too, i.e. the same figure stamped into both boxes.
+    The client reported that output verbatim ("0 full time employees, 0 part time
+    employees ... none of these values is supported by the policy").
+
+    One headcount cannot be both the full-time and the part-time count unless one
+    of them is zero, so the total is a defensible stand-in for ONE of the two
+    boxes and never for both. Full-time keeps the fallback (a real client answered
+    that question and needs it stamped - the test above); part-time does not.
+
+    This is the same conclusion `_ACORD_FIELD_RULES` already reached for
+    Contractors_PartTimeEmployeeCount, which was mapped to None with exactly this
+    reasoning and never generalised to the BusinessInformation twin."""
+    facts = {"num_employees": {"value": "41"}}
     assert pdf_service._deterministic_map(
         "BusinessInformation_PartTimeEmployeeCount_A", facts,
-    ) == "41"
+    ) is None
+    # A real part-time figure still stamps.
+    facts_with_split = {"num_employees": {"value": "41"},
+                        "num_employees_part_time": {"value": "7"}}
+    assert pdf_service._deterministic_map(
+        "BusinessInformation_PartTimeEmployeeCount_A", facts_with_split,
+    ) == "7"
 
 
 def test_genuine_per_location_breakdown_still_wins_over_the_scalar():

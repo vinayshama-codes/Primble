@@ -49,6 +49,32 @@ def _is_fein(v: str) -> bool:
     return clean.isdigit() and len(clean) == 9
 
 
+def _is_email(v: str) -> bool:
+    """something@something.tld. Named (not an inline lambda) because the
+    stamp-time shape check reuses these validators - a lambda cannot be looked
+    up by name from pdf_service, and duplicating the pattern there is how two
+    copies of one rule drift apart."""
+    return bool(re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v.strip()))
+
+
+def _is_phone(v: str) -> bool:
+    """7-20 chars of digits and the usual separators, and at least 7 DIGITS.
+    The digit floor is what the old inline pattern lacked: '(   )   -    ' and
+    '----------' both satisfied the character-class form."""
+    s = v.strip()
+    return bool(re.match(r'^[\d\s\-\(\)\+\.xX]{7,20}$', s)) and len(re.sub(r'\D', '', s)) >= 7
+
+
+def _is_url(v: str) -> bool:
+    """A web address. Accepts bare domains ('acme.com', 'www.acme.com') as well
+    as full URLs, because that is how they are printed on ACORD forms."""
+    s = v.strip().lower()
+    if " " in s or "@" in s:
+        return False
+    s = re.sub(r'^https?://', '', s)
+    return bool(re.match(r'^[a-z0-9][a-z0-9\-\.]*\.[a-z]{2,}(/.*)?$', s))
+
+
 def _is_percent(v: str) -> bool:
     """0–100 with optional % sign."""
     clean = v.strip().rstrip("%").strip()
@@ -129,15 +155,70 @@ FACT_REGISTRY: dict[str, dict] = {
         "forms":       {"ACORD_125"},
         "question":    "What is the best phone number to reach you?",
         "tier": 1, "required": False,
-        "validate":    lambda v: bool(re.match(r'^[\d\s\-\(\)\+\.]{7,20}$', v.strip())),
+        "validate":    _is_phone,
         "format_hint": "Phone number (7–20 digits, dashes, parentheses allowed)",
     },
     "contact_email": {
         "forms":       {"ACORD_125"},
         "question":    "What email address should we use to contact you?",
         "tier": 1, "required": False,
-        "validate":    lambda v: bool(re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', v.strip())),
+        "validate":    _is_email,
         "format_hint": "Valid email address (name@domain.com)",
+    },
+    "applicant_website": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is your business's website address?",
+        "tier": 2, "required": False,
+        "validate":    _is_url,
+        "format_hint": "Website (e.g. www.yourcompany.com)",
+    },
+
+    # ── Producer-scoped identity ────────────────────────────────────────────
+    # These are the AGENCY's own details. `tier: None` deliberately: they must
+    # never be asked of the insured in the client questionnaire - the agency
+    # already knows its own fax number. They exist so producer form fields stop
+    # being filled from the applicant's `contact_*` facts and vice versa.
+    "producer_contact_name": {
+        "forms":       {"ACORD_125"},
+        "question":    "Which person at the agency is handling this submission?",
+        "tier": None, "required": False,
+        "validate":    lambda v: len(v.strip()) >= 2,
+        "format_hint": "Full name",
+    },
+    "producer_contact_phone": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is the agency contact's phone number?",
+        "tier": None, "required": False,
+        "validate":    _is_phone,
+        "format_hint": "Phone number",
+    },
+    "producer_contact_email": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is the agency contact's email address?",
+        "tier": None, "required": False,
+        "validate":    _is_email,
+        "format_hint": "Valid email address (name@domain.com)",
+    },
+    "producer_fax": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is the agency's fax number?",
+        "tier": None, "required": False,
+        "validate":    _is_phone,
+        "format_hint": "Fax number",
+    },
+    "producer_address": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is the agency's street address?",
+        "tier": None, "required": False,
+        "validate":    lambda v: len(v.strip()) >= 5,
+        "format_hint": "Street, city, state, ZIP",
+    },
+    "carrier_website": {
+        "forms":       {"ACORD_125"},
+        "question":    "What is the carrier's website address?",
+        "tier": None, "required": False,
+        "validate":    _is_url,
+        "format_hint": "Website (e.g. www.carrier.com)",
     },
     "fein": {
         "forms":       {"ACORD_125"},
@@ -205,6 +286,34 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": 2, "required": False,
         "validate":    _is_positive_int,
         "format_hint": "Whole number (e.g. 25)",
+    },
+    # tier 2 = asked in the client questionnaire. Deliberate: these boxes used
+    # to be filled (wrongly) from the overall headcount, so blanking them without
+    # asking would be a pure fill loss. The client asked for exactly this -
+    # "Send these questions to the client" (report #14).
+    "num_employees_full_time": {
+        "forms":       {"ACORD_125"},
+        "question":    "How many of your employees are full time?",
+        "tier": 2, "required": False,
+        "validate":    _is_positive_int,
+        "format_hint": "Whole number (e.g. 18)",
+    },
+    "num_employees_part_time": {
+        "forms":       {"ACORD_125"},
+        "question":    "How many of your employees are part time?",
+        "tier": 2, "required": False,
+        "validate":    _is_positive_int,
+        "format_hint": "Whole number (e.g. 7)",
+    },
+    # Client report #15: "Obtain the actual business inception date. Do not
+    # treat the policy inception date as the business inception date." The box no
+    # longer takes `years_in_business`, so the questionnaire is how it gets filled.
+    "business_start_date": {
+        "forms":       {"ACORD_125"},
+        "question":    "On what date did your business start operating?",
+        "tier": 2, "required": False,
+        "validate":    _is_date,
+        "format_hint": "Date (MM/DD/YYYY)",
     },
     "operations_description": {
         "forms":       {"ACORD_125"},
@@ -479,6 +588,30 @@ FACT_REGISTRY: dict[str, dict] = {
         "tier": None, "required": False,
         "validate":    _is_currency,
         "format_hint": "Dollar amount (e.g. $1,000,000)",
+    },
+    # A split-limit auto policy states three separate figures (100/300/50).
+    # Without these there was nothing to fill the split boxes with, so the
+    # combined single limit was stamped into all of them.
+    "auto_bi_per_person": {
+        "forms":       {"ACORD_127"},
+        "question":    "What is the auto bodily injury limit per person?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $100,000)",
+    },
+    "auto_bi_per_accident": {
+        "forms":       {"ACORD_127"},
+        "question":    "What is the auto bodily injury limit per accident?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $300,000)",
+    },
+    "auto_pd_per_accident": {
+        "forms":       {"ACORD_127"},
+        "question":    "What is the auto property damage limit per accident?",
+        "tier": None, "required": False,
+        "validate":    _is_currency,
+        "format_hint": "Dollar amount (e.g. $50,000)",
     },
     "auto_liability_structure": {
         "forms":       {"ACORD_127", "ACORD_137_CA", "ACORD_137_CO"},

@@ -1263,6 +1263,32 @@ def _canonical_key(field_name: str) -> Optional[str]:
     return None
 
 
+def _canonical_keys_for(field_name: str) -> set:
+    """Every fact key that can legitimately fill `field_name`.
+
+    That is `_canonical_key` PLUS the more general fact it falls back to in
+    pdf_service's `_FACT_FALLBACKS`. Both indexes that resolve a client answer
+    back onto a form box need this, and they need it identically - a box reading
+    the specific `num_employees_full_time` must still be found when the client
+    answers the general "How many people does your business employ?". Kept as one
+    helper rather than the same two-line check written out at each call site;
+    two copies of one rule drifting apart is how these indexes broke in the first
+    place.
+    """
+    c = _canonical_key(field_name)
+    if not c or c.startswith("_"):
+        return set()
+    keys = {c}
+    try:
+        from services.pdf_service import _FACT_FALLBACKS
+        general = _FACT_FALLBACKS.get(c)
+        if general:
+            keys.add(general)
+    except Exception:                                  # pragma: no cover
+        pass
+    return keys
+
+
 def _is_curated_client_field(field_name: str) -> bool:
     """True when the field resolves to a known plain-language client question."""
     if not field_name:
@@ -1336,10 +1362,13 @@ def _backfill_and_resolve_present(generated: dict, facts: dict) -> Tuple[set, bo
     """
     from services.sqs_service import _fact_is_filled
     try:
-        from services.pdf_service import _deterministic_map
+        from services.pdf_service import _deterministic_map, _is_nonfillable_field
     except Exception as ex:  # pragma: no cover - defensive
         logger.warning(f"_backfill_and_resolve_present: pdf_service import failed: {ex}")
         _deterministic_map = None
+
+        def _is_nonfillable_field(_f):        # noqa: D103 - fail closed
+            return True
 
     generated = generated or {}
     facts = facts or {}
@@ -1349,10 +1378,15 @@ def _backfill_and_resolve_present(generated: dict, facts: dict) -> Tuple[set, bo
     for fid, form_data in generated.items():
         schema = (form_data or {}).get("schema", {}) or {}
         for sf in schema.keys():
-            c = _canonical_key(sf)
-            if not c or c.startswith("_"):
+            # Same non-fillable exclusion as the restamp path below: a signature
+            # or premium box must never receive a client answer.
+            if _is_nonfillable_field(sf):
                 continue
-            canon_fields.setdefault(c, []).append((fid, sf))
+            # Register under the specific fact AND the general one it falls back
+            # to: the client answers the general question ("How many people does
+            # your business employ?") but the box reads the specific fact.
+            for c in _canonical_keys_for(sf):
+                canon_fields.setdefault(c, []).append((fid, sf))
 
     present: set = set()
     changed = False
@@ -2974,7 +3008,7 @@ def _restamp_canonical_into_forms(
     Returns the list of form ids that received at least one stamped field.
     """
     try:
-        from services.pdf_service import _deterministic_map
+        from services.pdf_service import _deterministic_map, _is_nonfillable_field
     except Exception as ex:
         logger.warning(f"_restamp_canonical: pdf_service import failed: {ex}")
         return []
@@ -2990,10 +3024,24 @@ def _restamp_canonical_into_forms(
         form_touched = False
 
         for schema_field in schema.keys():
+            # NEVER restamp a signature, a premium or any other carrier-computed
+            # or administrative box. `map_facts_to_form` has always blanked these
+            # before any fill runs, but this path did not consult that rule at
+            # all - and `Producer_AuthorizedRepresentative_Signature_A` resolves
+            # to a canonical contact-name fact, so a client answering the tier-1
+            # question "Who is the main person we should contact about this
+            # application?" had their name written into the PRODUCER'S SIGNATURE
+            # box and labelled `client_arq` (green - "client supplied") on a
+            # legal document. Client report #20: "That should never be
+            # automatically inferred from the producer's name."
+            if _is_nonfillable_field(schema_field):
+                continue
             # Only consider schema fields that map to THIS canonical fact. This
             # keeps the re-stamp surgical: a question about `applicant_name`
-            # touches only the named-insured fields, nothing else.
-            if _canonical_key(schema_field) != canon:
+            # touches only the named-insured fields, nothing else. A box reading
+            # a SPECIFIC fact also matches the general fact it falls back to -
+            # see _canonical_keys_for.
+            if canon not in _canonical_keys_for(schema_field):
                 continue
             mapped_val = _deterministic_map(schema_field, facts)
             if mapped_val is None or str(mapped_val).strip() == "":
