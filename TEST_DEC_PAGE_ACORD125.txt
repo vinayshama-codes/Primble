@@ -1,0 +1,198 @@
+COMMERCIAL PACKAGE POLICY - COMMON DECLARATIONS
+GRANITE STATE MUTUAL INSURANCE COMPANY - NAIC # 24414
+A Stock Insurance Company - Home Office: 400 Commerce Way, Manchester, NH 03101
+Servicing Office: Granite State Mutual, Mountain West Branch, 1550 Wynkoop St Suite 700, Denver, CO 80202
+For Claims Reporting call (800) 555-0199, 24 hours a day
+Servicing Carrier Inquiries: (303) 555-0577
+
+- PAGE 1 OF 7 -
+
+POLICY NUMBER: PKG-88213-26
+RENEWAL OF POLICY NUMBER: PKG-88213-25
+POLICY PERIOD: From 09/01/2026 to 09/01/2027 at 12:01 A.M. Standard Time at the mailing address of the Named Insured.
+TRANSACTION STATUS: RENEWAL - ISSUED
+
+NAMED INSURED: Summit Ridge Builders LLC
+MAILING ADDRESS: 2200 Cascade Court, Unit B4, Aurora, CO 80014-3315
+LEGAL ENTITY: Limited Liability Company (LLC) - 2 Members and Managers
+FEIN: 84-3921657
+BUSINESS PHONE: (720) 555-0100
+INSURED WEBSITE: www.summitridgebuilders.com
+BUSINESS DESCRIPTION: Commercial general contractor specializing in tenant finish and light commercial renovation
+NAICS: 236220    SIC: 1542    GL CLASS CODE: 91580
+DATE BUSINESS STARTED: 04/12/2011
+
+SECOND NAMED INSURED: Summit Ridge Property Holdings LLC
+MAILING ADDRESS: 88 Marketplace Ave, Unit 12, Boulder, CO 80302
+LEGAL ENTITY: Limited Liability Company (LLC) - 2 Members and Managers
+FEIN: 84-1102938
+
+INSURED CONTACT PERSON: Maria Delgado, Office Manager
+CONTACT PHONE: (720) 555-0142 (business)
+CONTACT EMAIL: mdelgado@summitridgebuilders.com
+
+PRODUCER / AGENCY: Alpine Insurance Partners, Inc.
+AGENCY ADDRESS: 6400 Fiddlers Green Circle, Suite 210, Greenwood Village, CO 80111
+AGENCY CONTACT: Erin Calloway
+AGENCY PHONE: (303) 555-0800
+AGENCY FAX: (303) 555-0801
+AGENCY EMAIL: ecalloway@alpineinspartners.com
+AGENT NUMBER: AGT-4471-02
+ACCOUNT NUMBER: 0098-77215
+DIRECT BILL - PAYMENT PLAN: ANNUAL - AUDIT: ANNUAL
+
+- PAGE 2 OF 7 -
+
+SUMMARY OF COVERAGE PARTS AND ANNUAL PREMIUM
+This policy consists of the following coverage parts for which a premium is indicated.
+
+COMMERCIAL GENERAL LIABILITY COVERAGE PART
+  Issued by: Granite State Mutual Insurance Company - Policy No. GL-55110-26 ... $4,200
+COMMERCIAL AUTO (BUSINESS AUTO) COVERAGE PART
+  Issued by: Granite State Mutual Insurance Company - Policy No. CA-77120-26 ... $3,100
+COMMERCIAL INLAND MARINE COVERAGE PART
+  Issued by: Granite State Mutual Insurance Company - Policy No. IM-33448-26 ... $450
+COMMERCIAL LIABILITY UMBRELLA COVERAGE PART
+  Issued by: Granite State Mutual Insurance Company - Policy No. CU-90265-26 ... $2,750
+
+PROPERTY - NO COVERAGE
+CRIME AND FIDELITY - NO COVERAGE
+BOILER AND MACHINERY - NO COVERAGE
+
+TOTAL ANNUAL PACKAGE PREMIUM: $10,500
+
+Note: A Cyber Incident and Data Privacy Exclusion endorsement is attached to the
+Commercial General Liability coverage form. This policy provides no standalone
+cyber or privacy coverage part.
+
+- PAGE 3 OF 7 -
+
+COMMERCIAL GENERAL LIABILITY DECLARATIONS - Policy No. GL-55110-26
+LIMITS OF INSURANCE
+  Each Occurrence Limit ................................ $1,000,000
+  Damage To Premises Rented To You Limit ............... $300,000 (any one premises)
+  Medical Expense Limit ................................ $10,000 (any one person)
+  Personal and Advertising Injury Limit ................ $1,000,000
+  General Aggregate Limit .............................. $2,000,000
+  Products/Completed Operations Aggregate Limit ........ $2,000,000
+FORM TYPE: Occurrence
+AUDIT PERIOD: Annual
+
+SCHEDULE OF HAZARDS (GENERAL LIABILITY)
+LOC 1  Class Code 91580  Contractors - Executive Supervisors
+       Premium Basis: Payroll  Exposure: $410,000  Territory: 5
+LOC 1  Class Code 91342  Carpentry - interior
+       Premium Basis: Payroll  Exposure: $265,000  Territory: 5
+
+DESCRIPTION OF OPERATIONS: Commercial general contractor specializing in tenant
+finish and light commercial renovation of occupied retail and office space.
+Approximately 25% of work is subcontracted to licensed trade contractors under
+written contract. No roofing, no demolition, no exterior work above three stories.
+Installation, service or repair work: 15% of operations. Off-premises
+installation, service or repair work: 10% of operations.
+
+The insured maintains a written safety manual and conducts monthly safety
+meetings. Field supervisors are OSHA-10 certified.
+
+The Named Insured has no parent company and has no subsidiaries.
+
+- PAGE 4 OF 7 -
+
+PREMISES / LOCATION SCHEDULE
+LOCATION 1 (Primary):
+  Street: 2200 Cascade Court, Unit B4
+  City: Aurora    County: Arapahoe    State: CO    Zip: 80014-3315
+  Interest: Tenant (leased premises)
+  Full Time Employees: 6    Part Time Employees: 2
+  Annual Revenues at this location: $1,850,000
+  Occupied Area: 3,500 SQ FT    Total Building Area: 12,000 SQ FT
+  Operations at this location: Contractor office and warehouse/shop
+
+LOCATION 2:
+  Street: 88 Marketplace Ave, Unit 12
+  City: Boulder    County: Boulder    State: CO    Zip: 80302
+  Interest: Owner (owned by Summit Ridge Property Holdings LLC)
+  Full Time Employees: 2    Part Time Employees: 0
+  Annual Revenues at this location: $250,000
+  Occupied Area: 1,200 SQ FT    Total Building Area: 1,200 SQ FT
+  Operations at this location: Administrative office
+
+- PAGE 5 OF 7 -
+
+BUSINESS AUTO DECLARATIONS - Policy No. CA-77120-26
+ITEM TWO - SCHEDULE OF COVERAGES AND COVERED AUTOS
+  Covered Autos Liability: Symbol 1 (Any Auto) - Limit $1,000,000 each accident
+  Medical Payments: Symbol 2 - $5,000 each insured
+  Uninsured Motorists: Symbol 2 - $1,000,000 each accident ... $95
+  Underinsured Motorists: Symbol 2 - $1,000,000 each accident ... $70
+  Comprehensive: Symbol 7 - ACV less $500 deductible ... $240
+  Collision: Symbol 7 - ACV less $500 deductible ... $180
+
+ITEM THREE - SCHEDULE OF COVERED AUTOS YOU OWN
+  Auto 1: 2019 FORD F-150 XL  VIN 1FTEW1EP5KFA12345
+    GVW 7,000  Garaging: 2200 Cascade Court, Unit B4, Aurora, CO 80014
+    Comprehensive Ded $500 / Collision Ded $500
+  Auto 2: 2021 RAM PROMASTER 2500  VIN 3C6TRVDG8ME512346
+    GVW 8,900  Garaging: 2200 Cascade Court, Unit B4, Aurora, CO 80014
+    Comprehensive Ded $500 / Collision Ded $500
+
+SCHEDULE OF DRIVERS
+  Driver 1: Jordan Reyes  DOB 06/14/1985  License CO D123-4567-8901
+    Hired 03/09/2015  Years experience: 14
+
+- PAGE 6 OF 7 -
+
+COMMERCIAL INLAND MARINE DECLARATIONS - Policy No. IM-33448-26
+  Contractors Equipment Floater - Total Scheduled Value $86,000
+  Item 1: Skid Steer Loader, Serial SSL-99120 ... $52,000
+  Item 2: Compact Excavator, Serial CEX-40277 ... $34,000
+  Deductible: $1,000 per occurrence
+
+COMMERCIAL LIABILITY UMBRELLA DECLARATIONS - Policy No. CU-90265-26
+  Each Occurrence Limit: $2,000,000
+  Aggregate Limit: $2,000,000
+  Self-Insured Retention: $0
+  Schedule of Underlying Insurance: Commercial General Liability GL-55110-26
+  ($1,000,000 each occurrence) and Covered Autos Liability CA-77120-26
+  ($1,000,000 each accident), as listed in the schedule of underlying insurance.
+  Umbrella Policy Period: 09/01/2026 to 09/01/2027
+
+PRIOR POLICY SCHEDULE (EXPIRING TERM 09/01/2025 - 09/01/2026)
+  General Liability: Pinnacle Casualty Company - Policy GL-55110-25 - Premium $3,950
+    Effective 09/01/2025  Expiration 09/01/2026
+  Automobile: Pinnacle Casualty Company - Policy CA-77120-25 - Premium $2,880
+    Effective 09/01/2025  Expiration 09/01/2026
+
+MORTGAGEE / ADDITIONAL INTEREST SCHEDULE
+  Loss Payee (Contractors Equipment): First Peak Equipment Finance,
+  9100 Ridgeline Blvd, Suite 300, Highlands Ranch, CO 80129
+  Reference/Loan #: EQ-2071-88
+
+- PAGE 7 OF 7 -
+
+LOSS HISTORY - LOSS RUNS VALUED AS OF 07/31/2026
+Experience period 09/01/2021 through 09/01/2026 (5 years).
+  Claim 1: Occurrence Date 11/03/2023 - Line: General Liability
+    Claim Reported 11/05/2023 - Claim No. GL-2023-4471
+    Description: Slip and fall by visitor at tenant-finish job site
+    Paid $8,250  Reserved $0  Status: CLOSED  Subrogation: N
+  Claim 2: Occurrence Date 05/22/2025 - Line: Automobile
+    Claim Reported 05/22/2025 - Claim No. CA-2025-1108
+    Description: Rear-end collision, minor bumper damage to covered auto
+    Paid $2,100  Reserved $0  Status: CLOSED  Subrogation: Y
+Total Losses (5 years): $10,350
+
+CONDITIONS (EXCERPTS)
+Bankruptcy or insolvency of the insured or of the insured's estate will not
+relieve us of our obligations under this Coverage Part. In the event of a
+judgment or lien arising from a covered loss, the terms of this policy apply as
+described in the applicable coverage form. A false statement knowingly made by
+the insured on the application for this coverage may render coverage void.
+Blanket Additional Insured: any person or organization that the Named Insured
+agrees in a written contract to add as an additional insured is included as an
+insured, but only with respect to liability arising out of the Named Insured's
+ongoing operations. This provision does not name any specific person or
+organization as an additional insured.
+
+Countersigned: 08/15/2026
+Authorized Representative of Granite State Mutual Insurance Company

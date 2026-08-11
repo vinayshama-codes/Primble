@@ -217,6 +217,15 @@ _EXTRACT_SCHEMA = (
     '  "prior_carrier_naic": string or null,\n'
     '  "audit_period": string or null,\n'
     '  "billing_plan": string or null,\n'
+    # The package total the DOCUMENT states. Without it the form's POLICY
+    # PREMIUM box had to be computed by summing per-line premiums, which is
+    # only as good as every line's extraction - a real 271-page run summed to
+    # $9,438 against a stated total of $10,663 because one line's premium was
+    # missed. A stated total is a copy; a sum is an inference.
+    '  "total_policy_premium": string or null (the TOTAL package/policy premium the '
+    'document itself states - e.g. "TOTAL ANNUAL PACKAGE PREMIUM: $10,500". Never a '
+    'single coverage part\'s premium, never a figure you add up yourself, and never a '
+    'deposit or instalment. Null if the document states no overall total),\n'
     '  "wc_el_each_accident": string or null,\n'
     '  "wc_el_disease_each_employee": string or null,\n'
     '  "wc_el_disease_policy_limit": string or null,\n'
@@ -286,7 +295,9 @@ _EXTRACT_SCHEMA = (
     # Sub-fields mirror ACORD's own per-location premises data (occupancy,
     # ownership, employee counts, revenue) so multi-location submissions are
     # captured with real per-location facts instead of one company-wide total.
-    '  "property_locations": [{"address": string, "ownership": string or null (owner, tenant, or a short description '
+    '  "property_locations": [{"address": string, "county": string or null (the COUNTY the '
+    'premises sits in, only when the document states it - e.g. "Arapahoe"; never guessed from the city), '
+    '"ownership": string or null (owner, tenant, or a short description '
     'of the actual interest if neither, e.g. "licensee"), '
     '"inside_city_limits": boolean or null, "full_time_employees": string or null, "part_time_employees": string or null, '
     '"annual_revenue": string or null, "occupied_area": string or null, "open_to_public_area": string or null, '
@@ -2493,6 +2504,99 @@ def _dedupe_schedule_rows(list_key: str, items: List[dict]) -> List[dict]:
     return groups + unkeyed
 
 
+_DATE_ISH_RE = re.compile(r"^[\d/\-.\s]{6,12}$")
+_FOUR_DIGIT_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def _iso_date_or_none(sval: str) -> Optional[str]:
+    """ISO form of a bare date string, else None. Never raises."""
+    if not _DATE_ISH_RE.match(sval.strip()):
+        return None
+    try:
+        from services.normalization import normalize_date
+        return normalize_date(sval) or None
+    except Exception:                                     # noqa: BLE001
+        return None
+
+
+def _variant_group_key(sval: str) -> str:
+    """Group key that ignores FORMATTING but not CONTENT.
+
+    THE VOTE-SPLITTING FIX. Cross-chunk merging used `sval.lower()` as the
+    key, so two spellings of ONE value became two rivals and split their own
+    frequency. Measured on a real 271-page package, every one of these was a
+    self-inflicted contest between identical values:
+
+        effective_date          '07/15/25'(4)      vs '07/15/2025'(3)
+        producer_contact_phone  '303-996-7800'(3)  vs '(303)996-7800'(3)
+        mailing_address         '... denver, co'(3) vs '... denver co'(3)
+        auto_deductible_comp    '$1000 ded'        vs '1000 ded'
+        gl_each_occurrence      '$1,000,000'       vs '$ 1,000,000'
+
+    The mailing-address split is also what surfaced a phantom "documents
+    disagree" conflict to the user on a SINGLE-document submission.
+
+    Dates canonicalise through the shared `normalize_date` (so a two-digit
+    year merges with its four-digit twin); everything else folds to
+    alphanumerics. Genuinely different values - four different policy numbers,
+    two different NAIC codes - still land in different groups and still
+    compete, because they really are different.
+    """
+    s = sval.strip()
+    iso = _iso_date_or_none(s)
+    if iso:
+        return "d:" + iso
+    folded = re.sub(r"[^a-z0-9]+", "", s.lower())
+    return folded or s.lower()
+
+
+def _is_midword_truncation(short: str, long: str) -> bool:
+    """True when `short` is `long` cut off MID-WORD - the carrier-shorthand
+    shape ("commercial general contra" / "commercial general contractor").
+
+    The mid-word test is the whole safety argument. "$1,000,000" is also a
+    prefix of "$1,000,000 each accident", but the continuation begins at a
+    word boundary: that is a QUALIFIED value, not a truncated one, and merging
+    the two would put "each accident" into a limit box.
+    """
+    a, b = short.strip().lower(), long.strip().lower()
+    if len(a) < 4 or len(a) >= len(b) or not b.startswith(a):
+        return False
+    return b[len(a)].isalnum() and a[-1].isalnum()
+
+
+def _prefer_variant(new: str, current: str) -> bool:
+    """Should `new` replace `current` as its group's representative?"""
+    if _is_midword_truncation(current, new):
+        return True                       # new restores truncated characters
+    if _is_midword_truncation(new, current):
+        return False
+    # A four-digit year is the complete rendering of the same date.
+    new_full = bool(_FOUR_DIGIT_YEAR_RE.search(new))
+    cur_full = bool(_FOUR_DIGIT_YEAR_RE.search(current))
+    if new_full != cur_full:
+        return new_full
+    return False                          # otherwise first-seen spelling holds
+
+
+def _fold_truncated_groups(bucket: Dict[str, dict]) -> None:
+    """Merge groups whose representative is a mid-word truncation of another's
+    into that longer group, summing their frequencies. Mutates `bucket`."""
+    keys = list(bucket)
+    for short_key in keys:
+        entry = bucket.get(short_key)
+        if entry is None:
+            continue
+        for long_key in keys:
+            if long_key == short_key or long_key not in bucket:
+                continue
+            target = bucket[long_key]
+            if _is_midword_truncation(entry["display"], target["display"]):
+                target["freq"] += entry["freq"]
+                bucket.pop(short_key, None)
+                break
+
+
 def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
     if not partials:
         return {"facts": {}, "flags": {}}
@@ -2527,11 +2631,20 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
             if _is_empty(raw_val):
                 continue
             sval     = str(raw_val).strip()
-            norm_key = sval.lower()
-            val_candidates.setdefault(k, {})
-            if norm_key not in val_candidates[k]:
-                val_candidates[k][norm_key] = {"record": v, "freq": 0}
-            val_candidates[k][norm_key]["freq"] += 1
+            norm_key = _variant_group_key(sval)
+            bucket   = val_candidates.setdefault(k, {})
+            entry    = bucket.get(norm_key)
+            if entry is None:
+                entry = {"record": v, "freq": 0, "display": sval}
+                bucket[norm_key] = entry
+            elif _prefer_variant(sval, entry["display"]):
+                entry["record"], entry["display"] = v, sval
+            entry["freq"] += 1
+
+    # Fold carrier-shorthand truncations into their complete twin before any
+    # scoring runs, so a value cut off mid-word cannot out-vote itself.
+    for _bucket in val_candidates.values():
+        _fold_truncated_groups(_bucket)
 
     merged_facts: dict = {}
 
@@ -2548,8 +2661,12 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
 
     for field in _ordered_fields:
         candidates = val_candidates[field]
+        # Element 0 is the group's REPRESENTATIVE spelling, not the folded key:
+        # every downstream consumer (shape partition, money-amount comparison,
+        # the composite tiebreak, the logs) reads the real value that way.
         scored = sorted(
-            [(nk, _score_value(field, c["record"], c["freq"]), c) for nk, c in candidates.items()],
+            [(c["display"], _score_value(field, c["record"], c["freq"]), c)
+             for c in candidates.values()],
             key=lambda x: x[1], reverse=True,
         )
 
@@ -4025,9 +4142,84 @@ def _consolidate_property_locations(facts: dict) -> None:
             continue
         parsed = _parse_address(addr)
         entry.setdefault("address_line1", parsed.get("line1"))
+        entry.setdefault("address_line2", parsed.get("line2"))
         entry.setdefault("address_city",  parsed.get("city"))
         entry.setdefault("address_state", parsed.get("state"))
         entry.setdefault("address_zip",   parsed.get("zip"))
+        # County comes only from the document (extraction's per-location
+        # "county" key) - _parse_address cannot derive one.
+        entry.setdefault("address_county", entry.get("county"))
+
+    # ── Entries that are not locations at all ────────────────────────────────
+    # Two shapes observed on a live run (client form, premises section):
+    #
+    #   1. A bare UNIT fragment ("# D13", "Ste 400") captured as its own
+    #      "location". Its line1 is only a unit designator and it carries no
+    #      city/state/zip of its own, so it can never be a distinct premises -
+    #      it is a piece of some full address mentioned elsewhere. Stamping it
+    #      produced a phantom "LOC # 2" row whose street was the producer's
+    #      suite number.
+    #   2. The PRODUCER'S OWN ADDRESS swept into the insured's location list.
+    #      The premises schedule describes the INSURED's premises; the agency's
+    #      street belongs to the Producer block and nowhere else (same entity
+    #      discipline as extraction RULE 15).
+    #
+    # Both filters only ever REMOVE a non-location; a genuine location always
+    # has a real street line or its own city/state/zip and never equals the
+    # producer's address line.
+    _unit_only_re = re.compile(
+        r"^\s*(?:#|apt\.?|suite|ste\.?|unit|bldg\.?|building|fl\.?|floor|rm\.?|room)"
+        r"\s*[\w-]*\s*$",
+        re.I,
+    )
+    _producer_line1_key = ""
+    _producer_addr = _fv(facts, "producer_address")
+    if _producer_addr:
+        _p_line1 = _parse_address(str(_producer_addr)).get("line1") or ""
+        _producer_line1_key = normalize_address(_p_line1) if _p_line1 else ""
+
+    # Sub-fields that make an address-less entry worth keeping as its own row —
+    # real per-location data a document can state without repeating the street.
+    _substantive_keys = (
+        "ownership", "building_value", "bpp_value", "annual_revenue",
+        "full_time_employees", "part_time_employees", "occupied_area",
+        "open_to_public_area", "total_building_area", "operations_description",
+        "construction_type", "year_built", "inside_city_limits",
+    )
+
+    def _is_location_entry(entry: dict) -> bool:
+        line1 = str(entry.get("address_line1") or "").strip()
+        has_own_geo = any(
+            str(entry.get(k) or "").strip()
+            for k in ("address_city", "address_state", "address_zip")
+        )
+        if line1 and _unit_only_re.match(line1) and not has_own_geo:
+            return False                    # bare unit fragment, not a premises
+        if _producer_line1_key and line1 and normalize_address(line1) == _producer_line1_key:
+            return False                    # the agency's address, not the insured's
+        if not line1 and not has_own_geo:
+            # No address signal at all. Keep it only when it carries real
+            # per-location data; otherwise it becomes a phantom row whose only
+            # stamped cell is its own LOC # (observed live: an empty "LOC # 2"
+            # premises row on the client's form).
+            has_data = any(
+                entry.get(k) not in (None, "", [])
+                for k in _substantive_keys
+            )
+            if not has_data:
+                return False
+        return True
+
+    _dropped = [e for e in entries if not _is_location_entry(e)]
+    if _dropped:
+        logger.info(
+            "consolidate_locations: dropped %d non-location entr%s: %s",
+            len(_dropped), "y" if len(_dropped) == 1 else "ies",
+            [str(e.get("address") or "")[:40] for e in _dropped[:4]],
+        )
+        entries = [e for e in entries if _is_location_entry(e)]
+        if not entries:
+            return
 
     groups: Dict[str, dict] = {}
     order: List[str] = []
@@ -4064,9 +4256,11 @@ def _consolidate_property_locations(facts: dict) -> None:
         # bare number ("1", "2", ...), not the "L1" internal id format.
         obj["location_number"] = str(i + 1)
         obj.setdefault("address_line1", obj.get("address"))
+        obj.setdefault("address_line2", None)
         obj.setdefault("address_city", None)
         obj.setdefault("address_state", None)
         obj.setdefault("address_zip", None)
+        obj.setdefault("address_county", None)
 
         # Owner / Tenant / Other are mutually exclusive on the real ACORD
         # form. Deriving ALL THREE deterministically (not just owner/tenant)
@@ -4076,6 +4270,28 @@ def _consolidate_property_locations(facts: dict) -> None:
         # with a redundant description on the same row).
         ownership = str(obj.get("ownership") or "").strip()
         ownership_l = ownership.lower()
+        # A sentence naming SEVERAL interests is not a determination of one.
+        # Live 25-page run: the dec says "This location is owned, rented or
+        # occupied by the named insured" - deliberately non-committal - and
+        # that whole phrase was written into the ACORD "Other" interest box
+        # with the sentence as its description. Owner, tenant and other are
+        # mutually exclusive; a phrase that lists two of them tells us the
+        # document did not say which, so all three stay unknown and the
+        # question goes to the client.
+        # The tell is the document offering ALTERNATIVES ("owned, rented OR
+        # occupied"), not the length of the phrase: "Tenant (leased office
+        # space)" and "Licensee under a shared-use agreement" are single,
+        # determinate answers and must still resolve.
+        _interest_words = len({
+            w for w in ("own", "rent", "occup", "tenant", "lease", "licens")
+            if w in ownership_l
+        })
+        if _interest_words > 1 and re.search(r"\bor\b", ownership_l):
+            logger.info(
+                "consolidate_locations: ambiguous ownership %r - left unknown",
+                ownership[:60],
+            )
+            ownership_l = ""
         if ownership_l.startswith("owner"):
             obj["is_owner"], obj["is_tenant"], obj["is_other_interest"] = True, False, False
             obj["other_interest_description"] = None

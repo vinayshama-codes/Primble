@@ -168,6 +168,241 @@ There is also a fifth, non-obvious condition that is easy to lose:
 
 ## 3. Open issues
 
+### C44 — the same vote-split bug in a SECOND function; "absence" is not a value (2026-08-11), no prompt change
+
+Audit of a real 25-page Orbin declarations run. No LLM-call or prompt change; all six are
+decision-layer fixes.
+
+1. **Every line-of-business premium box came out BLANK** on a dec page that prints all four.
+   `_resolve_lob_premium` de-duplicated matched premiums by RAW STRING, so `"$ 3,954.00"`
+   and `"$3,954"` from different chunks counted as two different amounts, tripped the
+   "ambiguous - leave blank" branch, and suppressed the box. Same disease as C43's merge
+   vote-splitting, in a second function; comparing on digits is the same cure.
+2. **The PRIOR CARRIER grid held the policies being APPLIED FOR** - carriers, premiums and
+   the proposed term. `_prior_coverage_grid` now discards any entry carrying the CURRENT
+   policy number (including per-line numbers from `coverage_lines`) or the CURRENT
+   effective/expiration date. Equality tests against facts we already hold; a genuine prior
+   policy is untouched.
+3. **A declarations page states absence in its own vocabulary** - "None Scheduled",
+   "NOT PURCHASED", "NOT ATTACHED", "NOT INCLUDED", "NOT RATED", "NO COVERAGE",
+   "NOT REPORTED" - and those phrases were being stamped as VALUES, including into the
+   coded STATE and COUNTRY boxes of the additional-interest block. All added to
+   `_LLM_EMPTY_SENTINELS`.
+4. A non-committal ownership sentence ("owned, rented **or** occupied by the named
+   insured") no longer ticks the "Other" interest box; alternatives joined by "or" leave
+   the interest unknown, while "Tenant (leased office space)" and "Licensee under a
+   shared-use agreement" still resolve.
+5. The CITY LIMITS "Other" box is schedule-bound (it had been ticked with the insured's
+   street address as its description).
+6. A field ACORD declares as "Enter percentage:" keeps its value only when the document
+   actually prints that figure as a percentage - two runs of the same dec produced 0%/0%
+   then 100%/100% from a document stating no percentage at all.
+
+Plus more SELECTED-CONDITIONS anchors in `_POLICY_CONTRACT_LANGUAGE_RE` ("legal action
+against us", "no person or organization", "exclusions are deleted", "concealment,
+misrepresentation", ...) - each verbatim from this dec, each previously quotable as
+"evidence" for an applicant-history question.
+
+---
+
+### C43 — THE LARGE-DOCUMENT ROOT CAUSE: cross-chunk vote splitting (2026-08-11), no cost change
+
+**Why a 271-page package fills worse than a 7-page one, measured rather than assumed.**
+Extraction asks EVERY chunk for EVERY scalar fact. A 7-page dec is one chunk: one coherent
+answer per key. A 271-page package is 14 chunks: up to 14 partial answers per key, and
+`_merge_list_fields` picks the winner by frequency. That vote was keyed on
+`sval.lower()`, so two SPELLINGS of one value became two rivals splitting their own
+frequency. Verbatim from the run's own merge log:
+
+    effective_date          '07/15/25'(4)        vs '07/15/2025'(3)
+    producer_contact_phone  '303-996-7800'(3)    vs '(303)996-7800'(3)
+    mailing_address         '..., denver, co'(3) vs '... denver co'(3)
+    auto_deductible_comp    '$1000 ded'          vs '1000 ded'
+
+The address split also surfaced a phantom "documents disagree" conflict on a submission
+containing ONE document. Fix: `_variant_group_key` folds formatting (dates through the
+shared `normalize_date`, everything else to alphanumerics) so variants pool their votes,
+and `_fold_truncated_groups` merges a MID-WORD truncation into its complete twin
+("commercial general contra" -> "commercial general contractor"). A qualified value is
+explicitly NOT a truncation ("$1,000,000" vs "$1,000,000 each accident" - the
+continuation starts at a word boundary), which is the whole safety argument. Genuinely
+different values (four policy numbers, two NAIC codes) still compete.
+
+**Second root cause, same document, not fixed by grouping:** a 271-page package is ~7%
+declarations and ~93% policy forms, so for any Yes/No question some clause contains the
+question's own noun. Q3 ("flammables, explosives, chemicals?") came back "Y" quoting the
+POLLUTION DEFINITION; Q5 came back "Y" off a cancellation condition. `_POLICY_DEFINITION_RE`
+(a quoted term followed by "means", or "as used in this policy") and cancellation-condition
+patterns now disqualify such quotes as evidence and as narrative values.
+
+No prompt change, no call-count change.
+
+---
+
+### C42 — a stated package total replaces a computed one; three more families owned (2026-08-11), cost NEGATIVE
+
+Graded against both a synthetic 7-page fixture and the real 271-page package on the same day.
+
+1. **EXTRACTION PROMPT: `total_policy_premium` added (~60 words, cached prefix).** The only
+   prompt change here. The ACORD 125 POLICY PREMIUM box was computed by summing per-line
+   premiums; on the 271-page package that summed to **$9,438 against a stated $10,663**
+   because one line's premium was missed at extraction. A stated total is a COPY, a sum is
+   an INFERENCE - `_resolve_estimated_total` now prefers the stated total (currency-checked)
+   and keeps the sum as the fallback for documents that print no overall total.
+2. Field-set / code only: the transaction-status TIME boxes are owned unconditionally (a
+   dec page prints only the POLICY's "12:01 A.M." inception hour, lifted into them on two
+   runs); the thirteen additional-interest TYPE boxes are owned by the captured interest
+   fact (one stated Loss Payee had produced three ticks); a row-B narrative that
+   near-duplicates row A's is blanked (the primary insured's operations were copied into
+   "DESCRIPTION OF OPERATIONS OF OTHER NAMED INSUREDS"). This last one is deliberately NOT
+   the banned slot dedup (C18) - gap-fill values only, rows B+ only, >= 40 chars of free
+   text only, and schedule-bound cells never reach it.
+
+Field count to the LLM falls again (status times, 13 interest boxes when the fact exists).
+Calls unchanged.
+
+---
+
+### C41 — graded-fixture round: county joins the location schema; nine field families hardened (2026-08-10), cost NEGATIVE
+
+A synthetic 7-page dec fixture with a full grading key (TEST_DEC_PAGE_ACORD125.txt) was run
+live; ~85% of the key passed and the nine failures were each fixed with the run's literal
+values as tests:
+
+1. **EXTRACTION PROMPT: `property_locations` gained a `"county"` sub-field** (~25 words,
+   cached prefix; the only prompt change in this entry). County is now schedule-bound end
+   to end — the last premises column a model could free-associate into is owned.
+2. Field-set / code only: prior-grid premium cells exempted from the "Premium"
+   non-fillable substring (fill from `prior_coverage_by_line`); `NamedInsured_FullName`
+   rows B+ bound to `additional_named_insureds` (row_offset=1); the producer mailing block
+   owned by one `producer_address` parse; business-type mention-ticks suppressed for
+   contractors; a "Yes" whose support text LEADS with a negation is blanked by the gate;
+   negation sentences blanked from name boxes; Q8/9/10 incident dates anchored to their
+   explanations; an insured's own name blanked from AdditionalInterest (loss-payee fact
+   seeds the row instead).
+
+Net LLM field count falls again (county, producer block, prior premiums, 2nd-insured name
+all leave the prompts when facts exist). Calls unchanged.
+
+---
+
+### C40 — schedule row count bounds whole field families; package total is arithmetic (2026-08-10), cost NEGATIVE
+
+Run-E findings. Field-set changes only; call count unchanged.
+
+1. **`_resolve_schedule_family_row`**: rows beyond a KNOWN schedule length are owned blanks
+   for EVERY column of the family — including columns with no schedule binding. Solves the
+   client's original "ZIP = 4800 D / Denve" report for good: those fragments were in the
+   COUNTY boxes (beside ZIP on the printed form), the one premises column not bound to
+   `property_locations`, so it alone kept reaching the model as a "find 4 distinct values"
+   group. Ambiguous families (Vehicle: two list keys) are exempt; unknown/empty lists keep
+   full LLM coverage.
+2. **`_resolve_estimated_total`**: ACORD 125's POLICY PREMIUM box (name carries no
+   "Premium" token, so it was LLM-fillable and flip-flopped between the GL line premium
+   and the true package total across runs) is owned: the sum of granted line premiums,
+   with coverage-part entries and duplicate policy numbers excluded; blank when any line
+   lacks a figure. The model is never asked.
+3. **NAIC hard shape** (3-6 digits): the carrier's NAME was stamped into the NAIC CODE box.
+   +40 NAICCode fields under `_shape_violation`, swept per the C22 precedent.
+4. Q4's line label is withheld when it names a line whose coverage flag is explicitly
+   False (post-downgrade) — the number still stamps.
+
+---
+
+### C39 — applicant-contact + line-two families owned; absence sentinels widened (2026-08-10), cost NEGATIVE
+
+Run-D findings, all field-set / response-handling changes (no prompt text change):
+
+1. **`NamedInsured_Contact_*` (24 fields on ACORD 125) is owned**: authoritative blank when
+   extraction found no applicant contact fact (three consecutive live runs filled the block
+   with producer/carrier claims-line contacts — a dec page has no applicant contact to
+   find). Family reopens when a real contact fact exists. Fields leave every gap-fill
+   prompt on the no-contact case.
+2. **`*_MailingAddress/PhysicalAddress_LineTwo_A` owned** from the party's parsed address
+   fact ("# D13" was re-written into line two by the model on two runs).
+3. **`_LLM_EMPTY_SENTINELS` widened** ("not present", "not stated", ... ) — the literal
+   string "not present" was stamped into the NAIC box.
+4. LLM-sourced single-choice contradictions are cleared, not demoted (ISSUE+RENEW both
+   ticked); `lines_of_business` checkbox ticks need grant corroboration when per-line data
+   exists; statutory fraud-warning anchors added to the policy-language guard; carrier
+   identity blanked from AdditionalInterest names; BusinessStartDate == policy date
+   blanked; Form_CompletionDate now stamps the GENERATION date.
+
+Net field count to the LLM drops again (~24+ fields on the common case); calls unchanged.
+
+---
+
+### C38 — reply keys recovered instead of discarded; more owner-resolved families off the LLM (2026-08-10), cost NEGATIVE
+
+1. **`_absorb` now recovers answers returned under near-miss key names** via
+   `_recover_sent_field`: normalized-exact match (case/punctuation drift) and dropped-row-
+   suffix match, each accepted only when UNAMBIGUOUS; everything else still rejected and
+   counted as UNKNOWN_KEYS. This converts already-paid-for answers into filled boxes on
+   long documents (the measured failure: 57 of 60 answers discarded over key names on a
+   single call). Zero new calls; logs `recovered=` per chunk and `KEY_RECOVERED` per field.
+2. **More field families left the gap-fill prompts**: `Policy_Status_*` is owned
+   deterministically when `is_renewal` is affirmative; `StateLicense*`,
+   `Producer_NationalIdentifier`, `Insurer_Product*` are non-fillable (agency-profile /
+   carrier-filing identifiers that never appear correctly on a dec page); "Other" LOB rows
+   additionally exclude coverage-part entries. Field count per 125 run: 277 → 273 on the
+   small fixture; larger drop on renewal packages (whole Policy_Status family).
+
+---
+
+### C37 — gap-fill gained an entity-discipline rule; owner blanks stopped shipping to the LLM (2026-08-10), cost NEGATIVE
+
+Two changes in one entry, both logged per the standing rule:
+
+1. **Prompt: `_PROMPT_SKELETON` rule 9 (ENTITY DISCIPLINE), ~1,050 chars.** The extraction
+   prompt has had RULE 15 (never copy one party's detail into another party's field) since
+   2026-08-09; the GAP-FILL prompt never got an equivalent, and the live client form showed
+   the result: the carrier's "Claim Reporting: (888) 362-2255" line in the APPLICANT's
+   contact block, phone numbers in email fields, and a dec-page "Agent Number" stamped as
+   the State Producer License. Rule 9 names the three parties, forbids cross-party borrowing
+   and label reassignment, and says omit instead. Sits in the constant system prompt →
+   cached after call 1; cost impact negligible.
+
+2. **`compute_form_gaps` gained the authoritative-blank branch `map_facts_to_form` already
+   had.** Its docstring claimed the two "mirror exactly"; they did not. In the combined
+   (production) path every owner-resolved blank — the whole prior-coverage grid, Q4
+   other-policy rows, producer printed name, section-attached boxes, and the new Other-LOB
+   rows — was listed as an LLM question whose answer the fill stage then discarded. Fixing
+   the mirror removes those fields from every gap-fill prompt: fewer field lines per call,
+   occasionally a whole batch fewer. Cost direction strictly negative; stamped output
+   unchanged (the fill stage never consumed those answers).
+
+Also in this change set (no LLM-call impact): `_resolve_other_lob_row` deterministically
+owns ACORD 125's "Other" LOB rows from `coverage_lines` (granted lines matching no standard
+checkbox); locations consolidation drops bare unit fragments and the producer's own address;
+`CommercialStructure_PhysicalAddress_LineTwo` is schedule-bound; unanchored entity rows are
+cleared rather than demoted.
+
+---
+
+### C36 — gap-fill prompt stopped calling facts "already verified" (2026-08-10), cost ~neutral
+
+Two edits to the GAP-FILL prompt, both in text that is constant within a run and therefore
+sits in the cacheable prefix (structure and ordering untouched — verified with
+`inspect_gap_fill_prompts.py` after the change):
+
+1. The facts-block header read `PRIMARY SOURCE — already verified by document analyzer`.
+   **No verification of extraction output against the document exists anywhere in the
+   pipeline** (`_value_in_raw_text` appears zero times in the extraction layer), so the
+   prompt asserted a guarantee the system does not provide and told the model to prefer
+   possibly-wrong inferences over the document. Header now reads `unverified hints from a
+   previous pass — the RAW DOCUMENT TEXT below is authoritative`; the raw-text header
+   changed from `SECONDARY SOURCE` to `AUTHORITATIVE SOURCE`.
+2. The system skeleton's source description changed to match: facts are hints, the
+   document wins on conflict, and boolean facts may *support* a checkbox answer but every
+   such answer still needs its own grounding quote (rule 8 — unchanged).
+
+Char delta: +~320 chars system prompt, +~40 chars user prefix — cached after call 1, cost
+impact negligible. Facts stay AHEAD of raw text (position unchanged, per the C1-C11 cache
+work); only the claimed trust changed. Quality direction: fewer wrong facts echoed by the
+model on conflict; the evidence gate and compliance pass are unchanged.
+
+---
+
 ### C35 — RULE 16 gained a "what a line premium is not" clause (2026-08-09), cost ~neutral
 
 ~450 chars added to the EXTRACTION system prompt, which is constant per run and therefore

@@ -93,13 +93,16 @@ def test_the_check_is_narrowly_scoped():
     validator was enforced that should not have been.
 
     192 as of the postal-code and count tokens (2026-08-09): 113 employee/member
-    counts, 59 postal codes, 16 e-mail addresses, 4 websites. Each addition is
-    swept against every type-appropriate legitimate value on every field it
-    touches before the bound moves - see `test_the_swept_scope_has_no_false_positives`.
+    counts, 59 postal codes, 16 e-mail addresses, 4 websites. 232 as of the
+    NAIC-code token (2026-08-10, +40 NAICCode fields): a live run stamped the
+    CARRIER'S NAME into ACORD 125's NAIC CODE box, and an NAIC company code is
+    numeric by definition. Each addition is swept against every
+    type-appropriate legitimate value on every field it touches before the
+    bound moves - see `test_the_swept_scope_has_no_false_positives`.
     """
     touched = _shape_checked_fields()
-    assert 150 <= len(touched) <= 230, (
-        f"{len(touched)} fields are shape-checked; expected ~192. Review the "
+    assert 150 <= len(touched) <= 260, (
+        f"{len(touched)} fields are shape-checked; expected ~232. Review the "
         "validator set before accepting a change here."
     )
 
@@ -126,6 +129,9 @@ def test_the_swept_scope_has_no_false_positives():
         "zip": ["80216", "80216-3121", "802163121", "M5H 2N2", "m5h2n2"],
         # "1,200" and "approx. 25" are imprecise, not impossible.
         "count": ["25", "0", "1,200", "1200", "approx. 25", "25 (average)"],
+        # NAIC company codes: 3-6 digits, leading zeros legal, occasional
+        # spacing/hyphens tolerated.
+        "naic": ["26247", "0123", "123456", "26 247"],
     }
     failures = []
     for path, field in _shape_checked_fields():

@@ -48,9 +48,18 @@ CANONICAL_TO_EXTRACTION: Dict[str, str] = {
     # producer_customer_identifier intentionally omitted — it is an agency-assigned
     # account NUMBER, not the agency name; mapping it to producer_name produces
     # hallucinated-looking output (e.g. "RSG Specialty Atlanta Binding").
-    "producer_contact_person_full_name":          "contact_name",
-    "producer_contact_person_phone_number":       "contact_phone",
-    "producer_contact_person_email_address":      "contact_email",
+    #
+    # These three MUST point at the PRODUCER-scoped facts, mirroring the Pass-1
+    # rules for the same fields. They previously pointed at contact_* — the
+    # APPLICANT's contact person — so whenever the producer facts were absent
+    # (the common case) this pass stamped the applicant's name/phone/email into
+    # the Producer block as a trusted value: the exact entity-mixing defect
+    # Pass 1 was fixed for on 2026-08-09, resurrected one pass later. When the
+    # producer fact is absent the field now falls through to gap fill, which
+    # reads the producer's own labelled block from the document.
+    "producer_contact_person_full_name":          "producer_contact_name",
+    "producer_contact_person_phone_number":       "producer_contact_phone",
+    "producer_contact_person_email_address":      "producer_contact_email",
 
     # ── Insurer / carrier ──────────────────────────────────────────────────
     "insurer_full_name":                          "carrier_name",
@@ -61,7 +70,11 @@ CANONICAL_TO_EXTRACTION: Dict[str, str] = {
     "named_insured_contact_full_name":            "contact_name",
     "named_insured_contact_primary_phone_number": "contact_phone",
     "named_insured_contact_primary_email_address": "contact_email",
-    "named_insured_business_start_date":          "years_in_business",
+    # A DATE box ("Enter date: The date the applicant began in business").
+    # Previously bridged to years_in_business — a COUNT — so when the date fact
+    # was absent this pass stamped a bare duration ("15") into a date field.
+    # Same reasoning as the Pass-1 rule for NamedInsured_BusinessStartDate.
+    "named_insured_business_start_date":          "business_start_date",
     "named_insured_naics_code":                   "naics_code",
     "named_insured_sic_code":                     "sic_code",
 

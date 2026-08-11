@@ -136,18 +136,32 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
         claimants.setdefault(who[0], []).append(field)
 
     # ACORD 125's share: 64 prior-coverage cells, 4 unmapped "section attached"
-    # boxes, 3 website rows, 1 producer printed name. The certificate and
-    # auto-limit resolvers own nothing on this form.
+    # boxes, 3 website rows, 1 producer printed name, and — decision made
+    # 2026-08-10 — the 24 applicant-contact fields when NO applicant contact
+    # fact exists: three consecutive live runs filled that block with the
+    # producer's and the carrier's contacts ("Claim Reporting: (888) 362-2255",
+    # contact type "Producer"/"Agent Phone"), because a dec page simply has no
+    # applicant contact for the model to find. With a real contact fact the
+    # family opens up again (see _resolve_applicant_contact). The certificate,
+    # auto-limit, other-LOB and status resolvers own nothing under these facts.
+    # +3 on 2026-08-11: the transaction-status TIME boxes (EffectiveTime and
+    # its AM/PM indicators). A declarations page prints only the POLICY's
+    # inception hour ("12:01 A.M. Standard Time..."), which two live runs
+    # lifted into these boxes, AM tick included - a different concept from
+    # when a transaction takes effect, and not knowable from any document.
     assert {k: len(v) for k, v in sorted(claimants.items())} == {
         "_resolve_prior_coverage_cell": 64,
         "_resolve_section_attached_indicator": 4,
         "_resolve_applicant_website": 3,
         "_resolve_producer_printed_name": 1,
+        "_resolve_applicant_contact": 24,
+        "_resolve_policy_status": 3,
     }, {k: len(v) for k, v in sorted(claimants.items())}
-    # 72 of 548 on ACORD 125 (13%), and 64 of those 72 are the prior-coverage
-    # grid - deterministically stamped from four scalars, not withheld. The
-    # ceiling exists so the contract can never quietly swallow a form.
-    assert len(owned) < 0.15 * len(schema), (
+    # 96 of 548 on ACORD 125 (17.5%): 64 are the prior-coverage grid
+    # (deterministically stamped from four scalars, not withheld) and 24 are
+    # the contact block above. The ceiling exists so the contract can never
+    # quietly swallow a form.
+    assert len(owned) < 0.20 * len(schema), (
         f"{len(owned)} of {len(schema)} fields withheld from the model"
     )
 
