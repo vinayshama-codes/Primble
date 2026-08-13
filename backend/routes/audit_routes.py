@@ -1139,8 +1139,15 @@ async def sqs_narrative(
         raise HTTPException(404, "Session not found")
 
     generated = session.get("generated_forms", {})
-    sqs_result: dict = {}
-    if generated:
+    # One source of truth for the number the prose is built from: the PACKAGE
+    # result - the same object the download screen's "Score at download" banner
+    # renders. Building the narrative from the FIRST form's per-form score put
+    # two different scores on one screen (banner 66 / summary 63), because
+    # package and per-form scores are independent by design. The first-form
+    # fallback remains only for legacy sessions that predate package_sqs
+    # persistence.
+    sqs_result: dict = session.get("package_sqs") or {}
+    if not sqs_result and generated:
         first_form = next(iter(generated.values()), {})
         sqs_result = first_form.get("sqs", {})
 

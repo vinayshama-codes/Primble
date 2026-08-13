@@ -429,6 +429,81 @@ def test_subject_of_insurance_survives_dedup_even_with_coincidentally_equal_amou
     assert mapped["CommercialProperty_Premises_LimitAmount_G"] == "$500,000"
 
 
+# ── Parse-variant fold (client live run 2026-08-12) ─────────────────────────
+# ONE premises printed as THREE rows on ACORD 125. `_parse_address` splits on
+# commas; the document mentions the address comma-free in three shapes, so each
+# kept its whole string as line1 and grouped under a different key.
+
+_CLIENT_FRAGMENTS = [
+    {"address": "4800 Dahlia St # D13 Denver"},
+    {"address": "4800 Dahlia St D13 Denver CO. 80216-3121",
+     "operations_description": "COMMERCIAL GENERAL CONTRA"},
+    {"address": "Denver CO 80216-3121"},
+]
+
+
+def test_client_literal_three_fragment_mentions_fold_to_one_premises():
+    facts = {"property_locations": [dict(e) for e in _CLIENT_FRAGMENTS]}
+    _consolidate_property_locations(facts)
+    locs = facts["property_locations"]
+    assert len(locs) == 1
+    only = locs[0]
+    # ...and the fold RECOVERS data: street in the street box, city/state/zip
+    # in their own boxes, the description carried over from the middle mention.
+    assert only["address_line1"] == "4800 Dahlia St # D13"
+    assert only["address_city"] == "Denver"
+    assert only["address_state"] == "CO"
+    assert str(only["address_zip"]).startswith("80216")
+    assert only["operations_description"] == "COMMERCIAL GENERAL CONTRA"
+
+
+def test_two_real_suites_in_one_building_never_fold():
+    facts = {"property_locations": [
+        {"address": "4800 Dahlia St # D13, Denver, CO 80216"},
+        {"address": "4800 Dahlia St # B5, Denver, CO 80216"},
+    ]}
+    _consolidate_property_locations(facts)
+    assert len(facts["property_locations"]) == 2
+
+
+def test_a_geo_fragment_matching_two_groups_stays_its_own_row():
+    # Comma-free mentions of TWO Denver premises: the bare "Denver CO" fragment
+    # could belong to either, so it must not be folded into one by guesswork.
+    facts = {"property_locations": [
+        {"address": "100 Main St Denver CO 80216"},
+        {"address": "200 Oak Ave Denver CO 80216"},
+        {"address": "Denver CO 80216"},
+    ]}
+    _consolidate_property_locations(facts)
+    assert len(facts["property_locations"]) == 3
+
+
+def test_state_and_zip_leaked_into_line1_are_recovered_without_a_fold():
+    # A single comma-free mention: no fold happens, but the state/zip tail is
+    # still lifted into its own boxes and stripped off the street line.
+    facts = {"property_locations": [
+        {"address": "9100 E Colfax Ave Unit 4 Aurora CO 80010-1234"},
+    ]}
+    _consolidate_property_locations(facts)
+    only = facts["property_locations"][0]
+    assert only["address_state"] == "CO"
+    assert str(only["address_zip"]).startswith("80010")
+    assert "80010" not in only["address_line1"]
+    assert not only["address_line1"].rstrip().endswith("CO")
+
+
+def test_comma_parsed_entries_are_untouched_by_the_fold_pass():
+    facts = {"property_locations": [
+        {"address": "100 Main St, Aurora, CO 80010"},
+        {"address": "200 Oak Ave, Denver, CO 80216"},
+    ]}
+    _consolidate_property_locations(facts)
+    locs = facts["property_locations"]
+    assert len(locs) == 2
+    assert locs[0]["address_city"] == "Aurora"
+    assert locs[1]["address_city"] == "Denver"
+
+
 if __name__ == "__main__":
     import inspect
     mod = sys.modules[__name__]

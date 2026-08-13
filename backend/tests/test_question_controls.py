@@ -89,11 +89,36 @@ def test_contractor_operations_not_swept_into_carrier():
     assert tax["audience"] != AUDIENCE_CARRIER
 
 
-def test_naics_code_still_client_despite_naic_substring():
-    # The "naic" producer pattern is a substring of "naics_code"; the client
-    # whitelist must keep the industry classification a client question.
-    tax = classify_question("naics_code", ["ACORD_125"], is_curated_client=True)
-    assert tax["audience"] == AUDIENCE_CLIENT
+def test_naics_and_sic_are_producer_questions():
+    """REVERSED 2026-08-12 on the client's explicit instruction.
+
+    This test previously asserted the opposite - that the `_CLIENT_WHITELIST`
+    kept `naics_code` client-facing despite the "naic" producer pattern. That
+    was a deliberate decision, and the client has now overruled it:
+
+        "We should not be asking the client for the NAICS or SIC class codes;
+         those come from the producer or underwriter."
+
+    Their reasoning matches the declarations: a classification code is
+    CARRIER-ASSIGNED ("Class codes shown above are General Liability
+    classification codes assigned by the company"), so the insured cannot
+    reliably answer and a guess drives class assignment and rate.
+    """
+    for field in ("naics_code", "sic_code"):
+        tax = classify_question(field, ["ACORD_125"], is_curated_client=True)
+        assert tax["audience"] == AUDIENCE_PRODUCER, field
+        # ...and asking the agency must not dock the CLIENT's score.
+        assert tax["score_impact"]["sqs"] is False, field
+        assert tax["score_impact"]["form_completion"] is False, field
+
+
+def test_the_naics_change_did_not_sweep_in_neighbours():
+    """LOAD-BEARING. `sic_code` was added as a producer pattern and patterns are
+    substring-matched, so the fields that must STAY client-facing are pinned."""
+    for field in ("dba_name", "gl_class_codes", "wc_class_codes",
+                  "contact_name", "contact_email"):
+        tax = classify_question(field, ["ACORD_125"], is_curated_client=True)
+        assert tax["audience"] == AUDIENCE_CLIENT, field
 
 
 def test_crossform_conflict_is_internal_flag_by_default():

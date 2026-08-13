@@ -156,6 +156,13 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
         "_resolve_producer_printed_name": 1,
         "_resolve_applicant_contact": 24,
         "_resolve_policy_status": 3,
+        # +1 on 2026-08-12: the loss-history "Check if none" box. The 52-page
+        # trap run ticked it off "Prior Term Loss Experience: NOT ON FILE" -
+        # which means UNKNOWN, not "no losses" - because the deterministic
+        # resolver's silence used to fall through to gap fill. Attesting a
+        # clean loss history is the one box the client said must never be
+        # inferred, so silence is now an owned, authoritative blank.
+        "_resolve_no_loss_checkbox_owned": 1,
     }, {k: len(v) for k, v in sorted(claimants.items())}
     # 96 of 548 on ACORD 125 (17.5%): 64 are the prior-coverage grid
     # (deterministically stamped from four scalars, not withheld) and 24 are

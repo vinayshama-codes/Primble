@@ -178,9 +178,14 @@ _PRODUCER_PATTERNS = (
     # National identifier fields — client requirement "National identifier fields
     # unless contextually necessary": never a default client question, but routed
     # to the PRODUCER (who supplies them when the form context requires) instead of
-    # being hidden as internal. naics_code / sic_code remain client questions via
-    # _CLIENT_WHITELIST (they are industry classifications a business can provide).
+    # being hidden as internal.
+    #
+    # "naic" also catches `naics_code` now that it is no longer whitelisted -
+    # intended, per the client's 2026-08-12 instruction that NAICS and SIC come
+    # from the producer or underwriter, not the insured. `sic_code` has its own
+    # entry below because no other pattern matches it.
     "naic",
+    "sic_code", "sic_classification",
     "nationalproducer", "national_producer", "nationalproducernumber",
     "national_identifier", "nationalid",
 )
@@ -254,7 +259,31 @@ _AGENCY_PATTERNS = (
 # numbers were removed here: the client re-classified all policy numbers as an
 # AGENCY question, so they must NOT be whitelisted back to the client.)
 _CLIENT_WHITELIST = {
-    "naics_code", "sic_code",
+    # NAICS / SIC REMOVED 2026-08-12 on the client's explicit instruction:
+    # "We should not be asking the client for the NAICS or SIC class codes;
+    #  those come from the producer or underwriter."
+    #
+    # They were whitelisted here deliberately, and an earlier review of this
+    # exact question concluded "not a bug" because the whitelist plus
+    # `test_naics_code_still_client_despite_naic_substring` looked like a
+    # settled decision. It was a settled decision - and the client has now
+    # reversed it. Their reasoning is sound and matches the declarations we
+    # have seen: a classification code is CARRIER-ASSIGNED (the Orbin policy
+    # prints "Class codes shown above are General Liability classification
+    # codes assigned by the company"), so the insured has no reliable way to
+    # answer and a guess would drive class assignment and rate.
+    #
+    # `naics_code` reaches the producer audience via the existing "naic"
+    # pattern once it is no longer whitelisted; `sic_code` needs its own
+    # pattern (added to _PRODUCER_PATTERNS) because nothing else matches it.
+    #
+    # The Figure 20 suggester is NOT lost by this: it still computes
+    # candidates and now surfaces them to the PRODUCER, who is the person the
+    # client says should own the answer.
+    #
+    # gl_class_codes / wc_class_codes are LEFT whitelisted deliberately - the
+    # client named NAICS and SIC only, and these drive different questions.
+    # Same carrier-assigned argument arguably applies; flagged, not assumed.
     "gl_class_codes", "gl_class_codes_by_location", "wc_class_codes",
     # contact_name / contact_email are client-critical facts even when the raw
     # ACORD field that surfaces them is in the Producer section of the form

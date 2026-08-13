@@ -1,5 +1,6 @@
 # audit_service.py — asyncpg implementation
 
+import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -36,6 +37,18 @@ async def init_audit_tables() -> None:
     logger.info("Audit tables ready (asyncpg)")
 
 
+def _fallback_rec_id(message: str) -> str:
+    """Deterministic id for a recommendation that arrived without one.
+
+    A hash of the MESSAGE, never a random uuid: a random id defeats the
+    ON CONFLICT (session_id, rec_id) dedupe, so the same plain-string
+    recommendation presented twice (two forms' scorers, or a recalculation)
+    stored two identical rows in the pre-download review.
+    """
+    digest = hashlib.sha1((message or "").encode("utf-8")).hexdigest()[:10]
+    return f"rec_str_{digest}"
+
+
 # ASYNC-SAFE
 async def log_recommendations_presented(
     session_id: str,
@@ -53,14 +66,14 @@ async def log_recommendations_presented(
         for rec in recommendations:
             if isinstance(rec, str):
                 rec = {
-                    "rec_id":       f"rec_{uuid.uuid4().hex[:8]}",
+                    "rec_id":       _fallback_rec_id(rec),
                     "message":      rec,
                     "type":         "suggestion",
                     "field":        None,
                     "component":    None,
                     "score_impact": None,
                 }
-            rec_id = rec.get("rec_id") or f"rec_{uuid.uuid4().hex[:8]}"
+            rec_id = rec.get("rec_id") or _fallback_rec_id(rec.get("message") or "")
             try:
                 await conn.execute(
                     """

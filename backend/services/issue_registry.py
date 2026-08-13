@@ -1052,11 +1052,39 @@ def build_grouped_view(
                 break
             important.append({**c, "severity": "soft_warning", "tier": "recommended"})
 
+    # ── Headline counts (Workstream 6 §9.1) ──────────────────────────────────
+    # THE number of issues for the completion notification and the next-step
+    # banner. Derived from what this function actually RENDERED, never from the
+    # raw hard_stops/soft_stops the caller passed in. Those arrays are the SQS
+    # capping inputs, and three separate things make len() on them the wrong
+    # headline - two of which under-report and one of which over-reports:
+    #
+    #   * ADVISORY cross-form issues reach the display through structured_issues
+    #     (extraction_pipeline mirrors EVERY cross-form issue into it, whatever
+    #     its type) but split_cross_form_issues routes advisories to a third
+    #     list that nothing merges into soft_stops. Reported by the client: the
+    #     toast read "1 warning found" beneath three rendered warning cards.
+    #   * `cross_issues` injected above (the /extraction-result reload path) are
+    #     rendered here and are likewise absent from the caller's arrays.
+    #   * the legacy duplicate suppression above HIDES a message the arrays
+    #     still carry, so len() counts one problem twice.
+    #
+    # Counted in the same unit the screen prints - cluster["count"], i.e. items,
+    # which is exactly what each tier header badge sums. `important` is
+    # deliberately NOT counted: it is an echo of the top 3 clusters that are
+    # already counted in `warnings` below, so adding it would double-count.
+    counts = {
+        "hard_stops": sum(c["count"] for c in hard_clusters),
+        "warnings":   sum(c["count"] for tier_clusters in warnings.values()
+                          for c in tier_clusters),
+    }
+
     return {
         "important": important,
         "hard_stops": hard_clusters,
         "warnings": warnings,
         "tier_labels": TIER_LABELS,
+        "counts": counts,
     }
 
 

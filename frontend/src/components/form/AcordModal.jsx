@@ -398,11 +398,34 @@ const DISMISS_REASON_OPTIONS = [
   "Other",
 ];
 
+// ── Workstream 6 §9.1 - THE issue counts for the notification + next-step banner
+// Single source of truth, so the toast, the banner and the issue cards can never
+// disagree again. Reads grouped_issues.counts, which the backend derives from the
+// clusters it actually rendered.
+//
+// The raw hard_stops/soft_stops arrays are NOT a headline count - they are the
+// SQS capping inputs. Cross-form advisories are rendered as warning cards but
+// never enter soft_stops (client-reported: the toast said "1 warning found"
+// under three visible warning cards), and the legacy duplicate suppression hides
+// a message the arrays still carry. Falls back to array length so an older
+// backend payload - or the lite path, which returns no grouped view - still
+// announces something rather than nothing.
+function packageIssueCounts(data) {
+  const c = data && data.grouped_issues && data.grouped_issues.counts;
+  if (c && typeof c.hard_stops === "number" && typeof c.warnings === "number") {
+    return { hardStopCount: c.hard_stops, warningCount: c.warnings };
+  }
+  return {
+    hardStopCount: ((data && data.hard_stops) || []).length,
+    warningCount:  ((data && data.soft_stops) || []).length,
+  };
+}
+
 // ── Workstream 6 §9.1 - package status → corner-notification {title, body} ────
 // Maps the live package state (integrity review / hard stops / warnings / clean)
 // to a precise status so a notification never announces a bare "Ready" while
-// blocking issues remain. Counts come from the same arrays the on-screen banners
-// use, so the toast and the screen always agree.
+// blocking issues remain. Counts come from packageIssueCounts above, so the
+// toast and the screen always agree.
 function packageStatusNotice({ integrityReviewRequired, hardStopCount, warningCount }) {
   if (integrityReviewRequired) {
     return { title: "Primble - Documents Processed", body: "Submission Integrity Review Needed" };
@@ -3442,8 +3465,7 @@ const AcordModal = forwardRef(function AcordModal({
       }
       _notifyJobDone("upload", true, packageStatusNotice({
         integrityReviewRequired: !!data.integrity_review_required,
-        hardStopCount: (data.hard_stops || []).length,
-        warningCount: (data.soft_stops || []).length,
+        ...packageIssueCounts(data),
       }));
       setSessionId(data.session_id); setDocSummary(data.doc_summary || []); setFlags(data.flags || {});
       setAvailableDocTypes(data.available_doc_types || []);
@@ -3544,8 +3566,7 @@ const AcordModal = forwardRef(function AcordModal({
             }
           : packageStatusNotice({
               integrityReviewRequired: false,
-              hardStopCount: (data.hard_stops || []).length,
-              warningCount: (data.soft_stops || []).length,
+              ...packageIssueCounts(data),
             });
       _notifyJobDone("upload", true, _resolveNotice);
       // The integrity gate blocked the marketing-reason endpoint during the
@@ -3900,6 +3921,20 @@ const AcordModal = forwardRef(function AcordModal({
   );
   const openConflicts = (underwriting?.fields || []).filter(f => f.status === "conflict");
   const openItemCount = docsNeedingReview.length + openConflicts.length;
+
+  // Workstream 6 §9.1 - what the Hard Stops / Warnings sections actually have to
+  // show, from the same helper the completion toast uses (grouped view first,
+  // raw stop arrays as fallback). These gate the sections as well as label them:
+  // gating on hardStops.length / softStops.length would HIDE a card the grouped
+  // view renders but the stop arrays never carried - a cross-form advisory, for
+  // instance, which is the same class of issue that made the toast under-count.
+  const reviewIssueCounts = packageIssueCounts({
+    grouped_issues: groupedIssues,
+    hard_stops: hardStops,
+    soft_stops: softStops,
+  });
+  const hasHardStops = reviewIssueCounts.hardStopCount > 0;
+  const hasWarnings  = reviewIssueCounts.warningCount  > 0;
 
   const activeSqs = activeFormId && generatedForms[activeFormId]?.sqs;
   // Short name of the form the pinned score belongs to. The pinned header is the
@@ -5418,7 +5453,11 @@ const AcordModal = forwardRef(function AcordModal({
                 // excludes, and confirms values). openItemCount leads because it is
                 // the only part of this screen the broker can act on; hard stops and
                 // warnings follow as context. Only "ready" once all three are zero.
-                const h = hardStops.length, w = softStops.length;
+                // Same counts the completion toast and the section gates use, so
+                // this line and the notification can never quote two different
+                // numbers for the issue cards printed directly below them.
+                const h = reviewIssueCounts.hardStopCount;
+                const w = reviewIssueCounts.warningCount;
                 const n = openItemCount;
                 const plural = (c, word) => `${c} ${word}${c !== 1 ? "s" : ""}`;
                 const advisory = [
@@ -5723,16 +5762,16 @@ const AcordModal = forwardRef(function AcordModal({
                 saying so out loud is better than letting the broker click Resolve
                 and assume the score moved. They are excluded from openItemCount
                 for the same reason. */}
-            {(hardStops.length > 0 || softStops.length > 0) && (
+            {(hasHardStops || hasWarnings) && (
               <div style={{ fontSize: 11.5, color: "#64748b", margin: "0 2px 8px", lineHeight: 1.5 }}>
                 These come from the submission itself. Correct them at source - in the
                 documents above, or in the generated forms after this step. Marking one
                 Resolved or Dismissed tracks your progress; it does not change the score.
               </div>
             )}
-            {(hardStops.length > 0 || softStops.length > 0) && (
+            {(hasHardStops || hasWarnings) && (
               <div className="stops-row">
-                {hardStops.length > 0 && (
+                {hasHardStops && (
                   <div className="stops-banner stops-hard">
                     <div className="stops-title">
                       Hard Stops
@@ -5758,7 +5797,7 @@ const AcordModal = forwardRef(function AcordModal({
                     )}
                   </div>
                 )}
-                {softStops.length > 0 && (
+                {hasWarnings && (
                   <div className="stops-banner stops-soft">
                     <div className="stops-title">
                       Warnings

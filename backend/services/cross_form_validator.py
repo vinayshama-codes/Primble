@@ -330,9 +330,34 @@ def _check_umbrella_attachment_stack(
 ) -> List[dict]:
     """
     Umbrella (ACORD 131) attachment checks:
-    1. SIR must be >= GL deductible (coverage gap if SIR < deductible).
-    2. WC Employers Liability limits must be present when umbrella attaches over WC.
-    3. Umbrella policy period must align with underlying GL/Auto/WC periods.
+    1. WC Employers Liability limits must be present when umbrella attaches over WC.
+    2. Umbrella policy period must align with underlying GL/Auto/WC periods.
+
+    REMOVED 2026-08-12 - "SIR must be >= GL deductible". It fired as a HARD STOP
+    (capping the package at 60) on the ordinary, healthy structure, and it
+    compared two things that do not interact:
+
+      * an Umbrella SIR applies only to claims the umbrella covers and the
+        underlying does NOT - the drop-down case;
+      * a GL deductible is what the insured pays on a claim the GL DOES cover.
+
+    On a GL-covered claim the umbrella attaches above the GL LIMIT; the SIR
+    never enters. So a $0 SIR against a $1,000 GL deductible is not a gap - a
+    $0 SIR is the most favourable retention there is, and this codebase already
+    says so in writing for the Auto twin.
+
+    This is the same conflation as `umbrella_sir_below_auto_deductible`, deleted
+    2026-08-07 after the client reported it firing on a submission where nothing
+    was wrong. That entry called this GL sibling "defensible... not something
+    the client flagged"; it has since been reported doing exactly the same
+    thing, one coverage part over.
+
+    The REAL attachment check - umbrella against the underlying GL LIMIT, which
+    is the comparison that can genuinely reveal a gap - already exists and is
+    untouched: `_check_umbrella_gl_minimum_limits`. Nothing is lost by removing
+    this. `umbrella_sir` and `gl_deductible` also remain registered in
+    `underwriting_consistency.RECONCILABLE_FIELDS`, so a genuine cross-document
+    disagreement about either figure is still surfaced for review.
 
     GL/Auto underlying MINIMUM LIMIT checks are NOT in this function - they live
     in the sibling checks `_check_umbrella_gl_minimum_limits` and
@@ -352,22 +377,7 @@ def _check_umbrella_attachment_stack(
     if not _umbrella_in_scope(flags):
         return issues
 
-    # 1. SIR vs GL deductible - hard stop (was soft warning)
-    sir    = _to_int(_fv(facts, "umbrella_sir"))
-    gl_ded = _to_int(_fv(facts, "gl_deductible"))
-    if sir is not None and gl_ded is not None and sir < gl_ded:
-        issues.append(_issue(
-            "hard_stop",
-            "umbrella_sir_below_gl_deductible",
-            (
-                f"Umbrella SIR (${sir:,}) is lower than GL deductible (${gl_ded:,}). "
-                "This creates a coverage gap between GL deductible and umbrella "
-                "attachment. Align SIR ≥ GL deductible or add ACORD 101 explanation."
-            ),
-            ["ACORD_126", "ACORD_131"],
-        ))
-
-    # 2. WC Employers Liability when umbrella attaches over WC
+    # 1. WC Employers Liability when umbrella attaches over WC
     if "ACORD_130" in triggered_ids and flags.get("has_workers_comp"):
         el_limit = _fv(facts, "employers_liability_limits")
         if not el_limit:
@@ -395,7 +405,7 @@ def _check_umbrella_attachment_stack(
                     ["ACORD_130", "ACORD_131"],
                 ))
 
-    # 3. Policy period alignment - underlying must match umbrella
+    # 2. Policy period alignment - underlying must match umbrella
     umb_eff = _fv(facts, "umbrella_effective_date")
     umb_exp = _fv(facts, "umbrella_expiration_date")
     gl_eff  = _fv(facts, "effective_date")
@@ -1450,8 +1460,25 @@ def _check_auto_optional_coverages(
             if state_val:
                 state_list.append(state_val)
 
-    # UM/UIM - required in many states; advisory if not found
-    if not _fv(facts, "auto_um_limit") and not _fv(facts, "auto_uim_limit"):
+    # UM/UIM - required in many states; advisory if not found.
+    #
+    # `auto_um_limit` / `auto_uim_limit` ARE PHANTOM KEYS - grepped the whole
+    # repo 2026-08-12: they appear ONLY in this line. Nothing writes them, so
+    # the check was unsatisfiable and fired on every auto submission ever
+    # processed. The canonical fact is `auto_um_uim_limit` (extraction prompt,
+    # FACT_REGISTRY, issue_registry's own resolution for THIS issue id, and four
+    # uses in sqs_service). Same defect class as the five phantom auto-symbol
+    # keys fixed on 2026-08-07 - see CLAUDE.md.
+    #
+    # Confirmed against the client's real 50-page declarations: page 39 states
+    # "Uninsured Motorists Coverage ... SELECTED $1,000,000 EACH ACCIDENT" and
+    # "Rejection Of UM/UIM Coverage ... NOT ELECTED", extraction captured
+    # `auto_um_uim_limit = "$ 1,000,000 EACH ACCIDENT"`, and the warning fired
+    # anyway telling the producer to go and confirm it.
+    # The legacy names are still read so a session predating the canonical fact
+    # is not made worse.
+    if not (_fv(facts, "auto_um_uim_limit") or _fv(facts, "auto_um_limit")
+            or _fv(facts, "auto_uim_limit")):
         issues.append(_issue(
             "advisory",
             "auto_um_uim_not_specified",

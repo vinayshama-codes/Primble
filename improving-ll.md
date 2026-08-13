@@ -91,6 +91,15 @@ for a genuine `response_format` rejection. See C7.
 | `services/cover_service.py` | cover page generation (2 sites) | 4096 |
 | `services/sqs_service.py` | `generate_sqs_narrative` | 1024 |
 
+**`generate_sqs_narrative` prompt edited 2026-08-12** (same single call, no cost change;
+prompt a few words longer, replies typically shorter): the model is now FORBIDDEN from
+restating the numeric score / tier / point totals - the UI renders the live number, and
+prose that restates it can only agree by luck (client screenshot: banner 66/100, summary
+paragraph "scores 63/100" on the same screen). The score/tier stays in the prompt as
+context. Paired fix in `routes/audit_routes.py`: the endpoint now feeds this call the
+PACKAGE result (the same object the banner renders) instead of the first form's per-form
+result, which was the source of the 63.
+
 ### User-triggered chat bots — AUDITED CLEAN, do not investigate again
 
 | File | Endpoint | Output cap |
@@ -167,6 +176,462 @@ There is also a fifth, non-obvious condition that is easy to lose:
 ---
 
 ## 3. Open issues
+
+### C53 — the 52-page trap packet: five deterministic fixes, no LLM change (2026-08-12)
+
+The owner built a synthetic EMC package full of deliberate traps and audited the generated
+ACORD 125 against it. The form dodged most traps (NO-COVERAGE lines unchecked, FEIN/website/
+phone correctly blank, drones blank despite the unmanned-aircraft exclusion) and exposed
+five real defects. All five are aggregation/guard bugs - none needed a prompt or call
+change. Tests: `tests/test_dec_traps_20260812.py` (20), every fixture the packet's literal
+trap string.
+
+1. **The Additional Insured schedule lost a 11-vs-1 vote.** The AI schedule lives on ONE
+   page; one chunk returned the three scheduled names, ten chunks that never saw that page
+   returned an all-empty `risk_transfer`, and the vote chose empty (log:
+   `chosen=... freq=11 rejected=[...names...](freq=1)`). For a structured fact, ABSENCE of
+   data must never outvote PRESENCE: `_merge_risk_transfer` now unions across chunks
+   (booleans OR, name lists union, scalars first non-empty) and again across documents
+   (the primary-wins doc loop would otherwise clobber a companion doc's data).
+2. **Q3 FLAMMABLES = naked "Y" quoting the pollution exclusion - two stacked holes.**
+   (a) `_POLICY_DEFINITION_RE` (the gate's contract-language rejector) now also rejects
+   exclusion/grant clauses: "this insurance does not apply", "exclusions are deleted",
+   "coverage for ... is included/excluded". What a policy covers is never evidence of the
+   applicant's exposure - the client's own rule. (b) THE recreation mechanism, finally
+   pinned in code order: the policy-contract-language guard at the END of map_facts_to_form
+   blanks the explanation the gate wrote, AFTER Guard 9 already passed. New
+   `_final_yn_coherence` runs as the LAST mutation - anything that edits `mapped` must be
+   inserted above it - and re-blanks any affirmative whose paired explanation ended up
+   empty, whatever ate it.
+3. **SAFETY MANUAL ticked under a blank Q2** (off "sample written safety manuals ... may be
+   requested" - availability read as adoption). New rule: a question's QUALIFIER checkboxes
+   (the consecutive /Btn run after a `_Question_<code>Code_` field sharing one name
+   segment) may only stand when the parent is answered Yes. **Audited against all 17
+   schemas before shipping: exactly six runs exist, five genuine** (125 safety program +
+   cancellation reasons, 126/160 pool features, 141 audit-performed-by) **and one false
+   positive - ACORD 125's NATURE OF BUSINESS grid - which the audit caught before it could
+   blank the Contractor checkbox.** Excluded by name; scoped to AI-authored ticks so Pass-1
+   flag-derived boxes are never touched; a standing harvest test fails the build if a
+   future schema regeneration grows a new, unclassified run.
+4. **Loss-history "Check if none" ticked off "NOT ON FILE".** The deterministic resolver's
+   silence used to fall through to gap fill, which quoted "Prior Term Loss Experience: NOT
+   ON FILE" - UNKNOWN, not "no losses" - as its evidence. `_resolve_no_loss_checkbox_owned`
+   joins `_AUTHORITATIVE_BLANK_RESOLVERS`: flags/facts still answer Yes/No, silence is an
+   owned EMPTY box the model never gets to guess (the one checkbox the client explicitly
+   said requires confirmation). Extraction's `asserts_no_known_losses` flag guidance now
+   states that NOT ON FILE / NOT REPORTED / absence = unknown.
+5. **The producer's office stamped as premises LOC 4** - past the packet's own "this is not
+   a location of the named insured" note - because the consolidation filter compared
+   normalized line1 for EQUALITY and the entry carried "Ste 400" inside line1 while the
+   producer fact parsed it onto line2. The filter now also blocks on (street number, ZIP5)
+   identity - `_address_identity_key`, the comparator `_drop_transaction_party_rows`
+   already trusts - for both producer and carrier. Plus address-shape validation: a state
+   either is/converts to a real postal code ("Colorado" -> "CO") or is None; a ZIP matches
+   \d{5}(-\d{4})? or is None; and a "ZIP" that is actually a state name means the whole
+   city/state/zip split was one shifted mis-parse and all three clear ("VARIOUS JOB SITES,
+   STATE OF COLORADO" had printed city="State", state="of", zip="Colorado").
+
+**Re-run addendum (2026-08-13).** The owner regenerated after the fixes: producer office
+gone, job-sites row clean, ambiguity logged (`lob-premium: matched 2 different amounts`),
+prior-carrier grid correctly refusing current-term data, borrowed-N gone, GROUNDING_SHADOW
+not_in_document=0. Two traps half-survived by mutating and are now closed at the gate:
+Q3 kept a "Y" quoting the exclusion's own section HEADING ("POLLUTION EXCLUSION -
+FLAMMABLES, EXPLOSIVES AND CHEMICALS" - a bare noun phrase no clause pattern matched), and
+Q2 came back "Y" grounded on the carrier's loss-control OFFER ("may be requested ... does
+not obligate"). New `_quote_cites_contract_machinery` rejects both classes - any quote
+containing "exclusion(s)", plus offer clauses in `_POLICY_DEFINITION_RE` - while the
+KEPT_YES dec-page coverage rows from the same run ("LIABILITY 01 $1,000,000 COMBINED
+SINGLE") are pinned as still-valid evidence. The still-ticked "Check if none" on that run
+is the extraction CACHE, not the fix: the chunk results were served from Redis with flags
+produced by the pre-fix prompt, and the resolver honors an explicit flag by contract -
+validate with a cache-busted upload. The Additional Insured section is still empty because
+the union fixed the FACT and nothing yet STAMPS AdditionalInterest rows from
+`risk_transfer.additional_insured_names` - a missing stamper, proposed as follow-up, not a
+regression. Suite 2177/2 pre-existing.
+
+Known and deliberately not chased: the Business Auto premium box blank on this packet is
+honest ambiguity, not a bug - the document states the auto premium twice with different
+values ($2,991 at inception, $5,829 after the September endorsement) and the resolver
+refuses to pick; "prefer inception vs current" is a product decision. The "N" on Q8 whose
+likely evidence is the driver-schedule sentence "this is not a fire code violation" is the
+documented borrowed-negation residual. Suite **2174 passed / 2 failed** - the same two
+pre-existing unrelated failures; the authoritative-blank census test gained the new owner
+(+1, classified in place).
+
+### C52 — text selection DEFAULTED OFF: LLM call 2 reads the whole document (2026-08-12, owner decision), cost +input, quality per owner's live judgement
+
+**Coverage DROPPED on a live 700k-char run with filtering on, and the owner ordered the
+filter removed.** The mechanism was C51's own entry-anchored mode: it keeps ONLY windows
+carrying an already-known value (a fact or a verified entry), and a dec window whose values
+extraction never captured - the audit basis, the billing block, the underwriter line - has
+no anchor. Those are EXACTLY the fields only call 2 can fill, so anchoring cut their source
+text out of the prompt. The safe-direction stages (density, footer) erred toward keeping;
+anchoring inverted that and erred toward dropping. Wrong default for the end goal.
+
+`GAP_FILL_TEXT_SELECTION` now defaults to **0**: production sends the complete document to
+every gap-fill call, byte-for-byte the pre-filter behaviour. The filter code and its 40+
+tests remain (opt back in with `=1`; the suite opts in via `tests/conftest.py`), and the
+known costs of whole-document mode stand measured in this file - ~120-174k tokens per call
+and the C21 long-context failure modes. If fill rate or borrowed values regress to the
+26%-era numbers, the dial is here; the owner judges from live runs.
+
+**Also in this change, unrelated to the filter:**
+1. **Guard 9 - no naked Yes.** Owner saw "Y" stamped with an empty adjacent explanation on
+   two live decs. The evidence gate blanks an ungrounded Yes at fill time, but LATER guards
+   can eat the explanation it wrote (the NAKED_YES diagnostic caught the tooltip-echo guard
+   doing it). Guard 9 runs LAST on final state: an affirmative whose ACORD-paired
+   explanation ends up empty is blanked with it - "if yes, add explanation in the adjacent
+   field" is the client's own rule, and the form prints EXPLAIN ALL "YES" RESPONSES. Only
+   `_question_explanation_pairs` fields are touched; a No never needs an explanation.
+2. **Location fold vs OCR unit spacing.** The 3-row smear returned on a cold-cache run;
+   compact-form comparison ("D 13" == "D13" with spaces stripped) now folds keys the
+   token-level prefix cannot see, while two real suites still never fold.
+
+Tests: `tests/test_whole_document_default_20260812.py` (7), including a pin that the
+production default really is whole-document. Suite **2154 passed / 2 failed** - the same two
+pre-existing unrelated failures, zero regressions.
+
+### C51 — first live run of C50: entry-anchored keep + strict-reverse backfill (2026-08-12), cost NEGATIVE
+
+**The first production run of C50 worked and taught two lessons, both fixed the same hour.**
+Live numbers (271-page EMC package): reconciliation swapped $2,991 -> $10,663 and the PDF
+shows it; one clean premises row; **161 entries verified, 12 fabrications discarded at the
+gate** - and then:
+
+1. **The filter kept 66.4% because EMC's boilerplate is carrier-proprietary.** Density
+   declined again (gap 0.07) and the ISO-footer stage caught only 82/228 windows - pages
+   like "FORM CU7000A ED. 01-07" match no ISO shape, calls stayed ~120k tokens, fill rate
+   moved only 26%->31%. **Fix: entry-anchored keep.** The 161 verified entries ARE the dec
+   fingerprint - keep the windows their values live in, and stop trying to identify
+   boilerplate at all. Carrier-agnostic by construction (the entries come from whatever the
+   dec pages say), guarantee 3 satisfied by construction (anchors = every protected value),
+   ratio gates unchanged, engages only at >=`TEXT_SELECT_ENTRY_MIN` (20) verified entries,
+   `TEXT_SELECT_ENTRY_ANCHOR=0` kill switch. Fixture self-check proves the old path declines
+   on the EMC shape before the anchored test asserts anything.
+2. **The backfill filled ZERO facts - the forward label rule was the binding constraint.**
+   The dec prints "PAYROLL"; the key is `total_payroll`; the unmatched "total" blocked it -
+   and the run's ONE warning ("GL coverage detected but no revenue or payroll found") stood
+   while the dec printed $39,300. **Fix: strict-reverse matching** - allowed only when every
+   significant label token matches a key token AND every unmatched key token is a generic
+   QUALIFIER ("total", "annual", ...). The asymmetry is the safety argument: dropping
+   "total" from total_payroll still names payroll; dropping "gl" from gl_deductible names a
+   DIFFERENT thing, so "Deductible" and "Premium" stay refused (both pinned by tests).
+
+Also added: `merge coverage_lines FINAL` diagnostic (GL/Umbrella premium boxes went blank on
+this run where the previous run filled them, and nothing logged which line names the merge
+kept - next occurrence is diagnosable from the log alone).
+
+Known from this run, deliberately not chased yet: `Insurer_NAICCode_A` came back 21407 vs
+21415 (the EMC group prints several writing companies' NAICs - an attribution case for the
+entries' owner tags, not solvable inside call 2 under the no-touch rule);
+`CommercialPolicy_RemarkText_A` was stamped with a dec-header blob (literally present, so
+grounding cannot catch it); two of four parallel gap-fill batches missed the cache (the
+known warmup race, C27 territory). Tests: +8 in `test_dec_page_entries_20260812.py` (32
+total). Suite **2147 passed / 2 failed** - same two pre-existing, zero regressions.
+
+### C50 — dec_page_entries: LLM call 1 records the dec pages; only deterministic code consumes it (2026-08-12), cost ~+1c output, call 2 BYTE-IDENTICAL
+
+**The owner's end goal, verbatim: "if values are present in declaration pages uploaded by
+user then they should be correctly stamped on the form" - WITHOUT touching LLM call 2.**
+
+**The measured gap this closes.** Extraction is DESTINATION-driven: ~173 registry keys
+capture what the forms are known to ask for. Measured ceiling: with all 173 facts perfectly
+filled, only 68 of ACORD 125's 548 fields resolve deterministically; anything a dec page
+prints outside the key list (audit basis, deposit, program code, servicing contacts, FEIN
+when the model misses it) evaporates and can only be re-found by gap fill inside the
+haystack. This change makes call 1 SOURCE-driven as well: record every label:value pair a
+declarations/schedule page prints - label, value, owner, policy - and decide who consumes it
+later.
+
+**The decisions, each with its reason:**
+1. **In call 1, not a new call.** The chunks are already read; recording costs only output
+   tokens on the 1-3 dec-bearing chunks (~$0.01 at mini pricing). A separate labeling call
+   was designed first and rejected by the owner as unnecessary - correctly.
+2. **Verbatim or gone (`_verify_dec_entries`).** Every entry's label AND value must be
+   literally present (normalized) in the uploaded text; anything else is discarded before
+   any code can read it. A labeling pass is checkable in a way free-form answers never were,
+   and this check is what makes the rest of the design trustworthy.
+3. **Only deterministic consumers.** (a) `_backfill_empty_facts_from_entries`: fills a
+   registry fact that merged EMPTY under five stacked conditions - never overwrite; typed
+   NAMED validator must pass (86 registry facts qualify + `total_policy_premium` via an
+   explicit supplement, because registry membership would spawn a new ARQ client question);
+   every token of the fact key must appear in the entry label (stem match) - 'fein' is not
+   in 'Account Number', so the client's literal defect cannot route; owner compatibility -
+   producer_* facts take only producer-owned values, everything else takes only
+   applicant/policy-owned, the deterministic form of the client's "never place producer or
+   carrier contact information into applicant fields"; and all matching entries must agree
+   on ONE value - ambiguity stays blank for the ARQ. (b) text_selection's fact rescue now
+   also anchors on entry VALUES, closing the one data-loss shape the filter had left open
+   (a dec value the 173 keys never captured, living on a dropped window). Rescue only ever
+   ADDS kept text.
+4. **LLM call 2 is byte-identical, proven not promised.** `dec_page_entries` is excluded
+   from the gap-fill facts block (`_GAP_FILL_FACTS_EXCLUDE`), and
+   `test_call2_prompt_is_byte_identical_with_dec_entries` builds real call-2 prompts with
+   and without the key and asserts equality. Inspector re-run: 12 calls, $0.0584, prefix
+   stable - unchanged, PASS.
+5. **Every unfilled field still reaches call 2** (owner's explicit requirement): the
+   backfill removes a field from the gap-fill set only by actually FILLING its fact -
+   pinned by `test_every_unfilled_field_still_reaches_call_2` against the real ACORD 125
+   schema.
+6. **Deliberately NOT done: open-vocabulary matching of entry labels onto the 5,852 ACORD
+   field names.** That is a hand-rolled NLU layer, the exact heuristic class this codebase
+   has repeatedly burned on (echo guards, keyword matching). Entries reach fields only
+   through the typed fact layer, where validators and owner rules exist.
+7. **Diagnostic only, zero behaviour change: `NAKED_YES`.** Owner reported a "Y" standing
+   without its explanation; one candidate mechanism is the evidence gate keeping a grounded
+   Yes whose paired explanation Guard 8 then blanks as a tooltip echo. That path now logs
+   `post_fill_guard NAKED_YES` so the next live report pins the mechanism instead of
+   guessing.
+
+Tests: `backend/tests/test_dec_page_entries_20260812.py` (24) - every trap fixture is the
+client's literal reported defect (account number 0482854 vs FEIN, producer's 303-996-7800
+vs applicant phone, carrier website vs applicant website). Suite **2139 passed / 2 failed**,
+the same two pre-existing unrelated failures, zero regressions. One existing fixture
+updated, not weakened: `test_a_failure_falls_back_to_the_full_document`'s error injection
+raised on `.values()` and `_fact_values` now reads `.items()` - the fixture raises on both,
+same invariant.
+
+**How to see it working on a live run:** grep for `dec_entries VERIFIED`,
+`dec_entries BACKFILL fact=...`, `dec_entries DROPPED_UNVERIFIED`, and
+`TEXT_SELECTION FACT_RESCUE`. Backfills carry `source="dec_entry"` in the fact envelope.
+
+### C48 — Step 2 shipped: standard-form pages dropped by their OWN printed footer (2026-08-12), cost NEGATIVE
+
+**The fill-rate lever finally engages on the client's document.** The density filter
+(RETRIEVAL_CHANGES.md) skipped on the client's real package twice - final state
+`separation gap 0.07` against the 0.15 floor - so every gap-fill call still carried the full
+683k-char haystack and the measured fill rate stayed at 26%. The complementary signal that
+plan named as Step 2 is now in `services/text_selection.py`: an ISO standard form declares
+ITSELF in its page footer (`CG 00 01 04 13` - two letters, then four 2-digit groups), and
+that identification is independent of how a PDF extractor renders lines, which is exactly
+where the density signal failed.
+
+Decisions that must survive future edits:
+1. **Carrier dec-page codes do not match.** `CA7000A 02-22` (printed on the client's OWN dec
+   page as the program code) is a different shape, verified by test. So is `CO 80216-3121`.
+2. **A FORMS AND ENDORSEMENTS schedule is dec content and is kept** - it lists MANY codes in
+   one window where a real footer is 1-2 (`_FOOTER_MAX_PER_WINDOW`). A window ADJACENT to a
+   schedule-like window is also never marked: a schedule cut by a window boundary spills 1-2
+   codes into its neighbour, which otherwise looks exactly like a footer page. That edge was
+   caught by its own test fixture before it shipped, not by a client.
+3. **Order: after dilation, before the fact rescue.** Positive boilerplate identification
+   outranks a neighbour-of-a-dec-page guess; the rescue outranks everything, so an extracted
+   fact living on a form page always restores its window (guarantee 3 is absolute).
+4. **The ratio gates judge the combined result.** A document with fewer than
+   `_FOOTER_MIN_WINDOWS` (3) marked windows, or where the final kept share falls outside
+   [2%, 90%], is returned unchanged - same refusal discipline as the density stage.
+5. **One filtered document per run, so the §2 prefix-caching conditions hold.** Inspector
+   re-run after the change: gap_fill prefix 13,312 chars / 52%, compliance 64%, $0.0584 -
+   unchanged, PASS.
+
+Kill switches: `TEXT_SELECT_FORM_FOOTER=0` (this stage alone), `GAP_FILL_TEXT_SELECTION=0`
+(the whole feature). Tests: 6 new in `tests/test_text_selection.py`, including a self-check
+that the fixture really is density-inseparable (footer off -> returned unchanged), so the
+footer tests cannot pass by density accident.
+
+### C49 — the arithmetic reconciliation C45 called "the next step" (2026-08-12), no LLM change
+
+C45's known limit, verbatim: authority "does NOT separate two rivals that both sit on the
+declarations page - a line premium against the package total... That case needs the
+arithmetic reconciliation... and is not in this change." It is now in
+`extraction_service._reconcile_total_premium`, running inside `_merge_list_fields` after the
+list merge, while the candidate buckets still exist: a `total_policy_premium` winner smaller
+than the largest single GRANTED coverage-line premium is arithmetically not a total, and the
+best-scored candidate that IS possible replaces it (exact-sum match preferred among the
+possible ones; a possible winner is NEVER second-guessed - that would be C23's preference
+mistake). No coverage lines, or no possible candidate, and the merge result stands - the
+pdf_service resolver still refuses downstream, which is what shipped the client's BLANK
+POLICY PREMIUM box: the resolver could only blank, because by resolver time the $10,663 was
+gone from the fact dict. Now it never leaves.
+
+Two sibling deterministic fixes in the same batch (same client run, same end goal - "a value
+on the dec page must reach the form"): `_resolve_lob_premium` no longer lets a coverage
+PART's premium fill its line's box ($35 "Auto Medical Payments" stamped as the Business Auto
+line premium; now $2,991 stamps - stem matching reaches "Automobile", part-vocabulary
+leftovers reject parts, exact line names outrank qualified ones, parts-only documents still
+fill); and `_consolidate_property_locations` folds parse-variant groups (ONE premises
+printed as THREE ACORD 125 rows because `_parse_address` splits only on commas; the folded
+row recovers street/city/state/zip into their own boxes). Tests:
+`tests/test_dec_page_values_20260812.py` (13) + 5 in `tests/test_location_consolidation.py`.
+Suite 2098 passed / 2 failed - the same two pre-existing unrelated failures, zero
+regressions.
+
+### C47 — the evidence gate was rejecting REAL answers because "not" is a stopword (2026-08-12), cost ~neutral
+
+**Quality regression, not a cost issue — but it is the reason a form came back emptier and
+belongs in the same log as the fills it removed.**
+
+`_quote_restates_the_question` (added earlier the same day) exists to stop two real
+failures: a checkbox ticked on the "evidence" `"for non-payment of premium"`, another on
+`"additional insured"` — each the field's own label read back. Correct target.
+
+It tested only **token overlap**: "are all the quote's significant words already in the
+question?". That cannot work alone, because *a direct answer to a yes/no question is by
+definition mostly the question's own words* — and `"not"` sits in `_ECHO_STOPWORDS`, so the
+single word carrying the entire meaning was discarded before the comparison.
+
+Measured against the shipped schemas, synthesising the canonical way a document denies each
+genuine compliance question:
+
+```
+form        questions   rejected   rate
+ACORD_125          15          6    40%
+ACORD_126          21          7    33%
+ACORD_127          12          3    25%
+...
+TOTAL             218         39    18%
+```
+
+Casualties included `"The applicant does not have any subsidiaries."`,
+`"The applicant does not install, service or demonstrate products."` and — an affirmative —
+`"Subcontractors are required to carry coverage."`
+
+**The damage was concentrated by an asymmetry.** A "Yes" survives on a quote *or* a paired
+explanation; a "No" has only the quote, and `_evidence_supports` failing on a negative
+blanks the field outright. Most compliance answers are "No".
+
+**Fix — a structural second condition, `_quote_asserts_something`.** Overlap is now
+necessary but not sufficient: the quote must also fail to assert anything. Both live
+culprits are bare noun phrases (no subject, no finite verb); real evidence is a complete
+predication. Measured 15/15 separation across both populations, then 39/39 recovered with
+both culprits still rejected. Guarded by `tests/test_quote_label_vs_statement.py`, which
+harvests the questions from the real schemas rather than hand-listing them, and asserts the
+check carries no insurance vocabulary.
+
+### C46 — the model was asked about vehicles that do not exist (2026-08-12), cost NEGATIVE
+
+**This one put WRONG VALUES on a legal document, and it is also a free cost saving.**
+
+Client's live ACORD 127: the document describes ONE vehicle, a 2012 Subaru Outback. The
+generated form came back with vehicle rows 2 and 3 carrying the **General Liability** class
+codes 91580/91585 and the GL exposures — `$39,300` payroll and `$350,000` subcontract cost —
+stamped as vehicle **COST NEW**, plus a duplicated Subaru.
+
+The first theory was cross-form batch confusion (`Vehicle_*` sharing a call with
+`GeneralLiability_*`). **That was wrong.** `_SCHEDULE_REGISTRY` binds only the **19 identity
+columns** of the vehicle schedule (VIN, make, model, body). `_resolve_schedule_row` already
+holds the right contract for those — *"if the row is out of range, mark as authoritative
+blank, do NOT send to GPT, we know the row doesn't exist"* — but the other ~50 columns per
+row (cost new, rate class, territory, symbols, coverage indicators) are unbound, so they
+fell through to gap fill for **every row letter the form prints**:
+
+```
+ACORD_127, one vehicle in the document
+  row A (the real vehicle) :  56 fields
+  rows B..D (NO vehicle)   : 164 fields   <- questions about nothing
+```
+
+Asked "what is vehicle B's cost new?" with no vehicle B to describe, the model does the only
+thing it can and borrows a plausible figure from the document.
+
+**Fix:** `_resolve_phantom_schedule_row`, registered in `_AUTHORITATIVE_BLANK_RESOLVERS` —
+the contract both `compute_form_gaps` and `map_facts_to_form` already consult, so one
+resolver covers both paths. It applies the SAME rule `_resolve_schedule_row` enforces, to
+the whole row rather than the registered columns of it. Generic across all 16 schedule roots
+and all 17 forms.
+
+**It acts only on positive evidence.** An absent or empty schedule list means the row count
+is unknown, so nothing is suppressed and behaviour is unchanged — suppressing on no evidence
+would delete a schedule the extractor merely missed. Capacity is `len(list) + row_offset`,
+because some roots do not draw their first row from the list (`NamedInsured_A` is the
+applicant; `row_offset=1`). Using `len()` alone there would blank a real named insured.
+
+**Measured on the 5-form union** (125/126/127/140/25, one location, one vehicle, one driver):
+
+| | before | after |
+|---|---|---|
+| union fields sent to gap fill | 1,206 | **1,040** |
+| ACORD 127 alone | 318 | **154** |
+| outer batches | 7 | **6** |
+
+**166 fields (14%) removed, one fewer outer batch, and the removed ones were exactly the
+questions that had no correct answer.** Cheaper and more correct.
+`tests/test_phantom_schedule_rows.py` pins both directions — phantom rows suppressed, real
+rows and the no-evidence case untouched.
+
+### C45 — THE root cause under C43: the merge ranks by REPETITION, so the declarations page always loses (2026-08-12), no LLM change
+
+**C43 fixed two spellings of one value splitting their own vote. This is the layer under
+it: even with variants pooled correctly, the vote itself is the wrong question.**
+
+`_score_value` ranks competing values by `tier x (log1p(freq) + confidence)`. Measured
+against the real scorer:
+
+```
+RIGHT value, declarations page,  1 chunk,  ai_high :  1.543
+WRONG value, boilerplate,        2 chunks, ai_low  :  1.599   <- wins
+WRONG value, boilerplate,       16 chunks, ai_low  :  3.333   <- wins
+```
+
+**A wrong value needs only TWO mentions to beat the right one stated once at high
+confidence.** Now consider what a declarations page is: it states each figure EXACTLY ONCE,
+while the policy forms behind it mention rival figures page after page. Across 17 chunks the
+authoritative statement is structurally the minority vote. **The more of the document we
+read, the worse the answer gets** - which is the whole reported phenomenon, and it is
+arithmetic, not model attention.
+
+It also explains the asymmetry nobody could account for: on a ONE-chunk document every
+candidate has `freq == 1`, the frequency term is a constant, confidence decides, and the
+answer is right. Small documents were never being handled better - they simply have no vote
+to lose. The codebase had already written half of this down at `_partition_by_shape`
+("a low-confidence value seen twice beats a high-confidence value seen once"), and answered
+the *value validity* half while leaving *source credibility* unranked.
+
+**Fix - source authority as a dominant QUANTIZED tier.**
+`declarations_authority(text)` scores a span 0..1 on how much it looks like a
+declarations/schedule page, and `_gather_chunks_async` stamps it onto every partial;
+`_merge_list_fields` credits each candidate with the most authoritative place it was seen.
+
+Four decisions worth keeping, each of which was wrong on the first attempt:
+
+1. **Structural, not vocabulary.** A dec page is TABULAR (short lines, dense money and
+   dates); a policy form is PROSE. A keyword list would be a per-carrier lookup in disguise
+   and would not survive a carrier whose wording we have not seen.
+   `test_authority_needs_no_insurance_vocabulary` fails the build on drift.
+2. **Quantized tier, not a continuous weight.** Within a tier the expression is byte-for-byte
+   the old formula, so a document that cannot be discriminated (all prose, or all tabular)
+   does not merely rank *similarly* to before - it ranks *identically*. Asserted by
+   `test_within_one_tier_the_ranking_is_the_old_arithmetic_exactly`, not claimed.
+   `_AUTHORITY_GAIN=10.0` dominates the widest possible base spread (200 chunks -> 6.30).
+3. **Windowed MAX, never the chunk mean.** This nearly shipped as a no-op. An extraction
+   chunk is 56,000 chars and a real dec page is a few thousand: scoring the mean, a genuine
+   declarations page at 14% of its chunk scored **0.174 against pure prose at 0.061 - both
+   tier 0, signal gone**, on exactly the documents the fix exists for. Taking the max over
+   3,000-char windows holds down to a 4% share. Max is the deliberately SENSITIVE choice: a
+   false positive flattens the signal, which is today's behaviour, while a false negative
+   costs the entire fix.
+4. **Narrative facts opt out.** Authority says the dec page wins, which for a DESCRIPTION is
+   backwards - the fuller operations narrative lives out in the prose, and ranking a tabular
+   fragment above it would have *entrenched* the reported "COMMERCIAL GENERAL CONTRA"
+   truncation. Derived from the VALUE shape (>100 chars AND >12 words), not a list of fact
+   keys: `FACT_REGISTRY` has no `kind` column and a name pattern would miss the next
+   narrative fact somebody adds.
+
+**Coverage cannot fall** - authority reorders candidates that already exist and never drops
+one. Proven over 200 randomised partial sets: the merged key set is identical with the term
+on and off.
+
+**Cost: zero.** No prompt, no call, no chunking change; `raw_text` is untouched, so the
+cached prefix and `test_full_document_coverage` are unaffected. Scoring costs **58 ms of CPU
+for a whole 17-chunk document**. Inspector re-run after the change: 12 calls, $0.0584,
+gap_fill prefix 13,312 chars / 52%, compliance 64% - unchanged, PASS.
+
+**Found while doing it:** the new `_MONEY_TOKEN_RE` silently shadowed an existing CAPTURING
+pattern that `_money_amounts` parses with `float()`, turning all 12 C23 currency-tiebreak
+tests red. Renamed to `_AUTHORITY_FIGURE_RE`, and
+`test_no_module_level_regex_name_is_defined_twice` AST-walks the module so a counting
+pattern can never again share a name with a parsing one.
+
+**Known limit, deliberate:** authority separates dec-page values from boilerplate values. It
+does NOT separate two rivals that both sit on the declarations page - a line premium against
+the package total lands in the same tier and frequency decides as before. That case needs
+the arithmetic reconciliation (parts must sum to the stated total), which is the next step
+and is not in this change.
+
+Tests: `backend/tests/test_merge_authority_20260812.py` (23). Suite **1895 passed / 2
+failed** - the same two pre-existing unrelated failures, zero regressions.
+
+---
 
 ### C44 — the same vote-split bug in a SECOND function; "absence" is not a value (2026-08-11), no prompt change
 

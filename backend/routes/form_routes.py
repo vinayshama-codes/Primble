@@ -35,8 +35,8 @@ from services.extraction_service import (
     DOC_TYPE_LABELS, ALLOWED_DOC_TYPES,
 )
 from services.form_service import (
-    filter_available_forms, load_all_forms, match_forms, process_single_form,
-    score_extra_forms,
+    active_document_text, filter_available_forms, load_all_forms, match_forms,
+    process_single_form, score_extra_forms,
 )
 from services.ocr_service import extract_text, extract_zip
 from services.pdf_service import (
@@ -1051,7 +1051,10 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
                         forms_to_mapped[fid] = mapped
 
                 if forms_to_unmatched:
-                    raw_text = " ".join(d.get("text", "") for d in session.get("docs", []))
+                    # Excluded documents are NOT sent to the model - see
+                    # form_service.active_document_text for why this must match
+                    # what extraction already does.
+                    raw_text = active_document_text(session)
                     facts_with_flags = {**session["facts"], **session.get("flags", {})}
                     logger.info(
                         "combined_gap_fill: forms_to_unmatched=%d forms_to_mapped=%d "
@@ -2203,9 +2206,11 @@ async def clarity_analyze(
     # here too (parity with the Assembly pipeline, extraction_pipeline.match_forms).
     # Without it, coverage lines that appear only on a dec page would be silently
     # dropped for Clarity/Lite users while Assembly users see them.
-    combined_text     = " ".join(
-        d.get("text", "") for d in (session.get("docs") or []) if isinstance(d, dict)
-    )
+    # Same exclusion rule as the Assembly path it is claiming parity with:
+    # extraction_pipeline.match_forms is fed `active_docs`, so recommending a
+    # coverage line off a document the user REMOVED would break that parity in
+    # the other direction. See form_service.active_document_text.
+    combined_text     = active_document_text(session)
     matched           = match_forms_deterministic(facts, flags, text=combined_text)
     selected_form_ids = [f["form_id"] for f in matched]
     account_profile    = derive_account_profile(facts, flags, text=combined_text)

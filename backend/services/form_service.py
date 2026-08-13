@@ -1828,10 +1828,37 @@ def match_forms(facts: dict, flags: dict, all_forms: List[dict], text: str = "")
     return match_forms_deterministic(facts, flags, text=text)
 
 
+def active_document_text(session: dict) -> str:
+    """The uploaded text an LLM is allowed to read: EXCLUDED DOCUMENTS REMOVED.
+
+    "Exclude" is an explicit user action (`reclassify_document`, action="exclude"
+    - "this document is not part of this submission"). Every other consumer in
+    the pipeline already honours it via
+    ``active_docs = [d for d in docs if not d.get("excluded")]``:
+    extraction, fact merging, form matching, integrity, SQS - see
+    services/extraction_pipeline.py. The two places that built the gap-fill
+    prompt did NOT, so a document the user had deleted was still shipped to the
+    model as "RAW DOCUMENT TEXT (AUTHORITATIVE SOURCE)" - and the prompt tells
+    the model that text OUTRANKS the extracted facts, which had correctly
+    dropped it. A removed document could therefore overwrite a correct value.
+
+    The `or` fallback mirrors extraction_pipeline's and is load-bearing: if every
+    document were excluded, an empty string here makes _fill_unmatched_with_gpt
+    return immediately ("no raw_text provided - skipping GPT fill"), silently
+    losing EVERY gap-filled field on every form. Degrading to the old behaviour
+    is strictly better than that.
+    """
+    docs = session.get("docs") or []
+    active = [d for d in docs if isinstance(d, dict) and not d.get("excluded")]
+    if not active:
+        active = [d for d in docs if isinstance(d, dict)]
+    return " ".join(d.get("text", "") for d in active)
+
+
 def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = None) -> dict:
     tpl              = os.path.join(TEMPLATE_DIR, form_meta["template_file"])
     schema           = extract_form_schema(tpl, form_id=form_meta["form_id"])
-    raw_text         = " ".join(d.get("text", "") for d in session.get("docs", []))
+    raw_text         = active_document_text(session)
     # Merge flags into facts so _derive_indicator and GPT both see has_general_liability,
     # is_contractor, has_auto_coverage, etc. for checkbox resolution.
     facts_with_flags = {**session["facts"], **session.get("flags", {})}

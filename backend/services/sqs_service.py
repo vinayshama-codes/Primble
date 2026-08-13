@@ -807,14 +807,25 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
         if umb_exp and gl_exp and _dates_differ(umb_exp, gl_exp):
             soft.append("Umbrella and GL expiration dates misaligned.")
 
-        sir    = _to_int(_fv(facts, "umbrella_sir"))
-        gl_ded = _to_int(_fv(facts, "gl_deductible"))
-        if sir is not None and gl_ded is not None and sir < gl_ded:
-            # Spec: hard stop - SIR below GL deductible creates a coverage gap
-            hard.append(
-                f"Umbrella SIR ({sir:,}) is lower than GL deductible ({gl_ded:,}) - "
-                "coverage gap between deductible and umbrella attachment. Align SIR ≥ GL deductible."
-            )
+        # REMOVED 2026-08-12 - "Umbrella SIR is lower than GL deductible", a
+        # HARD STOP that fired on the ordinary structure and therefore capped
+        # the package at 60 on essentially every GL+Umbrella submission with a
+        # $0 SIR (the most favourable retention there is).
+        #
+        # An Umbrella SIR applies only where the umbrella drops down and the
+        # underlying does not respond; a GL deductible applies to claims the GL
+        # DOES cover, above which the umbrella attaches at the GL LIMIT. The two
+        # never meet, so their ordering carries no underwriting meaning. Full
+        # reasoning in `cross_form_validator._check_umbrella_attachment_stack`.
+        #
+        # THIS WAS THE SECOND, INDEPENDENT COPY of that rule - the same
+        # duplication that let `umbrella_sir_below_auto_deductible` survive its
+        # first fix on 2026-08-07, and the copy that actually drove the score
+        # cap (the coded engine's issues are a display mirror; these hard/soft
+        # stops are what feed the 60/85 caps). Both copies are now gone.
+        #
+        # The genuine attachment check - umbrella against the underlying GL
+        # LIMIT - is untouched in `_check_umbrella_gl_minimum_limits`.
 
     return hard, soft
 
@@ -3902,6 +3913,24 @@ def _estimate_score_impact(
 
 # ── Per-form SQS (enhanced with metadata) ─────────────────────────────────────
 
+def _loss_rec_id(message: str) -> str:
+    """Stable identity for a loss-history recommendation row.
+
+    Derived from the message TEMPLATE (digits stripped, so a varying age like
+    "372 days old" cannot fork the id) - never from the recommendation's
+    position in the list. Positional ids (`rec_loss_3`) made the identical
+    warning, emitted by two forms' scorers at different list indexes, insert
+    twice into sqs_recommendation_audit (its dedupe is ON CONFLICT
+    (session_id, rec_id)), and let a dismissed row resurface when a
+    recalculation renumbered it - the same throwaway-index defect as the
+    2026-08-08 legacy_soft_* fix. Display/audit identity only; no effect on
+    any score.
+    """
+    slug = re.sub(r"\d+", "", (message or "").lower())
+    slug = re.sub(r"[^a-z]+", "_", slug).strip("_")
+    return f"rec_loss_{slug[:60]}"
+
+
 def calculate_sqs(
     facts: dict,
     flags: dict,
@@ -4608,7 +4637,7 @@ def calculate_sqs(
     _loss_doc_phrases = ("no loss history provided", "loss runs", "required for carrier")
     for rec_msg in loss_recs:
         recommendations.append({
-            "rec_id": f"rec_loss_{len(recommendations)}",
+            "rec_id": _loss_rec_id(rec_msg),
             "field": "loss_history_years",
             "component": "loss_history_alignment",
             "message": rec_msg,
@@ -4828,14 +4857,29 @@ async def generate_sqs_narrative(
 
         breakdown    = sqs_result.get("breakdown", {})
         risk_drivers = sqs_result.get("risk_drivers", [])
+        if not risk_drivers:
+            # Package results carry top_recommendations (dicts) instead of the
+            # per-form risk_drivers list - surface their messages as drivers so
+            # the prose still knows what the main gaps are. Never let a raw
+            # dict repr leak into the prompt.
+            risk_drivers = [
+                (r.get("message") if isinstance(r, dict) else str(r))
+                for r in (sqs_result.get("top_recommendations") or [])
+                if (r.get("message") if isinstance(r, dict) else str(r))
+            ]
 
+        # The score/tier line is CONTEXT for the model, not content to repeat:
+        # the UI renders the live number itself ("Score at download"), and prose
+        # that restates a number can only ever agree by luck - the 66-vs-63
+        # contradiction the client screenshotted was exactly that. The prose is
+        # therefore forbidden from stating score, tier, or point totals.
         prompt = f"""Summarize this insurance submission quality in one concise paragraph (60-80 words). Be direct and professional.
 
 Score: {score}/100 ({tier}) | Change this session: {'+' if delta_this_session >= 0 else ''}{delta_this_session} pts
 Top risk drivers: {', '.join(str(r) for r in risk_drivers[:3]) if risk_drivers else 'none'}
 Resolved: {', '.join(resolved_recs) if resolved_recs else 'none'} | Ignored: {', '.join(ignored_recs) if ignored_recs else 'none'}
 
-One paragraph only. State the score tier, the main gap, and the single most impactful next action."""
+One paragraph only. State the main gap and the single most impactful next action. Do NOT repeat the numeric score, the tier name, or any point totals in your answer - the interface displays those separately, and a restated number that drifts from the displayed one reads as a contradiction."""
 
         raw = await groq_chat(
             LLM_MODEL,

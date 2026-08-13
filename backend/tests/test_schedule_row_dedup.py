@@ -73,13 +73,68 @@ def test_distinct_drivers_not_merged():
     assert len(out) == 2
 
 
-def test_unregistered_list_key_passes_through_unchanged():
-    # Only auto_drivers has a registered dedup key today — every other
-    # schedule (vehicles, officers, loss history, ...) must behave exactly
-    # as before this fix: identity passthrough, no merging.
-    rows = [{"vin": "ABC123", "year": "2020"}, {"vin": "ABC123", "year": "2021"}]
-    out = _dedupe_schedule_rows("auto_vin_schedule", rows)
-    assert out == rows
+def test_a_row_with_no_natural_identifier_passes_through_unchanged():
+    """SUPERSEDES test_unregistered_list_key_passes_through_unchanged.
+
+    That test asserted every schedule but auto_drivers was identity-passthrough.
+    That was a description of the code at the time, not an invariant, and it was
+    the gap that let the vehicle schedule duplicate a Subaru on the client's
+    ACORD 127 (2026-08-12). De-duplication is now generic: any row carrying a
+    globally-unique identifier merges on it.
+
+    What must still pass through untouched is a row with NO identifier - merging
+    those would delete real data (two identical trucks bought together).
+    """
+    rows = [{"year": "2020", "make": "FORD"}, {"year": "2020", "make": "FORD"}]
+    assert _dedupe_schedule_rows("auto_vin_schedule", rows) == rows
+    # ...and an identifier too short to be real is not an identifier.
+    junk = [{"serial_number": "N/A"}, {"serial_number": "N/A"}]
+    assert _dedupe_schedule_rows("inland_marine_items", junk) == junk
+
+
+def test_dedup_is_generic_across_schedules_nobody_registered():
+    """The point of the generic key: a schedule added later is covered without
+    anyone remembering to register it."""
+    vehicles = [
+        {"year": "2012", "make": "SUBARU", "model": "OUTBACK",
+         "vin": "4S4BRCGC9C3217772", "body_type": "SEDAN"},
+        {"year": "2012", "make": "SUBARU", "model": "OUTBACK 2.5i SEDAN 4D",
+         "vin": "4S4BRCGC9C3217772", "comp_symbol": "07"},
+    ]
+    merged = _dedupe_schedule_rows("auto_vin_schedule", vehicles)
+    assert len(merged) == 1
+    # It MERGES rather than discarding - both rows' data survives.
+    assert merged[0]["body_type"] == "SEDAN"
+    assert merged[0]["comp_symbol"] == "07"
+
+    equipment = [
+        {"description": "Excavator", "serial_number": "CAT0320D1234"},
+        {"description": "CAT 320D Excavator", "serial_number": "CAT0320D1234",
+         "value": "$85,000"},
+    ]
+    assert len(_dedupe_schedule_rows("inland_marine_items", equipment)) == 1
+
+
+def test_two_real_items_with_different_identifiers_never_merge():
+    trucks = [{"year": "2020", "make": "FORD", "vin": "AAAAAAAAAAAAAAAA1"},
+              {"year": "2020", "make": "FORD", "vin": "BBBBBBBBBBBBBBBB2"}]
+    assert len(_dedupe_schedule_rows("auto_vin_schedule", trucks)) == 2
+
+
+def test_policy_number_is_never_a_natural_key():
+    """LOAD-BEARING. A policy carries many coverage parts, so merging on its
+    number would DELETE real lines. Measured on the client's session:
+    BBC7263-26 legitimately carries both Commercial General Liability and
+    Employee Benefits Liability."""
+    import services.extraction_service as es
+    assert "policy_number" not in es._NATURAL_ID_SUBKEYS
+    lines = [
+        {"line": "Commercial General Liability", "policy_number": "BBC7263-26",
+         "premium": "$3,954"},
+        {"line": "Employee Benefits Liability", "policy_number": "BBC7263-26",
+         "premium": "$75"},
+    ]
+    assert len(_dedupe_schedule_rows("coverage_lines", lines)) == 2
 
 
 def test_driver_dedup_keys_includes_both_when_available():

@@ -115,7 +115,28 @@
       "Bash(npx --no-install esbuild src/components/form/ResolutionModal.jsx --loader:.jsx=jsx --bundle --external:react --external:react-dom --external:../../config/constants --external:../arq/* --outdir=\"C:/Users/lenovo/AppData/Local/Temp/claude/c--Users-lenovo-OneDrive-Desktop-Primble/49d35f77-c596-4ac0-b8c3-fe38db88af4c/scratchpad/esb3\")",
       "Bash(npx --no-install esbuild src/components/form/ResolutionModal.jsx src/components/form/AcordModal.jsx --loader:.jsx=jsx --bundle --external:react --external:react-dom --external:../../config/constants --external:../../utils/* --external:../arq/* --external:../overlays/* --external:./* --outdir=\"C:/Users/lenovo/AppData/Local/Temp/claude/c--Users-lenovo-OneDrive-Desktop-Primble/49d35f77-c596-4ac0-b8c3-fe38db88af4c/scratchpad/esb4\")",
       "Bash(py -c \"import ast; ast.parse\\(open\\('routes/audit_routes.py',encoding='utf-8'\\).read\\(\\)\\); print\\('audit_routes.py: syntax OK'\\)\")",
-      "Bash(py -m pytest tests/test_issue_resolution.py -q)"
+      "Bash(py -m pytest tests/test_issue_resolution.py -q)",
+      "Bash(py -m pytest -q tests/test_dec_page_values_20260812.py tests/test_estimated_total_sanity.py)",
+      "Bash(py -m pytest -q tests/test_dec_page_entries_20260812.py)",
+      "Bash(py -m pytest -q tests/test_dec_page_entries_20260812.py::test_the_same_value_fills_the_producer_fact_it_actually_belongs_to tests/test_dec_page_entries_20260812.py::test_two_distinct_stated_values_are_ambiguity_and_stay_blank)",
+      "Bash(py -m pytest -q tests/test_dec_page_entries_20260812.py::test_merge_facts_unions_verifies_and_backfills)",
+      "Bash(awk '/[\"\\\\x27]total_policy_premium[\"\\\\x27]/{found=NR} found && NR>=found && NR<=found+9' services/fact_registry.py)",
+      "Bash(py -m pytest -q tests/test_text_selection.py::test_a_failure_falls_back_to_the_full_document)",
+      "Bash(py -m pytest -q tests/test_text_selection.py tests/test_dec_page_entries_20260812.py)",
+      "Bash(awk 'NR>=8990 && NR<=9010' services/pdf_service.py)",
+      "Bash(awk -F: '$1 > 8990 && $1 < 9500')",
+      "Bash(python -c ' *)",
+      "Bash(py scripts/inspect_gap_fill_prompts.py --forms ACORD_25)",
+      "Bash(py -m pytest -q tests/test_whole_document_default_20260812.py)",
+      "Bash(py -m pytest -q tests/test_dec_page_entries_20260812.py tests/test_text_selection.py tests/test_quote_label_vs_statement.py tests/test_phantom_schedule_rows.py)",
+      "Bash(cd \"c:/Users/lenovo/OneDrive/Desktop/Primble/backend\" && grep -n \"UNKNOWN_KEYS\" services/pdf_service.py && echo \"===\" && sed -n '/def _absorb/,/^    def _build_prompt\\\\|^def /p' services/pdf_service.py | head -95)",
+      "Bash(awk -F: '$1 > 11400 && $1 < 11800')",
+      "Bash(py -m pytest -q tests/test_dec_traps_20260812.py)",
+      "Bash(py -m pytest -q tests/test_authoritative_blank_contract.py::test_ownership_check_is_scoped_to_the_named_resolvers)",
+      "Bash(py -m pytest -q tests/test_authoritative_blank_contract.py)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\lenovo\\OneDrive\\Desktop\\Primble\\backend\\services"
     ]
   }
 }

@@ -323,6 +323,194 @@ this area again):**
   residual (~2-3 borrowed false "N"s per run, an LLM limitation, not a bug) are in
   "Dedicated Compliance Yes/No Question Pass" and the two sections above it, below.
 
+### Dec-Page Values Must Reach The Form: Three Leaks Plugged, And The Fill-Rate Fix Finally Engages - FIXED (2026-08-12, second session)
+**Owner's end goal, verbatim: "form should not be blank if values are present in declaration
+page."** Four changes, all measured against the client's live package. Full detail in
+`improving-ll.md` C48/C49 and `RETRIEVAL_CHANGES.md` Decision 8.
+
+1. **The blank POLICY PREMIUM box.** The merge picked $2,991 (the Auto LINE premium, printed
+   twice) over the real $10,663 (printed once) - C45's documented known limit - and the
+   downstream resolver could only REFUSE the impossible figure, so the box shipped empty.
+   `extraction_service._reconcile_total_premium` now runs inside the merge, where the
+   candidates still exist: a winner smaller than the largest single granted line is not a
+   total, and the best-scored POSSIBLE stated value replaces it (exact-sum preferred; a
+   possible winner is never second-guessed - that would be C23's preference mistake).
+2. **The $35 Business Auto premium.** "Auto Medical Payments $35" was the only entry whose
+   tokens fit the box under the old raw-subset match ("automobile" != "auto" as bare tokens
+   kept the real line out). `_resolve_lob_premium` now matches with the same stem/synonym
+   predicate the indicator logic uses, rejects a coverage PART (leftover tokens are
+   coverage-feature vocabulary), and lets an exact line name outrank a qualified one:
+   $2,991 stamps. Parts-only documents still fill; conflicting exact names still refuse.
+3. **One premises printed as THREE ACORD 125 location rows.** `_parse_address` splits only
+   on commas, and the document mentions the address comma-free in three shapes, so each kept
+   its whole string as line1 under a different group key. `_consolidate_property_locations`
+   now folds parse-variant groups (prefix-with-same-street-number, and geo-only fragments
+   contained in exactly ONE street group) and recovers city/state/zip out of a comma-free
+   line1 into their own boxes. Two real suites never fold; ambiguous fragments stay put.
+4. **Step 2 of the retrieval plan shipped** (`RETRIEVAL_CHANGES.md`): the density filter
+   skipped on the client's package (separation gap 0.07 < 0.15 floor), leaving every
+   gap-fill call a 174k-token haystack and the fill rate at 26%. Standard-form pages are now
+   dropped by their OWN printed ISO footer (`CG 00 01 04 13`) - carrier dec-page codes
+   (`CA7000A 02-22`) don't match, a FORMS AND ENDORSEMENTS schedule (many codes in one
+   window) and its boundary-spill neighbours are kept, the fact rescue outranks the drop,
+   and the ratio gates still judge the result. On the density-inseparable fixture:
+   108,873 -> 3,000 chars with zero dec values lost. Kill switch `TEXT_SELECT_FORM_FOOTER=0`.
+
+**Correction to the entry below:** "Checked and deliberately NOT changed: NAICS/SIC routing"
+is stale - a later session the same day DID reverse it in `question_classifier.py` on the
+client's explicit instruction (Part 13: "those come from the producer or underwriter").
+NAICS/SIC are now producer-facing; the Figure 20 suggester surfaces its candidates to the
+producer. The code comments there carry the full reasoning.
+
+Tests: `tests/test_dec_page_values_20260812.py` (13), +5 in `test_location_consolidation.py`,
++6 in `test_text_selection.py`. Suite **2098 passed / 2 failed** - the same two pre-existing
+unrelated failures, zero regressions. Prompt inspector re-run: prefix stable, PASS.
+
+**Same day, third session - `dec_page_entries` (C50, read improving-ll.md before touching):**
+LLM call 1 now also RECORDS every label:value:owner entry printed on a declarations/schedule
+page (source-driven, form-agnostic - the fix for the measured 68-of-548 deterministic
+ceiling). `_verify_dec_entries` discards anything not literally present in the uploaded text;
+the ONLY consumers are deterministic - `_backfill_empty_facts_from_entries` (five stacked
+conditions; the client's account-number-as-FEIN and producer-phone-as-applicant-phone defects
+are each blocked by two of them) and the text-selection rescue net (closes the filter's one
+remaining data-loss shape). **LLM call 2 is byte-identical, proven by
+`test_call2_prompt_is_byte_identical_with_dec_entries`; every still-unfilled field still
+reaches it, pinned by `test_every_unfilled_field_still_reaches_call_2`.** The fr1 equality
+edge on the total-premium floor ($3,954 == largest line slipping through) was also closed on
+both layers. Suite **2139 passed / 2 failed** (same two pre-existing), inspector $0.0584
+unchanged, PASS. Tests: `tests/test_dec_page_entries_20260812.py` (24).
+
+### Pre-Download Review: Repeated Lines + Score Contradicting Itself - FIXED (2026-08-12)
+**Client: "repeated values are there a lot" + PART 18's "does the score correlate to the
+items?"; the fresh run showed the same loss warning twice, ~20 near-identical "high-impact
+... left blank" rows, and "Score at download: 66/100" above prose saying "scores 63/100".**
+Four root causes, NONE in score computation:
+1. **Positional rec_ids** (`rec_loss_{len(recommendations)}`, `sqs_service`) - the same
+   throwaway-index defect as the 2026-08-08 legacy_soft_* fix, one layer up. Two forms'
+   scorers emit the identical loss warning at different list indexes -> different ids ->
+   the audit table's ON CONFLICT (session_id, rec_id) dedupe never fires -> two rows, and
+   a dismissal stops matching when a recalc renumbers. Now `_loss_rec_id(message)`:
+   identity from the digit-stripped message template. Every other rec already had a
+   stable id; loss was the only positional straggler.
+2. **Random uuid fallback** in `log_recommendations_presented` for plain-string recs -
+   same dedupe defeat. Now `_fallback_rec_id` = message hash.
+3. **One row per distinct high-impact question** in `field_qa.to_recommendation_rows`.
+   Second merge tier added: distinct questions sharing form+reason roll into ONE row
+   naming each question (first 3, "+N more"). The client's literal 20-row shape now
+   renders 3 rows (test-pinned). Single-question groups keep byte-identical wording;
+   value mismatches / schedule rows stay individual. Also rewrote the "1011 fields the
+   AI left blank" summary phrase to "optional fields not covered by the documents (left
+   blank by design)" - it was the blank-over-wrong rule working, reading like a failure.
+4. **The narrative was built from a different score than the banner.** `/api/sqs/narrative`
+   fed the LLM `next(iter(generated_forms))` - the FIRST form's per-form score - while the
+   banner renders the independent PACKAGE score, and the prompt said "state the score
+   tier". Endpoint now reads `session["package_sqs"]` (first-form fallback only for legacy
+   sessions); prompt now FORBIDS restating score/tier/points - the UI owns the number,
+   prose owns the gap + next action. Package `top_recommendations` messages feed the
+   drivers context (never a dict repr). Fallback string kept per user decision - it now
+   derives from the same package object as the banner.
+Tests: `backend/tests/test_preflight_repetition_20260812.py` (14, incl. an anti-rot grep
+for positional ids and the client's literal run shape). Suite **2112 passed / 2 failed** -
+the same two pre-existing unrelated failures, zero regressions. `improving-ll.md` updated
+for the prompt edit. Old sessions keep their already-written duplicate rows (positional
+ids already stored); fresh runs are clean.
+
+### Completion Notification Announced The Wrong Issue Count - FIXED (2026-08-12)
+**Client screenshot: the corner toast read "1 warning found" while the review screen printed
+THREE warning clusters** - Missing baseline form, GL exposure basis, Auto optional coverage
+gaps. Reported for hard stops too.
+
+**Root cause: the toast counted a different list than the screen drew.** `packageStatusNotice`
+and the next-step banner used `len(hard_stops)` / `len(soft_stops)`; the issue cards render
+`grouped_issues`. Those diverge THREE ways, in both directions:
+1. **Advisory cross-form issues are rendered but never counted.** `extraction_pipeline.py:786`
+   mirrors EVERY cross-form issue into `structured_issues` whatever its type, so an advisory
+   draws a warning card - but `split_cross_form_issues` routes advisories to a third list that
+   nothing merges into `soft_stops`. 8 rules are advisory-typed; the client's UM/UIM card is one.
+2. **`cross_issues` injected on the reload path** (`/extraction-result`) render alongside stop
+   arrays that never contained them.
+3. **The legacy duplicate suppression** hides a message the arrays still carry, so `len()`
+   counts one problem twice - the same count, wrong the OTHER way.
+
+**Fix: stop counting inputs, count output.** `build_grouped_view` now returns `counts`, summed
+from the clusters it actually rendered (`cluster["count"]`, the same unit each tier header badge
+sums). One frontend helper `packageIssueCounts()` reads it, with array length as the fallback for
+old payloads and the lite path. It feeds the toast, the next-step banner AND the section
+visibility gates - gating on the arrays could hide a card the grouped view renders.
+**`important` is deliberately excluded**: it echoes the top 3 clusters already counted in the
+tiers, so counting it would inflate by up to 3.
+
+**The raw arrays are untouched** - they are the SQS capping inputs (60/85), dismiss credit and
+`issue_id` hashing. This is display-only. Tests: `backend/tests/test_grouped_view_counts.py` (6),
+including the client's literal screenshot values. Suite **2031 passed / 2 failed**, the same two
+pre-existing unrelated failures, zero regressions. Frontend production build verified.
+
+### Form Coverage Dropped: Four Defects, Three Of Them Self-Inflicted - FIXED (2026-08-12)
+**Client report: "form values are not filling up as they were earlier".** Four causes found,
+each measured against the real schemas rather than reasoned about. Full detail in
+`improving-ll.md` C46/C47.
+
+1. **The evidence gate was rejecting REAL answers because `"not"` is a stopword.**
+   `_quote_restates_the_question` (added hours earlier, to stop a checkbox ticked on the
+   "evidence" `"for non-payment of premium"`) tested only whether all the quote's significant
+   words appear in the question. **A direct answer to a yes/no question is by definition
+   mostly the question's own words**, and `"not"` sits in `_ECHO_STOPWORDS`, so the one word
+   carrying the whole meaning was discarded before comparison. Measured: **39 of 218 real
+   compliance questions across 9 forms (18%; ACORD 125 40%, ACORD 126 33%)** lost their
+   canonical evidence - including `"The applicant does not have any subsidiaries."` and the
+   affirmative `"Subcontractors are required to carry coverage."` **Damage concentrated by an
+   asymmetry: a "Yes" survives on a quote OR a paired explanation; a "No" has only the quote
+   and is blanked outright.** Fixed with a structural second condition
+   (`_quote_asserts_something`) - overlap is necessary but not sufficient, and a bare noun
+   phrase (no subject, no finite verb) is what a label actually is. 15/15 separation, 39/39
+   recovered, both original culprits still rejected.
+2. **The model was asked about vehicles that do not exist.** One Subaru in the document;
+   ACORD 127 came back with rows 2-3 carrying the **General Liability** class codes
+   91580/91585 and the GL exposures ($39,300 payroll, $350,000 subcontract cost) stamped as
+   vehicle COST NEW. **The first theory - cross-form batch confusion - was wrong.**
+   `_SCHEDULE_REGISTRY` binds only the 19 IDENTITY columns; the other ~50 columns per row
+   fell through to gap fill for every row letter the form prints - **164 questions about
+   vehicles that do not exist, against 56 for the real one.** Fixed by
+   `_resolve_phantom_schedule_row` in `_AUTHORITATIVE_BLANK_RESOLVERS` (the contract BOTH
+   `compute_form_gaps` and `map_facts_to_form` already consult). **Acts only on positive
+   evidence** - no schedule list means no suppression, since suppressing on no evidence would
+   delete a schedule the extractor merely missed. Capacity is `len(list) + row_offset`, because
+   `NamedInsured_A` is the applicant and the list starts at row B. **166 union fields (14%)
+   removed and one fewer outer batch: cheaper AND more correct.**
+3. **A line premium was stamped as the package total.** $2,991 (Commercial Auto) instead of
+   $10,663, because `_merge_list_fields` ranks on `log1p(freq) + confidence` and a line
+   premium printed twice beats the true total printed once. `_resolve_estimated_total` now
+   rejects a stated total smaller than `max(sum of lines, largest single line)` and falls back
+   to the sum it already computed. **This is a VALIDITY constraint, not C23's magnitude
+   PREFERENCE** - nothing here ever picks a bigger number, it refuses an arithmetically
+   impossible one. `test_a_larger_stated_total_is_never_forced` pins that distinction.
+4. **`umbrella_sir_below_gl_deductible` - the SAME conflation as the Auto twin, one coverage
+   part over, and a HARD STOP.** A $0 SIR against a $1,000 GL deductible fired a hard stop
+   capping the package at 60 on the ordinary, healthy structure. An Umbrella SIR applies only
+   where the umbrella drops down; a GL deductible applies to claims the GL DOES cover, above
+   which the umbrella attaches at the GL **limit**. The two never meet. Deleted from BOTH
+   engines - `sqs_service.evaluate_stops` held **a second, independent copy**, exactly the
+   duplication that let the Auto version survive its first fix, and the legacy copy is the one
+   that actually drives the 60/85 caps. The genuine check
+   (`_check_umbrella_gl_minimum_limits`, umbrella vs underlying GL LIMIT) is untouched and
+   verified still firing.
+
+**Checked and deliberately NOT changed: NAICS/SIC routing.** It was on the open list as
+"should go to the producer, not the client". It should not - `test_naics_code_still_client_
+despite_naic_substring` and the `_CLIENT_WHITELIST` entry exist specifically to keep it
+client-facing (the carrier's `naic` number is a substring of `naics_code`), and the Figure 20
+suggester chips the client praised render in the client questionnaire. Reversing it would
+break a deliberate, tested decision and a working feature.
+
+**Also cleared by measurement, not assumption** - the other suspects for the coverage drop:
+Guard 8's rewritten `_is_tooltip_echo` is a net GAIN (0 flags where the old code flagged 67 of
+ACORD's own enumerated valid answers; 7 extra in 146,300 cross-applied pairs, all nonsense
+pairs); text selection never fired on the client's document (separation gap 0.07 against a
+0.15 floor); and `_report_ungrounded_ai_values` is read-only by inspection.
+
+Suite: **2025 passed / 2 failed** - the same two pre-existing unrelated failures
+(`test_arq_acord125_missing_only`, `test_normalization`), zero regressions, +47 new tests.
+
 ### Data Consistency Picker Suggested Legal Boilerplate As The Real Value - FIXED (2026-08-08)
 **Client report: the "Applicant / Named Insured" Data Consistency picker suggested "c. Any person or
 organization having proper..." instead of the real company name** - a sentence lifted straight out of

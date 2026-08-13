@@ -472,6 +472,13 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
     repeating or mostly similar"). Rows sharing the same form + underlying
     field (row suffix stripped) + reason are now merged into a single row with
     a count - still individually visible, no longer duplicated per slot.
+
+    A SECOND merge tier (client feedback 2026-08-12: "repeated values are
+    there a lot") rolls DISTINCT high-impact questions that share one form and
+    one reason into a single row naming each question (first 3 labels, then
+    "+N more"), instead of one near-identical row per question. Value
+    mismatches and schedule-row defects stay individual - each is a distinct,
+    differently-actioned finding.
     """
     if not qa_result:
         return []
@@ -543,31 +550,71 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
             # were surfaced individually by the high_impact branch above).
             n_blank += 1
 
+    # Second-tier merge (client feedback 2026-08-12: "repeated values are there
+    # a lot, is there a way we can reduce it"): the 2026-07-15 merge above only
+    # collapses row-letter repeats of the SAME question, so a form with many
+    # DISTINCT high-impact gaps still rendered one near-identical row per
+    # question (~20 on the client's 125/126/127 run). Distinct questions
+    # sharing one form + one reason now roll up to ONE row that NAMES them -
+    # nothing is buried (Figure 33: every question is still listed by name),
+    # nothing repeats. A form+reason with a single underlying question keeps
+    # today's wording (including the "N high-impact repeating rows" message),
+    # so the common case is byte-identical.
+    by_form_reason: Dict[tuple, list] = {}
     for (form_id, base_field, code), grp in high_impact_groups.items():
-        fields = grp["fields"]
-        n = len(fields)
-        if n == 1:
-            message = grp["message"]
-        else:
-            label = _humanize_field(base_field)
-            form_label = (form_id or "").replace("ACORD_", "ACORD ")
-            if code == "low_confidence":
-                verb = "were AI-inferred (not copied verbatim from a document)"
-                action = "Confirm each against the source before sending."
-            elif code == "not_answered":
-                verb = "were left blank by the AI (no value found in the documents)"
-                action = "Answer manually if they apply."
-            else:  # missing_required
-                verb = "are required but empty"
-                action = "Provide values before sending."
-            message = (
-                f"{label} on {form_label}: {n} high-impact repeating rows {verb}. Fix: {action}"
-            )
+        by_form_reason.setdefault((form_id, code), []).append((base_field, grp))
+
+    for (form_id, code), groups in by_form_reason.items():
+        form_label = (form_id or "").replace("ACORD_", "ACORD ")
+        if len(groups) == 1:
+            base_field, grp = groups[0]
+            fields = grp["fields"]
+            n = len(fields)
+            if n == 1:
+                message = grp["message"]
+            else:
+                label = _humanize_field(base_field)
+                if code == "low_confidence":
+                    verb = "were AI-inferred (not copied verbatim from a document)"
+                    action = "Confirm each against the source before sending."
+                elif code == "not_answered":
+                    verb = "were left blank by the AI (no value found in the documents)"
+                    action = "Answer manually if they apply."
+                else:  # missing_required
+                    verb = "are required but empty"
+                    action = "Provide values before sending."
+                message = (
+                    f"{label} on {form_label}: {n} high-impact repeating rows {verb}. Fix: {action}"
+                )
+            rows.append({
+                "rec_id":       _rec_id(form_id, base_field, code, "grp"),
+                "message":      message,
+                "type":         "suggestion",
+                "field":        fields[0] if n == 1 else None,
+                "component":    form_id,
+                "score_impact": None,
+            })
+            continue
+
+        # >= 2 distinct questions on one form for one reason -> one named row.
+        labels = [_humanize_field(base_field) for base_field, _ in groups]
+        shown = ", ".join(labels[:3]) + (
+            f", +{len(labels) - 3} more" if len(labels) > 3 else ""
+        )
+        if code == "low_confidence":
+            what = "high-impact answers were AI-inferred (not copied verbatim from a document)"
+            action = "Confirm each against the source before sending."
+        elif code == "not_answered":
+            what = "high-impact questions were left blank by the AI (no value found in the documents)"
+            action = "Answer them manually if they apply."
+        else:  # missing_required
+            what = "high-impact required fields are empty"
+            action = "Provide values before sending."
         rows.append({
-            "rec_id":       _rec_id(form_id, base_field, code, "grp"),
-            "message":      message,
+            "rec_id":       _rec_id(form_id, code, "form_group"),
+            "message":      f"{form_label}: {len(labels)} {what}: {shown}. Fix: {action}",
             "type":         "suggestion",
-            "field":        fields[0] if n == 1 else None,
+            "field":        None,
             "component":    form_id,
             "score_impact": None,
         })
@@ -579,7 +626,14 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
         if n_review:
             parts.append(f"{n_review} AI-inferred field{'s' if n_review != 1 else ''} to verify")
         if n_blank:
-            parts.append(f"{n_blank} field{'s' if n_blank != 1 else ''} the AI left blank")
+            # Copy matters here (client, PART 18: "73 unresolved items - that
+            # seems like a lot"): most of these are fields the documents simply
+            # never address, which is the blank-over-wrong design working as
+            # intended - the count must not read as a failure tally.
+            parts.append(
+                f"{n_blank} optional field{'s' if n_blank != 1 else ''} "
+                "not covered by the documents (left blank by design)"
+            )
         rows.append({
             "rec_id":       "fieldqa_summary",
             "message": (

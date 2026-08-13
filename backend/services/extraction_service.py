@@ -390,6 +390,31 @@ _EXTRACT_SCHEMA = (
     '  "auto_dealers_inventory_value": string or null,\n'
     # ── WC Application (ACORD 130) ────────────────────────────────────────
     '  "wc_description_of_operations": string or null,\n'
+    # ── Declarations-page recording (source-driven, form-agnostic) ────────
+    # WHY THIS EXISTS (2026-08-12): the ~170 keys above are DESTINATION-driven -
+    # they capture what the forms are known to ask for, and anything else a dec
+    # page prints (audit basis, deposit, program code, servicing contacts, ...)
+    # evaporates and can only be re-found by the gap-fill model inside a 683k-
+    # char haystack, which measurably answers ~26% of what it is asked. This key
+    # is SOURCE-driven: record what the document STATES, decide who consumes it
+    # later. Every entry is mechanically verified verbatim against the document
+    # in merge_facts (_verify_dec_entries) - a fabricated entry cannot survive -
+    # and consumed ONLY by deterministic code (fact backfill, rescue anchors).
+    # It is deliberately NEVER rendered into the gap-fill prompt
+    # (pdf_service._GAP_FILL_FACTS_EXCLUDE): LLM call 2 stays byte-identical.
+    '  "dec_page_entries": [{"label": string, "value": string, '
+    '"owner": "applicant"|"producer"|"carrier"|"policy"|"other", '
+    '"policy_number": string or null, "line_of_business": string or null}] '
+    '(EVERY label:value pair printed on a DECLARATIONS, coverage-summary or '
+    'SCHEDULE page in this text - premiums, limits, deductibles, dates, '
+    'identifiers, phone/email/web contacts, codes. Copy label and value '
+    'VERBATIM as printed. owner = whose value it is: the applicant/insured, '
+    'the producer/agency, the carrier/insurer, or "policy" for policy-level '
+    'figures like premiums and limits. NEVER record anything from policy '
+    'wording, endorsement legal text, or hypothetical/illustrative amounts - '
+    'only values this policy actually states on its declarations/schedule '
+    'pages. At most 80 entries; [] when this text contains no declarations '
+    'content.),\n'
     '  "state_of_operations": string or null\n'
     '},\n\n'
     '"flags": {\n'
@@ -397,7 +422,10 @@ _EXTRACT_SCHEMA = (
     '  "has_property_coverage": boolean, "has_auto_coverage": boolean,\n'
     '  "has_workers_comp": boolean, "has_umbrella": boolean,\n'
     '  "has_multiple_locations": boolean, "has_loss_history": boolean,\n'
-    '  "asserts_no_known_losses": boolean,\n'
+    '  "asserts_no_known_losses": boolean (true ONLY when the document '
+    'EXPLICITLY states there are no losses/claims - e.g. "no known losses", '
+    '"loss free", "claim free". "NOT ON FILE", "NOT REPORTED" or loss data '
+    'simply being absent means UNKNOWN - leave false),\n'
     '  "is_contractor": boolean, "has_certificate_request": boolean,\n'
     '  "is_certificate_doc": boolean, "gl_is_claims_made": boolean,\n'
     '  "auto_has_physical_damage": boolean, "auto_split_limits": boolean,\n'
@@ -493,7 +521,7 @@ _EXTRACT_PROMPT_PREFIX = (
     '  is_contractor: true only if the named INSURED\'s PRIMARY BUSINESS is a construction or installation contracting trade (general contractor, roofing contractor, electrical, plumbing, excavation, demolition contractor, etc.). Do NOT set true if construction trades are only mentioned in loss history, claims descriptions, operations of a third party, or as endorsement requirements listed for certificate holders.\n'
     '  has_certificate_request: true if document contains language requesting issuance of a certificate of insurance, lists a certificate holder, or shows "certificate required".\n'
     '  is_certificate_doc: true if the document IS itself an ACORD 25 Certificate of Liability Insurance or ACORD 28 Evidence of Property — identifiable by "Certificate of Liability Insurance" or "Evidence of Commercial Property Insurance" as the document title.\n'
-    '  gl_is_claims_made: true if GL coverage is written on a claims-made basis (document shows "Claims Made" selected or "Retro Date" present for GL).\n'
+    '  gl_is_claims_made: true ONLY if the GENERAL LIABILITY COVERAGE FORM ITSELF (Coverage A bodily injury / property damage) is written on a claims-made basis. A retroactive date alone is NOT enough - it must belong to the GL coverage form. Do NOT set true when the retroactive date belongs to a SUB-COVERAGE endorsement such as Employee Benefits Liability, Professional/E&O, or Pollution, which are routinely claims-made INSIDE an otherwise occurrence-based GL policy; and do NOT set true when the document states the GL form is written on an OCCURRENCE basis. When a declarations page says both (e.g. "CG 00 01 is written on an OCCURRENCE basis" and "Employee Benefits Liability CG 04 35 is the only coverage written on a CLAIMS-MADE basis"), the answer is FALSE.\n'
     '  auto_has_physical_damage: true if document shows comprehensive and/or collision coverage for autos.\n'
     '  auto_split_limits: true if auto liability is expressed as split limits (BI per person / BI per accident / PD per accident) rather than a combined single limit (CSL). When true, ALSO fill auto_bi_per_person, auto_bi_per_accident and auto_pd_per_accident with the three separate figures (e.g. "100/300/50" means $100,000 / $300,000 / $50,000). When the policy carries a single combined limit, leave those three null and put the figure in auto_liability_limit only - a CSL is NOT the same amount as each split part.\n'
     '  auto_has_hired_nonowned: true if document mentions "hired auto", "non-owned auto", "HNOA", or hired and non-owned coverage.\n'
@@ -1462,6 +1490,7 @@ _STRUCTURED_DICT_FIELDS = frozenset({
 
 # List fields in the schema — LLM must return [] not null for these.
 _LIST_FIELDS = frozenset({
+    "dec_page_entries",
     "lines_of_business", "locations", "property_locations",
     "auto_vin_schedule", "auto_garaging_addresses", "auto_drivers",
     "gl_class_codes_by_location", "gl_class_code_schedule",
@@ -1783,6 +1812,10 @@ _LONG_DOC_LIST_KEYS = [
     # keeps ONE chunk's list, so a dec page split across chunks silently loses
     # every line mentioned in the other chunks.
     "coverage_lines",
+    # Source-driven dec-page recording - union across chunks for the same
+    # reason as coverage_lines: a dec section split across two chunks must
+    # contribute entries from both halves.
+    "dec_page_entries",
 ]
 
 DOC_TYPE_CHUNK_LIMITS: Dict[str, int] = {
@@ -2278,6 +2311,87 @@ def _money_amounts(sval: str) -> set:
     return out
 
 
+# ── Arithmetic reconciliation: the package total vs its own coverage lines ───
+# THE case source authority (C45) cannot decide, named there as the known limit:
+# a LINE premium and the PACKAGE total both sit on the declarations page, so they
+# land in the same authority tier and frequency decides - and a line premium
+# printed twice beats the true total printed once. Live 2026-08-12: $2,991 (the
+# Commercial Auto line) won `total_policy_premium` over the real $10,663.
+#
+# `pdf_service._resolve_estimated_total` already REFUSES the impossible figure
+# (a total cannot be smaller than one of its own lines), but a resolver can only
+# blank - the candidate list is gone by then, so the client's PDF shipped with an
+# EMPTY policy-premium box while the correct figure sat in the rejected pile.
+# This runs where the candidates still exist and swaps in the best VALID one.
+#
+# VALIDITY, not preference (the C23 lesson): nothing here prefers a bigger
+# number. It removes candidates that are arithmetically impossible as a total -
+# smaller than the largest single granted coverage-line premium - and only when
+# the document provides that evidence. No coverage lines, or no candidate that
+# passes, and the merge result stands untouched (the resolver still blanks it
+# downstream, which is the correct last resort: blank beats wrong).
+def _premium_dollars(text: Any) -> int:
+    """Whole dollars from a currency string; 0 when there is no figure."""
+    digits = re.sub(r"[^\d]", "", str(text or "").split(".")[0])
+    return int(digits) if digits else 0
+
+
+def _reconcile_total_premium(merged_facts: dict, candidates: Dict[str, dict]) -> None:
+    """Replace an arithmetically-impossible `total_policy_premium` winner with
+    the best-scored candidate that IS possible. Mutates `merged_facts`."""
+    lines = merged_facts.get("coverage_lines")
+    if not isinstance(lines, list) or not lines or not candidates:
+        return
+    granted = [
+        _premium_dollars(e.get("premium"))
+        for e in lines
+        if isinstance(e, dict) and _line_entry_grants_coverage(e)
+    ]
+    largest = max(granted, default=0)
+    if largest <= 0:
+        return
+    # With two or more PRICED lines the true total strictly exceeds any single
+    # line, so equality with the largest line is impossible too. Live run fr1
+    # (2026-08-12): the merge picked $3,954 - the GL line premium exactly - and
+    # the >=-only floor waved it through. A one-line package keeps equality.
+    positive = sum(1 for p in granted if p > 0)
+    def _possible(amount: int) -> bool:
+        if amount <= 0:
+            return False
+        return amount > largest or (amount == largest and positive < 2)
+    chosen = merged_facts.get("total_policy_premium")
+    chosen_val = chosen.get("value", chosen) if isinstance(chosen, dict) else chosen
+    chosen_amt = _premium_dollars(chosen_val)
+    if chosen_amt == 0 or _possible(chosen_amt):
+        return                            # valid as a total, or nothing parseable
+    valid = [
+        c for c in candidates.values()
+        if _possible(_premium_dollars(c["display"]))
+    ]
+    if not valid:
+        return                            # no possible total among the candidates
+    # Among the valid: an exact match with the sum of the granted lines is the
+    # total by definition; otherwise the ordinary score decides. Both only ever
+    # pick from values the document actually stated.
+    line_sum = sum(granted)
+    exact = [c for c in valid if line_sum and _premium_dollars(c["display"]) == line_sum]
+    pool = exact or valid
+    best = max(
+        pool,
+        key=lambda c: _score_value(
+            "total_policy_premium", c["record"], c["freq"], c.get("authority")),
+    )
+    logger.warning(
+        "merge total_policy_premium ARITHMETIC reconciliation: %r is smaller "
+        "than a single granted coverage line ($%s) and cannot be the package "
+        "total - replaced with %r (%s). The rejected figure is a line premium "
+        "that out-voted the real total on repetition (C45's known limit).",
+        str(chosen_val)[:40], f"{largest:,}", best["display"][:40],
+        "matches the sum of the lines" if exact else "best-scored valid candidate",
+    )
+    merged_facts["total_policy_premium"] = best["record"]
+
+
 def _score_composite_candidate(cand_text: str, child_candidates: Dict[str, dict]) -> tuple:
     """Rank a candidate COMPOSITE limits string. Higher is better.
 
@@ -2404,7 +2518,147 @@ def _partition_by_shape(field: str, scored: list) -> list:
     return good + bad
 
 
-def _score_value(field: str, record: Any, freq: int) -> float:
+# ── Source authority ─────────────────────────────────────────────────────────
+# THE large-document root cause. `_score_value` ranks by repetition, and a
+# declarations page states each figure exactly ONCE while the policy forms
+# behind it mention rival figures on page after page. Measured against the real
+# scorer: a wrong value needs only TWO mentions to beat the right one stated
+# once at high confidence (1.599 vs 1.543). Across 17 chunks the authoritative
+# statement is structurally the minority vote, so the more document we read, the
+# worse the answer gets. On a ONE-chunk document every candidate has freq==1,
+# the frequency term is constant and confidence decides correctly - which is
+# exactly why small documents come out right and large packages do not.
+#
+# The signal is STRUCTURAL, deliberately carrying no insurance vocabulary: a
+# declarations page is TABULAR (short lines, dense money and dates), a policy
+# form is PROSE (long wrapped lines, almost no figures). A keyword list would be
+# a per-carrier lookup in disguise and would not hold across the 17 forms or a
+# carrier whose wording we have never seen. `test_authority_needs_no_insurance_
+# vocabulary` fails the build if that ever stops being true.
+# Deliberately NOT named _MONEY_TOKEN_RE: that name is already taken above by a
+# CAPTURING pattern `_money_amounts` parses with float(). Redefining it here
+# shadowed it, findall() started returning whole matches, and every C23 currency
+# tiebreak test went red. Counting patterns and parsing patterns are different
+# things and must not share a name.
+_AUTHORITY_FIGURE_RE = re.compile(r"[$€£]\s?\d[\d,]*(?:\.\d{1,2})?")
+_AUTHORITY_DATE_RE   = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b")
+# Mean line length of wrapped policy prose vs a printed schedule row. Only the
+# GAP between them matters - the score is a position between the two.
+_PROSE_LINE_CHARS   = 75.0
+_TABULAR_LINE_CHARS = 40.0
+# Roughly one printed page. The unit the signal is about: "is there a
+# declarations page in here", not "is this whole 56,000-char chunk one".
+_AUTHORITY_WINDOW_CHARS = 3_000
+
+
+def _window_authority(text: str) -> float:
+    """Declarations-likeness of one window, 0.0 (prose) .. 1.0 (dense tabular)."""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    if not lines:
+        return 0.0
+    figures = (len(_AUTHORITY_FIGURE_RE.findall(text))
+               + len(_AUTHORITY_DATE_RE.findall(text)))
+    # One figure per line saturates: a schedule row carries an amount, prose does
+    # not. Beyond that, more figures say nothing extra.
+    figure_density = min(1.0, figures / len(lines))
+    mean_len = sum(len(ln) for ln in lines) / len(lines)
+    brevity = (_PROSE_LINE_CHARS - mean_len) / (_PROSE_LINE_CHARS - _TABULAR_LINE_CHARS)
+    brevity = min(1.0, max(0.0, brevity))
+    return 0.5 * figure_density + 0.5 * brevity
+
+
+def declarations_authority(text: str) -> float:
+    """Whether this span CONTAINS a declarations/schedule region - the MAXIMUM
+    over page-sized windows, never the average across the span.
+
+    Averaging was measured and rejected: an extraction chunk is 56,000 chars and
+    a real dec page is a few thousand, so a genuine declarations page occupying
+    14% of its chunk scored 0.174 - indistinguishable from pure policy prose at
+    0.061. Chunk-mean would have shipped a fix that quietly does nothing on the
+    documents it was built for.
+
+    Max is deliberately the SENSITIVE choice. A limits table inside an
+    endorsement can raise a boilerplate chunk too, but the cost of that is every
+    chunk landing in one tier, which is a flat signal, which is exactly today's
+    ranking (see _AUTHORITY_TIER_CUTS). A false positive costs nothing; a false
+    negative costs the whole fix.
+
+    Public: `_gather_chunks_async` stamps it onto every partial.
+    """
+    text = text or ""
+    if len(text) <= _AUTHORITY_WINDOW_CHARS:
+        return round(_window_authority(text), 4)
+    step = max(1, _AUTHORITY_WINDOW_CHARS // 2)          # 50% overlap, so a
+    best = 0.0                                           # region cannot be split
+    for start in range(0, len(text), step):              # across two windows and
+        window = text[start : start + _AUTHORITY_WINDOW_CHARS]   # diluted in both
+        if not window:
+            break
+        best = max(best, _window_authority(window))
+        if best >= 1.0:
+            break
+    return round(best, 4)
+
+
+# Authority enters the score as a QUANTIZED TIER, never as a continuous weight.
+# That is the whole safety argument: within one tier the expression below is
+# byte-for-byte today's formula, so when a document cannot be discriminated
+# (every chunk prose, or every chunk tabular) the ranking is not merely similar
+# to the old one, it IS the old one. A continuous weight would silently reorder
+# every fact in the system on every document - which is why the sibling
+# `_partition_by_shape` above ships in shadow mode.
+_AUTHORITY_TIER_CUTS = (0.25, 0.55)
+# Must exceed the widest possible spread of (log1p(freq) + confidence). At 40
+# chunks that is log1p(40) + 1.0 = 4.71, so 10.0 dominates with room to spare.
+_AUTHORITY_GAIN = 10.0
+
+
+def _authority_tier(authority: Optional[float]) -> int:
+    """0 = prose, 1 = mixed, 2 = declarations. None/absent behaves as 0 for
+    every candidate alike, which is a flat signal, not a demotion."""
+    if authority is None:
+        return 0
+    return sum(1 for cut in _AUTHORITY_TIER_CUTS if authority >= cut)
+
+
+# Authority is a claim about WHERE a value came from, and it is only meaningful
+# for values a declarations page actually prints: amounts, dates, numbers, names,
+# codes. A narrative does not live on a dec page - the fuller operations
+# description is out in the prose, and ranking a tabular fragment above it would
+# ENTRENCH the truncated-shorthand defect rather than fix it. So when any
+# candidate for a fact is prose, authority sits out and the old ranking stands.
+#
+# Derived from the VALUE, not from a list of fact keys: `FACT_REGISTRY` has no
+# `kind` column, and a name pattern would silently miss the next narrative fact
+# somebody adds. Thresholds are set well clear of the longest atomic value a
+# dec page prints - a full mailing address is ~45 chars / 8 tokens.
+_PROSE_VALUE_CHARS = 100
+_PROSE_VALUE_WORDS = 12
+
+
+def _is_prose_value(s: str) -> bool:
+    return len(s) > _PROSE_VALUE_CHARS and len(s.split()) > _PROSE_VALUE_WORDS
+
+
+def _best_authority(a: Optional[float], b: Optional[float]) -> Optional[float]:
+    """A candidate is credited with the MOST authoritative place it was seen.
+
+    Max, not mean: a figure printed on the declarations page does not become
+    less trustworthy because the policy forms repeat it. The corollary is the
+    known limit of this signal - when two RIVAL values both appear on the
+    declarations page (a line premium against the package total, say) they land
+    in the same tier and frequency decides between them exactly as before.
+    Separating those needs the arithmetic reconciliation, not this.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return max(a, b)
+
+
+def _score_value(field: str, record: Any, freq: int,
+                 authority: Optional[float] = None) -> float:
     tier_weight = _TIER_WEIGHTS[_get_field_tier(field)]
 
     # Extract confidence from annotated dict
@@ -2424,8 +2678,13 @@ def _score_value(field: str, record: Any, freq: int) -> float:
     if field in _STRUCTURED_SCORE_FIELDS:
         return tier_weight * conf_score
 
+    # `base` is today's expression, unchanged. Authority is added on top as a
+    # dominant quantized tier, so candidates from the SAME tier are ordered by
+    # exactly the arithmetic that shipped before this change (see the block
+    # comment at _AUTHORITY_TIER_CUTS).
     freq_score = math.log1p(freq)
-    return tier_weight * (freq_score + conf_score)
+    base = freq_score + conf_score
+    return tier_weight * (_AUTHORITY_GAIN * _authority_tier(authority) + base)
 
 
 # ── Schedule row dedup ────────────────────────────────────────────────────────
@@ -2466,19 +2725,185 @@ def _driver_dedup_keys(item: dict) -> List[str]:
     return keys
 
 
+# ── Natural keys: identifiers that pick out ONE real-world entity ───────────
+# GENERIC by design. Rather than a bespoke dedup function per schedule - which
+# is how the vehicle schedule went unprotected while drivers were covered - any
+# schedule row carrying one of these identifiers de-duplicates on it, and a
+# schedule added later is covered with no code change at all.
+#
+# Every entry here is unique BY CONSTRUCTION for the entity it names: one VIN is
+# one vehicle, one driver's licence is one person, one serial number is one
+# machine. Two rows sharing one describe the same thing and must merge.
+#
+# Measured on the client's real session 2026-08-12 (session 7d95a6e6):
+#
+#     2012 SUBARU OUTBACK                 vin=4S4BRCGC9C3217772
+#     2012 SUBARU OUTBACK 2.5i SEDAN 4D   vin=4S4BRCGC9C3217772
+#
+# One vehicle described two ways on two pages, extracted as two rows. That is
+# the "vehicle duplicated" defect reported on ACORD 127, and it also inflated
+# every downstream row count - the phantom-row suppression, the fleet warnings
+# and the ACORD 125 attachment box were all working from a fleet one vehicle
+# too large.
+#
+# `policy_number` is DELIBERATELY ABSENT and must never be added: a policy
+# carries many coverage parts, so merging on it would DELETE real lines.
+# Measured on the same session - BBC7263-26 legitimately carries both
+# Commercial General Liability and Employee Benefits Liability. Same trap that
+# broke `_line_list_is_trustworthy` on its first run.
+#
+# Nothing here falls back to descriptive fields (year+make+model, name alone):
+# a contractor can own two identical trucks bought together, and merging those
+# would delete a real vehicle. No identifier, no merge - the same "positive
+# evidence only" rule the rest of this module follows.
+_NATURAL_ID_SUBKEYS: Tuple[str, ...] = (
+    "vin", "license_number", "serial_number", "equipment_serial_number",
+    "identification_number", "item_serial_number",
+)
+# Short strings collide; a real identifier of any of these kinds is longer.
+_NATURAL_ID_MIN_CHARS = 6
+
+
+def _natural_id_keys(item: dict) -> List[str]:
+    """Candidate natural keys for ANY schedule row, from _NATURAL_ID_SUBKEYS."""
+    keys: List[str] = []
+    for sub in _NATURAL_ID_SUBKEYS:
+        raw = re.sub(r"[\s\-.]", "", str(item.get(sub) or "")).strip().upper()
+        if len(raw) >= _NATURAL_ID_MIN_CHARS:
+            keys.append(f"{sub}:{raw}")
+    return keys
+
+
+# Bespoke key functions, for schedules needing MORE than the generic identifier
+# scan (auto_drivers also matches on name+dob so a row missing its licence
+# number still merges). Every other schedule uses _natural_id_keys.
 _SCHEDULE_DEDUP_KEYS: Dict[str, Any] = {
     "auto_drivers": _driver_dedup_keys,
 }
 
 
-def _dedupe_schedule_rows(list_key: str, items: List[dict]) -> List[dict]:
-    """Merge rows describing the same entity (per _SCHEDULE_DEDUP_KEYS),
-    filling gaps from later duplicates rather than dropping their data. Two
-    rows merge if ANY of their candidate keys match (see _driver_dedup_keys).
-    Returns ``items`` unchanged for any list_key with no registered key fn."""
-    key_fn = _SCHEDULE_DEDUP_KEYS.get(list_key)
-    if key_fn is None:
+# ── A schedule row that is really the PRODUCER or the CARRIER ────────────────
+# Live run 2026-08-12, two wrong boxes on two forms from ONE bad row: ACORD 127
+# listed "ERIN ROYAL" - the producer contact at Commercial Risk Solutions - as a
+# DRIVER, and ACORD 125 then ticked the DRIVER INFORMATION SCHEDULE attachment
+# because `auto_drivers` was non-empty. The client had flagged both separately.
+#
+# The producer and the carrier are named all over a policy - the dec page
+# header, the cancellation notice, the servicing-contact block, the signature
+# line - so any person-schedule extracted from that text will eventually pick
+# one of them up. They are parties TO the transaction; they are never members of
+# the APPLICANT's own driver or officer schedule.
+#
+# Derived from the identity facts this same extraction already produced, so
+# there is no name list, nothing carrier-specific, and it works for an agency we
+# have never seen. Applied to person-schedules only - a company name legitimately
+# repeats across property or vehicle rows.
+_PERSON_SCHEDULE_KEYS: Tuple[str, ...] = ("auto_drivers", "wc_officers")
+
+# Below this a "name" is too short to match safely ("Lee" would collide).
+_PARTY_NAME_MIN_CHARS = 5
+
+# Schedules keyed by ADDRESS rather than by name. Same principle, same defect:
+# session 7d95a6e6 (2026-08-12) captured "9780 S Meridian Blvd STE 400,
+# Englewood, CO 80112-6072" as the applicant's fourth PREMISES - it is the
+# producer's own office, byte-identical to `producer_address`, and it printed on
+# ACORD 125 as a location with no operations description.
+_ADDRESS_SCHEDULE_KEYS: Tuple[str, ...] = ("property_locations",)
+
+
+def _address_identity_key(value: Any) -> Optional[Tuple[str, str]]:
+    """(street number, 5-digit ZIP) - enough to identify a building, and immune
+    to the spelling differences that defeat whole-string comparison ("Suite 400"
+    vs "STE 400", "S." vs "S"). Both parts are required; either alone would
+    collide across a city."""
+    if isinstance(value, dict):
+        value = " ".join(
+            str(value.get(k) or "")
+            for k in ("address_line1", "address", "address_city", "address_zip")
+        )
+    text = str(value or "")
+    number = re.match(r"\s*(\d{1,8})\b", text)
+    zip5 = re.search(r"\b(\d{5})(?:-\d{4})?\b", text)
+    if not number or not zip5:
+        return None
+    return (number.group(1), zip5.group(1))
+
+
+def _identity_name_key(value: Any) -> str:
+    """Letters-only, lowercased comparison key. Unwraps the annotated
+    ``{"value": ..., "confidence": ...}`` envelope a merged fact may carry."""
+    if isinstance(value, dict):
+        value = value.get("value")
+    return re.sub(r"[^a-z]+", " ", str(value or "").lower()).strip()
+
+
+def _drop_transaction_party_rows(
+    list_key: str, items: List[dict], facts: dict,
+) -> List[dict]:
+    """Remove person-schedule rows naming the producer or the carrier.
+
+    Returns an EMPTY list when every row was such a party - that is the correct
+    answer (there is no driver schedule), and it is what makes the ACORD 125
+    attachment box resolve to an explicit "No" instead of ticking.
+    """
+    if not items:
         return items
+
+    if list_key in _ADDRESS_SCHEDULE_KEYS:
+        blocked_addr = {
+            _address_identity_key(facts.get(key))
+            for key in ("producer_address", "carrier_address")
+        }
+        blocked_addr.discard(None)
+        if not blocked_addr:
+            return items
+        kept = []
+        for item in items:
+            if isinstance(item, dict) and _address_identity_key(item) in blocked_addr:
+                logger.info(
+                    "merge schedule_party_drop field=%r dropped=%r - that is the "
+                    "producer's/carrier's own office, not a premises of the "
+                    "applicant", list_key, str(item.get("address_line1") or item)[:70],
+                )
+                continue
+            kept.append(item)
+        return kept
+
+    if list_key not in _PERSON_SCHEDULE_KEYS:
+        return items
+    blocked = {
+        _identity_name_key(facts.get(key))
+        for key in ("producer_contact_name", "producer_name", "carrier_name")
+    }
+    blocked = {b for b in blocked if len(b) >= _PARTY_NAME_MIN_CHARS}
+    if not blocked:
+        return items
+    kept: List[dict] = []
+    for item in items:
+        name_key = _identity_name_key(item.get("name") if isinstance(item, dict) else None)
+        if name_key and name_key in blocked:
+            logger.info(
+                "merge schedule_party_drop field=%r dropped=%r - that is the "
+                "producer/carrier on this policy, not a member of the "
+                "applicant's schedule",
+                list_key, (item.get("name") if isinstance(item, dict) else item),
+            )
+            continue
+        kept.append(item)
+    return kept
+
+
+def _dedupe_schedule_rows(list_key: str, items: List[dict]) -> List[dict]:
+    """Merge rows describing the same entity, filling gaps from later duplicates
+    rather than dropping their data. Two rows merge if ANY of their candidate
+    keys match (see _driver_dedup_keys / _natural_id_keys).
+
+    Schedules with special needs register a bespoke key function in
+    `_SCHEDULE_DEDUP_KEYS`; EVERY other schedule falls back to the generic
+    natural-identifier scan, so a row carrying a VIN, a licence number or a
+    serial number de-duplicates without anyone registering it first. A row with
+    no identifier at all is never merged."""
+    key_fn = _SCHEDULE_DEDUP_KEYS.get(list_key) or _natural_id_keys
     groups: List[dict] = []
     key_to_group: Dict[str, int] = {}
     unkeyed: List[dict] = []
@@ -2593,8 +3018,51 @@ def _fold_truncated_groups(bucket: Dict[str, dict]) -> None:
             target = bucket[long_key]
             if _is_midword_truncation(entry["display"], target["display"]):
                 target["freq"] += entry["freq"]
+                # The truncation's sighting counts for the group it folds into,
+                # so its source authority has to travel with its frequency -
+                # otherwise a dec-page value cut off mid-word would donate its
+                # vote and lose its standing.
+                target["authority"] = _best_authority(
+                    target.get("authority"), entry.get("authority"))
                 bucket.pop(short_key, None)
                 break
+
+
+def _merge_risk_transfer(partials: List[dict]) -> Optional[dict]:
+    """Union of every chunk's `risk_transfer`: booleans OR, lists union
+    (order-preserving), scalars first non-empty in chunk order. None when no
+    partial carried the fact at all.
+
+    WHY UNION AND NOT THE VOTE: the sub-facts live on single pages (an AI
+    schedule, a waiver endorsement), so the chunks that saw them are always a
+    small minority against chunks correctly reporting "nothing here". A vote
+    is the wrong question - see the call-site comment in _merge_list_fields.
+    Only ever ADDS information relative to any single chunk; a document with
+    no risk-transfer content still merges to all-False/empty exactly as
+    before.
+    """
+    merged: Optional[dict] = None
+    for partial in sorted(partials, key=lambda p: p.get("_chunk_idx", 0)):
+        rt = (partial.get("facts") or {}).get("risk_transfer")
+        if not isinstance(rt, dict):
+            continue
+        if merged is None:
+            merged = {}
+        for k, v in rt.items():
+            if isinstance(v, bool):
+                merged[k] = bool(merged.get(k)) or v
+            elif isinstance(v, list):
+                bucket = merged.setdefault(k, [])
+                if isinstance(bucket, list):
+                    for item in v:
+                        if item and item not in bucket:
+                            bucket.append(item)
+            elif v is not None and str(v).strip():
+                if not str(merged.get(k) or "").strip():
+                    merged[k] = v
+            else:
+                merged.setdefault(k, v)
+    return merged
 
 
 def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
@@ -2602,7 +3070,7 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
         return {"facts": {}, "flags": {}}
     if len(partials) == 1:
         p = dict(partials[0])
-        for k in ("_chunk_idx", "_char_start", "_char_end"):
+        for k in ("_chunk_idx", "_char_start", "_char_end", "_authority"):
             p.pop(k, None)
         raw_facts = p.get("facts")
         if isinstance(raw_facts, dict) and any(k in _SCHEDULE_DEDUP_KEYS for k in list_keys):
@@ -2623,8 +3091,12 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
 
     val_candidates: Dict[str, Dict[str, dict]] = {}
     for partial in sorted(partials, key=lambda p: p.get("_chunk_idx", 0)):
+        # How declarations-like the chunk this fact came from was. Absent on
+        # hand-built partials (replayed fixtures, the reconciliation path, any
+        # pre-2026-08-12 session), and absent uniformly means a flat signal.
+        p_auth = partial.get("_authority")
         for k, v in partial.get("facts", {}).items():
-            if k in list_keys or k == "wc_payroll_by_state" or _is_empty(v):
+            if k in list_keys or k in ("wc_payroll_by_state", "risk_transfer") or _is_empty(v):
                 continue
             # Extract canonical string value from annotated or raw form
             raw_val = v.get("value", v) if isinstance(v, dict) and "value" in v else v
@@ -2635,10 +3107,11 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
             bucket   = val_candidates.setdefault(k, {})
             entry    = bucket.get(norm_key)
             if entry is None:
-                entry = {"record": v, "freq": 0, "display": sval}
+                entry = {"record": v, "freq": 0, "display": sval, "authority": p_auth}
                 bucket[norm_key] = entry
             elif _prefer_variant(sval, entry["display"]):
                 entry["record"], entry["display"] = v, sval
+            entry["authority"] = _best_authority(entry.get("authority"), p_auth)
             entry["freq"] += 1
 
     # Fold carrier-shorthand truncations into their complete twin before any
@@ -2664,11 +3137,61 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
         # Element 0 is the group's REPRESENTATIVE spelling, not the folded key:
         # every downstream consumer (shape partition, money-amount comparison,
         # the composite tiebreak, the logs) reads the real value that way.
+        # A narrative fact opts out of source authority entirely (see
+        # _is_prose_value): the fuller answer lives in the prose, so a tabular
+        # fragment must not be promoted over it.
+        _narrative = any(_is_prose_value(c["display"]) for c in candidates.values())
         scored = sorted(
-            [(c["display"], _score_value(field, c["record"], c["freq"]), c)
+            [(c["display"],
+              _score_value(field, c["record"], c["freq"],
+                           None if _narrative else c.get("authority")), c)
              for c in candidates.values()],
             key=lambda x: x[1], reverse=True,
         )
+
+        # ── A FRAGMENT MUST NEVER OUT-VOTE A SENTENCE ────────────────────────
+        # Measured on the client's real 271-page package (2026-08-12):
+        #
+        #   merge field='operations_description'
+        #     chosen='COMMERCIAL GENERAL CONTRA'          score=2.95 freq=4
+        #     rejected=["Contractors' equipment coverage and installation
+        #                floater coverage for property used in contracting,
+        #                installation, erection, repair, moving, ..."  freq=1,
+        #               'Contractors - Executive Supervisors or Executive
+        #                Superintendents; subcontractors in connection with
+        #                construction, reconstruction, repair, ...'    freq=1]
+        #
+        # `COMMERCIAL GENERAL CONTRA` is a column header cut off mid-word,
+        # repeated on four pages. `_score_value` is `log1p(freq) + confidence`,
+        # so four repetitions of a fragment beat one statement of the real
+        # thing. The client's verdict on the stamped result: "truncated carrier
+        # shorthand, not a usable underwriting description".
+        #
+        # `_narrative` is ALREADY computed directly above - the code recognises
+        # that this fact has a prose candidate and switches authority off for
+        # it, then ranks the fragment first anyway. This makes it act on what it
+        # already knows.
+        #
+        # Scope is deliberately tiny. It fires ONLY when a fact has BOTH a prose
+        # candidate and a non-prose one, and `_is_prose_value` demands >100
+        # chars AND >12 words - comfortably past the longest atomic value a
+        # declarations page prints (a full mailing address is ~45 chars / 8
+        # tokens), so no scalar fact can reach this branch. It REORDERS and
+        # never discards: the fragment stays in the list, one place lower.
+        #
+        # Repetition is evidence of a repeated HEADER, not of a better answer.
+        if _narrative and len(scored) > 1:
+            _prose_c = [e for e in scored if _is_prose_value(e[0])]
+            _frag_c  = [e for e in scored if not _is_prose_value(e[0])]
+            if _prose_c and _frag_c and not _is_prose_value(scored[0][0]):
+                logger.info(
+                    "merge field=%r narrative partition: chose %r (a complete "
+                    "statement) over %r (a %d-char fragment seen %d time(s)) - "
+                    "repetition of a truncated header is not quality",
+                    field, _prose_c[0][0][:90], scored[0][0][:60],
+                    len(scored[0][0]), scored[0][2]["freq"],
+                )
+                scored = _prose_c + _frag_c
 
         # Shape partition (see _partition_by_shape). SHADOW BY DEFAULT: the old
         # winner still ships and the disagreement is logged, because this reorders
@@ -2864,7 +3387,29 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
                     "merge schedule_dedup field=%r partials=%d rows_before=%d rows_after=%d",
                     lk, len(partials), len(before), len(after),
                 )
+            # Runs AFTER dedup so a party appearing on several pages is one row
+            # by the time it is dropped, and after the scalar loop above so the
+            # producer/carrier identity facts it compares against are resolved.
+            after = _drop_transaction_party_rows(lk, after, merged_facts)
             merged_facts[lk] = after
+
+    # Runs AFTER the list merge above so `coverage_lines` is final, and while
+    # the scalar candidate buckets still exist - the whole point is choosing a
+    # DIFFERENT stated value, which no downstream resolver can do.
+    _reconcile_total_premium(
+        merged_facts, val_candidates.get("total_policy_premium") or {})
+
+    # risk_transfer: UNION across chunks, never a vote. 52-page trap run
+    # (2026-08-12): the Additional Insured schedule lives on ONE page, so one
+    # chunk returned the three scheduled AI names and TEN chunks - which never
+    # saw that page - returned an all-empty dict. The vote chose empty
+    # (freq=11 beat freq=1) and three real additional insureds vanished from
+    # the form. For a structured fact, ABSENCE of data is not an answer that
+    # can outvote PRESENCE: booleans OR, name lists union, scalars first
+    # non-empty in chunk order.
+    _rt_union = _merge_risk_transfer(partials)
+    if _rt_union is not None:
+        merged_facts["risk_transfer"] = _rt_union
 
     # wc_payroll_by_state: scored per state
     wc_candidates: Dict[str, Dict[str, dict]] = {}
@@ -3272,7 +3817,15 @@ async def _gather_chunks_async(
                     total_llm_calls += 1
                     result = await extract_facts_async(chunk_text, low_confidence_tokens, ctx, source="ai")
                     await asyncio.sleep(_POST_CALL_DELAY)
-                    result.update({"_chunk_idx": idx, "_char_start": c_start, "_char_end": c_end})
+                    # Source authority for every fact this chunk produced. Scored
+                    # here because `chunk_text` is in hand - no raw_text change,
+                    # no OCR change, no new parameter on any signature, so the
+                    # cached prompt prefix and the sentinel coverage test are
+                    # untouched. See declarations_authority().
+                    result.update({
+                        "_chunk_idx": idx, "_char_start": c_start, "_char_end": c_end,
+                        "_authority": declarations_authority(chunk_text),
+                    })
                     await sem.record(retried=(attempt > 0))
                     if attempt > 0:
                         logger.info(f"chunk {idx}: recovered on attempt {attempt + 1} chars={c_start}–{c_end}")
@@ -4136,6 +4689,22 @@ def _consolidate_property_locations(facts: dict) -> None:
     # detail line), while the street line itself is the stable identifier for
     # "this building." This mirrors the client's own §5.2 normalization
     # examples, which compare on the street line, not the full address.
+    # A state is a real 2-letter postal code and a ZIP is 5 digits - anything
+    # else in those boxes is a mis-parse, not data. Derived from the SAME
+    # name->abbreviation table normalize_address already uses, so "Colorado"
+    # in a state box converts to "CO" instead of being wiped.
+    from services.normalization import _US_STATE_NAME_PHRASES
+    _state_codes = {ab.upper() for _p, ab in _US_STATE_NAME_PHRASES}
+    _name_to_code = {p.lower(): ab.upper() for p, ab in _US_STATE_NAME_PHRASES}
+
+    def _coerce_state(value: Any) -> Optional[str]:
+        s = str(value or "").strip().rstrip(".")
+        if not s:
+            return None
+        if s.upper() in _state_codes:
+            return s.upper()
+        return _name_to_code.get(s.lower())
+
     for entry in entries:
         addr = str(entry.get("address") or "").strip()
         if not addr:
@@ -4149,6 +4718,23 @@ def _consolidate_property_locations(facts: dict) -> None:
         # County comes only from the document (extraction's per-location
         # "county" key) - _parse_address cannot derive one.
         entry.setdefault("address_county", entry.get("county"))
+
+        # ── Shape validation (52-page trap run, 2026-08-12) ──────────────────
+        # "VARIOUS JOB SITES, STATE OF COLORADO" decomposed to city="State",
+        # state="of", zip="Colorado" and PRINTED that way on the form. Rules:
+        # a state either is/converts to a postal code or it is None; a ZIP
+        # either matches \d{5}(-\d{4})? or it is None; and when the "ZIP" was
+        # actually a STATE NAME the whole city/state/zip split is one shifted
+        # mis-parse, so all three are cleared and the full text stays in the
+        # street line - a street-only row beats three boxes of garbage.
+        _st_raw, _zp_raw = entry.get("address_state"), entry.get("address_zip")
+        if _st_raw:
+            entry["address_state"] = _coerce_state(_st_raw)
+        if _zp_raw and not re.match(r"^\d{5}(-\d{4})?$", str(_zp_raw).strip()):
+            if _coerce_state(_zp_raw):
+                entry["address_city"] = None
+                entry["address_state"] = None
+            entry["address_zip"] = None
 
     # ── Entries that are not locations at all ────────────────────────────────
     # Two shapes observed on a live run (client form, premises section):
@@ -4178,6 +4764,22 @@ def _consolidate_property_locations(facts: dict) -> None:
         _p_line1 = _parse_address(str(_producer_addr)).get("line1") or ""
         _producer_line1_key = normalize_address(_p_line1) if _p_line1 else ""
 
+    # STREET-NUMBER + ZIP identity for the producer/carrier, alongside the
+    # line1-equality check above. 52-page trap run (2026-08-12): the packet's
+    # own location schedule lists the producer's office as "Loc 004" with the
+    # explicit note "this is not a location of the named insured" - and it
+    # stamped as premises #4 anyway, because the entry's line1 carried the
+    # suite INSIDE it ("9780 S Meridian Blvd Ste 400") while the producer fact
+    # parsed the suite onto line2, so normalized-line1 equality never matched.
+    # (street number, ZIP5) is immune to where the suite lands - the same
+    # comparator _drop_transaction_party_rows already trusts.
+    _blocked_party_ids = set()
+    for _party_key in ("producer_address", "carrier_address"):
+        _pv = _fv(facts, _party_key)
+        _pid = _address_identity_key(str(_pv)) if _pv else None
+        if _pid:
+            _blocked_party_ids.add(_pid)
+
     # Sub-fields that make an address-less entry worth keeping as its own row —
     # real per-location data a document can state without repeating the street.
     _substantive_keys = (
@@ -4197,6 +4799,8 @@ def _consolidate_property_locations(facts: dict) -> None:
             return False                    # bare unit fragment, not a premises
         if _producer_line1_key and line1 and normalize_address(line1) == _producer_line1_key:
             return False                    # the agency's address, not the insured's
+        if _blocked_party_ids and _address_identity_key(entry) in _blocked_party_ids:
+            return False                    # producer/carrier office by street#+ZIP
         if not line1 and not has_own_geo:
             # No address signal at all. Keep it only when it carries real
             # per-location data; otherwise it becomes a phantom row whose only
@@ -4246,6 +4850,141 @@ def _consolidate_property_locations(facts: dict) -> None:
         # a truncated repeat.
         if len(addr) > len(str(target.get("address") or "")):
             target["address"] = addr
+
+    # ── Fold parse-variant groups describing ONE premises ────────────────────
+    # Live run 2026-08-12: the client's single location printed as THREE
+    # premises rows on ACORD 125. `_parse_address` splits on commas, and the
+    # document mentions the address comma-free in three shapes, so each kept
+    # its whole string as line1 and produced a DIFFERENT group key:
+    #
+    #     "4800 dahlia st d13 denver"                    <- street + city leaked
+    #     "4800 dahlia st d13 denver co 80216"           <- everything in line1
+    #     "denver co 80216"                              <- geo fragment, no street
+    #
+    # Two structural rules fold them, both requiring positive evidence:
+    #   1. PREFIX: one key extends the other and both start with the SAME street
+    #      number - the longer is the same premises with its city/state/zip tail
+    #      leaked into line1. Two different suites diverge before the tail
+    #      ("...st d13 denver" vs "...st b5 denver") so they never fold.
+    #   2. FRAGMENT: a key with NO street number whose every token appears in
+    #      exactly ONE street-numbered group is a geo fragment of that group. It
+    #      carries zero distinguishing information by construction; if TWO
+    #      groups could contain it, it stays its own row (no guessing).
+    # Sub-fields merge with the same setdefault semantics as above, so a fold
+    # only ever FILLS gaps (the fragment's zip completes the street group).
+    def _street_num(k: str) -> str:
+        m = re.match(r"(\d{1,8})\b", k)
+        return m.group(1) if m else ""
+
+    # "City ST 80216-3121" and nothing else - the exact shape of a geo fragment.
+    _geo_only_re = re.compile(
+        r"^\s*([A-Za-z][A-Za-z .'-]*?)[\s,]+([A-Za-z]{2})\.?[\s,]+(\d{5}(?:-\d{4})?)\s*$"
+    )
+    # A comma-free mention's city/state/zip tail, leaked into line1 by
+    # _parse_address (which only splits on commas).
+    _state_zip_tail_re = re.compile(r"[\s,]+([A-Za-z]{2})\.?[\s,]+(\d{5}(?:-\d{4})?)\s*$")
+
+    folded = True
+    while folded and len(order) > 1:
+        folded = False
+        for b_key in list(order):
+            b_num, b_toks = _street_num(b_key), set(b_key.split())
+            hosts = []
+            for a_key in order:
+                if a_key == b_key:
+                    continue
+                a_num = _street_num(a_key)
+                # COMPACT comparison alongside the token one: OCR splits unit
+                # designators unpredictably ("D13" on one page, "D 13" on the
+                # next), which breaks token-level prefixing while the two keys
+                # are byte-identical once spaces are removed. Two real suites
+                # ("d13" vs "b5") still differ compacted, so nothing new folds
+                # that should not.
+                a_c, b_c = a_key.replace(" ", ""), b_key.replace(" ", "")
+                if b_num and a_num == b_num and (
+                    b_key.startswith(a_key + " ") or a_key.startswith(b_key + " ")
+                    or a_c == b_c
+                    or b_c.startswith(a_c) or a_c.startswith(b_c)
+                ):
+                    hosts.append(a_key)
+                elif not b_num and a_num and b_toks and b_toks <= set(a_key.split()):
+                    hosts.append(a_key)
+            if len(hosts) != 1:
+                continue
+            a_key = hosts[0]
+            first = a_key if order.index(a_key) < order.index(b_key) else b_key
+            second = b_key if first == a_key else a_key
+            # The TOKEN-SUPERSET key becomes the group's key (at the earlier
+            # position) so a later fragment can still find its tokens in it -
+            # keeping the short key here left "denver co 80216" unable to fold.
+            canonical = a_key if len(a_key) >= len(b_key) else b_key
+            merged: dict = {}
+            for src in (groups[first], groups[second]):
+                for k, v in src.items():
+                    if v is None or (isinstance(v, str) and not v.strip()):
+                        continue
+                    merged.setdefault(k, v)
+            merged["address"] = max(
+                (str(groups[first].get("address") or ""),
+                 str(groups[second].get("address") or "")), key=len)
+            # A geo-only member IS the city/state/zip, stated plainly - capture
+            # it now, before its short string is buried under the longer display.
+            for src in (groups[first], groups[second]):
+                gm = _geo_only_re.match(str(src.get("address") or ""))
+                if gm:
+                    merged.setdefault("address_city", gm.group(1).strip())
+                    merged.setdefault("address_state", gm.group(2).upper())
+                    merged.setdefault("address_zip", gm.group(3))
+            logger.info(
+                "consolidate_locations: folded parse-variant group %r into %r "
+                "- one premises mentioned in different shapes, not two premises",
+                second[:50], first[:50],
+            )
+            order = [canonical if k == first else k for k in order if k != second]
+            del groups[first], groups[second]
+            groups[canonical] = merged
+            folded = True
+            break
+
+    # ── Recover city/state/zip a comma-free mention left inside line1 ────────
+    # Runs for every group (folded or not). Only ever fills EMPTY sub-fields
+    # from unambiguous shapes, then strips those now-known values off the tail
+    # of the street line so "4800 Dahlia St # D13 Denver" prints as a street
+    # and "Denver" prints in the CITY box - not both in one.
+    for key in order:
+        obj = groups[key]
+        if not str(obj.get("address_zip") or "").strip():
+            tm = (_state_zip_tail_re.search(str(obj.get("address") or ""))
+                  or _state_zip_tail_re.search(str(obj.get("address_line1") or "")))
+            if tm:
+                obj.setdefault("address_state", None)
+                if not str(obj.get("address_state") or "").strip():
+                    obj["address_state"] = tm.group(1).upper()
+                obj["address_zip"] = tm.group(2)
+        line1 = str(obj.get("address_line1") or "")
+        if line1:
+            city  = str(obj.get("address_city") or "").strip()
+            state = str(obj.get("address_state") or "").strip()
+            zip_v = str(obj.get("address_zip") or "").strip()
+            tails = []
+            if zip_v:
+                tails.append(re.compile(
+                    r"[\s,]+" + re.escape(zip_v.split("-")[0]) + r"(?:-\d{4})?\s*$"))
+            if state:
+                tails.append(re.compile(
+                    r"[\s,]+" + re.escape(state) + r"\.?\s*$", re.I))
+            if city:
+                tails.append(re.compile(
+                    r"[\s,]+" + re.escape(city) + r"\s*$", re.I))
+            for _ in range(4):                     # zip, state, city - at most
+                stripped = line1                   # one pass each, repeated in
+                for t in tails:                    # case of "city state zip"
+                    stripped = t.sub("", stripped)
+                if stripped == line1:
+                    break
+                line1 = stripped
+            if line1.strip():
+                obj["address_line1"] = line1.strip()
 
     consolidated: List[dict] = []
     for i, key in enumerate(order):
@@ -4327,6 +5066,237 @@ def _consolidate_property_locations(facts: dict) -> None:
     facts["locations"] = [str(o["address"]) for o in consolidated if o.get("address")]
 
 
+# ── Dec-page entries: verify mechanically, consume deterministically ─────────
+# The recording half lives in the extraction schema ("dec_page_entries"). These
+# two functions are the ONLY consumers, and neither involves an LLM:
+#
+#   _verify_dec_entries       - literal-presence check against the uploaded
+#                               text. An entry the document does not actually
+#                               print is DISCARDED before anything can read it.
+#   _backfill_empty_facts_... - fills a registry fact that merged EMPTY from a
+#                               verified entry, under five stacked conditions
+#                               (typed validator, all-token label match, owner
+#                               compatibility, single distinct value, fact
+#                               genuinely empty). Misses are fine; a wrong box
+#                               is not - every condition fails toward blank.
+#
+# DELIBERATELY NOT DONE: rendering entries into the gap-fill prompt (LLM call 2
+# stays byte-identical - see pdf_service._GAP_FILL_FACTS_EXCLUDE and
+# test_call2_prompt_is_byte_identical_with_dec_entries), and open-vocabulary
+# matching of entry labels onto the 5,852 ACORD field names (a hand-rolled NLU
+# layer - the exact heuristic class this codebase has repeatedly burned on).
+_DEC_ENTRY_MAX = 500
+_DEC_ENTRY_VALUE_MAX_CHARS = 300
+_DEC_ENTRY_LABEL_MAX_CHARS = 120
+_DEC_ENTRY_OWNERS = frozenset({"applicant", "producer", "carrier", "policy", "other"})
+
+
+def _dec_norm(text: Any) -> str:
+    """Case/punctuation-insensitive form - mirrors text_selection._norm and
+    pdf_service._normalize_for_search so 'verbatim' means the same thing in
+    every layer that checks it."""
+    return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+def _verify_dec_entries(entries: Any, full_text: str) -> List[dict]:
+    """The verified subset of `entries`: label AND value literally present.
+
+    No text to check against means nothing can be verified, and unverifiable
+    entries are dropped - blank over wrong, same as everywhere else.
+    """
+    if not isinstance(entries, list) or not entries or not (full_text or "").strip():
+        return []
+    hay = _dec_norm(full_text)
+    kept: List[dict] = []
+    seen: set = set()
+    dropped_unverified = dropped_malformed = 0
+    for item in entries:
+        if len(kept) >= _DEC_ENTRY_MAX:
+            break
+        if not isinstance(item, dict):
+            dropped_malformed += 1
+            continue
+        label = str(item.get("label") or "").strip()[:_DEC_ENTRY_LABEL_MAX_CHARS]
+        value = str(item.get("value") or "").strip()
+        if not label or not value or len(value) > _DEC_ENTRY_VALUE_MAX_CHARS:
+            dropped_malformed += 1
+            continue
+        n_label, n_value = _dec_norm(label), _dec_norm(value)
+        if not n_label or not n_value:
+            dropped_malformed += 1
+            continue
+        # VERBATIM or gone. The model was instructed to copy both halves as
+        # printed; an entry that is not literally in the document is exactly
+        # the fabrication this gate exists to stop.
+        if n_value not in hay or n_label not in hay:
+            dropped_unverified += 1
+            logger.info(
+                "dec_entries DROPPED_UNVERIFIED label=%r value=%r - not "
+                "literally present in the uploaded text", label[:60], value[:60],
+            )
+            continue
+        owner = str(item.get("owner") or "").strip().lower()
+        kept_item = {
+            "label": label,
+            "value": value,
+            "owner": owner if owner in _DEC_ENTRY_OWNERS else "other",
+            "policy_number": (str(item.get("policy_number")).strip()
+                              if item.get("policy_number") else None),
+            "line_of_business": (str(item.get("line_of_business")).strip()
+                                 if item.get("line_of_business") else None),
+        }
+        dedup_key = (n_label, n_value)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        kept.append(kept_item)
+    if kept or dropped_unverified or dropped_malformed:
+        logger.info(
+            "dec_entries VERIFIED kept=%d dropped_unverified=%d dropped_malformed=%d",
+            len(kept), dropped_unverified, dropped_malformed,
+        )
+    return kept
+
+
+def _dec_entry_token_match(a: str, b: str) -> bool:
+    """Two tokens name the same thing: identical, or prefix-stems (>=4 chars,
+    the same rule pdf_service._stem_match uses, so 'comprehensive'~'comp')."""
+    if a == b:
+        return True
+    return len(a) >= 4 and len(b) >= 4 and (a.startswith(b) or b.startswith(a))
+
+
+# Key/label tokens that QUALIFY a fact without changing WHAT it is. Dropping
+# "total" from total_payroll still names payroll; dropping "gl" from
+# gl_deductible names a DIFFERENT thing (any line's deductible). That asymmetry
+# is the whole safety argument of the reverse label match below.
+_GENERIC_QUALIFIER_TOKENS = frozenset({
+    "total", "annual", "num", "number", "count", "overall", "estimated",
+})
+
+
+def _dec_entry_label_matches_key(label: str, key_tokens: List[str]) -> bool:
+    """Does this dec-page label name this fact key?
+
+    FORWARD (the original rule): every key token appears in the label -
+    "FEIN OR SOC SEC #" names `fein`, extra label words are fine.
+
+    STRICT REVERSE (added after the first live run backfilled NOTHING): the
+    dec page prints "PAYROLL", the key is `total_payroll`, and the unmatched
+    "total" blocked the forward rule - so the one warning on that run ("no
+    revenue or payroll found") stood while the dec printed both. Reverse
+    matching is allowed ONLY when (a) every significant label token matches a
+    key token AND (b) every UNMATCHED key token is a generic qualifier.
+    "Deductible" -> gl_deductible leaves "gl" unmatched: refused, because a
+    bare deductible could belong to any coverage line. "Premium" ->
+    total_policy_premium leaves "policy": refused for the same reason.
+    """
+    label_tokens = [t for t in _dec_norm(label).split() if len(t) >= 3]
+    if not label_tokens:
+        return False
+    if all(any(_dec_entry_token_match(kt, lt) for lt in label_tokens)
+           for kt in key_tokens):
+        return True                        # forward
+    sig_label = [t for t in label_tokens if t not in _GENERIC_QUALIFIER_TOKENS]
+    if not sig_label:
+        return False
+    return (
+        all(any(_dec_entry_token_match(lt, kt) for kt in key_tokens)
+            for lt in sig_label)
+        and all(kt in _GENERIC_QUALIFIER_TOKENS
+                or any(_dec_entry_token_match(kt, lt) for lt in sig_label)
+                for kt in key_tokens)
+    )
+
+
+def _dec_entry_owner_ok(fact_key: str, owner: str) -> bool:
+    """A producer's value only ever fills producer_* facts; a carrier's only
+    carrier_*; everything else takes applicant- or policy-owned values ONLY.
+    This is the deterministic form of the client's Part 19 rule: 'never place
+    producer or carrier contact information into applicant fields'."""
+    if fact_key.startswith("producer"):
+        return owner == "producer"
+    if fact_key.startswith("carrier"):
+        return owner == "carrier"
+    return owner in ("applicant", "policy")
+
+
+def _backfill_empty_facts_from_entries(facts: dict, entries: List[dict]) -> None:
+    """Fill registry facts that merged EMPTY from verified dec-page entries.
+
+    Five stacked conditions, each of which alone would block the client's
+    literal reported defect (the carrier's account number stamped as the FEIN):
+      1. the fact is genuinely empty - a backfill never overwrites;
+      2. the fact has a NAMED shape validator in FACT_REGISTRY and the entry
+         value passes it (a fact with no validator is not typed enough to
+         backfill safely);
+      3. every token of the fact KEY appears in the entry LABEL (stem match) -
+         'fein' is not in 'Account Number', so that value cannot route there;
+      4. the entry's owner is compatible (_dec_entry_owner_ok);
+      5. all matching entries agree on ONE value - two distinct candidates is
+         ambiguity, and ambiguity stays blank for the ARQ to ask.
+    Mutates `facts`; every fill is logged with its provenance.
+    """
+    if not entries or not isinstance(facts, dict):
+        return
+    try:
+        from services.fact_registry import FACT_REGISTRY, _is_currency
+    except Exception:                                     # noqa: BLE001
+        return
+    # Extraction facts that are NOT in FACT_REGISTRY but are typed and worth
+    # backfilling. total_policy_premium is the flagship dec value and its only
+    # downstream consumer (_resolve_estimated_total) carries its own arithmetic
+    # guards. Deliberately NOT added to FACT_REGISTRY instead: registry
+    # membership would generate a new ARQ client question for it, a behaviour
+    # change far beyond this feature's scope.
+    _extra_typed = {"total_policy_premium": _is_currency}
+    _candidates = {**{k: (s or {}).get("validate") for k, s in FACT_REGISTRY.items()},
+                   **_extra_typed}
+    filled = 0
+    for key, validator in _candidates.items():
+        if key in _LIST_FIELDS or key in _STRUCTURED_DICT_FIELDS:
+            continue
+        v_name = getattr(validator, "__name__", "")
+        if not callable(validator) or not v_name.startswith("_is_"):
+            continue                       # condition 2: typed facts only
+        current = facts.get(key)
+        current_val = current.get("value") if isinstance(current, dict) else current
+        if not _is_empty(current_val):
+            continue                       # condition 1: never overwrite
+        key_tokens = re.findall(r"[a-z0-9]+", key)
+        by_value: Dict[str, dict] = {}
+        for entry in entries:
+            if not _dec_entry_label_matches_key(entry["label"], key_tokens):
+                continue                   # condition 3: label names this key
+            if not _dec_entry_owner_ok(key, entry["owner"]):
+                continue                   # condition 4: right party
+            try:
+                if not validator(entry["value"]):
+                    continue               # condition 2: value has the right shape
+            except Exception:              # noqa: BLE001
+                continue
+            by_value.setdefault(_dec_norm(entry["value"]), entry)
+        if len(by_value) != 1:
+            if len(by_value) > 1:
+                logger.info(
+                    "dec_entries BACKFILL_AMBIGUOUS fact=%s candidates=%s - "
+                    "two distinct stated values, leaving blank for the ARQ",
+                    key, [e["value"][:40] for e in list(by_value.values())[:3]],
+                )
+            continue                       # condition 5: exactly one value
+        entry = next(iter(by_value.values()))
+        facts[key] = {"value": entry["value"], "confidence": "ai_low",
+                      "source": "dec_entry"}
+        filled += 1
+        logger.info(
+            "dec_entries BACKFILL fact=%s value=%r from label=%r owner=%s - "
+            "extraction merged this fact empty; the dec page states it verbatim",
+            key, entry["value"][:60], entry["label"][:60], entry["owner"],
+        )
+    if filled:
+        logger.info("dec_entries BACKFILL filled %d empty fact(s)", filled)
+
+
 def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     """
     Multi-document merge with field-level source confidence.
@@ -4398,6 +5368,52 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
             mg["wc_multi_state"] = True
         if state_codes & _MONOPOLISTIC_STATES:
             mg["wc_has_monopolistic_state"] = True
+
+    # DIAGNOSTIC: the final line list every LOB premium box resolves from.
+    # Live 2026-08-12: GL and Umbrella premium boxes came back blank on a run
+    # where the previous run filled them, and nothing logged WHICH line names
+    # the merge had kept - so the difference was invisible. One line fixes that.
+    _cl = mf.get("coverage_lines")
+    if isinstance(_cl, list) and _cl:
+        logger.info(
+            "merge coverage_lines FINAL: %s",
+            [(str(e.get("line"))[:32], str(e.get("premium"))[:12],
+              str(e.get("policy_number"))[:18])
+             for e in _cl if isinstance(e, dict)][:14],
+        )
+
+    # risk_transfer: union across ALL docs for the same reason as the chunk-
+    # level union in _merge_list_fields - the primary-wins loop above would let
+    # the primary doc's (possibly empty) dict replace a companion document's
+    # real AI/waiver data.
+    try:
+        _rt_docs = _merge_risk_transfer(
+            [{"facts": d.get("facts") or {}, "_chunk_idx": i}
+             for i, d in enumerate(docs)])
+        if _rt_docs is not None:
+            mf["risk_transfer"] = _rt_docs
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: risk_transfer union failed: %s", exc)
+
+    # ── Dec-page entries: union across ALL docs, verify, then consume ────────
+    # Deliberately NOT routed through the primary-wins loop above: that loop
+    # would let the primary doc's list REPLACE the others', and a value stated
+    # only on a companion policy's dec page would vanish. Union preserves
+    # everything; verification then throws out anything not literally printed.
+    # Failure here must never block the pipeline - entries are an enrichment.
+    try:
+        _all_entries: List[dict] = []
+        for _d in docs:
+            _lst = (_d.get("facts") or {}).get("dec_page_entries")
+            if isinstance(_lst, list):
+                _all_entries.extend(_lst)
+        _full_text = " ".join(str(_d.get("text") or "") for _d in docs)
+        _verified = _verify_dec_entries(_all_entries, _full_text)
+        mf["dec_page_entries"] = _verified
+        _backfill_empty_facts_from_entries(mf, _verified)
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: dec-entry verification/backfill failed: %s", exc)
+        mf.pop("dec_page_entries", None)
 
     # Canonical, deduplicated multi-location list (Beta Report Figure 27).
     # Must run LAST, after every chunk/doc-level merge above, so it is the
