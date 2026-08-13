@@ -92,7 +92,46 @@ def test_the_attachment_box_follows_the_filtered_schedule():
     """The second half of the defect: the ACORD 125 checkbox."""
     field = "Policy_SectionAttached_DriverInformationScheduleIndicator_A"
     assert ps._derive_indicator(field, {"auto_drivers": []}) == "No"
-    assert ps._derive_indicator(field, {"auto_drivers": [{"name": "John Smith"}]}) == "Yes"
+    assert ps._derive_indicator(field, {"auto_drivers": [
+        {"name": "John Smith", "license_number": "S123-4567"}]}) == "Yes"
+
+
+def test_a_name_only_row_is_not_a_driver_schedule():
+    """TIGHTENED 2026-08-13, and the fixture above moved with it.
+
+    Live run: the attachment box was ticked on a package with no drivers,
+    because extraction had read page 92's `CA 99 10 A DRIVE OTHER CAR COVERAGE -
+    NAMES OF INDIVIDUALS` as a driver schedule. Drive Other Car names an
+    individual covered while driving someone else's car; it is not a schedule of
+    the applicant's drivers, and on the page the two shapes are identical.
+
+    The client's own instruction is the test: the box is for when we "actually
+    create and attach a COMPLETED driver-information schedule". A row with
+    nothing but a name completes nothing - every other ACORD driver column would
+    ship blank.
+    """
+    field = "Policy_SectionAttached_DriverInformationScheduleIndicator_A"
+    assert ps._derive_indicator(
+        field, {"auto_drivers": [{"name": "Erin Royal"}]}) == "No"
+    # Empty strings and nulls are not substance either.
+    assert ps._derive_indicator(field, {"auto_drivers": [
+        {"name": "Erin Royal", "dob": None, "license_number": ""}]}) == "No"
+    # ANY real column brings it back - not just a licence number.
+    for col in ("dob", "license_state", "hire_date", "experience_years"):
+        assert ps._derive_indicator(
+            field, {"auto_drivers": [{"name": "Erin Royal", col: "X"}]}) == "Yes", col
+
+
+def test_the_rows_themselves_are_not_deleted():
+    """Non-destructive by design: only the ATTACHMENT CLAIM is withdrawn. The
+    rows stay in the facts for `Driver_FullName_*` and the questionnaire, because
+    deleting extracted data on a heuristic is the failure mode this codebase
+    already documented at C24."""
+    rows = [{"name": "Erin Royal"}]
+    facts = {"auto_drivers": rows}
+    ps._derive_indicator(
+        "Policy_SectionAttached_DriverInformationScheduleIndicator_A", facts)
+    assert facts["auto_drivers"] == rows
 
 
 # ── 2. Question 5's reason boxes depend on Question 5 ────────────────────────

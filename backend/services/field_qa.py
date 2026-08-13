@@ -381,6 +381,23 @@ def run_field_qa(
             rows_val = _fv(merged_facts, list_key)
         if not isinstance(rows_val, list) or not rows_val:
             continue
+        # A schedule whose rows carry nothing but a name is not a schedule -
+        # `pdf_service._schedule_has_substance` already ruled so, and the row
+        # resolver now refuses to stamp it. Validating it anyway produced the
+        # client's "auto drivers row 1: license number is required but missing"
+        # row on a package whose ground truth has NO driver schedule at all:
+        # we were demanding a licence for a driver we had correctly declined to
+        # print. The absence belongs in the questionnaire, not as a defect
+        # against a row that does not exist.
+        try:
+            from services.pdf_service import (
+                _schedule_has_substance, _NAME_ONLY_INVALID_SCHEDULES,
+            )
+            if list_key in _NAME_ONLY_INVALID_SCHEDULES and \
+                    not _schedule_has_substance(list_key, rows_val):
+                continue
+        except Exception:                                 # pragma: no cover
+            pass
         target_form = next(iter(entry.get("forms") or [""]), "")
         for issue in validate_schedule_rows(list_key, rows_val):
             checked += 1
@@ -412,6 +429,45 @@ def run_field_qa(
                 "high_impact": False,
                 "message":     message,
                 "stamped":     stamped,
+                "expected":    None,
+            })
+
+    # ── Boxes a guard REFUSED a value for ────────────────────────────────────
+    # THE FEEDBACK LOOP THAT WAS MISSING (2026-08-13). `evaluate_stops` and the
+    # cross-form engine both validate FACTS. Every post-fill guard in
+    # `map_facts_to_form` validates STAMPED VALUES - a phone in a fax box, a
+    # policy definition offered as evidence for a "Yes", an endorsement title in
+    # a party-name box. Nothing carried the second set anywhere a human could
+    # see it, so four consecutive runs reported "no warnings" on forms where a
+    # dozen fabricated values had been caught and removed. An empty box read
+    # identically whether the document was silent or whether we refused what the
+    # model said about it. These rows say which.
+    #
+    # Advisory by construction: a guard blank is the system working (blank over
+    # wrong), so it never fails the run and never blocks a download. It is
+    # reported because the producer is the one who can go and look the value up.
+    for form_id, fr in (generated_forms or {}).items():
+        for gb in ((fr or {}).get("guard_blanks") or []):
+            if not isinstance(gb, dict) or not gb.get("field"):
+                continue
+            review += 1
+            results.append({
+                "form_id":     form_id,
+                "field":       gb.get("field"),
+                "field_label": _humanize_field(gb.get("field")),
+                "fact_key":    None,
+                "verdict":     "review",
+                "reason_code": "guard_removed_value",
+                "high_impact": False,
+                "message": (
+                    f"{_humanize_field(gb.get('field'))} was left blank on "
+                    f"purpose: the value found for it "
+                    f"(\"{str(gb.get('removed_value') or '')[:80]}\") could not "
+                    "be true for that box, so it was removed rather than "
+                    "stamped. Fix: Check the source document and enter the "
+                    "correct value if there is one."
+                ),
+                "stamped":     None,
                 "expected":    None,
             })
 
@@ -487,10 +543,19 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
     n_review = 0
     n_blank = 0
     high_impact_groups: Dict[tuple, dict] = {}
+    guard_by_form: Dict[str, List[dict]] = {}
 
     for item in qa_result.get("results") or []:
         code = item.get("reason_code")
-        if code in _HARD_BLOCK_REASON_CODES:
+        if code == "guard_removed_value":
+            # ONE row per form, not one per field. The client's 2026-08-12
+            # feedback ("repeated values are there a lot") applies here more
+            # than anywhere: a bad run can blank 20 boxes and 20 near-identical
+            # rows would bury the three that matter. The row names the first
+            # few fields and counts the rest, exactly like the high-impact
+            # second merge tier below.
+            guard_by_form.setdefault(item.get("form_id") or "", []).append(item)
+        elif code in _HARD_BLOCK_REASON_CODES:
             # Surfaced individually (never rolled into the summary) and tagged with
             # a "hardblock_" marker inside the rec_id so the frontend preflight
             # modal can identify these specifically: this is what requires an
@@ -549,6 +614,32 @@ def to_recommendation_rows(qa_result: Optional[dict]) -> List[dict]:
             # Non-high-impact blanks roll into the summary count (high-impact ones
             # were surfaced individually by the high_impact branch above).
             n_blank += 1
+
+    # ── One row per form for the boxes a guard refused a value for ───────────
+    # This is the row that answers "why do I see no warnings when the form is
+    # half empty". It is the ONLY place a producer learns that a blank is a
+    # decision rather than an absence.
+    for form_id, items in sorted(guard_by_form.items()):
+        form_label = (form_id or "").replace("ACORD_", "ACORD ")
+        labels = [it.get("field_label") or it.get("field") or "" for it in items]
+        shown = ", ".join(labels[:3]) + (
+            f", +{len(labels) - 3} more" if len(labels) > 3 else ""
+        )
+        n = len(items)
+        rows.append({
+            "rec_id":       _rec_id(form_id, "guard_removed_value", "grp"),
+            "message": (
+                f"{form_label}: {n} field{'s' if n != 1 else ''} left blank on "
+                f"purpose - a value was found for {'each' if n != 1 else 'it'} "
+                f"but could not be true for that box, so it was removed rather "
+                f"than stamped ({shown}). Fix: Check these against the source "
+                f"document and enter the correct value where there is one."
+            ),
+            "type":         "suggestion",
+            "field":        items[0].get("field") if n == 1 else None,
+            "component":    form_id,
+            "score_impact": None,
+        })
 
     # Second-tier merge (client feedback 2026-08-12: "repeated values are there
     # a lot, is there a way we can reduce it"): the 2026-07-15 merge above only

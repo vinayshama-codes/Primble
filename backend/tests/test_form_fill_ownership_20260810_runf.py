@@ -117,12 +117,30 @@ def test_a_real_retailer_still_ticks_retail():
 # ── J5 ───────────────────────────────────────────────────────────────────────
 
 def _first_gated_question(schema):
-    from services.pdf_service import is_compliance_question
+    """First gated question WITHOUT a mandatory dependent section.
+
+    CHANGED 2026-08-13: this used to return the first CommercialPolicy question
+    outright, which is Q1a "is the applicant a subsidiary of another entity?" -
+    a question whose form section demands the parent company's NAME. Under the
+    owner's explicit rule ("whenever there is a Y, there should be an
+    explanation mandatory") a Yes there no longer survives on a quote alone,
+    which is a DIFFERENT contract from the one this file tests (that an
+    affirmative quote, versus a negation, keeps a Yes). Picking a question with
+    no dependent section keeps this file testing its own claim; the dependent
+    rule has its own tests in test_run_20260813d.py.
+    """
+    from services.pdf_service import (
+        is_compliance_question, _question_explanation_pairs,
+        _unpaired_question_deps,
+    )
+    pairs = _question_explanation_pairs(schema)
+    deps = _unpaired_question_deps(schema, pairs)
     for f, meta in schema.items():
         if f.startswith("CommercialPolicy_Question_") and f.endswith("Code_A") \
-                and is_compliance_question(f, meta):
+                and is_compliance_question(f, meta) \
+                and f not in deps and f not in pairs:
             return f
-    raise AssertionError("no compliance question found on ACORD 125")
+    raise AssertionError("no dependency-free compliance question on ACORD 125")
 
 
 def test_a_yes_backed_by_a_leading_negation_is_blanked():

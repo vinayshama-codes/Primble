@@ -211,7 +211,7 @@ def test_predication_check_carries_no_insurance_vocabulary():
     src = inspect.getsource(ps._quote_asserts_something)
     src = re.sub(r'""".*?"""', "", src, flags=re.S)
     for pattern in (ps._QUOTE_INTERROGATIVE_RE.pattern,
-                    ps._QUOTE_PREDICATE_RE.pattern):
+                    ps._QUOTE_AUX_RE.pattern):
         src += pattern
     banned = (
         "insur", "premium", "policy", "coverage", "liability", "applicant",

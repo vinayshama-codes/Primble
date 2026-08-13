@@ -566,6 +566,20 @@ async def _finalize_pipeline(
 
     tier2_score, tier2_missing = check_tier2(merged_facts, mflags)
     hard_stops, soft_stops     = evaluate_stops(merged_facts, mflags)
+    # A run with NO stops looks identical to a run where the engine never fired,
+    # and the owner asked exactly that question of a clean live package
+    # (2026-08-13: "check why i am not getting expected warnings"). The answer
+    # was "the facts satisfied every check", but proving it required
+    # reconstructing the facts by hand. One line makes the next run answer it.
+    logger.info(
+        "evaluate_stops: hard=%d soft=%d%s", len(hard_stops), len(soft_stops),
+        "" if (hard_stops or soft_stops) else
+        " - every field-level check passed on the merged facts",
+    )
+    for _stop in hard_stops:
+        logger.info("evaluate_stops HARD: %s", str(_stop)[:160])
+    for _stop in soft_stops:
+        logger.info("evaluate_stops SOFT: %s", str(_stop)[:160])
 
     # Structured, code-tagged mirror of every issue added to hard_stops/soft_stops
     # below (Figures 4/5: clustering + Required/Recommended/Binder-followup tiers).

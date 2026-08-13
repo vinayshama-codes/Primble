@@ -93,7 +93,15 @@ def test_a_mapped_section_box_still_answers_from_its_own_rule(section):
     assert ps._deterministic_map(field, {
         "has_open_cargo": True, "has_builders_risk": True,
         "auto_vin_schedule": [{"vin": "4S4BRCGC9C3217772"}],
-        "auto_drivers": [{"name": "Erin Royal"}],
+        # A REAL driver-schedule row. This fixture used to read
+        # `[{"name": "Erin Royal"}]`, which is not a driver schedule - it is
+        # page 92's DRIVE OTHER CAR endorsement naming an individual, and it was
+        # ticking this box on a package with no drivers (live 2026-08-13, the C22
+        # decoy). The box now needs a row carrying more than a name; this test's
+        # subject is that the MAPPED rule still answers, so the fixture gets a
+        # licence number exactly as the vehicle fixture above gets a VIN.
+        # See _schedule_has_substance and the two tests beneath this one.
+        "auto_drivers": [{"name": "Erin Royal", "license_number": "12-345-6789"}],
     }) == "Yes"
 
 

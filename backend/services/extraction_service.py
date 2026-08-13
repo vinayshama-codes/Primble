@@ -400,20 +400,30 @@ _EXTRACT_SCHEMA = (
     # later. Every entry is mechanically verified verbatim against the document
     # in merge_facts (_verify_dec_entries) - a fabricated entry cannot survive -
     # and consumed ONLY by deterministic code (fact backfill, rescue anchors).
-    # It is deliberately NEVER rendered into the gap-fill prompt
-    # (pdf_service._GAP_FILL_FACTS_EXCLUDE): LLM call 2 stays byte-identical.
+    # SINCE 2026-08-13 it is ALSO the index LLM call 2 reads first (Stage A -
+    # see pdf_service._render_dec_index and CALL2_RETRIEVAL_REDESIGN D11). That
+    # is why `section` exists: two coverage parts print the identical label
+    # ("Each Occurrence Limit") with different amounts, and without the section
+    # title the two are indistinguishable once the page break is gone.
     '  "dec_page_entries": [{"label": string, "value": string, '
+    '"section": string or null, '
     '"owner": "applicant"|"producer"|"carrier"|"policy"|"other", '
     '"policy_number": string or null, "line_of_business": string or null}] '
     '(EVERY label:value pair printed on a DECLARATIONS, coverage-summary or '
     'SCHEDULE page in this text - premiums, limits, deductibles, dates, '
     'identifiers, phone/email/web contacts, codes. Copy label and value '
-    'VERBATIM as printed. owner = whose value it is: the applicant/insured, '
+    'VERBATIM as printed. section = the heading printed at the top of the page '
+    'the entry appears on, copied VERBATIM (e.g. "COMMERCIAL UMBRELLA '
+    'DECLARATIONS", "GENERAL LIABILITY DECLARATIONS", "BUSINESS AUTO '
+    'DECLARATIONS"); null only if the page prints no heading. This matters: '
+    'the same label carries different amounts under different headings, and '
+    'the heading is the only thing that says which coverage part a figure '
+    'belongs to. owner = whose value it is: the applicant/insured, '
     'the producer/agency, the carrier/insurer, or "policy" for policy-level '
     'figures like premiums and limits. NEVER record anything from policy '
     'wording, endorsement legal text, or hypothetical/illustrative amounts - '
     'only values this policy actually states on its declarations/schedule '
-    'pages. At most 80 entries; [] when this text contains no declarations '
+    'pages. At most 150 entries; [] when this text contains no declarations '
     'content.),\n'
     '  "state_of_operations": string or null\n'
     '},\n\n'
@@ -5080,14 +5090,29 @@ def _consolidate_property_locations(facts: dict) -> None:
 #                               genuinely empty). Misses are fine; a wrong box
 #                               is not - every condition fails toward blank.
 #
-# DELIBERATELY NOT DONE: rendering entries into the gap-fill prompt (LLM call 2
-# stays byte-identical - see pdf_service._GAP_FILL_FACTS_EXCLUDE and
-# test_call2_prompt_is_byte_identical_with_dec_entries), and open-vocabulary
-# matching of entry labels onto the 5,852 ACORD field names (a hand-rolled NLU
-# layer - the exact heuristic class this codebase has repeatedly burned on).
-_DEC_ENTRY_MAX = 500
+# SINCE 2026-08-13 there is a THIRD consumer, and it is an LLM one: the entries
+# are rendered as the dec-page INDEX that gap fill reads before the raw document
+# (pdf_service._render_dec_index, CALL2_RETRIEVAL_REDESIGN D11). The old comment
+# here said call 2 stays byte-identical; that constraint was lifted deliberately
+# by the owner. What has NOT changed is the verification contract below - an
+# entry that is not literally printed in the document never reaches any consumer,
+# LLM or otherwise, so the index cannot introduce a value the document lacks.
+#
+# STILL DELIBERATELY NOT DONE: open-vocabulary matching of entry labels onto the
+# 5,852 ACORD field names (a hand-rolled NLU layer - the exact heuristic class
+# this codebase has repeatedly burned on). The model does that matching, from an
+# index that is small enough for it to read carefully.
+#
+# CAP SIZING (raised 2026-08-13, and these are the numbers, not a guess). The
+# real ORBIN package prints 30 declarations/schedule pages inside 271. At the
+# ~25 label:value pairs a dec page carries that is ~750 entries, so the old
+# global 500 was throwing away a third of the index it now feeds, and the old
+# per-chunk 80 x 13 chunks capped the candidates before dedup. 1200 holds that
+# package with headroom and renders to ~2 index chunks, against 13 raw ones.
+_DEC_ENTRY_MAX = int(os.getenv("DEC_ENTRY_MAX", "1200"))
 _DEC_ENTRY_VALUE_MAX_CHARS = 300
 _DEC_ENTRY_LABEL_MAX_CHARS = 120
+_DEC_ENTRY_SECTION_MAX_CHARS = 80
 _DEC_ENTRY_OWNERS = frozenset({"applicant", "producer", "carrier", "policy", "other"})
 
 
@@ -5096,6 +5121,53 @@ def _dec_norm(text: Any) -> str:
     pdf_service._normalize_for_search so 'verbatim' means the same thing in
     every layer that checks it."""
     return re.sub(r"[^a-z0-9]+", " ", str(text or "").lower()).strip()
+
+
+_SECTION_TOKEN_GAP = 80
+
+
+def _section_is_printed(n_section: str, hay: str) -> bool:
+    """Is this page heading actually printed, allowing for how headings print?
+
+    RELAXED 2026-08-13, from a plain substring test, on measured evidence. The
+    first live run with `section` logged **45 SECTION_DROPPED lines** and every
+    one of them was a coverage part this package demonstrably contains:
+    `COMMERCIAL UMBRELLA DECLARATIONS`, `COMMERCIAL UMBRELLA SCHEDULE`,
+    `COMMERCIAL INLAND MARINE DECLARATIONS`. Both the plain and the `POLICY`
+    variant of the umbrella heading failed, so this is not the model guessing a
+    name - the heading does not survive OCR as one contiguous run. A dec page
+    heading is large centred type, routinely broken by a logo, a page number or a
+    column boundary landing between its words.
+
+    The cost of that was precise: `section` is the C23 discriminator - the only
+    thing that tells the umbrella's $3,000,000 from the GL's $1,000,000 under the
+    identical label "Each Occurrence Limit" - and it was being discarded for
+    exactly the pages that need it.
+
+    So the test is now ORDERED CONTAINMENT: every significant word of the heading
+    must appear, in the printed order, within `_SECTION_TOKEN_GAP` characters of
+    its predecessor. That accepts a heading split by page furniture and still
+    rejects an invented one, because a heading the document never printed will
+    not have its words sitting in sequence anywhere.
+
+    It IS a relaxation and the risk is named rather than dressed up: a heading
+    could now be accepted from words that coincidentally line up in body text.
+    The consequence is bounded - a mis-grouped line in the index, never a stamped
+    value, since `label` and `value` still face the unchanged verbatim gate.
+    Single-word headings keep the strict test: one word in sequence is no
+    evidence of anything.
+    """
+    if n_section in hay:
+        return True
+    tokens = [t for t in n_section.split() if len(t) > 2]
+    if len(tokens) < 2:
+        return False
+    pattern = (r"\b" + rf"\b.{{0,{_SECTION_TOKEN_GAP}}}?\b".join(
+        re.escape(t) for t in tokens) + r"\b")
+    try:
+        return re.search(pattern, hay, re.S) is not None
+    except re.error:                                       # pragma: no cover
+        return False
 
 
 def _verify_dec_entries(entries: Any, full_text: str) -> List[dict]:
@@ -5136,16 +5208,32 @@ def _verify_dec_entries(entries: Any, full_text: str) -> List[dict]:
             )
             continue
         owner = str(item.get("owner") or "").strip().lower()
+        # `section` is the coverage-part heading, and it gets the SAME verbatim
+        # treatment as label and value - it is the discriminator that tells the
+        # umbrella's $3,000,000 from the GL's $1,000,000 (improving-ll.md C23),
+        # so a fabricated one would be worse than none at all. Unverifiable
+        # section, no section: the entry survives, it just loses its attribution.
+        section = str(item.get("section") or "").strip()[:_DEC_ENTRY_SECTION_MAX_CHARS]
+        n_section = _dec_norm(section)
+        if not n_section or not _section_is_printed(n_section, hay):
+            if section:
+                logger.info("dec_entries SECTION_DROPPED %r - not printed in the "
+                            "uploaded text", section[:60])
+            section, n_section = "", ""
         kept_item = {
             "label": label,
             "value": value,
+            "section": section or None,
             "owner": owner if owner in _DEC_ENTRY_OWNERS else "other",
             "policy_number": (str(item.get("policy_number")).strip()
                               if item.get("policy_number") else None),
             "line_of_business": (str(item.get("line_of_business")).strip()
                                  if item.get("line_of_business") else None),
         }
-        dedup_key = (n_label, n_value)
+        # Section is part of the identity. Dropping it from the key would collapse
+        # the SAME label:value printed under two headings into one entry and keep
+        # whichever heading happened to arrive first - inventing an attribution.
+        dedup_key = (n_label, n_value, n_section)
         if dedup_key in seen:
             continue
         seen.add(dedup_key)

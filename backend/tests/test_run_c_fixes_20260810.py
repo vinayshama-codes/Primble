@@ -112,11 +112,28 @@ def test_renewal_owns_the_status_family():
         assert f in det
 
 
-def test_unknown_renewal_status_keeps_legacy_path():
+def test_unknown_renewal_status_leaves_the_box_empty():
+    """REVERSED 2026-08-13, on evidence rather than opinion.
+
+    This used to assert the box "keeps its legacy path" - i.e. reaches the
+    model - when the renewal status is unknown. Then the owner ran ONE
+    declarations package through TWO accounts: ISSUE POLICY came back ticked on
+    one and blank on the other. A document cannot produce two answers to the
+    same question; a model asked an unanswerable one can.
+
+    STATUS OF TRANSACTION says what THIS SUBMISSION is - quote, issue, renew,
+    change, cancel. A bound policy's declarations page has no opinion on it.
+    Unknown now means EMPTY, and a renewal we actually know about still ticks.
+    """
     from services.pdf_service import compute_form_gaps
     schema = _schema_125()
-    _m, unmatched, _d = compute_form_gaps("ACORD_125", schema, {})
-    assert "Policy_Status_RenewIndicator_A" in unmatched
+    mapped, unmatched, _d = compute_form_gaps("ACORD_125", schema, {})
+    assert "Policy_Status_RenewIndicator_A" not in unmatched
+    assert mapped.get("Policy_Status_RenewIndicator_A") is None
+
+    mapped2, _u2, _d2 = compute_form_gaps(
+        "ACORD_125", schema, {"is_renewal": "yes"})
+    assert mapped2.get("Policy_Status_RenewIndicator_A") == "Yes"
 
 
 # ── 4. Phantom location rows ─────────────────────────────────────────────────

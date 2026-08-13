@@ -262,7 +262,13 @@ def test_a_quote_that_restates_the_question_is_not_evidence(field, quote):
 
 @pytest.mark.parametrize("field,quote", [
     # From the SAME run - these are real and must survive.
-    ("Policy_Status_IssueIndicator_A", "Date of Issue: 07/16/2025"),
+    # WAS Policy_Status_IssueIndicator_A until 2026-08-13. That box is now an
+    # authoritative blank (the whole STATUS OF TRANSACTION family is - one
+    # document produced two different answers across two accounts), so it can
+    # no longer carry this test. The POINT of the case is unchanged and still
+    # exercised: a quote whose payload is real DATA, not a restatement of the
+    # question, must survive the gate.
+    ("CommercialStructure_Question_ABBCode_A", "Date of Issue: 07/16/2025"),
     ("NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A", "INSURED IS: LLC"),
 ])
 def test_a_quote_carrying_real_data_still_grounds_a_yes(field, quote):

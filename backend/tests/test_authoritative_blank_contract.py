@@ -155,7 +155,12 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
         "_resolve_applicant_website": 3,
         "_resolve_producer_printed_name": 1,
         "_resolve_applicant_contact": 24,
-        "_resolve_policy_status": 3,
+        # 3 -> 10 on 2026-08-13: the WHOLE transaction-status family, not just
+        # the three time boxes. The owner ran one declarations package through
+        # TWO accounts and got ISSUE POLICY ticked on one, blank on the other.
+        # A document cannot produce two answers - the question was never
+        # answerable from it. Renewal still ticks when `is_renewal` says so.
+        "_resolve_policy_status": 10,
         # +1 on 2026-08-12: the loss-history "Check if none" box. The 52-page
         # trap run ticked it off "Prior Term Loss Experience: NOT ON FILE" -
         # which means UNKNOWN, not "no losses" - because the deterministic
@@ -163,13 +168,72 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
         # clean loss history is the one box the client said must never be
         # inferred, so silence is now an owned, authoritative blank.
         "_resolve_no_loss_checkbox_owned": 1,
+        # +2 on 2026-08-13 (run 9): TOTAL LOSSES and the years count. The live
+        # form shipped "$0" with "Check if none" unchecked and no loss runs -
+        # a clean-history attestation the client said must come from the
+        # client. Same signals as the checkbox above; silence means empty.
+        "_resolve_loss_history_summary": 2,
+        # +1 on 2026-08-13: REMARKS / PROCESSING INSTRUCTIONS. Two consecutive
+        # live runs filled it off the carrier's policy - first the IL8384A
+        # terrorism disclosure, then a 36-entry "Forms Applicable" schedule
+        # transcribed from the dec page. Neither is a processing instruction,
+        # and neither is knowable from a bound policy: this box says what the
+        # PRODUCER wants the underwriter to do with THIS submission, the same
+        # category as the "section attached" boxes above. A remark we genuinely
+        # hold (`acord101_remarks` / `additional_remarks_text`, from a producer
+        # or an ARQ answer) still stamps - and is itself checked for being a
+        # forms schedule, since that is how the fact got filled last time.
+        # ACORD 101's own AdditionalRemark_* rows are explicitly exempt.
+        "_resolve_remark_text": 1,
+        # +2 on 2026-08-13 (second entry that day): the FAX boxes. Three
+        # consecutive live runs stamped the producer's PHONE into the FAX box -
+        # the walk's last remaining field hunts chunk after chunk until the
+        # model returns the only phone-shaped thing the package prints. A dec
+        # package that states a fax states it labelled "Fax", which extraction
+        # captures as `producer_fax`; with no such fact there is no document
+        # source for this box. Same reasoning and same shape as
+        # `_resolve_applicant_website` above. Producer_FaxNumber_A +
+        # AdditionalInterest_Primary_FaxNumber_A on this form.
+        "_resolve_party_fax": 2,
+        # +1 on 2026-08-13 (third entry that day): the DEPOSIT box. Run 3
+        # stamped the package TOTAL as the deposit; run 5 stamped $31 - the
+        # terrorism premium, the only other small money figure in the index.
+        # This package states no deposit anywhere; the box stamps from a
+        # deposit fact or stays blank. Same shape as the fax box above.
+        "_resolve_payment_deposit": 1,
     }, {k: len(v) for k, v in sorted(claimants.items())}
-    # 96 of 548 on ACORD 125 (17.5%): 64 are the prior-coverage grid
-    # (deterministically stamped from four scalars, not withheld) and 24 are
-    # the contact block above. The ceiling exists so the contract can never
-    # quietly swallow a form.
-    assert len(owned) < 0.20 * len(schema), (
+    # 113 of 548 on ACORD 125 (20.6%). The ceiling exists so the contract can
+    # never quietly swallow a form, and it BIT on 2026-08-13 when the
+    # transaction-status family was added - which is the point. Raised to 25%
+    # deliberately, with the arithmetic stated so the next person can judge it:
+    #
+    #   64  prior-coverage grid   - deterministically stamped from four
+    #                               scalars; a CURRENT policy has no prior
+    #                               carrier data, so these are not "withheld",
+    #                               they are answered
+    #   24  applicant contact     - a dec page has no applicant contact
+    #   10  transaction status    - what THIS submission is; the producer says
+    #    4  section attached      - claims about our own package
+    #    3  applicant website
+    #    2  loss-history summary  - a clean-history attestation
+    #    2  fax
+    #  ~4   printed name, no-loss tick, remarks, deposit
+    #
+    # 88 of the 113 are the two grids. Excluding them the contract owns 25
+    # scalar boxes on a 548-field form - under 5%. If this fires again, check
+    # whether the NEW entries are grids or scalars before touching the number.
+    assert len(owned) < 0.25 * len(schema), (
         f"{len(owned)} of {len(schema)} fields withheld from the model"
+    )
+    # ...and the scalar half must stay small, which is the constraint the
+    # percentage was really standing in for. The two grids are identified by
+    # their OWNING RESOLVER, not by a guessed name prefix - the resolver is the
+    # thing that actually decides, and a prefix list would drift from it.
+    _grid_owners = {"_resolve_prior_coverage_cell", "_resolve_applicant_contact"}
+    _scalar = sum(len(v) for k, v in claimants.items() if k not in _grid_owners)
+    assert _scalar < 30, (
+        f"{_scalar} non-grid fields withheld - the contract is growing "
+        "scalars, not just repeating structures"
     )
 
 

@@ -1862,11 +1862,19 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
     # Merge flags into facts so _derive_indicator and GPT both see has_general_liability,
     # is_contractor, has_auto_coverage, etc. for checkbox resolution.
     facts_with_flags = {**session["facts"], **session.get("flags", {})}
+    # Guard blanks: boxes a post-fill guard emptied because the value was not
+    # possible for that box. They are invisible to `evaluate_stops` (which
+    # validates FACTS, not stamped VALUES), which is why four consecutive runs
+    # showed "no warnings" on forms where a dozen fabricated values had been
+    # caught and removed. Carried through to field QA so the pre-download review
+    # can say so.
+    guard_blanks: list = []
     mapped, confidence = map_facts_to_form(
         facts_with_flags, schema,
         form_id=form_meta["form_id"],
         raw_text=raw_text,
         pre_filled_gpt=pre_filled_gpt,
+        guard_report=guard_blanks,
     )
 
     hard_stops, soft_stops = run_field_validations(mapped)
@@ -1922,4 +1930,5 @@ def process_single_form(form_meta: dict, session: dict, pre_filled_gpt: dict = N
         "sqs":        sqs,
         "cross":      cross,
         "pdf_bytes":  pdf_bytes,
+        "guard_blanks": guard_blanks,
     }

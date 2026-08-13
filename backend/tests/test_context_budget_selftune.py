@@ -120,6 +120,15 @@ def test_an_over_large_budget_recovers_instead_of_blanking_the_batch(monkeypatch
     """The whole point: guess high, and the run still completes."""
     monkeypatch.setattr(ps, "_GPT_CALL_BUDGET_CHARS", 400_000)
     ps._effective_budget_chars = 400_000
+    # `_raw_budget` now takes the MIN of the capacity budget above and the
+    # quality cap (`_GAP_FILL_DOC_CHARS_PER_CALL`, 112,000 - see
+    # CALL2_RETRIEVAL_REDESIGN D1). Leaving the cap at its production value keeps
+    # every prompt around 70k, comfortably under this fixture's 120k rejection
+    # threshold, so the overflow path is never reached and the test passes
+    # vacuously on an assertion that never fires. The path under test is the
+    # CAPACITY overflow recovery, so the quality limiter has to be lifted out of
+    # the way to reach it - the recovery code itself is unchanged.
+    monkeypatch.setattr(ps, "_GAP_FILL_DOC_CHARS_PER_CALL", 400_000)
     client = _OverflowThenSucceed(limit=120_000)
     monkeypatch.setattr(ps, "_get_openai_form_fill_client_sync", lambda: client)
 

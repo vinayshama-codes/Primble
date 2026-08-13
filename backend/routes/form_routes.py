@@ -45,6 +45,7 @@ from services.pdf_service import (
     apply_acord125_missing_field_highlights,
     apply_acord126_missing_field_highlights,
     extract_form_schema, compute_form_gaps, combined_gap_fill,
+    log_dec_index_coverage,
 )
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
@@ -148,6 +149,14 @@ def _doc_summary_entry(d: dict, primary_filename: str = "") -> dict:
         "low_confidence_tokens": d.get("low_confidence_tokens", []),
         "truncation_warning":    d.get("truncation_warning"),
     }
+
+# Drop the declarations index from the session once forms have been generated.
+# ON by default because the owner's product rule makes it dead weight: a package
+# is single-shot, so nothing can re-generate off it. `0` keeps it, which is what
+# you want the day the product grows an "add another form" flow - and then this
+# comment is the thing to read first. See the purge site in select_forms_bulk.
+_PURGE_DEC_INDEX_AFTER_GENERATION = os.getenv(
+    "PURGE_DEC_INDEX_AFTER_GENERATION", "1").strip().lower() not in ("0", "false", "no")
 
 # Dedicated pool for sync form-processing work (process_single_form, fill_pdf).
 # Explicit size prevents the default pool from growing unbounded under burst load.
@@ -1113,6 +1122,70 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             fid, result = item
             if result is not None:
                 results[fid] = result
+
+        # ── What the declarations pages printed, and what reached a form ─────
+        # Owner's question, 2026-08-13: "what about the data that was present in
+        # the declaration page and it didn't get stamped on the form". Answered
+        # by subtracting the values actually stamped across EVERY generated form
+        # from the verified dec-page index. Read-only, never blocks, never edits
+        # a form - see pdf_service.dec_index_coverage for why it is a report and
+        # not a guard. Union across forms on purpose: a value ACORD 125 ignores
+        # may be exactly what ACORD 127 wanted.
+        try:
+            _stamped_all = [
+                v for _r in results.values()
+                for v in (_r.get("mapped") or {}).values()
+            ]
+            _dec_cov = log_dec_index_coverage(
+                (session.get("facts") or {}).get("dec_page_entries"),
+                _stamped_all,
+                label=f"session={req.session_id}",
+            )
+            if _dec_cov.get("recorded"):
+                await upd_processing_session(
+                    req.session_id, {"dec_index_coverage": _dec_cov})
+
+            # ── Data minimisation: the index has no consumer left ────────────
+            # OWNER'S PRODUCT RULE (2026-08-13): "once any form is generated,
+            # user cannot go back in that same package to generate another form,
+            # they have to restart new package." That removes the only reason
+            # this was being kept - re-generating a different ACORD form later
+            # off the same extraction.
+            #
+            # Verified against the code before deleting, not assumed. Every
+            # consumer of `dec_page_entries` runs at or before generation:
+            #   _backfill_empty_facts_from_entries   merge time
+            #   text-selection rescue net            gap fill
+            #   _render_dec_index (Stage A)          gap fill
+            #   _second_claim_on_a_single_printed_value   stamping
+            #   dec_index_coverage                   the line above this one
+            # Everything AFTER generation - download, signature, the ARQ
+            # confidence updates - reads `generated_forms[...]["mapped"]`, which
+            # is already-stamped values, never the facts.
+            #
+            # ONLY ON THIS PATH. `lite_generate_internal` also generates forms,
+            # silently, for scoring and ARQ - and it runs BEFORE the producer has
+            # chosen anything. Purging there would leave the real generation with
+            # no index at all.
+            #
+            # It matters that this is PII: a dec-page index is names, addresses
+            # and identifiers, ~33 KB a session, and on the professional tier
+            # `run_facts_retention` skips the facts sweep entirely - so without
+            # this it lives until the session row is deleted at 180 days.
+            #
+            # Degrades safely rather than breaking. If a second generation ever
+            # does reach this session, Stage A simply does not run and every
+            # field walks the raw document - the pre-2026-08-13 pipeline.
+            if _PURGE_DEC_INDEX_AFTER_GENERATION and results:
+                await upd_processing_session(
+                    req.session_id, {}, delete_facts=["dec_page_entries"])
+                logger.info(
+                    "dec_index PURGED: session=%s - %d recorded entries removed "
+                    "after generating %d form(s); the coverage summary is kept.",
+                    req.session_id, _dec_cov.get("recorded", 0), len(results),
+                )
+        except Exception as _cov_ex:
+            logger.warning("dec index coverage report skipped: %s", _cov_ex)
 
         if not results:
             await _queue.update_status(_job_id, STATUS_FAILED, error="No forms could be generated")

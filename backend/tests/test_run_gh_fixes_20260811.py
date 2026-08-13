@@ -84,8 +84,14 @@ def test_transaction_time_boxes_are_owned_even_without_the_renewal_fact():
         assert mapped.get(f) is None
         assert f not in unmatched, f"{f} can still receive the policy's 12:01 A.M."
         assert f in det
-    # The rest of the family keeps its legacy path when renewal is unknown.
-    assert "Policy_Status_RenewIndicator_A" in unmatched
+    # CHANGED 2026-08-13: the WHOLE family is owned now, not just the time
+    # boxes. The owner ran one declarations package through two accounts and
+    # got ISSUE POLICY ticked on one and blank on the other - a document cannot
+    # produce two answers, so the question was never answerable from it. STATUS
+    # OF TRANSACTION describes what THIS submission is; the producer decides
+    # it. Silence means empty everywhere in the family.
+    assert "Policy_Status_RenewIndicator_A" not in unmatched
+    assert mapped.get("Policy_Status_RenewIndicator_A") is None
 
 
 # ── K3 ───────────────────────────────────────────────────────────────────────

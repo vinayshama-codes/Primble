@@ -1,0 +1,124 @@
+"""The declarations index is deleted once forms exist.
+
+Owner's product rule, 2026-08-13: "once any form is generated, user cannot go
+back in that same package to generate another form, they have to restart new
+package." That removes the only reason the index was being kept - re-generating
+a different ACORD form off the same extraction - and it is PII (names, addresses,
+identifiers), ~33 KB a session, which on the professional tier the nightly facts
+sweep skips entirely.
+
+These tests pin the CONTRACT rather than the plumbing: every consumer runs at or
+before generation, nothing after generation reads it, and the purge degrades to
+the pre-Stage-A pipeline rather than breaking if a second generation ever happens.
+"""
+import ast
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault("OPENAI_API_KEY", "sk-offline")
+
+import services.pdf_service as ps                                 # noqa: E402
+
+BACKEND = Path(__file__).resolve().parents[1]
+ROUTES = (BACKEND / "routes" / "form_routes.py").read_text(encoding="utf-8")
+
+
+def test_the_purge_uses_the_atomic_retraction_path():
+    """`delete_facts` exists precisely because the facts merge is ADDITIVE - a
+    key merely absent from an update is preserved. Read-modify-write from the
+    stale session dict this request opened with would clobber anything the
+    extraction pipeline wrote in between."""
+    assert 'delete_facts=["dec_page_entries"]' in ROUTES
+
+
+def test_the_purge_only_runs_when_a_form_was_actually_generated():
+    assert "_PURGE_DEC_INDEX_AFTER_GENERATION and results" in ROUTES
+
+
+def test_the_purge_is_not_on_the_lite_generation_path():
+    """`lite_generate_internal` also generates forms - silently, for scoring and
+    ARQ - and runs BEFORE the producer chooses anything. Purging there would
+    leave the real generation with no index at all.
+
+    Checked structurally: the purge call must sit inside `select_forms_bulk`.
+    """
+    tree = ast.parse(ROUTES)
+    owners = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
+            body = ast.get_source_segment(ROUTES, node) or ""
+            if "delete_facts=[\"dec_page_entries\"]" in body:
+                owners.append(node.name)
+    assert owners == ["select_forms_bulk"], owners
+
+
+def test_the_kill_switch_exists_and_defaults_on():
+    import routes.form_routes as fr
+    assert fr._PURGE_DEC_INDEX_AFTER_GENERATION is True
+    assert "PURGE_DEC_INDEX_AFTER_GENERATION" in ROUTES
+
+
+# ── The contract that makes deleting safe ────────────────────────────────────
+
+def test_every_consumer_of_the_index_runs_at_or_before_generation():
+    """ANTI-ROT. The purge is only safe while nothing downstream reads the
+    entries. If someone adds a post-generation consumer, this fails and they
+    have to decide deliberately rather than discover it in production.
+
+    Consumers are located by grep across the service layer, so a NEW one shows
+    up here whether or not its author knew about this test.
+    """
+    hits = []
+    for path in sorted((BACKEND / "services").glob("*.py")) + \
+            sorted((BACKEND / "routes").glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for i, line in enumerate(text.splitlines(), 1):
+            if "dec_page_entries" in line and not line.strip().startswith("#"):
+                hits.append(f"{path.name}:{i}")
+    # The known set, each verified to run at or before generation. Adding a line
+    # here is a decision: state where it runs and why the purge is still safe.
+    known_files = {
+        "extraction_service.py",   # the schema, the merge, the verification
+        "pdf_service.py",          # Stage A index, the duplicate guard, exclusion
+        "form_routes.py",          # the coverage report and this purge
+        "text_selection.py",       # the rescue net, during gap fill
+    }
+    unexpected = [h for h in hits if h.split(":")[0] not in known_files]
+    assert not unexpected, (
+        f"new dec_page_entries consumer(s) {unexpected} - if any of them runs "
+        "AFTER form generation, the purge in select_forms_bulk deletes data they "
+        "need. Decide, then update this list.")
+
+
+def test_a_missing_index_simply_turns_stage_a_off():
+    """The degradation path, executed rather than asserted about. A session whose
+    index has been purged must fall back to the pre-2026-08-13 pipeline - every
+    field walking the raw document - not raise, and not silently blank a form."""
+    assert ps._render_dec_index(None) == ""
+    assert ps._dec_index_chunks(None, 100_000) == []
+    # And the guard that consults the index abstains rather than erroring.
+    assert ps._second_claim_on_a_single_printed_value(
+        "Producer_FaxNumber_A",
+        {"Producer_ContactPerson_PhoneNumber_A": "303-996-7800",
+         "Producer_FaxNumber_A": "303-996-7800"},
+        {"Producer_FaxNumber_A"}, None) is None
+
+
+def test_the_coverage_summary_survives_the_purge():
+    """`dec_index_coverage` is written BEFORE the purge and is not a fact, so it
+    is untouched by `delete_facts`. It is what still answers "what did the
+    declarations print that never reached a form" after the entries are gone."""
+    order_report = ROUTES.index('"dec_index_coverage": _dec_cov')
+    order_purge = ROUTES.index('delete_facts=["dec_page_entries"]')
+    assert order_report < order_purge, (
+        "the purge must not run before the coverage report is persisted")
+
+
+@pytest.mark.parametrize("entries", [None, [], "junk"])
+def test_the_report_is_honest_about_an_absent_index(entries):
+    report = ps.dec_index_coverage(entries, ["anything"])
+    assert report["recorded"] == 0 and report["unused"] == []

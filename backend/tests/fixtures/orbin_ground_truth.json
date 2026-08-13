@@ -1,0 +1,207 @@
+{
+  "_comment": [
+    "GROUND TRUTH - ORBIN CONTRACTING LLC package (EMC Insurance, policy term 07/15/25-07/15/26).",
+    "Built by reading the real declarations pages, not by running the pipeline. Used by",
+    "backend/scripts/score_gap_fill.py to put a correctness number on LLM call 2.",
+    "",
+    "STATUS: COMPLETE - all 271 pages read.",
+    "Every value below is quoted from a DECLARATIONS or SCHEDULE page, with the page noted.",
+    "Nothing here is inferred from policy wording - that is the whole point.",
+    "",
+    "PACKAGE COMPOSITION, all 271 pages: 30 declarations/schedule pages, 241 ISO+AAIS",
+    "standard form pages. 11% signal, 89% boilerplate. Per part: 17% / 9% / 8% - the",
+    "ratio gets WORSE as the package goes on, because every added coverage part brings",
+    "one dec page and dozens of wording pages. This is the haystack, measured.",
+    "",
+    "FIVE coverage parts: Inland Marine (6C7-40-02), Business Auto (6E7-40-02),",
+    "Commercial Umbrella (6J7-40-02), General Liability (BBC7263), plus the Common",
+    "Declarations. Property, Crime and Workers Comp are all 'No Coverage'.",
+    "",
+    "_traps below is not scored - it records the specific boilerplate sentences in THIS",
+    "document that have already produced client-reported wrong values, so a regression on",
+    "any of them is recognised instantly rather than re-diagnosed from scratch."
+  ],
+  "_doc": "REPLACE_WITH_EXTRACTED_TEXT_PATH",
+  "_forms": ["ACORD_125"],
+  "_facts": {},
+
+  "NamedInsured_FullName_A": "ORBIN CONTRACTING LLC",
+  "NamedInsured_MailingAddress_LineOne_A": "4800 DAHLIA ST # D13",
+  "NamedInsured_MailingAddress_CityName_A": "DENVER",
+  "NamedInsured_MailingAddress_StateOrProvinceCode_A": "CO",
+  "NamedInsured_MailingAddress_PostalCode_A": "80216-3121",
+  "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A": "Yes",
+
+  "Producer_FullName_A": "COMMERCIAL RISK SOLUTIONS, INC.",
+  "Producer_MailingAddress_LineOne_A": "9780 S MERIDIAN BLVD STE 400",
+  "Producer_MailingAddress_CityName_A": "ENGLEWOOD",
+  "Producer_MailingAddress_StateOrProvinceCode_A": "CO",
+  "Producer_MailingAddress_PostalCode_A": "80112-6072",
+
+  "Policy_EffectiveDate_A": "07/15/2025",
+  "Policy_ExpirationDate_A": "07/15/2026",
+  "Policy_Payment_EstimatedTotalAmount_A": "$10,663.00",
+
+  "_traps": {
+    "estimated_total_premium": {
+      "correct": "$10,663.00",
+      "page": 1,
+      "reconciliation": "3954 (GL) + 300 (IM) + 2991 (Auto) + 3418 (Umbrella) = 10,663 EXACTLY. Every line is now confirmed on its own section declarations page: GL p205, IM p3, Auto p85, Umbrella p143. `_reconcile_total_premium` prefers an exact-sum match and now has one, and its validity floor (a total may not be at or below the largest single granted line, $3,954) rejects $2,991 outright.",
+      "decoys": {
+        "$2,991.00": "page 85 - the AUTO SECTION subtotal, printed as '*ESTIMATED TOTAL POLICY PREMIUM'. Identical label to the package total. This is the C46 defect's exact source.",
+        "$3,954.00": "pages 1, 205, 211 - the GL premium, and the largest single granted line. Printed THREE times against the true total's ONE.",
+        "$2,212.00": "page 89 - ITEM 3 vehicle premium total",
+        "$3,418.00": "page 143 - Umbrella, 'PREMIUM NOT SUBJECT TO AUDIT'",
+        "$300.00": "page 3 - TOTAL INLAND MARINE PREMIUM"
+      }
+    },
+    "applicant_phone": {
+      "correct": null,
+      "reason": "ORBIN CONTRACTING has NO phone number printed anywhere in pages 1-90. The box must ship BLANK.",
+      "decoys": {
+        "303-996-7800": "page 1/3/85 - AGENT PHONE (the producer's)",
+        "888-362-2255": "page 1/3/85 - CLAIM REPORTING (the carrier's)",
+        "720-200-3700": "page 2/3/85 - SERVICING CARRIER (EMC's Greenwood Village office)"
+      }
+    },
+    "applicant_name": {
+      "correct": "ORBIN CONTRACTING LLC",
+      "decoys": {
+        "anyone having proper temporary custody of your property will have your rights and duties": "page 24, IL 00 17 11 98 section F. THE CLIENT-REPORTED 2026-08-08 GARBAGE, verbatim, living in this package."
+      }
+    },
+    "mailing_address": {
+      "correct": "4800 DAHLIA ST # D13, DENVER, CO 80216-3121",
+      "decoys": {
+        "proof of mailing will be sufficient proof of notice": "pages 10, 11, 24 - CL0100 / CL0182 / IL0017. The client-reported mailing_address garbage, verbatim.",
+        "in compliance with laws, rules, or regulations": "page 10, CL0100 item 4 Inspections. Second half of the same reported string."
+      },
+      "note": "Printed THREE ways: '4800 DAHLIA ST # D13' (p1,3,85), same + city on separate line (p8), and '4800 DAHLIA STREET D13 / DENVER CO. 80216-3121' (p89 - STREET spelled out, 'CO.' with a period). _consolidate_property_locations must fold all three into ONE location, not three."
+    },
+    "entity_type": {
+      "correct": "LLC",
+      "source": "page 3 / 85, 'INSURED IS: LLC'",
+      "decoys": {
+        "your members or managers if you are a limited liability company": "pages 36 and 51, IM7000 / IM7100 exclusion boilerplate. Ticks the CORRECT box for the WRONG reason - so a passing result here can still be luck. Check the grounding quote, not just the value."
+      }
+    },
+    "policy_number": {
+      "ambiguous": true,
+      "candidates": {
+        "0482854": "Account Number, page 1 - what the Common Declarations leads with",
+        "6C7-40-02---26": "Inland Marine section policy number, page 3",
+        "6E7-40-02---26": "Business Auto section policy number, page 85",
+        "6J7-40-02---26": "Commercial Umbrella section policy number, page 143",
+        "BBC7263": "General Liability policy number, referenced on page 148 - the GL dec page itself is NOT in pages 1-180"
+      },
+      "note": "FIVE candidates, no single package policy number. Whatever lands in the box must be one of these and not an invented composite."
+    },
+
+    "gl_limits": {
+      "correct": {
+        "each_occurrence": "$1,000,000",
+        "damage_to_premises_rented": "$500,000",
+        "medical_expense": "$10,000",
+        "personal_and_advertising_injury": "$1,000,000",
+        "general_aggregate": "$2,000,000",
+        "products_completed_ops_aggregate": "$2,000,000"
+      },
+      "source": "page 205, GENERAL LIABILITY DECLARATIONS (Form CG7000A), EMC Property & Casualty Company, Policy BBC7263-26. Independently confirmed on page 148, the Umbrella's SCHEDULE OF UNDERLYING INSURANCE - the two agree exactly.",
+      "decoys": {
+        "$3,000,000": "page 143, COMMERCIAL UMBRELLA DECLARATIONS - the UMBRELLA's own limits, printed as three clean lines: 'Each Occurrence Limit (Liability Coverage)', 'Personal & Advertising Injury Limit', 'Aggregate Limit (Liability Coverage)'."
+      },
+      "note": "THE C23 DEFECT'S SOURCE, located, and part 3 makes it worse rather than better. There are now TWO pages titled DECLARATIONS carrying different 'Each Occurrence' limits - page 143 says $3,000,000 (umbrella) and page 205 says $1,000,000 (GL) - SIXTY-TWO PAGES APART. Nothing in the text distinguishes them except which coverage part's dec page you are standing on. That is page identity, and page identity is exactly what a single 175k-token prompt destroys. Chunking restores it."
+    },
+
+    "gl_premium": {
+      "correct": "$3,954.00",
+      "breakdown": {
+        "products_completed_operations": "$1,198.00",
+        "other_than_products_completed_operations": "$2,756.00"
+      },
+      "source": "page 205, and again on page 211 (GENERAL LIABILITY SCHEDULE)"
+    },
+
+    "gl_class_codes": {
+      "correct": [
+        {"code": "91580", "description": "Contractors - Executive Supervisors or Executive Superintendents", "premium_basis": "Payroll", "exposure": "$39,300"},
+        {"code": "91585", "description": "Contrctrs-sub work-in connection w/constrctn,recon,repr,erctn of buildings - NOC", "premium_basis": "Total Cost", "exposure": "$350,000"}
+      ],
+      "source": "page 211, GENERAL LIABILITY SCHEDULE (Form CG7001A), Location 001",
+      "note": "THE C46 PHANTOM-VEHICLE-ROW DEFECT'S LITERAL SOURCE. CLAUDE.md records ACORD 127 rows 2-3 coming back with 'the General Liability class codes 91580/91585 and the GL exposures ($39,300 payroll, $350,000 subcontract cost) stamped as vehicle COST NEW.' All four values are on this single page. There is ONE vehicle in this package and it is a 2012 Subaru Outback costing $26,680 - these numbers have nothing to do with it. A vehicle-schedule question that reaches this page in an undifferentiated blob will find four numbers shaped exactly like the answer."
+    },
+
+    "operations": {
+      "business_description": "COMMERCIAL GENERAL CONTRACTOR",
+      "note": "Printed TRUNCATED as 'COMMERCIAL GENERAL CONTRA' on every dec page (pages 3, 85, 143) - the carrier's field is too narrow. The GL class-code descriptions on page 211 are the fuller statement of what the business actually does: executive supervision plus subcontracted construction, reconstruction, repair and erection of buildings.",
+      "rated_location": "4800 Dahlia St # D13, Denver, CO 80216-3121 (page 212, 'Location of All Premises Owned, Rented or Occupied' - ONE location, 'Location 1')"
+    },
+
+    "gl_deductible": {
+      "correct": null,
+      "reason": "There is NO general GL deductible on this policy. The GL declarations page (205) lists limits only.",
+      "decoys": {
+        "$1,000": "page 207, CG 72 76 Limited Pollution Coverage - Work Sites: 'Property Damage Deductible $1,000 Each Pollution Incidents'. That is a POLLUTION deductible inside one endorsement, not the policy's GL deductible. It is the likely source of the '$1,000 GL deductible' in the umbrella_sir_below_gl_deductible false positive already deleted on 2026-08-12."
+      }
+    },
+
+    "umbrella": {
+      "each_occurrence": "$3,000,000",
+      "personal_and_advertising_injury": "$3,000,000",
+      "aggregate": "$3,000,000",
+      "self_insured_retention": "$0",
+      "premium": "$3,418.00",
+      "source": "pages 143 and 148",
+      "note": "SIR is $0 against a $1,000 Auto comp/collision deductible. That pairing is the false-positive warning already fixed on 2026-08-07 - this package is its literal reproduction case, so a re-run must stay silent on it."
+    },
+
+    "driver_schedule": {
+      "correct": null,
+      "reason": "There is NO driver schedule in this package. No licence numbers, no dates of birth, no driver rows.",
+      "decoys": {
+        "ERIN ROYAL": "page 92, CA 99 10 A DRIVE OTHER CAR COVERAGE, under 'NAMES OF INDIVIDUALS'. The ONLY personal name in 180 pages, and it is a Drive Other Car named individual, NOT a driver on the vehicle schedule. This is the source of the C22 defect where 'ERIN ROYAL' landed in Driver_TaxIdentifier_A and Driver_GenderCode_A."
+      }
+    },
+
+    "_repeated_boilerplate": {
+      "note": "A MERGE defect, not a retrieval one - chunking will not fix it. Common interline forms attach to EVERY coverage part, so their text repeats once per part while a real declarations value is printed ONCE. `_merge_list_fields` ranks candidates on log1p(freq) + confidence, so the bias scales with the number of coverage parts. This package has five. CONFIRMED COUNTS across all 271 pages:",
+      "final_counts": {
+        "IL 00 17 Common Policy Conditions": {"copies": 4, "pages": [24, 131, 195, 258], "carries": "the client-reported applicant_name garbage sentence"},
+        "IL 70 04 Mutual Policy Provisions": {"copies": 4, "pages": [25, 138, 199, 264]},
+        "IL 76 02 CO Company Elimination": {"copies": 4, "pages": [28, 141, 204, 269]},
+        "IL 02 28 CO Cancellation And Nonrenewal": {"copies": 3, "pages": [136, 197, 262]},
+        "IL 01 25 CO Changes - Civil Union": {"copies": 3, "pages": [134, 196, 261]},
+        "IL 74 47 Notice Of Cancellation": {"copies": 3, "pages": [140, 202, 267]},
+        "IL 83 83.2A TRIA Disclosure": {"copies": 3, "pages": [5, 147, 210]},
+        "IL 00 21 Nuclear Energy Liability": {"copies": 2, "pages": [132, 259]}
+      },
+      "the_arithmetic": "log1p(1) = 0.693 for the $10,663 total premium, printed once. log1p(4) = 1.609 for the IL0017 boilerplate. The boilerplate scores 2.3x the real number on frequency alone, before confidence is even considered.",
+      "recommendation": "Worth its own fix after the harness produces a baseline. Options include damping frequency for text that appears in a known standard form, or scoring dec-page provenance rather than raw repetition. Do not touch it before there is a number to move."
+    },
+
+    "_blank_form_trap": {
+      "pages": "125-126",
+      "form": "CA 8282 COLORADO BODILY INJURY UNINSURED MOTORISTS COVERAGE SELECTION/REJECTION",
+      "note": "An UNCOMPLETED form. 'Producer:', 'Insured Name and Mailing Address:', 'Effective Date', 'Policy/Account Number', '(Initials)' and four signature lines are all EMPTY. It also prints '$50,000' as the Colorado statutory minimum UM limit. Two risks: the model reading empty labelled boxes as data, and $50,000 being taken for this policy's UM limit. The real UM limit is $1,000,000 (page 88)."
+    }
+  },
+
+  "_auto_section_pages_85_90": {
+    "note": "Not scored on ACORD 125 - recorded for the 127 fixture and to pin the vehicle-schedule retrieval case.",
+    "vehicle_1": {
+      "year": "2012", "make": "SUBARU", "model": "OUTBACK", "body": "SEDAN",
+      "vin": "4S4BRCGC9C3217772", "cost_new": "26680", "class": "7383", "territory": "111",
+      "garaged": "4800 DAHLIA STREET D13, DENVER CO 80216-3121"
+    },
+    "covered_auto_symbols": {
+      "liability": "01", "medical_payments": "02", "um_uim": "02",
+      "comprehensive": "07", "collision": "07"
+    },
+    "limits": {
+      "liability_csl": "$1,000,000", "med_pay": "$5,000",
+      "um_uim_csl": "$1,000,000",
+      "comprehensive_deductible": "$1,000", "collision_deductible": "$1,000"
+    },
+    "phantom_row_check": "ONE vehicle only. Rows B-N of ACORD 127 must stay blank. This is the C46 phantom-schedule-row case with real data."
+  }
+}

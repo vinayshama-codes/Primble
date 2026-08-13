@@ -4,8 +4,16 @@ Owner's end goal, verbatim: "if values are present in declaration pages uploaded
 by user then they should be correctly stamped on the form" - WITHOUT touching
 LLM call 2. So call 1 records every label:value pair a dec page prints
 (`dec_page_entries`), a mechanical gate discards anything not literally in the
-document, and the ONLY consumers are deterministic: the empty-fact backfill and
-the text-selection rescue net. Call 2's prompt is proven byte-identical below.
+document, and the consumers were deterministic: the empty-fact backfill and the
+text-selection rescue net.
+
+UPDATED 2026-08-13: the owner lifted the "without touching call 2" constraint on
+purpose. The same verified entries are now ALSO rendered as the Stage A
+declarations index that gap fill reads before the raw document (see
+CALL2_RETRIEVAL_REDESIGN D11). The verification contract below is unchanged and
+is what makes that safe - an entry the document does not literally print reaches
+no consumer, LLM or deterministic. Section 4 now pins the kill switch instead of
+the freeze.
 
 Every trap fixture here is the client's literal reported defect:
   * the carrier's account number 0482854 stamped as the FEIN,
@@ -278,20 +286,62 @@ def _capture_call2_prompts(monkeypatch, facts):
     return rec.calls
 
 
-def test_call2_prompt_is_byte_identical_with_dec_entries(monkeypatch):
-    """THE constraint this whole feature was built under: LLM call 2 must not
-    change. Same facts, with and without the entries key - every prompt built
-    must be byte-for-byte identical."""
-    base_facts = {"applicant_name": "Orbin Contracting LLC",
-                  "total_policy_premium": {"value": "$10,663"}}
-    with_entries = dict(base_facts)
-    with_entries["dec_page_entries"] = [
-        _entry("FEIN OR SOC SEC #", "84-1234567"),
-        _entry("Total Policy Premium", "$10,663", owner="policy"),
-    ]
-    a = _capture_call2_prompts(monkeypatch, base_facts)
-    b = _capture_call2_prompts(monkeypatch, with_entries)
+_BASE_FACTS = {"applicant_name": "Orbin Contracting LLC",
+               "total_policy_premium": {"value": "$10,663"}}
+_WITH_ENTRIES = dict(_BASE_FACTS, dec_page_entries=[
+    _entry("FEIN OR SOC SEC #", "84-1234567"),
+    _entry("Total Policy Premium", "$10,663", owner="policy"),
+])
+
+
+def test_call2_prompt_is_byte_identical_when_the_index_is_off(monkeypatch):
+    """SUPERSEDED CONSTRAINT, KEPT AS THE KILL SWITCH'S PROOF.
+
+    Until 2026-08-13 this asserted unconditionally: the entries existed but LLM
+    call 2 was frozen, so its prompt had to be byte-identical with and without
+    them. The owner lifted that freeze deliberately - the entries are now the
+    Stage A declarations index (CALL2_RETRIEVAL_REDESIGN D11).
+
+    What survives is the guarantee that `GAP_FILL_DEC_INDEX=0` really does
+    restore the old pipeline exactly, rather than approximately. A kill switch
+    nobody proves is a kill switch nobody can trust in an incident.
+    """
+    monkeypatch.setattr(ps, "_DEC_INDEX_ENABLED", False)
+    a = _capture_call2_prompts(monkeypatch, _BASE_FACTS)
+    b = _capture_call2_prompts(monkeypatch, _WITH_ENTRIES)
     assert a and a == b
+
+
+def test_dec_entries_never_enter_the_facts_block(monkeypatch):
+    """The facts block stays clean whether the index is on or off.
+
+    `_GAP_FILL_FACTS_EXCLUDE` is NOT vestigial after the unfreezing. The facts
+    block is labelled "unverified hints"; the entries are verbatim document
+    content. Dumping them there would mislabel them AND inflate the cached
+    prefix by ~80k chars on every call in the run.
+    """
+    for enabled in (True, False):
+        monkeypatch.setattr(ps, "_DEC_INDEX_ENABLED", enabled)
+        for _sys, user in _capture_call2_prompts(monkeypatch, _WITH_ENTRIES):
+            facts_block = user.split("=== EXTRACTED FACTS")[-1].split(
+                "=== END EXTRACTED FACTS ===")[0]
+            assert "dec_page_entries" not in facts_block
+
+
+def test_the_index_reaches_call_2_as_its_own_section(monkeypatch):
+    """The other half of the unfreezing: with entries present, a Stage A call
+    carries the index INSTEAD of the raw document."""
+    monkeypatch.setattr(ps, "_DEC_INDEX_ENABLED", True)
+    calls = _capture_call2_prompts(monkeypatch, _WITH_ENTRIES)
+    indexed = [u for _s, u in calls if "=== DECLARATIONS INDEX" in u]
+    assert indexed, "no Stage A call carried the declarations index"
+    for user in indexed:
+        # Stage A replaces the document, never accompanies it - carrying both
+        # would cost more than the behaviour it replaced.
+        assert "=== RAW DOCUMENT TEXT" not in user
+        assert "Total Policy Premium: $10,663" in user
+    # And the raw walk still happens for whatever the index did not answer.
+    assert any("=== RAW DOCUMENT TEXT" in u for _s, u in calls)
 
 
 def test_every_unfilled_field_still_reaches_call_2(monkeypatch):
