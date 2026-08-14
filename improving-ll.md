@@ -485,6 +485,389 @@ orphaned phone that rode along with the fabricated name. Tests:
 pre-existing, zero regressions. Prompt inspector PASS — no LLM call added, removed or
 reprompted.
 
+### C74 — the evidence-layer audit: 8 findings, all 8 reproduced, 4 closed at the mechanism (2026-08-14), **+1 LLM stage** (the evidence judge), fail-safe by construction
+
+**An external audit of the Yes/No evidence layer was checked claim by claim rather than
+accepted. All eight reproduced.** Two had inflated numbers (197 of 312 compliance questions
+lack an explanation slot, 63% - not 369 of 515/71%); one was WORSE than reported (see #1);
+and its central thesis is correct: sixteen stacked regexes were approximating a semantic
+judgment, which is why every recent fix relocated the failure instead of closing it.
+
+**1. ANSWER AND EVIDENCE WERE DECIDED BY DIFFERENT RULES - and it is live on the client's
+package, contrary to my own note.** `candidate_counts` picks the value by MAJORITY VOTE
+across chunks; `all_question_grounding` was LAST-WRITE-WINS. I had been asserting this
+document never splits; `_GAP_FILL_DOC_CHARS_PER_CALL` is 112,000 and the package is 683,601
+chars, so the raw walk runs **7 chunks with rescan auto-on** - a "Yes" can win the vote and
+inherit the citation from the chunk that answered "No", and that citation is what the gate
+judges and what the Explanation box PRINTS (the raw-quote overwrite at the KEPT_YES site is
+finding #2, and this is its worst source). Fixed with `grounding_by_value[field][value]`
+threaded through `_absorb` / both batch runners / `_merge` / the compliance absorber, and
+the winner collects its own citation at selection time (`EVIDENCE_REBOUND` log). The
+outward contract `question_grounding: {field: quote}` is byte-identical, so no consumer
+changed. Pure plumbing, no model involvement.
+
+**2. THE "No" TEST WAS INVERTED IN BOTH DIRECTIONS.** `_NEGATION_CUE_RE` contained bare
+`no|free|clear|clean`: **4 of 4** dec-page identifier lines were admitted as proof of a
+"No" (`Policy No. BBC7263`, `FEIN No. 84-2210987`, `toll free`, `free-standing`), while
+**3 of 3** genuine implied denials were rejected ("All vehicles are owned by the
+applicant"). The code already knew "no" abbreviates NUMBER - `_COVERAGE_DENIAL_RE`'s
+comment says so and keeps the broad cue off the Yes side - it was never applied here.
+`_strip_number_abbreviations` now removes it on two positive-evidence shapes only
+("No."/"No:" + a digit-bearing token, or a preceded identifier label), so an ALL-CAPS
+"THE APPLICANT HAS NO PRIOR CANCELLATIONS" is untouched. **My first cut used `re.I` on a
+`[A-Z0-9]` lookahead - which makes it match lowercase - and blanked exactly that sentence;
+the suite caught it in one run.** Over-firing on affirmative quotes fell 7/10 -> 3/10 and
+`test_yes_polarity_gate`'s measurement was updated to the new number rather than deleted.
+
+**3. THE 12-CHAR GROUNDING FLOOR SAT ABOVE REAL EVIDENCE.** "Direct Bill" normalizes to 10
+characters, so the phrase this package prints on all four section dec pages **could never
+ground anything, ever** - which is how the box shipped "No" against four printed DIRECT
+BILLs before C70's fact backfill worked around it. Lowered to 6: still no fragments, no
+longer excluding short printed VALUES, which is what a dec page states.
+
+**4. STAGE A CITED THE INDEX IT WAS HANDED.** `_render_dec_index` builds `"Label: value
+[owner]"` lines that exist in OUR prompt, not verbatim in the document, and the gate then
+verified quotes against the raw document only - so a model that correctly cited what it was
+given was blanked, with **no second chance** (Stage A removes answered fields from Stage B).
+`_evidence_hay` now includes the rendered index. **This is not a relaxation:** every entry
+already passed `_verify_dec_entries`' literal-presence check, so it admits nothing the
+document does not print - only in the shape the model was shown.
+
+**5. THE SEMANTIC JUDGE (`_judge_evidence_batch`) - the one thing regex cannot do.** One
+batched call per form: *does this quote support this answer to this question?* It reviews
+BOTH directions - rejecting a kept answer whose evidence does not support it, and rescuing a
+"No" blanked only because a genuine implied denial carried no negation word. **Three safety
+properties:** silence is never a verdict (an id the judge does not return keeps its
+deterministic decision, so no API key / a 429 / a malformed reply / every offline test is a
+strict no-op - which is why 2,647 tests pass unchanged); only fields that already have an
+answer AND a quote are queued, capped at `EVIDENCE_JUDGE_MAX_FIELDS` (400) and batched 20;
+and it reads **no document text**, so the calls are small. Cost: ~5-15 calls per package at
+~1-2k input tokens each, roughly **+$0.01-0.02 per package** - the first deliberate cost
+increase in this file, bought against the defect class that has consumed four runs. Kill
+switch `EVIDENCE_JUDGE=0`. **The gap-fill and compliance prompts are untouched; inspector
+PASS, prefix stable.**
+
+**6. COVERAGE-EXISTENCE BOXES WERE UNEVIDENCEABLE BY CONSTRUCTION.** For "is Commercial
+Auto on this policy?" the only possible proof is a printed dec line - and dec lines are
+rejected as Yes evidence for every field. Narrow exemption by field NAME
+(`Policy_LineOfBusiness_*`) so every EXPOSURE question keeps the full artifact rule; the
+mention-versus-grant distinction is intact, and `_COVERAGE_DENIAL_RE` still stops
+"Property - No Coverage" ticking Property.
+
+**Reported, deliberately NOT changed:** the reuse-cap clustering iterates a `set` (real
+nondeterminism, but the cap is now generous at 12 and the judge is the real arbiter);
+and the 1,384-field routing split between the general prompt and the compliance gate -
+rule 8 of `_PROMPT_SKELETON` already asks every checkbox for grounding, and the judge is
+uniform across both, so re-routing 1,384 fields is blast radius without a measured gain.
+Both stay on the open list rather than being half-fixed.
+
+Tests: `tests/test_evidence_binding_and_judge.py` (27). Suite **2647 passed / 2 failed** -
+the same two pre-existing unrelated failures, zero regressions.
+
+### C73 — run 4 of 2026-08-14: every C72 fix verified on paper; the last standing defect (nameplate-as-evidence) closed via the index, NO LLM change
+
+**Verified working on run 4's PDF:** clean page-1 address split (line1/city separated, the
+_parse_address fix), PAYMENT PLAN empty (the resolver), genuine GL classifications in the
+operations box (the coverage-meta demotion), one premises row, empty Additional Interest,
+Direct Bill + method intact, and only the genuinely-true expired-term warning. Index: 278
+raw twice in a row, content matching the ground-truth fixture including sub-limit captions.
+
+**The one defect run 4 shipped: Q3 (flammables) = Y and Q6 (abuse/molestation claims) = Y,
+both "explained" by "BUSINESS DESC: COMMERCIAL GENERAL CONTRA".** Root cause traced in the
+session's own data, and it is a two-layer story: (1) the Yes rode the EXPLANATION path (a
+Yes survives on a paired explanation, so the quote checks and the Yes-reuse cap never
+decide alone); (2) the explanation artifact check's colon escape already knew this literal
+string - `_is_labelled_fact_echo` tests FACT equality, and this run's `contractor_type`
+merged to the EXPANDED "Commercial General Contractor" instead of the truncated header.
+Fact jitter blinded a fact-keyed guard.
+
+**Fix: `_is_applicant_attribute_echo`, keyed on the INDEX as well as the facts.** An entry
+the extraction attributed to the APPLICANT (name, address, entity, business description) is
+an identity attribute - who the applicant IS can never evidence that an event HAPPENED.
+Equality-only with an 8-char floor, so "INSURED IS: LLC" stays pinned-legitimate short
+evidence; wired into `_is_coverage_artifact_text` and its colon escape, which the quote
+check AND the explanation pre-blank both consult. Replayed on run 4's live session: both
+the full string and the bare tail now register as artifacts, and the end-to-end test drives
+the literal two-question shape through the real gate to blank on both. No topic matching -
+identity of the text against the applicant's own recorded attributes, nothing else.
+
+### C72 — run 3 of 2026-08-14: locations/interest/payroll-warning fixes verified WORKING; the three remaining defects closed at rule level (one extraction-schema key added)
+
+**Verified working on run 3:** ONE premises row, correctly decomposed (the C71 deadlock fix);
+the Additional Interest block EMPTY (the index-owner borrow pool); the GL payroll warning
+stood down (correctly - the document states a payroll basis, so only the genuinely-true
+expired-term stop remains); index labels carrying real captions (the C71 caption rule -
+'Deductible'/'Coinsurance'/'Catastrophe Limit' instead of a row id repeated).
+
+**1. DESCRIPTION OF PRIMARY OPERATIONS held the POLICY's own coverage summary** ("...
+equipment coverage and installation floater coverage are described, including coverage
+for ...") - run-to-run jitter let the coverage-meta candidate out-score the genuine GL
+classification text this run. Fix: `_COVERAGE_META_RE` demotion in the narrative merge,
+the same demote-never-discard shape as the C45 fragment rule one block above it: a
+candidate whose grammatical subject is the coverage/policy itself may not win a narrative
+fact while a genuine candidate exists, and with no rival it still stamps (never blanks).
+
+**2. The page-1 mailing street box printed "4800 Dahlia St # D13 Denver CO 80216-3121"
+with the city/zip boxes ALSO filled.** Dec pages print addresses as one comma-free run and
+`_parse_address` split only on commas - the fused line1 fed every `_addr_*`/`_loc_*`
+component and the producer resolver alike. Fix at the parser, structure-anchored, never
+guessed: a trailing "ST 12345" is extracted only when the 2-letter token and the ZIP
+corroborate each other via `_state_from_zip` ("AVE NW 20500" stays put - NW is not what
+20500 implies), and the city is split out only when a UNIT designator anchors the street's
+end ("# D13 DENVER", "STE 400 ENGLEWOOD"); no unit anchor, no attempt. Fixes named
+insured, producer, cert holder, additional interest and location components in one place.
+
+**3. PAYMENT PLAN = "AN" on every run - closed for good.** The code is invented from
+"Audit Period: Annual" (the GL's AUDIT term); a CODE abbreviates a printed word, so no
+verbatim gate can ever see the invention. `_resolve_payment_schedule` joins the
+authoritative-blank family (same shape as the deposit and fax boxes): stamps from the new
+`payment_plan` extraction key when a document genuinely prints one, otherwise the box
+stays EMPTY for the producer. **One extraction-schema key added** (`payment_plan`, beside
+`billing_plan`) - constant per run, prefix intact, inspector PASS.
+
+**Answered, no change needed:** run 3's single warning is CORRECT - the payroll warning
+was the false alarm (C71 fix working), the expired-term stop is true. Entry-count jitter
+(278 vs 221 vs 353 raw) is 13 independent calls at nonzero temperature; the systematic
+half was the C71 label collapse, now fixed - judge the index by which VALUES it carries,
+not the count. Tests: `tests/test_run_20260814c_fixes.py` (12) + the resolver registered
+in `test_authoritative_blank_contract`.
+
+### C71 — run 2 of 2026-08-14: three C70 fixes verified WORKING, two defects returned through OTHER doors, both closed at the root; one index-prompt regression owned and fixed
+
+**Verified working on the fresh run:** Direct Bill ticked + METHOD OF PAYMENT = "DIRECT BILL"
+(the C70 billing backfill firing live), the invented 100% installation split GONE
+(quote-gated percentage guard), heading verbatim-copying (the letter-spaced
+"D R I V E O T H E R C A R" heading survived verification), and the split GL table cells
+recorded ('Prem Basis'='Payroll', 'Exposure'='$39,300', class codes with classifications).
+
+**1. The tripled premises returned through Pass 1 - a THREE-VARIANT DEADLOCK in the C48
+consolidator, found by replaying the live session's own facts.** The fold loop's "exactly one
+host" ambiguity rule deadlocks when one premises prints in 3+ chained shapes ('...st d13' /
+'...st d13 denver' / '...st d13 denver co 80216'): every key sees TWO hosts, nothing folds,
+three rows stamp. Fixed: multiple hosts fold when they are pairwise the SAME premises
+(mutually fold-related), into the longest. Fixing that exposed a PRE-EXISTING reverse hole
+the new test caught immediately: when the more-specific shape found the bare fragment as its
+single host, it absorbed a fragment that a DIFFERENT premises ('...d13 boulder') could claim
+equally - so the fold now also requires no un-related third claimant on the pair's shorter
+member. Replayed on the live session's verbatim facts: 3 rows -> **1 row, correctly
+decomposed** (street / DENVER / CO / zip each in its own box). The stamp-time dedupe guard is
+now SOURCE-AGNOSTIC as belt (its gpt-only first cut is what let Pass 1 walk through - and
+"corrects values from any source" was the guards' charter all along).
+
+**2. The fabricated Additional Interest returned wearing different clothes** - FullName =
+"Persons Or Organizations With Whom You Have Agreed In A Written Contract Or Agreement"
+(endorsement wording), the applicant's city/zip (allowed by design), and the SERVICING
+CARRIER's phone - a number no ACORD 125 field stamps, so C70's form-side borrow pool was
+blind to it. Fix: the borrow pool now also holds every verified dec-entry VALUE owned by
+producer/carrier (the index records "SERVICING CARRIER: (720)200-3700" with its owner), and
+that alone kills both live fabrications. **A name-witness rule ("the FullName must appear in
+the index") was tried and REMOVED the same day**: the suite caught it blanking 'Meridian
+Fleet Leasing, LLC' - the 2026-08-13 contract protects a third party named in document
+PROSE, which is exactly what the index never records. A name-only fabrication with zero
+borrowed details stays the accepted residual rather than a reason to blank named parties.
+
+**3. "GL coverage detected but no revenue or payroll found" was firing against a printed
+payroll basis.** The 2026-08-12 backfill ('PAYROLL'='$39,300' -> total_payroll) went blind
+when C70's per-cell rule split the pair into 'Prem Basis'='Payroll' + 'Exposure'='$39,300'.
+`_dec_entries_state_payroll` now answers the warning's own question from the verified index -
+a payroll-labelled entry with a figure, or a basis entry whose value IS "payroll" - and the
+warning stands down. Presence check only; no fact, no form field written.
+
+**4. Owned regression: the per-cell index rule collapsed the IM schedule 80 -> 26 entries.**
+The model labelled a dozen sub-limits 'CONTRACTORS EQUIPMENT 801' each; identical
+(label,value,section) triples deduped away and distinct sub-coverages became
+indistinguishable. Rule 5 now requires the label to carry the printed CAPTION (column
+heading / coverage name), never a shared row id alone - 'CATASTROPHE LIMIT' and 'JOBSITE
+LIMIT' are two labels - and names the basis-word case ('Payroll $39,300' = label+value, not
+two entries). Run-to-run entry-count jitter (13 independent calls at nonzero temperature)
+accounts for the rest of 344 -> 195; the prompt fix targets the systematic half.
+
+**Reported, deliberately NOT keyword-patched:** Q3 flammables answered "Y" on the ISO
+pollutant definition ("fumes, smoke, soot, vapor, and waste") and two borrowed "N"s (Q9/Q11).
+That is the documented borrowed-quote residual of the evidence gate - detecting it needs
+quote-topic matching, which three prior sessions proved causes worse regressions. Also
+still open: PAYMENT PLAN "AN" (C70's known residual).
+
+### C70 — four wrong-value clusters from the verified ORBIN run, closed at rule level (2026-08-14, second batch), one gap-fill prompt clause + one index-prompt clause, all guards deterministic
+
+**The run behind this was VERIFIED against the ground-truth fixture, not eyeballed** (session
+f26d8685; form values read back from `generated_forms`, the index from the per-doc copies).
+Four defect clusters shipped to the PDF; each is now closed by a RULE with the live values
+pinned in `tests/test_run_20260814b_form_fixes.py` (20 tests):
+
+**1. A fabricated Additional Interest, half-killed and half-shipped.** FullName "Blanket
+Additional Insureds" (a GL endorsement TITLE), city/zip/phone the PRODUCER's, email the
+carrier's claims address, account number the GL policy number. Existing guards blanked 22 of
+the row's fields and left these six. Fix: `_drop_fabricated_interest_rows` - an interest row
+dies WHOLE when it has no FullName or when ANY identifying detail (line1/line2/city/zip/
+phone/email, suffix-matched) is byte-equal normalized to a value stamped for the producer or
+carrier. Sharing the APPLICANT's address is deliberately NOT a signal (a landlord at the
+insured premises is legitimate). Only model-authored fields are touchable. No topics, no
+keywords - value-equality against the other parties' own stamped fields.
+
+**2. Direct Bill stamped "No" against four printed DIRECT BILLs.** `billing_plan` merged
+empty because the phrase only prints FUSED into label runs ("DIRECT BILL AGENT PHONE: ...")
+- the model never returned the fact, and the entry-backfill's label-match condition correctly
+refused the fused entries. The empty fact fell to gap fill, which answered "No" from nothing.
+Fix: `_backfill_billing_plan` in merge_facts - ACORD's billing method is a TWO-VALUE closed
+vocabulary (direct/agency bill), the one raw-text scan shape this codebase allows itself
+(same argument as `_LOB_NAMES`; word-bounded so "direct billing disputes" prose cannot
+match). Fills only an EMPTY fact, only when exactly ONE method is printed. Plus
+`Policy_PaymentMethod_MethodDescription -> billing_plan` in `_ACORD_FIELD_RULES`, so Pass 1
+owns the METHOD OF PAYMENT box - the run had stamped the umbrella's audit note there.
+
+**3. The percentage guard was document-wide and a live run defeated it.** The invented
+INSTALLATION 100% survived because *some* unrelated page prints a "100%"; its invented 0%
+sibling died only because the package happens never to print one. Anywhere-in-271-pages is
+not evidence about a box. Fix: quote-gated, the same shape as the Yes/No evidence gate -
+NEW rule 8d asks for a `question_grounding` quote on every percentage field, and
+`_drop_unstated_percentages` now requires (a) the quote exists, (b) it is verbatim in the
+document, (c) it contains this number AS a percentage. No topic matching - presence checks
+only, per the standing evidence-gate design. **This is the one gap-fill PROMPT change**
+(~90 words in `_PROMPT_SKELETON`, constant per run - the cached prefix stays one variant;
+inspector re-run PASS). Fact-supplied percentages are untouched.
+
+**4. One premises stamped as three location rows** ("4800 Dahlia St # D13 Denver" / a
+street-less "Denver 80216-3121" fragment / "4800 Dahlia St D13 Denver"), one an orphan
+whose street an earlier guard had blanked while leaving its city/zip. The C48 consolidator
+folds these in FACTS; these rows were authored by gap fill, which bypasses it. Fix:
+`_dedupe_stamped_premises_rows` - same folding rules at stamp time (normalized street
+equality/prefix with zip agreement; street-less fragments fold on zip match), and a folded
+row dies WHOLE including its description. **Scoped by NAME to
+`CommercialStructure_PhysicalAddress`, deliberately not generic: the obvious generalization
+is exactly C18** (three trucks garaged in one city legitimately print identical
+Vehicle_PhysicalAddress rows), pinned by `test_garaging_rows_are_never_touched_c18_safety`.
+
+**Also: the index prompt** now names the numeric table columns (rate, factor, exposure,
+cost new, per-row premium - the run's remaining index misses) and forbids paraphrased
+section headings (the model's own "COMMERCIAL UMBRELLA DECLARATIONS" rewording cost 17
+entries their C23 attribution).
+
+**Known, deliberately left:** `Policy_Payment_PaymentScheduleCode` "AN" (likely borrowed
+from the GL's "Audit Period: Annual") has no clean deterministic rule yet - a code is an
+abbreviation of a printed word, so verbatim checks cannot see it. Logged, not guessed at.
+
+### C69 — the index must be COMPLETE: the cap, the gate, and the fusion, all three recall leaks closed (2026-08-14), prompt edit + routing change, cost = up to (dec-dense chunks − 8) extra index calls on pathological spreads
+
+**The owner's requirement, verbatim: "i want full coverage" — the index is Stage A's whole
+world, so anything it silently lacks is a value Stage A cannot stamp.** The 259-entry live
+run (session 5d4e0cdd, vs ~750 printed entries on the ORBIN package) had ONE dominant cause —
+the wrapper bug already fixed under C68, the run predated the fix — but tracing it surfaced
+three GENUINE recall leaks that would have survived the restart. All three closed:
+
+**1. `_DEC_INDEX_MAX_CHUNKS` defaulted to 8 and trimmed silently.** A package whose
+declarations spread across more than 8 chunks lost the dedicated pass on the excess — no log
+line, no way to know. Now **0 = uncapped by default**: every chunk clearing
+`_DEC_INDEX_MIN_AUTHORITY` (0.25) is indexed. The authority gate IS the cost boundary (0.75
+measured on a real dec page vs 0.00 on wording), and an upload is already bounded by
+`MAX_UPLOAD_SIZE_MB`. Worst case on ORBIN: 14 index calls instead of 8 if every chunk were
+dec-dense — it is not; the real package routes a handful. An env cap >0 remains as an
+emergency valve and now **WARNS with exactly what it trimmed**.
+
+**2. The verbatim gate was deleting real TABLE rows.** Live drops, logged: the ENTIRE GL
+class table (`'Location 001' = '91580 Contractors - Executive Supervisors...'`) and every
+`'Section N <part>' = 'No Coverage'` summary line — DROPPED_UNVERIFIED. Not fabrications: the
+model joined two printed CELLS, OCR interleaves the neighbouring columns between them, so the
+joined string is contiguous nowhere. Fix is `_entry_is_printed`: verbatim, OR ordered
+containment within `_SECTION_TOKEN_GAP` (80 chars) per adjacent token — the SAME relaxation
+`_section_is_printed` shipped 2026-08-13, via one shared engine (`_tokens_printed_in_order`)
+so the two can never drift. **Numbers get no latitude**: digit tokens are always required,
+and a text whose significant tokens are ALL digits never takes the relaxed path — a
+reformatted `1000000`, a date rewritten `07/16/25 → 07/16/2025`, a re-grouped phone all stay
+DROPPED, because a number failing the verbatim test is the exact fabrication the gate exists
+to stop. Deterministic, zero LLM cost.
+
+**3. The fusion is now also forbidden at the SOURCE.** Both recording prompts (the dedicated
+pass rule 5, and the main-schema `dec_page_entries` instruction) now say: one entry PER
+printed cell, label = column heading + row identifier, NEVER concatenate two cells. ~50 words
+on each; the dedicated prompt is per-run constant, and the main-schema edit shifts the cached
+prefix once (same class of edit as every schema change — constant within a run, cache
+unaffected where it matters).
+
+**Also: `_DEC_ENTRY_MAX` truncation can no longer be silent** — hitting the 1200 cap with
+candidates still unprocessed logs a WARNING naming the loss (raise `DEC_ENTRY_MAX` and
+`GAP_FILL_DEC_INDEX_BUDGET_MULT` together — see `_dec_index_chunks` for why they are coupled).
+
+**Explicitly NOT changed:** Stage A→B in `pdf_service` (already correct: index first, every
+field the index cannot answer walks the FULL raw document — pinned by the I2 invariant), the
+facts/flags schema (byte-identical), `_verify_dec_entries`'s dedup and owner logic, and
+`_section_is_printed`'s own semantics. Tests: +9 in `test_dec_index_dedicated_pass.py`
+(fused row survives, two-column No Coverage survives, reformatted amount/date still dropped,
+scattered words still dropped, uncapped default, env valve, prompt pins).
+
+### C68 — a DEDICATED declarations-index call, two root causes, and the one stop nothing was making (2026-08-14), **+1 LLM stage**, cost bounded by routing
+
+**THE INDEX CALL — the only LLM change in this arc, and the first one in a week.**
+`dec_page_entries` was one key among ~170 in the main extraction schema, and the model budgets
+its answer across all of them: ~19 entries per chunk against a 150 allowance and a
+16,000-token output cap, **neither binding**. 250 entries recorded from ~30 declarations pages
+carrying an estimated ~750. That index is what Stage A of LLM call 2 reads first, so a thin
+index is a direct loss of fill quality - and it is the mechanism behind a defect that returned
+five times ("Limited Pollution Coverage - Work Sites $150"): a guard keyed off the index is
+blind to whatever the index never recorded.
+
+Attention is the constraint, so the fix is **separation, not a bigger cap or a louder
+instruction**. `_harvest_dec_index` runs one prompt with one job - enumerate every label:value
+printed here - with no facts, no flags, no coverage judgments.
+
+**Cost is bounded by ROUTING rather than by trimming the ask.** Only chunks whose
+`declarations_authority` clears `_DEC_INDEX_MIN_AUTHORITY` (0.25) are sent - the same scorer
+the retrieval filter already trusts, measured at **0.75 on a real dec page against 0.00 on
+policy wording**. `_DEC_INDEX_MAX_CHUNKS` (8) caps a pathological package — **superseded by
+C69 the same day: uncapped by default, the cap is now an opt-in env valve that warns when it
+trims**. A package of pure wording costs **zero extra calls**, which is pinned by test.
+
+**Nothing else moved.** The main extraction prompt is byte-identical, so LLM call 1's cached
+prefix survives; entries are merged ADDITIVELY (`_verify_dec_entries` dedupes on
+label+value+section, so an entry both passes found costs nothing and one only the main pass
+saw is never lost); every entry still faces the unchanged verbatim gate, so this buys RECALL,
+never trust. Inspector re-run: **PASS, prefix stable, gap fill $0.0650 unchanged.** Kill
+switch `DEC_INDEX_DEDICATED_PASS=0`.
+
+**TWO ROOT CAUSES, stated once by RULE instead of once per box** - the owner's explicit ask
+("we cannot pinpoint things for all the forms"):
+
+1. **A PERCENTAGE needs a source.** Live ACORD 125: "INSTALLATION 100%" and "OFF PREMISES
+   100%", neither supported by anything in 271 pages; earlier runs produced "RETAIL 100%" and
+   "% owned 50%". Measured first: ACORD declares "Enter percentage:" on **74 fields across 8
+   forms** and **zero are fillable from any fact**, so every percentage we print was blank or
+   a guess. The FIRST CUT was an authoritative blank and the suite rejected it correctly -
+   `test_a_percentage_the_document_states_survives` plants a "15%" the document really does
+   state, and closing the box threw it away. The measurement was right about FACTS and forgot
+   the other legitimate source. Shipped as a guard instead: a percentage stamps from a fact
+   (Pass 1, untouched) or when the document prints that number **as a percentage**. "100" as a
+   radius of use is not evidence that 100% of work is off premises.
+2. **A ROW about a party who is not on the form.** "DESCRIPTION OF OPERATIONS OF OTHER NAMED
+   INSUREDS" held "COMMERCIAL GENERAL CONTRA" on a package with ONE insured. ACORD's own
+   tooltip says what row B is - *"As used here, this is the description of operations for
+   other named insureds"* - so the anchor is `NamedInsured_FullName_B`, a DIFFERENT field
+   family, which is why the existing same-family unanchored-row sweep could not see it. Also a
+   guard rather than a resolver, because the anchor is the STAMPED name: the first cut checked
+   a fact and blanked a genuinely different row-B narrative whose second insured arrived by
+   another route.
+
+**THE ONE GENUINELY MISSING STOP.** Asked honestly what a dec-page package can be checked for
+that nothing checks. Every date rule looks at the EFFECTIVE date - format, two years past, two
+years future - and `validate_date_range` only asks whether effective precedes expiration.
+**Nothing compared the EXPIRATION date to today.** So the client's own package, term
+07/15/2025-07/15/2026, sailed through on 2026-08-14 with both dates printed under "PROPOSED
+EFF/EXP DATE". `validate_policy_term_not_expired` is deliberately HARD: an expired term is not
+a quality problem an underwriter can weigh, it is an application for a period that does not
+exist. 30-day grace, so a renewal prepared at expiry is a warning.
+
+Two things that had to be fixed alongside it, both anti-rot doing its job: the message needed
+a `_LEGACY_MESSAGE_RULES` row (an unclassified legacy message reaches the user with no cluster
+and no Resolve action), and the append had to be written as plain `hard.append` /
+`soft.append` because `test_legacy_rules.py` harvests this function by walking its AST and a
+`(hard if x else soft).append(...)` is invisible to it.
+
+Also corrected: `test_the_kill_switch_exists_and_defaults_on` asserted the RUNTIME value of
+the dec-index purge, so it failed the moment anyone set `PURGE_DEC_INDEX_AFTER_GENERATION=0` -
+which is the documented way to inspect the index on a live run. It now tests the default.
+
+Tests: `backend/tests/test_dec_index_dedicated_pass.py` (19). Suite **2563 passed / 2 failed**
+- the same two pre-existing, zero regressions.
+
 ### C67 — the ACORD 125 scored clean, and the one blank box exposed a three-way Pass-1 split (2026-08-14), NO LLM change, cost ZERO
 
 **C66 confirmed on the live form.** NAIC blank on both accounts, STATUS OF TRANSACTION blank,

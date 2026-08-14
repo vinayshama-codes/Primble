@@ -193,10 +193,20 @@ def test_a_percentage_absent_from_the_document_is_blanked():
 
 
 def test_a_percentage_the_document_states_survives():
-    planted = {"CommercialStructure_InstallationRepairWorkPercent_A": "15%"}
-    raw = "Installation, service or repair work: 15% of operations."
-    mapped = _map_125({}, planted, raw)
-    assert mapped.get("CommercialStructure_InstallationRepairWorkPercent_A") == "15%"
+    """CONTRACT UPDATED 2026-08-14 (second batch): the percentage guard is
+    quote-gated now - rule 8d asks for a grounding quote and a stated
+    percentage survives WITH its citation. The document-wide check this test
+    originally pinned was defeated live: an unrelated page's '100%' saved an
+    invented installation split. See test_run_20260814b_form_fixes.py."""
+    from services.pdf_service import map_facts_to_form
+    f = "CommercialStructure_InstallationRepairWorkPercent_A"
+    quote = "Installation, service or repair work: 15% of operations."
+    mapped, _c = map_facts_to_form(
+        {}, _schema_125(), form_id="ACORD_125", raw_text=quote,
+        pre_filled_gpt={"filled_values": {f: "15%"}, "raw_text_fields": set(),
+                        "question_grounding": {f: quote}},
+    )
+    assert mapped.get(f) == "15%"
 
 
 # ── P2 / P3 ──────────────────────────────────────────────────────────────────

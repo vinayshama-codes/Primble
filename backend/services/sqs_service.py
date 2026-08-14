@@ -560,6 +560,52 @@ def validate_effective_date_window(facts: dict) -> tuple | None:
     return None
 
 
+def validate_policy_term_not_expired(facts: dict) -> tuple | None:
+    """The proposed term has already ended.
+
+    THE ONE GENUINELY MISSING STOP, found 2026-08-14 by asking honestly what a
+    dec-page package can be checked for that nothing checks. Every other date
+    rule looks at the EFFECTIVE date - format, more than two years past, more
+    than two years future - and `validate_date_range` only asks whether
+    effective precedes expiration. Nothing looks at the EXPIRATION date against
+    today.
+
+    So a package whose term is 07/15/2025-07/15/2026 sails through on 2026-08-14
+    and prints both dates in boxes ACORD labels PROPOSED EFF DATE and PROPOSED
+    EXP DATE. An application proposing a period that ended last month cannot be
+    submitted, and no amount of correct field-filling makes it submittable -
+    which is what a hard stop is for.
+
+    Deliberately HARD, unlike every other date rule here: an expired term is not
+    a quality problem the underwriter can weigh, it is an application for a period
+    that does not exist. A 30-day grace is allowed so a renewal being prepared
+    right at expiry is a warning rather than a block.
+    """
+    from datetime import datetime, timedelta
+    from services.normalization import normalize_date
+    exp = _fv(facts, "expiration_date")
+    if not exp:
+        return None
+    iso = normalize_date(exp)
+    if iso is None:
+        return None                      # format is validate_date_format's job
+    try:
+        d = datetime.strptime(iso, "%Y-%m-%d")
+    except ValueError:
+        return None
+    now = datetime.now()
+    if d < now - timedelta(days=30):
+        return ("hard", (
+            f"Policy term already expired ({exp}) - the application proposes a "
+            "period that ended. Fix: Update the proposed effective and "
+            "expiration dates to the term being applied for."))
+    if d < now:
+        return ("soft", (
+            f"Policy term expires within the last 30 days ({exp}) - confirm "
+            "the proposed dates are the renewal term, not the expiring one."))
+    return None
+
+
 _VALID_NAICS_PREFIXES = {
     "11","21","22","23","31","32","33","42","44","45",
     "48","49","51","52","53","54","55","56","61","62",
@@ -594,6 +640,33 @@ def _dates_differ(a: Any, b: Any) -> bool:
     return str(a).strip() != str(b).strip()
 
 
+def _dec_entries_state_payroll(facts: dict) -> bool:
+    """The verified dec index states a payroll exposure, whatever its shape.
+
+    WHY (live 2026-08-14): the GL schedule prints "Prem Basis: Payroll /
+    Exposure: $39,300", and "GL coverage detected but no revenue or payroll
+    found" fired anyway - the payroll FACT merges empty because no single
+    label:value pair carries both the word and the figure once the index
+    records table cells individually. The warning's own question is "did the
+    document state a GL exposure basis?", and the verified index answers it
+    deterministically (see extraction_service._entries_state_payroll for the
+    two recognised shapes).
+
+    PURGE-SAFE: `dec_states_payroll_basis` is derived by merge_facts while the
+    entries still exist and survives the C57 purge, so a post-generation
+    recalc reaches the same answer as the pre-generation one - the live
+    entries check is the fallback for sessions predating the derived fact.
+    Presence check only - nothing is written to any fact or any form.
+    """
+    if (facts or {}).get("dec_states_payroll_basis"):
+        return True
+    try:
+        from services.extraction_service import _entries_state_payroll
+    except Exception:                                      # noqa: BLE001
+        return False
+    return _entries_state_payroll((facts or {}).get("dec_page_entries"))
+
+
 def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     """
     Evaluate hard and soft stops from facts/flags.
@@ -609,6 +682,17 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     if naics_issue:
         soft.append(naics_issue[1])
 
+    # Plain `hard.append` / `soft.append`, NOT a conditional-expression append:
+    # tests/test_legacy_rules.py harvests this function's append sites by
+    # walking its AST, and a `(hard if x else soft).append(...)` is invisible to
+    # it - the message would then reach users with no cluster and no code, which
+    # is exactly what that harness exists to prevent.
+    term_issue = validate_policy_term_not_expired(facts)
+    if term_issue and term_issue[0] == "hard":
+        hard.append(term_issue[1])
+    elif term_issue:
+        soft.append(term_issue[1])
+
     # ── Prior carrier adverse action ──────────────────────────────────────────
     if flags.get("prior_carrier_adverse_action") and not _narrative_remarks_text(facts):
         soft.append(
@@ -619,7 +703,9 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     # ── GL ────────────────────────────────────────────────────────────────────
     if flags.get("gl_is_claims_made") and not _fv(facts, "retro_date"):
         soft.append("GL policy is claims-made - retro date is required")
-    if flags.get("has_general_liability") and not _fv(facts, "total_revenue") and not _fv(facts, "total_payroll"):
+    if (flags.get("has_general_liability") and not _fv(facts, "total_revenue")
+            and not _fv(facts, "total_payroll")
+            and not _dec_entries_state_payroll(facts)):
         soft.append("GL coverage detected but no revenue or payroll found")
     if flags.get("has_general_liability"):
         codes = _fv(facts, "gl_class_codes_by_location") or []

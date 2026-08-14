@@ -10,18 +10,32 @@ serve as the grounding quote for TICKING the Commercial Property box - the
 client's report #5. A denial is not proof of the opposite.
 
 THE TWO SIDES ARE DELIBERATELY NOT SYMMETRIC, and that is the point of this
-file. The "No" side uses the broad `_NEGATION_CUE_RE`
-(no|not|none|never|without|free|clear|clean|...) because its failure mode is a
-blank. Using that same cue to reject a "Yes" would DELETE correct answers:
+file. The "No" side uses the broad `_NEGATION_CUE_RE` because its failure mode
+is a blank. Using that same cue to reject a "Yes" would DELETE correct answers.
+
+MEASUREMENT UPDATED 2026-08-14 (C74), and the three examples this file was
+built on are exactly the ones that moved:
 
     "Crime Coverage Policy No. BBC7263 - Employee Dishonesty $50,000"   <- "No."
     "The building is a free-standing masonry structure"                 <- "free"
     "Item No. 4 - Contractors Equipment Floater"                        <- "No."
 
-Measured: the broad cue wrongly rejects 7 of 10 realistic affirmative quotes.
-The narrow `_COVERAGE_DENIAL_RE` ("no coverage" / "not covered" / "coverage not
-provided") rejects 0 of 10 and still catches every real denial. Do not "tidy"
-this into one shared helper.
+All three are now handled at the source. `_strip_number_abbreviations` removes
+"No." when it is the abbreviation for NUMBER (period/colon followed by a
+digit-bearing token, or a preceded identifier label), and bare `free|clear|
+clean` are gone from the cue - they were admitting "toll free", "free-standing"
+and "clearance" as proof of a denial, which is how a borrowed dec line could
+license a false "N".
+
+So the over-fire count fell from **7 of 10 to 3 of 10**. The asymmetry still
+stands and this file still guards it: the survivors ("Loss-free for the past
+five years", "Coverage includes theft, not limited to burglary", "Neither party
+may cancel without 30 days notice") carry real negation words in affirmative
+sentences, which no word list can separate. The narrow `_COVERAGE_DENIAL_RE`
+still rejects 0 of 10. Do not "tidy" this into one shared helper.
+
+What DOES separate them is `_judge_evidence_batch` (C74), which reads
+implication instead of vocabulary - the cue is now only a cheap pre-filter.
 """
 import os
 import sys
@@ -80,7 +94,11 @@ def test_the_broad_negation_cue_would_have_been_unsafe_here():
     wrongly_rejected = [
         q for q in AFFIRMATIVE_QUOTES if ps._quote_expresses_negative(q)
     ]
-    assert len(wrongly_rejected) >= 5, (
+    # 3 of 10 since C74 (was 7 of 10) - see this file's docstring for what
+    # changed and why the asymmetry survives the improvement. If this ever
+    # reaches 0, the two sides genuinely could be unified and someone should
+    # re-measure deliberately rather than discovering it by accident.
+    assert len(wrongly_rejected) >= 3, (
         "the broad cue no longer over-fires on affirmative quotes; re-measure "
         "before assuming the two sides can be unified"
     )

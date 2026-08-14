@@ -217,6 +217,11 @@ _EXTRACT_SCHEMA = (
     '  "prior_carrier_naic": string or null,\n'
     '  "audit_period": string or null,\n'
     '  "billing_plan": string or null,\n'
+    # An INSTALLMENT plan ("Payment Plan: Monthly"), not the billing method and
+    # not the audit term. Most dec pages print none - null is the normal answer.
+    # Consumed only by _resolve_payment_schedule (fact-or-blank): every run
+    # without this key stamped "AN", a code invented from "Audit Period: Annual".
+    '  "payment_plan": string or null,\n'
     # The package total the DOCUMENT states. Without it the form's POLICY
     # PREMIUM box had to be computed by summing per-line premiums, which is
     # only as good as every line's extraction - a real 271-page run summed to
@@ -412,7 +417,9 @@ _EXTRACT_SCHEMA = (
     '(EVERY label:value pair printed on a DECLARATIONS, coverage-summary or '
     'SCHEDULE page in this text - premiums, limits, deductibles, dates, '
     'identifiers, phone/email/web contacts, codes. Copy label and value '
-    'VERBATIM as printed. section = the heading printed at the top of the page '
+    'VERBATIM as printed. In a TABLE, one entry per CELL - label = the column '
+    'heading plus the row identifier if printed, value = that one cell; never '
+    'join two cells into one value. section = the heading printed at the top of the page '
     'the entry appears on, copied VERBATIM (e.g. "COMMERCIAL UMBRELLA '
     'DECLARATIONS", "GENERAL LIABILITY DECLARATIONS", "BUSINESS AUTO '
     'DECLARATIONS"); null only if the page prints no heading. This matters: '
@@ -2645,6 +2652,18 @@ def _authority_tier(authority: Optional[float]) -> int:
 _PROSE_VALUE_CHARS = 100
 _PROSE_VALUE_WORDS = 12
 
+# A narrative candidate whose grammatical subject is the COVERAGE/POLICY
+# itself ("... coverage ... is/are described/provided/afforded ...", "this
+# policy/endorsement ..."). Such a sentence describes what the policy GRANTS,
+# never what the business DOES, so it may not win a narrative fact while a
+# genuine candidate exists. Used only to DEMOTE, never to blank.
+_COVERAGE_META_RE = re.compile(
+    r"\bcoverages?\b[^.]{0,120}?\b(?:is|are)\s+"
+    r"(?:described|provided|afforded|included|excluded|extended)\b"
+    r"|\b(?:this|the)\s+(?:policy|endorsement|coverage\s+(?:form|part))\b",
+    re.I,
+)
+
 
 def _is_prose_value(s: str) -> bool:
     return len(s) > _PROSE_VALUE_CHARS and len(s.split()) > _PROSE_VALUE_WORDS
@@ -3202,6 +3221,28 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
                     len(scored[0][0]), scored[0][2]["freq"],
                 )
                 scored = _prose_c + _frag_c
+
+        # ── THE POLICY DESCRIBING ITSELF IS NOT AN ANSWER ────────────────────
+        # Live 2026-08-14 run 3: operations_description shipped "Contractors'
+        # equipment coverage and installation floater coverage are described,
+        # including coverage for ..." - a sentence about the POLICY's grants,
+        # stamped as what the BUSINESS does, because run-to-run jitter let it
+        # out-score the genuine classification text. Same demote-never-discard
+        # shape as the fragment rule above: when a narrative fact has a
+        # candidate whose grammatical subject is the coverage/policy itself
+        # AND at least one candidate that is not, every self-referential
+        # candidate drops below every genuine one. It can only ever pick a
+        # DIFFERENT real candidate, never blank the fact.
+        if _narrative and len(scored) > 1:
+            _meta_c = [e for e in scored if _COVERAGE_META_RE.search(e[0])]
+            _gen_c  = [e for e in scored if not _COVERAGE_META_RE.search(e[0])]
+            if _meta_c and _gen_c and _COVERAGE_META_RE.search(scored[0][0]):
+                logger.info(
+                    "merge field=%r coverage-meta demotion: %r describes the "
+                    "POLICY, not the business - choosing %r instead",
+                    field, _meta_c[0][0][:80], _gen_c[0][0][:80],
+                )
+                scored = _gen_c + _meta_c
 
         # Shape partition (see _partition_by_shape). SHADOW BY DEFAULT: the old
         # winner still ships and the disagreement is logged, because this reorders
@@ -3967,6 +4008,164 @@ def _count_claims_from_text(text: str) -> int:
 # ── Core pipeline ─────────────────────────────────────────────────────────────
 
 # ASYNC-SAFE
+# ── THE DEDICATED DECLARATIONS-INDEX PASS ────────────────────────────────────
+# WHY THIS EXISTS, measured rather than assumed. `dec_page_entries` is one key
+# among ~170 in the main extraction schema, and the model budgets its answer
+# across all of them: on the client's 271-page package it returned ~19 entries
+# per chunk against a 150 allowance and a 16,000-token output cap, neither of
+# which was binding. 250 entries recorded from ~30 declarations pages that
+# carry an estimated ~750. The index is what Stage A of LLM call 2 reads first,
+# so a thin index is a direct loss of fill quality - and it is why the same
+# defect ("Limited Pollution Coverage - Work Sites $150") kept coming back:
+# guards that key off the index are blind to whatever it failed to record.
+#
+# Attention is the constraint, so the fix is SEPARATION, not a bigger cap or a
+# louder instruction. One prompt, one job: enumerate every label:value printed
+# here. No facts, no flags, no coverage judgments.
+#
+# COST IS BOUNDED BY ROUTING, not by trimming the ask. Only chunks whose
+# `declarations_authority` clears `_DEC_INDEX_MIN_AUTHORITY` are sent - the
+# same scorer the retrieval filter already trusts, measured at 0.75 on a real
+# dec page against 0.00 on policy wording. On the client's package that is a
+# handful of chunks, not fourteen. Everything else about the pipeline is
+# untouched: the main extraction prompt is byte-identical, so its cached prefix
+# survives, and LLM call 2 never sees this pass at all.
+#
+# Set DEC_INDEX_DEDICATED_PASS=0 to disable and fall back to whatever the main
+# extraction happened to record.
+_DEC_INDEX_DEDICATED_PASS = os.getenv(
+    "DEC_INDEX_DEDICATED_PASS", "1").strip().lower() not in ("0", "false", "no")
+_DEC_INDEX_MIN_AUTHORITY = float(os.getenv("DEC_INDEX_MIN_AUTHORITY", "0.25"))
+# EVERY chunk that clears the authority bar is indexed - the owner's stated
+# requirement (2026-08-14) is FULL declarations coverage, the authority gate is
+# the cost boundary, and an upload is already bounded by MAX_UPLOAD_SIZE_MB.
+# The old default of 8 silently skipped dec pages on any package whose dec
+# content spread across more chunks than that - a recall loss with no log line.
+# >0 restores a hard cap as an emergency valve; when it trims, it WARNS with
+# what it cost, so it can never be silent again.
+_DEC_INDEX_MAX_CHUNKS = int(os.getenv("DEC_INDEX_MAX_CHUNKS", "0"))
+# One job, so the whole reply budget is the index. A dense dec page can
+# carry 40+ entries at ~35 tokens each; 16,000 holds several such pages.
+_DEC_INDEX_MAX_TOKENS = int(os.getenv("DEC_INDEX_MAX_TOKENS", "16000"))
+
+_DEC_INDEX_SYSTEM_PROMPT = (
+    "You transcribe insurance DECLARATIONS and SCHEDULE pages. You have exactly "
+    "one job: list EVERY label:value pair printed in the text.\n\n"
+    "Return JSON: {\"dec_page_entries\": [{\"label\": string, \"value\": string, "
+    "\"section\": string or null, \"owner\": "
+    "\"applicant\"|\"producer\"|\"carrier\"|\"policy\"|\"other\", "
+    "\"policy_number\": string or null, \"line_of_business\": string or null}]}\n\n"
+    "RULES\n"
+    "1. COPY label and value VERBATIM as printed. Do not normalise, expand an "
+    "abbreviation, reformat a number or fix a typo. An entry that is not "
+    "literally in the text is discarded, so a paraphrase is a wasted entry.\n"
+    "2. BE EXHAUSTIVE. Every premium, limit, deductible, date, code, "
+    "identifier, address, phone, name, percentage, valuation and coverage line. "
+    "In a rating or class table that includes EVERY numeric column of every "
+    "row - rate, factor, exposure, cost new, per-row premium - not just the "
+    "identity columns. A page with forty printed values must return forty "
+    "entries. Under-reporting is the failure mode this pass exists to fix.\n"
+    "3. 'No Coverage', 'Included', 'Waived', 'Not Applicable' are VALUES. "
+    "Record them - a line the policy declines to cover is data.\n"
+    "4. section = the heading printed at the top of the page the entry appears "
+    "on, copied verbatim (e.g. 'COMMERCIAL UMBRELLA DECLARATIONS'). Copy the "
+    "heading EXACTLY as printed - never shorten, reorder or reword it (write "
+    "'COMMERCIAL LIABILITY UMBRELLA DECLARATIONS' if that is what the page "
+    "prints, not your own paraphrase - a reworded heading is discarded). This "
+    "is the only thing that says which coverage part a figure belongs to: two "
+    "parts print the identical label with different amounts.\n"
+    "5. TABLES: one entry PER printed cell. label = the caption printed for "
+    "THAT value - the column heading and/or the row's own name (the coverage "
+    "name, class code or location number), as printed. NEVER label several "
+    "different cells with only a shared row identifier (their labels must "
+    "differ exactly as the printed captions differ - 'CATASTROPHE LIMIT' and "
+    "'JOBSITE LIMIT' are two labels, not one row id twice), and NEVER "
+    "concatenate two cells into one value: a class code and its "
+    "classification wording are TWO entries, and a basis word printed beside "
+    "an amount ('Payroll $39,300') is the amount's LABEL, not a separate "
+    "entry. A joined value is not literally printed anywhere and is "
+    "discarded.\n"
+    "6. Record NOTHING from policy wording, endorsement legal text, exclusions, "
+    "definitions or hypothetical examples. Declarations and schedules only.\n"
+    "7. If this text contains no declarations content, return an empty list."
+)
+
+
+async def _harvest_dec_index(chunks: List[ChunkTuple]) -> List[dict]:
+    """Index-only LLM pass over the declarations-dense chunks. Never raises."""
+    if not _DEC_INDEX_DEDICATED_PASS or not chunks:
+        return []
+    try:
+        ranked = sorted(
+            ((declarations_authority(c[0]), i, c[0]) for i, c in enumerate(chunks)),
+            key=lambda t: -t[0],
+        )
+        eligible = [(i, txt) for score, i, txt in ranked
+                    if score >= _DEC_INDEX_MIN_AUTHORITY]
+        picked = (eligible if _DEC_INDEX_MAX_CHUNKS <= 0
+                  else eligible[:_DEC_INDEX_MAX_CHUNKS])
+        if len(picked) < len(eligible):
+            logger.warning(
+                "dec_index_pass: DEC_INDEX_MAX_CHUNKS=%d trimmed %d of %d "
+                "declarations-dense chunk(s) - their pages fall back to the "
+                "thin main-pass index",
+                _DEC_INDEX_MAX_CHUNKS, len(eligible) - len(picked), len(eligible),
+            )
+        if not picked:
+            logger.info("dec_index_pass: no chunk cleared authority %.2f - skipped",
+                        _DEC_INDEX_MIN_AUTHORITY)
+            return []
+        logger.info(
+            "dec_index_pass: %d of %d chunk(s) are declarations-dense (authority "
+            ">= %.2f) - running the dedicated index call on those",
+            len(picked), len(chunks), _DEC_INDEX_MIN_AUTHORITY,
+        )
+
+        async def _one(idx: int, text: str) -> List[dict]:
+            try:
+                raw = await groq_chat(
+                    LLM_MODEL,
+                    [{"role": "system", "content": _DEC_INDEX_SYSTEM_PROMPT},
+                     {"role": "user", "content": text}],
+                    max_tokens=_DEC_INDEX_MAX_TOKENS,
+                )
+                parsed = await _safe_json_parse(raw, context=f"dec_index[{idx}]")
+                # `_safe_json_parse` normalises a bare reply into
+                # {"facts": {...}, "flags": {}} - which is exactly what this
+                # prompt returns, since it deliberately does NOT ask for the
+                # facts/flags wrapper. The first cut read the top level only
+                # and discarded EIGHT successful calls on the first live run:
+                # every one logged "bare dict ... wrapping into {facts: ...}"
+                # and then "harvested 0 raw entries from 8 chunk(s)". The
+                # output was there - up to 6,788 tokens of it - and this
+                # function could not see it.
+                out = None
+                for level in (parsed, (parsed or {}).get("facts")):
+                    if isinstance(level, dict) and isinstance(
+                            level.get("dec_page_entries"), list):
+                        out = level["dec_page_entries"]
+                        break
+                if out is None:
+                    logger.warning(
+                        "dec_index_pass: chunk %d returned no usable "
+                        "dec_page_entries (top-level keys: %s)", idx,
+                        sorted(parsed)[:6] if isinstance(parsed, dict) else type(parsed),
+                    )
+                return out or []
+            except Exception as ex:                        # noqa: BLE001
+                logger.warning("dec_index_pass: chunk %d failed - %s", idx, ex)
+                return []
+
+        results = await asyncio.gather(*[_one(i, t) for i, t in picked])
+        entries = [e for r in results for e in r if isinstance(e, dict)]
+        logger.info("dec_index_pass: harvested %d raw entries from %d chunk(s)",
+                    len(entries), len(picked))
+        return entries
+    except Exception as ex:                                # noqa: BLE001
+        logger.warning("dec_index_pass skipped: %s", ex)
+        return []
+
+
 async def _run_extraction(
     text: str,
     doc_type: str,
@@ -4038,6 +4237,26 @@ async def _run_extraction(
         )
 
     result = _merge_list_fields(merge_partials, list_keys=_LONG_DOC_LIST_KEYS)
+
+    # ── The dedicated index pass, merged in ADDITIVELY ───────────────────────
+    # Appended to whatever the main extraction recorded rather than replacing
+    # it: `_verify_dec_entries` de-duplicates on (label, value, section) at
+    # merge time, so an entry both passes found costs nothing, and one only the
+    # main pass saw is never lost. Everything here still faces the verbatim
+    # gate - this pass buys RECALL, not trust.
+    try:
+        _extra = await _harvest_dec_index(chunks)
+        if _extra:
+            _base = result.get("dec_page_entries")
+            _base = _base if isinstance(_base, list) else []
+            result["dec_page_entries"] = _base + _extra
+            logger.info(
+                "dec_index_pass: %d entries from the main extraction + %d from "
+                "the dedicated pass -> %d before verification",
+                len(_base), len(_extra), len(result["dec_page_entries"]),
+            )
+    except Exception as _dx:                               # noqa: BLE001
+        logger.warning("dec_index_pass merge skipped: %s", _dx)
 
     # Full-text coverage verification — log so operators can confirm no silent truncation.
     if extraction_complete:
@@ -4894,34 +5113,59 @@ def _consolidate_property_locations(facts: dict) -> None:
     # _parse_address (which only splits on commas).
     _state_zip_tail_re = re.compile(r"[\s,]+([A-Za-z]{2})\.?[\s,]+(\d{5}(?:-\d{4})?)\s*$")
 
+    # Can group key `a` host (absorb) key `b`? Two shapes, mirroring C48:
+    # a street-numbered b folds by same-number prefix/compact identity; a
+    # numberless b is a geo fragment folding by token subset. COMPACT
+    # comparison rides alongside the token one: OCR splits unit designators
+    # unpredictably ("D13" on one page, "D 13" on the next), which breaks
+    # token-level prefixing while the two keys are byte-identical once spaces
+    # are removed. Two real suites ("d13" vs "b5") still differ compacted.
+    def _street_claims(a_key: str, b_key: str) -> bool:
+        a_num, b_num = _street_num(a_key), _street_num(b_key)
+        if b_num:
+            if not a_num or a_num != b_num:
+                return False
+            a_c, b_c = a_key.replace(" ", ""), b_key.replace(" ", "")
+            return (b_key.startswith(a_key + " ") or a_key.startswith(b_key + " ")
+                    or a_c == b_c or b_c.startswith(a_c) or a_c.startswith(b_c))
+        b_toks = set(b_key.split())
+        return bool(a_num and b_toks and b_toks <= set(a_key.split()))
+
+    def _same_premises(x: str, y: str) -> bool:
+        return _street_claims(x, y) or _street_claims(y, x)
+
     folded = True
     while folded and len(order) > 1:
         folded = False
         for b_key in list(order):
-            b_num, b_toks = _street_num(b_key), set(b_key.split())
-            hosts = []
-            for a_key in order:
-                if a_key == b_key:
-                    continue
-                a_num = _street_num(a_key)
-                # COMPACT comparison alongside the token one: OCR splits unit
-                # designators unpredictably ("D13" on one page, "D 13" on the
-                # next), which breaks token-level prefixing while the two keys
-                # are byte-identical once spaces are removed. Two real suites
-                # ("d13" vs "b5") still differ compacted, so nothing new folds
-                # that should not.
-                a_c, b_c = a_key.replace(" ", ""), b_key.replace(" ", "")
-                if b_num and a_num == b_num and (
-                    b_key.startswith(a_key + " ") or a_key.startswith(b_key + " ")
-                    or a_c == b_c
-                    or b_c.startswith(a_c) or a_c.startswith(b_c)
-                ):
-                    hosts.append(a_key)
-                elif not b_num and a_num and b_toks and b_toks <= set(a_key.split()):
-                    hosts.append(a_key)
-            if len(hosts) != 1:
+            hosts = [a for a in order if a != b_key and _street_claims(a, b_key)]
+            if not hosts:
                 continue
+            if len(hosts) > 1:
+                # THE THREE-VARIANT DEADLOCK (live 2026-08-14): one premises
+                # printed in 3+ shapes ('...st d13' / '...st d13 denver' /
+                # '...st d13 denver co 80216') makes EVERY key see the other
+                # two as hosts, the old exactly-one rule skipped all of them,
+                # zero folds happened, and three rows stamped. Multiple hosts
+                # fold only when they are all the SAME premises as each other
+                # (pairwise related); 'd13 denver' vs 'd13 boulder' fails and
+                # b stays put.
+                if not all(_same_premises(h1, h2)
+                           for _i, h1 in enumerate(hosts) for h2 in hosts[_i + 1:]):
+                    continue
+                hosts = [max(hosts, key=len)]
             a_key = hosts[0]
+            # REVERSE ambiguity, the hole the deadlock fix exposed: when the
+            # HOST is the more-specific shape ('...d13 denver' finding bare
+            # '...d13'), a third group ('...d13 boulder') may claim the bare
+            # shape just as well - folding would guess which premises owns the
+            # fragment. A third claimant only excuses itself by being the same
+            # premises as the LONGER member of the pair (a chain, which folds
+            # on its own turn anyway).
+            shorter, longer = sorted((a_key, b_key), key=len)
+            if any(k not in (a_key, b_key) and _street_claims(k, shorter)
+                   and not _same_premises(k, longer) for k in order):
+                continue
             first = a_key if order.index(a_key) < order.index(b_key) else b_key
             second = b_key if first == a_key else a_key
             # The TOKEN-SUPERSET key becomes the group's key (at the earlier
@@ -5126,6 +5370,22 @@ def _dec_norm(text: Any) -> str:
 _SECTION_TOKEN_GAP = 80
 
 
+def _tokens_printed_in_order(tokens: List[str], hay: str) -> bool:
+    """Every token, in printed order, each within `_SECTION_TOKEN_GAP` chars of
+    its predecessor. The one shared engine behind `_section_is_printed` and
+    `_entry_is_printed` - a single definition of "printed, allowing for how
+    print survives OCR", not two that drift. Fewer than two tokens is no
+    evidence of anything and always fails; callers fall back to strict."""
+    if len(tokens) < 2:
+        return False
+    pattern = (r"\b" + rf"\b.{{0,{_SECTION_TOKEN_GAP}}}?\b".join(
+        re.escape(t) for t in tokens) + r"\b")
+    try:
+        return re.search(pattern, hay, re.S) is not None
+    except re.error:                                       # pragma: no cover
+        return False
+
+
 def _section_is_printed(n_section: str, hay: str) -> bool:
     """Is this page heading actually printed, allowing for how headings print?
 
@@ -5153,21 +5413,58 @@ def _section_is_printed(n_section: str, hay: str) -> bool:
     It IS a relaxation and the risk is named rather than dressed up: a heading
     could now be accepted from words that coincidentally line up in body text.
     The consequence is bounded - a mis-grouped line in the index, never a stamped
-    value, since `label` and `value` still face the unchanged verbatim gate.
-    Single-word headings keep the strict test: one word in sequence is no
-    evidence of anything.
+    value, since `label` and `value` face their own gate (`_entry_is_printed`,
+    which is stricter about numbers than this is about words). Single-word
+    headings keep the strict test: one word in sequence is no evidence of
+    anything.
     """
     if n_section in hay:
         return True
-    tokens = [t for t in n_section.split() if len(t) > 2]
-    if len(tokens) < 2:
+    return _tokens_printed_in_order(
+        [t for t in n_section.split() if len(t) > 2], hay)
+
+
+def _entry_is_printed(n_text: str, hay: str) -> bool:
+    """Is this label/value printed - verbatim, or the way OCR prints a TABLE?
+
+    EXTENDED 2026-08-14 from a plain substring test, on the same class of
+    measured evidence that relaxed `_section_is_printed` the day before. The
+    live ORBIN runs logged DROPPED_UNVERIFIED for the entire GL class table
+    (label 'Location 001', value '91580 Contractors - Executive Supervisors or
+    Executive Superintendents') and for every 'Section N <part>' = 'No
+    Coverage' summary line. None of those are fabrications: the model joined
+    two printed CELLS of one row, and OCR interleaves the neighbouring columns
+    (premium basis, exposure, a second section's column) between them, so the
+    joined string is not contiguous anywhere in the text. Dropping them cost
+    the index exactly the table content Stage A exists to serve - generically,
+    on any package with a rating schedule, not just this one.
+
+    The relaxation is the SAME ordered containment the section check uses,
+    with two extra rules it does not need, both protecting the one class of
+    value where a false accept is cheapest to manufacture - numbers:
+
+      - digit tokens are always significant, whatever their length: the class
+        code / location number is the anchor of its row and must be present.
+      - a text whose significant tokens are ALL digits never takes the relaxed
+        path. '1,000,000' rewritten as '1000000', a date rewritten from
+        07/16/25 to 07/16/2025, a re-grouped phone number: scattered digit
+        groups sitting in order prove nothing, and a NUMBER that fails the
+        verbatim test is precisely the fabrication this gate exists to stop.
+        Reformatting is the model disobeying rule 1; the entry stays dropped.
+
+    Single-significant-token texts stay strict for the same reason single-word
+    sections do. The named risk: a multi-word text assembled from real words
+    that coincidentally sit in reading order within one row's width. The
+    consequence is an odd line in the index - every downstream consumer still
+    guards itself (backfill's five stacked conditions, the post-fill guards on
+    anything the Stage A model stamps).
+    """
+    if n_text in hay:
+        return True
+    significant = [t for t in n_text.split() if len(t) > 2 or t.isdigit()]
+    if not significant or all(t.isdigit() for t in significant):
         return False
-    pattern = (r"\b" + rf"\b.{{0,{_SECTION_TOKEN_GAP}}}?\b".join(
-        re.escape(t) for t in tokens) + r"\b")
-    try:
-        return re.search(pattern, hay, re.S) is not None
-    except re.error:                                       # pragma: no cover
-        return False
+    return _tokens_printed_in_order(significant, hay)
 
 
 def _verify_dec_entries(entries: Any, full_text: str) -> List[dict]:
@@ -5182,8 +5479,18 @@ def _verify_dec_entries(entries: Any, full_text: str) -> List[dict]:
     kept: List[dict] = []
     seen: set = set()
     dropped_unverified = dropped_malformed = 0
-    for item in entries:
+    for pos, item in enumerate(entries):
         if len(kept) >= _DEC_ENTRY_MAX:
+            # Truncation must never be silent: everything past this point is
+            # dec-page data the index will simply not have, and "the index is
+            # thin" has already cost days of tracing once. Raise DEC_ENTRY_MAX
+            # (and GAP_FILL_DEC_INDEX_BUDGET_MULT with it - see
+            # pdf_service._dec_index_chunks) if this fires on a real package.
+            logger.warning(
+                "dec_entries CAP: reached DEC_ENTRY_MAX=%d with %d candidate "
+                "entr(ies) still unprocessed - the index is TRUNCATED",
+                _DEC_ENTRY_MAX, len(entries) - pos,
+            )
             break
         if not isinstance(item, dict):
             dropped_malformed += 1
@@ -5197,14 +5504,16 @@ def _verify_dec_entries(entries: Any, full_text: str) -> List[dict]:
         if not n_label or not n_value:
             dropped_malformed += 1
             continue
-        # VERBATIM or gone. The model was instructed to copy both halves as
-        # printed; an entry that is not literally in the document is exactly
-        # the fabrication this gate exists to stop.
-        if n_value not in hay or n_label not in hay:
+        # PRINTED or gone. The model was instructed to copy both halves as
+        # printed; an entry the document does not print is exactly the
+        # fabrication this gate exists to stop. "Printed" means verbatim, OR
+        # in printed order across one table row's width (`_entry_is_printed`) -
+        # numbers get no such latitude, see that function for why.
+        if not _entry_is_printed(n_value, hay) or not _entry_is_printed(n_label, hay):
             dropped_unverified += 1
             logger.info(
                 "dec_entries DROPPED_UNVERIFIED label=%r value=%r - not "
-                "literally present in the uploaded text", label[:60], value[:60],
+                "printed in the uploaded text", label[:60], value[:60],
             )
             continue
         owner = str(item.get("owner") or "").strip().lower()
@@ -5385,6 +5694,79 @@ def _backfill_empty_facts_from_entries(facts: dict, entries: List[dict]) -> None
         logger.info("dec_entries BACKFILL filled %d empty fact(s)", filled)
 
 
+# ACORD's billing method is a TWO-VALUE vocabulary: a policy is direct bill or
+# agency bill. Closed vocabulary is the one shape of raw-text scan this
+# codebase allows itself (same argument as _LOB_NAMES) - it maps a printed
+# literal onto an enum and can never capture free text, which is what makes it
+# different from the label-scan class that caused the 2026-08-08 boilerplate
+# defects. Word-bounded so "direct billing disputes" prose cannot match.
+_BILLING_VOCAB = (
+    ("DIRECT BILL", re.compile(r"\bdirect bill\b")),
+    ("AGENCY BILL", re.compile(r"\bagency bill\b")),
+)
+
+
+def _entries_state_payroll(entries: Any) -> bool:
+    """The verified dec entries state a payroll exposure, whatever the shape:
+    a payroll-labelled entry carrying a figure ('PAYROLL' = '$39,300'), or a
+    basis entry whose value IS the word ('Prem Basis' = 'Payroll' - the
+    split-cell shape; its amount is the sibling entry). Consumed by
+    sqs_service's GL exposure warning, both live (via the entries) and after
+    the C57 purge (via the `dec_states_payroll_basis` fact merge_facts derives
+    from this while the entries still exist)."""
+    if not isinstance(entries, list):
+        return False
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        label = str(e.get("label") or "").lower()
+        value = str(e.get("value") or "").strip().lower()
+        if "payroll" in label and re.search(r"\d", value):
+            return True
+        if value == "payroll":
+            return True
+    return False
+
+
+def _backfill_billing_plan(facts: dict, full_text: str) -> None:
+    """Fill an EMPTY billing_plan from the document's own printed billing word.
+
+    WHY (live 2026-08-14, ORBIN): the package prints DIRECT BILL on all four
+    section dec pages, but always FUSED into a label run ("DIRECT BILL AGENT
+    PHONE: ..."), so the extraction model never returned the fact and the
+    entry-backfill's label-match condition (correctly) refused the fused
+    entries. The empty fact then fell to gap fill, which answered the Direct
+    Bill checkbox "No" - a stamped contradiction of four printed statements.
+
+    Fires ONLY when the fact merged empty, and ONLY when exactly one of the
+    two vocabulary values is printed - both printed is a real ambiguity and
+    stays blank for reconciliation, same rule as the entry backfill's
+    condition 5. Never overwrites; the value written is ACORD's own canonical
+    printing of the method.
+    """
+    if not isinstance(facts, dict) or not (full_text or "").strip():
+        return
+    current = facts.get("billing_plan")
+    current_val = current.get("value") if isinstance(current, dict) else current
+    if not _is_empty(current_val):
+        return
+    hay = _dec_norm(full_text)
+    stated = [printed for printed, rx in _BILLING_VOCAB if rx.search(hay)]
+    if len(stated) != 1:
+        if len(stated) > 1:
+            logger.info(
+                "billing_plan backfill: document prints BOTH billing methods - "
+                "ambiguous, leaving blank")
+        return
+    facts["billing_plan"] = {"value": stated[0], "confidence": "ai_low",
+                             "source": "dec_entry"}
+    logger.info(
+        "billing_plan BACKFILL value=%r - extraction merged this fact empty; "
+        "the document prints the method verbatim (closed two-value vocabulary)",
+        stated[0],
+    )
+
+
 def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     """
     Multi-document merge with field-level source confidence.
@@ -5499,9 +5881,20 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
         _verified = _verify_dec_entries(_all_entries, _full_text)
         mf["dec_page_entries"] = _verified
         _backfill_empty_facts_from_entries(mf, _verified)
+        # Durable one-bit derivation, computed while the entries still exist:
+        # the purge (C57) deletes the entries after generation, and the GL
+        # exposure warning re-evaluates on every recalc - without this fact the
+        # warning would stand down before generation and refire after it.
+        if _entries_state_payroll(_verified):
+            mf["dec_states_payroll_basis"] = True
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: dec-entry verification/backfill failed: %s", exc)
         mf.pop("dec_page_entries", None)
+    try:
+        _backfill_billing_plan(
+            mf, " ".join(str(_d.get("text") or "") for _d in docs))
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: billing_plan backfill failed: %s", exc)
 
     # Canonical, deduplicated multi-location list (Beta Report Figure 27).
     # Must run LAST, after every chunk/doc-level merge above, so it is the

@@ -939,6 +939,12 @@ _ACORD_FIELD_RULES = [
     ("CommercialPolicy_BillingPlan",                       "billing_plan"),
     ("Policy_AuditPeriod",                                 "audit_period"),
     ("Policy_BillingPlan",                                 "billing_plan"),
+    # METHOD OF PAYMENT is the billing method in prose - "DIRECT BILL" is a
+    # complete, correct method description. Unmapped, this box fell to gap
+    # fill, which stamped the umbrella's audit note into it (live 2026-08-14:
+    # "PREMIUM NOT SUBJECT TO AUDIT" as a method of payment). Pass 1 filling
+    # it from the fact takes the box off the model's plate entirely.
+    ("Policy_PaymentMethod_MethodDescription",             "billing_plan"),
 
     # ── Policy / form header ─────────────────────────────────────────────────
     ("Policy_PolicyNumberIdentifier",                      "policy_number"),
@@ -1872,6 +1878,7 @@ _AUTHORITATIVE_BLANK_RESOLVERS = (
     "_resolve_producer_mailing",
     "_resolve_applicant_contact",
     "_resolve_estimated_total",
+    "_resolve_payment_schedule",
     "_resolve_schedule_family_row",
     "_resolve_producer_printed_name",
     "_resolve_applicant_website",
@@ -2940,6 +2947,30 @@ def _resolve_payment_deposit(field_name: str, facts: dict):
     if not _PAYMENT_DEPOSIT_RE.match(field_name or ""):
         return _SCHED_SKIP
     for key in ("deposit_amount", "premium_deposit"):
+        val = _fv(facts, key)
+        if val and str(val).strip():
+            return str(val).strip()
+    return None
+
+
+# ── The PAYMENT PLAN box, same disease a third time ──────────────────────────
+# Every 2026-08-14 run stamped "AN" - a code the model derives from "Audit
+# Period: Annual", which is the GL's AUDIT term, not a payment plan. This
+# package prints no payment plan anywhere, and an installment plan can never
+# be inferred from a dec page that does not state one; no verbatim check can
+# catch the invention either, because a CODE is an abbreviation of a printed
+# word ("Annual" is genuinely printed - about the audit). Fact-or-blank, like
+# the deposit and fax: `payment_plan` (asked for by extraction since
+# 2026-08-14) stamps when a document genuinely prints one ("Payment Plan:
+# Monthly"); otherwise the box stays EMPTY for the producer.
+_PAYMENT_SCHEDULE_RE = re.compile(
+    r"^\w+_Payment_(?:PaymentScheduleCode|PaymentPlanCode)_[A-N]$")
+
+
+def _resolve_payment_schedule(field_name: str, facts: dict):
+    if not _PAYMENT_SCHEDULE_RE.match(field_name or ""):
+        return _SCHED_SKIP
+    for key in ("payment_plan", "payment_schedule"):
         val = _fv(facts, key)
         if val and str(val).strip():
             return str(val).strip()
@@ -4814,6 +4845,423 @@ _GL_HAZARD_ROW_RE = re.compile(
 )
 
 
+# ── A PERCENTAGE IS EXPOSURE DATA. IT IS NEVER ON A DECLARATIONS PAGE ────────
+# THE GENERIC FIX for a defect that kept arriving one box at a time. Live
+# 2026-08-14 ACORD 125: "INSTALLATION, SERVICE OR REPAIR WORK 100%" and "OFF
+# PREMISES ... 100%", neither supported by anything in 271 pages. Earlier runs
+# produced "RETAIL 100%", "% of vehicles monitored", "% owned 50%".
+#
+# Measured before writing the rule, across all 17 schemas: ACORD declares
+# "Enter percentage:" on **74 fields over 8 forms**, and **ZERO of them can be
+# filled by any fact today**. So every percentage on every form we produce is
+# either blank or a gap-fill guess - and a percentage is a share of the
+# applicant's OWN business (sales split, work subcontracted, ownership,
+# fleet monitored). A carrier's declarations page states what it insures, never
+# how the insured's revenue divides. There is nothing to read it off.
+#
+# This is the deposit/fax/staff-count rule stated ONCE by TYPE instead of
+# seventy-four times by name, which is the whole point: the fact route stays
+# open, so a producer or client ARQ answer still stamps, and silence is a blank
+# rather than an invitation to guess a round number.
+# Matched on the NAME, not the tooltip, because the name is available to a
+# resolver and is provably equivalent here: swept across all 17 schemas, 63 of
+# the 68 percentage-typed fields carry "Percent" in their name and **no field
+# named *Percent* is anything other than a percentage** - zero false positives,
+# so this cannot blank a box of another kind. The 5 typed fields the name misses
+# are `PriorCoverage_ModificationFactor_*`, already owned by
+# `_resolve_prior_coverage_cell`.
+_PERCENT_FIELD_RE = re.compile(r"Percent(?:age)?(?:_[A-N])?$")
+
+
+# A number is a PERCENTAGE in the document only when it is printed as one.
+# "100" appearing as a radius of use, a territory code or a page number is not
+# evidence that 100% of the work is off-premises.
+_PCT_IN_TEXT_RE = "(?:%|\\s*percent)"
+
+
+def _percentage_is_stated(value: Any, raw_text: str) -> bool:
+    digits = re.sub(r"[^\d.]", "", str(value or ""))
+    if not digits or not raw_text:
+        return False
+    return re.search(re.escape(digits) + r"\s*" + _PCT_IN_TEXT_RE,
+                     raw_text, re.I) is not None
+
+
+def _drop_unstated_percentages(mapped: dict, raw_text: str,
+                               gpt_filled_set: set,
+                               grounding: Optional[dict] = None) -> List[str]:
+    """Blank an AI-authored percentage that cannot cite its own sentence.
+
+    FIRST CUT WAS AN AUTHORITATIVE BLANK AND THE SUITE REJECTED IT, correctly:
+    `test_a_percentage_the_document_states_survives` plants "15%" that the
+    document really does state, and closing the box outright threw it away. The
+    measurement behind the rule ("74 percentage fields, zero fillable from any
+    fact") was right about FACTS and forgot the other legitimate source - a
+    narrative or supplement that states the split in words.
+
+    SECOND CUT WAS DOCUMENT-WIDE AND A LIVE RUN DEFEATED IT (2026-08-14): the
+    guard asked only "is `100%` printed ANYWHERE in the document", and on a
+    271-page package some unrelated endorsement always prints one - so the
+    invented INSTALLATION 100% shipped while its invented 0% sibling (a figure
+    the package happens never to print) was blanked. Anywhere-in-271-pages is
+    not evidence about THIS box.
+
+    So the bar is now the same one the Yes/No evidence gate uses - the model
+    must CITE, and the citation is verified mechanically, never interpreted:
+      1. the field's own "question_grounding" quote exists (rule 8d asks for
+         it on every percentage field),
+      2. the quote is verbatim in the uploaded document (normalized
+         containment - a quote the document never printed proves nothing), and
+      3. the quote itself contains this number AS A PERCENTAGE.
+    No topic matching anywhere - quote presence and number presence only, per
+    the standing evidence-gate design. A percentage without its sentence is a
+    guess, and guessing an exposure split misrepresents the risk. Pass 1 /
+    fact-supplied percentages are untouched.
+
+    Scoped to `gpt_filled_set` deliberately - "did the model invent this?" is a
+    question about MODEL BEHAVIOUR, so the fourth-door rule does not apply.
+    """
+    dropped: List[str] = []
+    n_doc = _normalize_for_search(raw_text or "")
+    for field in list(gpt_filled_set):
+        if not _PERCENT_FIELD_RE.search(field):
+            continue
+        val = mapped.get(field)
+        if val is None or not str(val).strip():
+            continue
+        quote = str((grounding or {}).get(field) or "").strip()
+        quote_ok = (
+            bool(quote)
+            and _normalize_for_search(quote) in n_doc
+            and _percentage_is_stated(val, quote)
+        )
+        if quote_ok:
+            continue
+        logger.info(
+            "guard UNSTATED_PERCENTAGE field=%s value=%r - no verbatim grounding "
+            "quote states this number as a percentage (quote=%r)",
+            field, str(val)[:24], quote[:60],
+        )
+        mapped[field] = None
+        dropped.append(field)
+    return dropped
+
+
+# ── A PARTY ASSEMBLED FROM OTHER PARTIES' DETAILS ────────────────────────────
+# Live 2026-08-14 ACORD 125: the Additional Interest block shipped half-built -
+# FullName "Blanket Additional Insureds" (the TITLE of a GL endorsement on the
+# forms schedule, not a party), city/zip/phone all the PRODUCER's, email the
+# carrier's claims address, account number the GL policy number. Other guards
+# had blanked 22 of the row's fields (every indicator, the street line) and
+# left these, which is worse than leaving all of them: a half-fabricated
+# interest reads like a real one with sparse data.
+#
+# The mechanism is BORROWING, so the rule tests borrowing, not topics: an
+# Additional Interest is a THIRD party, and a third party's identifying details
+# are never the producer's or the carrier's. Sharing the APPLICANT's details is
+# deliberately NOT a signal - a landlord or loss payee at the insured premises
+# legitimately shares that address.
+_AI_ROW_RE = re.compile(r"^AdditionalInterest_(.+)_([A-Z])$")
+# Component SUFFIXES that identify a party (suffix match, because ACORD names
+# them "MailingAddress_LineOne", "Primary_PhoneNumber", "Primary_EmailAddress",
+# ...). Deliberately excludes state/country codes ("CO", "US" match everything
+# in a one-state submission) and indicators.
+_AI_IDENTITY_PARTS = (
+    "LineOne", "LineTwo", "CityName", "PostalCode",
+    "PhoneNumber", "EmailAddress",
+)
+
+
+def _drop_fabricated_interest_rows(mapped: dict, gpt_filled_set: set,
+                                   facts: Optional[dict] = None) -> List[str]:
+    """Blank a model-authored AdditionalInterest row that is a borrowed assembly.
+
+    A row dies WHOLE (atomicity, same principle as the party-row and schedule
+    guards) when either:
+      - it has no FullName - an interest without a name is not an interest; or
+      - any of its identifying details (address line, city, zip, phone, email)
+        is byte-equal, normalized, to a PRODUCER or CARRIER value - stamped
+        elsewhere on this form, OR recorded in the verified dec index under
+        those owners. The index half closed the second live case (2026-08-14
+        run 2): the fabricated row's phone was the SERVICING CARRIER's number,
+        which no ACORD 125 field ever stamps, so the form-side pool was blind
+        to it - but the index records it with owner=carrier.
+
+    TRIED AND REMOVED the same day: requiring the FullName itself to appear in
+    the dec index ("a real interest is a scheduled party"). The suite caught
+    it immediately - the 2026-08-13 evidence-gate contract protects a third
+    party NAMED IN DOCUMENT PROSE ("Meridian Fleet Leasing, LLC" as the named
+    owner behind a Yes answer), and prose parties are exactly what the index
+    never records. Both live fabrications die on the borrow rules; a name-only
+    fabrication with zero borrowed details remains the accepted residual
+    rather than a reason to blank legitimate named parties.
+
+    Only fields the model authored (`gpt_filled_set`) are blanked, so a
+    fact-driven or producer-entered interest is untouchable by this guard.
+    """
+    dropped: List[str] = []
+    other_party_pool: set = set()
+    for f, v in mapped.items():
+        if v in (None, "") or not str(v).strip():
+            continue
+        if f.startswith(("Producer_", "Insurer_", "Carrier_")):
+            n = _normalize_for_search(str(v))
+            if len(n) > 4:                 # "co", "inc" prove nothing
+                other_party_pool.add(n)
+    entries = (facts or {}).get("dec_page_entries")
+    entries = [e for e in entries if isinstance(e, dict)] \
+        if isinstance(entries, list) else []
+    for e in entries:
+        if str(e.get("owner") or "").strip().lower() in ("producer", "carrier"):
+            v_n = _normalize_for_search(str(e.get("value") or ""))
+            if len(v_n) > 4:
+                other_party_pool.add(v_n)
+    rows: Dict[str, Dict[str, str]] = {}
+    for f, v in mapped.items():
+        m = _AI_ROW_RE.match(f)
+        if m and v not in (None, "") and str(v).strip():
+            rows.setdefault(m.group(2), {})[m.group(1)] = f
+    for letter, comps in rows.items():
+        name = str(mapped.get(comps.get("FullName", "")) or "").strip()
+        borrowed = [
+            f for comp, f in comps.items()
+            if comp.endswith(_AI_IDENTITY_PARTS)
+            and _normalize_for_search(str(mapped[f])) in other_party_pool
+        ]
+        if name and not borrowed:
+            continue
+        reason = ("no FullName - an interest without a name is not an interest"
+                  if not name else
+                  f"identity details borrowed from another party: {borrowed}")
+        for comp, f in comps.items():
+            if f not in gpt_filled_set:
+                continue
+            logger.info(
+                "guard FABRICATED_INTEREST_ROW field=%s value=%r - row %s: %s",
+                f, str(mapped[f])[:50], letter, reason,
+            )
+            mapped[f] = None
+            dropped.append(f)
+    return dropped
+
+
+# ── ONE PREMISES STAMPED AS SEVERAL LOCATION ROWS ────────────────────────────
+# Live 2026-08-14 ACORD 125: one address, printed comma-free in three shapes
+# through the package ("4800 DAHLIA ST # D13 DENVER", "4800 Dahlia St D13
+# Denver", a bare "Denver / CO / 80216-3121"), stamped as THREE premises rows.
+# The 2026-08-12 fix (`_consolidate_property_locations`) folds these in the
+# FACTS list - but these rows were authored by gap fill, which never passes
+# through it. Same defect, one layer later, so the same folding rules apply at
+# stamp time: prefix-with-same-street (the C48 rule) and geo-only fragments.
+#
+# SCOPED TO THE PREMISES FAMILY BY NAME, deliberately not generic: the
+# obvious generalization ("dedupe any repeating address family") is exactly
+# the C18 disaster - three trucks garaged in one city legitimately print
+# identical Vehicle_PhysicalAddress city/state/zip rows, and deleting those
+# was the worst regression this pipeline has had. Schedule-backed address
+# families must never route through this guard.
+_PREMISES_ADDR_ROOT = "CommercialStructure_PhysicalAddress"
+_PREMISES_ROW_PREFIX = "CommercialStructure_"
+
+
+def _dedupe_stamped_premises_rows(mapped: dict, gpt_filled_set: set) -> List[str]:
+    """Fold model-authored duplicate premises rows into the first occurrence.
+
+    A later row folds when:
+      - its street line, normalized (case/punctuation/'#' stripped), is equal
+        to or a prefix-extension of a kept row's street (the C48 rule), with
+        no zip disagreement; or
+      - it has NO street line at all and its zip matches a kept row - a
+        geo-only fragment. A premises row without a street is not a premises.
+    A folded row dies WHOLE: every CommercialStructure_*_<row> field goes with
+    it, so no orphan city/zip/description remnants survive (the live run
+    shipped exactly that orphan after a street-only blank). Rows with a
+    genuinely different street (two suites, two buildings) never fold -
+    normalized inequality keeps them.
+
+    SOURCE-AGNOSTIC since the second 2026-08-14 run, deliberately: the first
+    cut blanked only model-authored fields, and the very next run shipped the
+    SAME tripled premises through Pass 1 (the facts consolidator had a
+    three-variant deadlock, since fixed). A duplicate premises row is provably
+    wrong whichever door stamped it, and `_enforce_post_fill_guards`' own
+    charter is "corrects values from any source (Pass 1, alias, GPT)".
+    """
+    addr = re.compile(
+        rf"^{_PREMISES_ADDR_ROOT}_(LineOne|LineTwo|CityName|PostalCode)_([A-Z])$")
+    rows: Dict[str, Dict[str, str]] = {}
+    for f, v in mapped.items():
+        m = addr.match(f)
+        if m and v not in (None, "") and str(v).strip():
+            rows.setdefault(m.group(2), {})[m.group(1)] = f
+    if len(rows) < 2:
+        return []
+
+    def _street_key(comps: Dict[str, str]) -> str:
+        parts = [str(mapped[comps[c]]) for c in ("LineOne", "LineTwo") if c in comps]
+        return re.sub(r"[^a-z0-9]+", "", " ".join(parts).lower())
+
+    def _zip_key(comps: Dict[str, str]) -> str:
+        return re.sub(r"[^0-9]", "", str(mapped[comps["PostalCode"]])) \
+            if "PostalCode" in comps else ""
+
+    dropped: List[str] = []
+    kept: List[Tuple[str, str]] = []       # (street_key, zip_key)
+    for letter in sorted(rows):
+        comps = rows[letter]
+        s, z = _street_key(comps), _zip_key(comps)
+        if s:
+            duplicate = any(
+                ks and (s == ks or s.startswith(ks) or ks.startswith(s))
+                and (not z or not kz or z == kz)
+                for ks, kz in kept
+            )
+        else:
+            duplicate = bool(z) and any(z == kz for _, kz in kept)
+        if not duplicate:
+            kept.append((s, z))
+            continue
+        row_suffix = f"_{letter}"
+        for f in list(mapped.keys()):
+            if (f.startswith(_PREMISES_ROW_PREFIX) and f.endswith(row_suffix)
+                    and mapped.get(f) not in (None, "")):
+                logger.info(
+                    "guard DUPLICATE_PREMISES_ROW field=%s value=%r - row %s "
+                    "repeats an earlier premises row", f, str(mapped[f])[:50], letter,
+                )
+                mapped[f] = None
+                dropped.append(f)
+    return dropped
+
+
+def _drop_unanchored_party_rows(mapped: dict, schema: dict) -> List[str]:
+    """Blank a row-B..N box ACORD scopes to a named insured who does not exist.
+
+    Live 2026-08-14 ACORD 125: "DESCRIPTION OF OPERATIONS OF OTHER NAMED
+    INSUREDS" held "COMMERCIAL GENERAL CONTRA" on a package with ONE insured.
+    ACORD's own tooltip says what row B means - "As used here, this is the
+    description of operations for other named insureds" - so the anchor is
+    `NamedInsured_FullName_B`, a DIFFERENT field family, which is why the
+    existing unanchored-row sweep (same-family only) cannot see it.
+
+    A GUARD rather than a resolver, because the anchor is the STAMPED name, not
+    a fact: the first cut checked an `additional_named_insureds` fact and blanked
+    a genuinely different row-B narrative whose second insured had reached the
+    form by another route (`test_a_genuinely_different_row_b_narrative_survives`).
+    Whatever filled the name, if the name is there the row stands.
+    """
+    dropped: List[str] = []
+    for field, value in list(mapped.items()):
+        if value is None or not str(value).strip():
+            continue
+        m = re.search(r"_([B-N])$", field)
+        if not m or field.startswith("NamedInsured_"):
+            continue
+        meta = schema.get(field) if isinstance(schema, dict) else None
+        tu = str((meta or {}).get("tu") or "").lower()
+        if _PARTY_ROW_MARKER not in tu or "insured" not in tu:
+            continue
+        anchor = f"NamedInsured_FullName_{m.group(1)}"
+        if anchor not in (schema or {}):
+            continue
+        if str(mapped.get(anchor) or "").strip():
+            continue                       # that insured exists - row stands
+        logger.info(
+            "guard PARTY_ROW_WITHOUT_A_PARTY field=%s value=%r - %s is empty, "
+            "so there is no such named insured", field, str(value)[:60], anchor,
+        )
+        mapped[field] = None
+        dropped.append(field)
+    return dropped
+
+
+# ── A BOX ABOUT A PARTY WHO DOES NOT EXIST ───────────────────────────────────
+# Live 2026-08-14 ACORD 125: "DESCRIPTION OF OPERATIONS OF OTHER NAMED
+# INSUREDS" came back holding "COMMERCIAL GENERAL CONTRA" on a package with ONE
+# named insured. The box is `CommercialPolicy_OperationsDescription_B`, and
+# ACORD's own tooltip says what row B means: "As used here, this is the
+# description of operations for OTHER NAMED INSUREDS."
+#
+# So the anchor is not in this field's own family - it is
+# `NamedInsured_FullName_B`, and that box is empty because there is no second
+# insured. The existing unanchored-row sweep looks for a name INSIDE the same
+# prefix family and therefore cannot see this.
+#
+# The rule is ACORD's marker, not ours: a row-lettered field whose tooltip
+# carries the "As used here ... insured" party convention belongs to the
+# named insured at that row letter, and is blank when that insured has no name.
+# Swept across all 17 schemas: it identifies exactly one field today, which is
+# the honest count - it is a RULE rather than a special case, so a form edition
+# that adds another party-scoped row is covered without another patch.
+# The resolver signature is (field, facts) - no schema - so the tooltip reaches
+# it through a THREAD-LOCAL set by whichever form builder is running. Forms are
+# generated concurrently on `_FORM_EXECUTOR`, so a plain module global would
+# race and hand one form another form's tooltips.
+_SCHEMA_CTX = threading.local()
+
+
+def _set_schema_context(schema: Optional[dict]) -> None:
+    _SCHEMA_CTX.schema = schema if isinstance(schema, dict) else None
+
+
+def _field_meta(field_name: str) -> dict:
+    schema = getattr(_SCHEMA_CTX, "schema", None)
+    meta = (schema or {}).get(field_name)
+    return meta if isinstance(meta, dict) else {}
+
+
+_PARTY_ROW_MARKER = "as used here"
+
+
+def _resolve_party_scoped_row(field_name: str, facts: dict):
+    m = re.search(r"_([B-N])$", field_name or "")
+    if not m or (field_name or "").startswith("NamedInsured_"):
+        return _SCHED_SKIP
+    tu = str(_field_meta(field_name).get("tu") or "").lower()
+    if _PARTY_ROW_MARKER not in tu or "insured" not in tu:
+        return _SCHED_SKIP
+    roster = _fv(facts, "additional_named_insureds")
+    idx = _ROW_LETTER_TO_IDX[m.group(1)] - 1        # row B is the FIRST extra
+    if isinstance(roster, list) and 0 <= idx < len(roster) and roster[idx]:
+        return _SCHED_SKIP                          # that insured exists
+    return None
+
+
+def _single_row_schedule(field_name: str, facts: dict) -> bool:
+    """True when this field's schedule holds AT MOST ONE row.
+
+    THE GUARD ON THE ROW-A SCALAR FALLBACK, added 2026-08-14 after the fallback
+    shipped a real defect the day it landed. The fallback exists so a
+    package-level fact can fill row A of a schedule that has no value for that
+    column - "one premises, and the operations description lives on the policy
+    rather than the location". That reasoning holds for ONE row and collapses
+    for two: with a second location, row A's empty street is not an invitation
+    to stamp the HEAD OFFICE address into it.
+
+    Reproduced before this guard existed: two locations, row 1 carrying a city
+    ("Aurora") but no street, and `CommercialStructure_PhysicalAddress_LineOne_A`
+    came back "4800 DAHLIA ST # D13" - the Denver mailing address, printed as
+    the street of a building the document places in another town. Two different
+    premises merged into one row is worse than a blank street.
+
+    One row means the package-level fact and location 1 are the same thing.
+    Two or more, and blank is the correct answer.
+    """
+    m = _SCHED_ROW_RE.match(field_name or "")
+    if not m:
+        return True                       # not schedule-backed; nothing to gate
+    base = m.group(1)
+    defn = _SCHEDULE_REGISTRY.get(base)
+    if defn is None:
+        for prefix, d in _SCHEDULE_REGISTRY.items():
+            if base == prefix or base.startswith(prefix + "_") or base.endswith("_" + prefix):
+                defn = d
+                break
+    if defn is None:
+        return True
+    items = _fv(facts, defn.list_key)
+    return not isinstance(items, list) or len(items) <= 1
+
+
 def _resolve_gl_hazard_row(field_name: str, facts: dict):
     """Resolve an ACORD 126 schedule-of-hazards data cell from the structured
     `gl_class_code_schedule` fact.
@@ -5122,6 +5570,9 @@ def _deterministic_map(field_name: str, facts: dict):
     max_exposure = _resolve_max_vehicle_exposure(field_name, facts)
     if max_exposure is not _SCHED_SKIP:
         return max_exposure
+    payment_schedule = _resolve_payment_schedule(field_name, facts)
+    if payment_schedule is not _SCHED_SKIP:
+        return payment_schedule
     exposure_count = _resolve_exposure_count(field_name, facts)
     if exposure_count is not _SCHED_SKIP:
         return exposure_count
@@ -5177,7 +5628,8 @@ def _deterministic_map(field_name: str, facts: dict):
         # entry. So this fallback can never override or hide genuine partial
         # schedule data, and rows B/C/D+ are untouched - a document with real
         # per-location or per-line data still uses it, exactly as before.
-        if sched is None and field_name.endswith("_A"):
+        if sched is None and field_name.endswith("_A") \
+                and _single_row_schedule(field_name, facts):
             fallback = _resolve_via_field_rules(field_name, facts)
             if fallback is not None and fallback != "UNMATCHED":
                 return fallback
@@ -6767,7 +7219,13 @@ _PROMPT_SKELETON = (
     "       c) Whenever you answer \"Y\" and the form has a matching \"...Explanation\" or\n"
     "          \"...OtherDescription\" field for that question, ALSO fill that field with the\n"
     "          specific detail from the document (the same content as your grounding quote\n"
-    "          is fine).\n\n"
+    "          is fine).\n"
+    "       d) A PERCENTAGE field (an exposure share or split - '% of total sales',\n"
+    "          installation/service/repair work %, subcontracted %) follows the same\n"
+    "          discipline: fill it ONLY when the document states that percentage, and add\n"
+    "          its \"question_grounding\" entry - the VERBATIM sentence containing the\n"
+    "          number WITH its % sign. A percentage answer without that quote is\n"
+    "          discarded, so an unquoted percentage is a wasted answer.\n\n"
     "  9. ENTITY DISCIPLINE - a submission names several DIFFERENT parties: the APPLICANT\n"
     "     (the named insured the form is about), the PRODUCER/AGENCY submitting it, and\n"
     "     the CARRIER/INSURER issuing the policy (including its claims and servicing\n"
@@ -7081,6 +7539,10 @@ def _fill_unmatched_with_gpt(
     candidate_counts: Dict[str, Dict[str, int]] = {f: {} for f in field_list}
     all_raw_fields:   set                       = set()
     all_question_grounding: Dict[str, str]      = {}
+    # grounding_by_value[field][value] = the quote the model gave FOR THAT VALUE.
+    # The vote picks the value; this hands the winner its own citation instead of
+    # whichever chunk replied last (see _absorb).
+    grounding_by_value: Dict[str, Dict[str, str]] = {}
     # Permanently-failed LLM calls in this pass. A failed call returns {}, which
     # downstream looks identical to "the model answered nothing" — so without
     # this the fields simply come back blank and nobody knows a call died.
@@ -7793,7 +8255,8 @@ def _fill_unmatched_with_gpt(
     # cleanly afterward (field sub-batches are disjoint by construction).
     def _absorb(result: dict, sent: List[str], counts: Dict[str, Dict[str, int]],
                 raw_fields: set, grounding_out: Dict[str, str],
-                chunk_label: str = "1/1") -> None:
+                chunk_label: str = "1/1",
+                grounding_by_value: Optional[Dict[str, Dict[str, str]]] = None) -> None:
         values      = result.get("values",          {}) or {}
         raw_sourced = set(result.get("raw_text_sourced", []) or [])
         grounding   = result.get("question_grounding", {}) or {}
@@ -7871,6 +8334,18 @@ def _fill_unmatched_with_gpt(
             _quote = grounding.get(field)
             if _quote and str(_quote).strip():
                 grounding_out[field] = str(_quote).strip()
+                # ── ANSWER AND EVIDENCE, BOUND TOGETHER (2026-08-14) ──────────
+                # `counts` decides the value by MAJORITY VOTE across chunks;
+                # `grounding_out` was last-write-wins. On a 7-chunk package
+                # (683k chars / 112k per call, with rescan auto-on) that means a
+                # "Yes" can win the vote and inherit the quote from the chunk
+                # that answered "No" - and the gate then judges, and the form
+                # then PRINTS, a citation belonging to a different answer.
+                # Keyed by (field, value) here so the winner can collect its
+                # OWN evidence at selection time. The outward contract
+                # (`question_grounding: {field: quote}`) is unchanged.
+                if grounding_by_value is not None:
+                    grounding_by_value.setdefault(field, {})[vstr] = str(_quote).strip()
             filled_count += 1
 
         logger.info(
@@ -8048,12 +8523,14 @@ def _fill_unmatched_with_gpt(
         local_counts: Dict[str, Dict[str, int]] = {}
         local_raw: set = set()
         local_grounding: Dict[str, str] = {}
+        local_gbv: Dict[str, Dict[str, str]] = {}
         _consume_context_overflow()        # start clean; ignore another batch's flag
         for _attempt in range(max(1, _CONTEXT_SHRINK_ATTEMPTS)):
             budget_before = _effective_budget_chars
             local_counts = {}
             local_raw = set()
             local_grounding = {}
+            local_gbv = {}
             chunks = _split_raw_text(batch_fields)
             # THE ESCALATION LADDER (CALL2_RETRIEVAL_REDESIGN §3). `_order` is a
             # PERMUTATION of every chunk index, best-evidenced first — not a
@@ -8150,7 +8627,8 @@ def _fill_unmatched_with_gpt(
                 )
                 result = _call_llm_sync(prompt)
                 _absorb(result, active_fields, local_counts, local_raw, local_grounding,
-                        chunk_label=f"{batch_label}:{chunk_idx + 1}/{len(chunks)}")
+                        chunk_label=f"{batch_label}:{chunk_idx + 1}/{len(chunks)}",
+                        grounding_by_value=local_gbv)
                 if _consume_context_overflow():
                     # OUR OWN call overflowed (not a sibling thread's — see
                     # `_overflow_state`). Re-split against the reduced budget.
@@ -8162,14 +8640,14 @@ def _fill_unmatched_with_gpt(
                 # flag is required here because BOTH of those exits and the
                 # overflow exit use `break`, so a `for/else` cannot tell them
                 # apart and would re-run a batch that had already succeeded.
-                return local_counts, local_raw, local_grounding
+                return local_counts, local_raw, local_grounding, local_gbv
             logger.warning(
                 "gpt_fill: batch=%s re-splitting against the reduced budget (%d -> %d chars)",
                 batch_label, budget_before, _effective_budget_chars,
             )
-        return local_counts, local_raw, local_grounding
+        return local_counts, local_raw, local_grounding, local_gbv
 
-    def _merge(local_counts, local_raw, local_grounding):
+    def _merge(local_counts, local_raw, local_grounding, local_gbv=None):
         # Runs on the main thread only (from the as_completed / direct path), so
         # no lock is needed. Sub-batches are disjoint, so this is effectively a
         # plain fill of pre-initialised candidate_counts buckets.
@@ -8179,6 +8657,8 @@ def _fill_unmatched_with_gpt(
                 candidate_counts[f][v] = candidate_counts[f].get(v, 0) + c
         all_raw_fields.update(local_raw)
         all_question_grounding.update(local_grounding)
+        for f, vmap in (local_gbv or {}).items():
+            grounding_by_value.setdefault(f, {}).update(vmap)
 
     # ── Dedicated compliance Yes/No question pass ─────────────────────────────
     # Yes/No underwriting questions are pulled OUT of the general field-fill and
@@ -8346,6 +8826,9 @@ def _fill_unmatched_with_gpt(
                 q = (quotes or {}).get(fld)
                 if q and str(q).strip():
                     all_question_grounding[fld] = str(q).strip()
+                    # Bound to THIS answer, same reason as _absorb's copy: the
+                    # compliance pass also runs in batches whose answers merge.
+                    grounding_by_value.setdefault(fld, {})[vstr] = str(q).strip()
                 kept += 1
 
         if len(batches) <= 1:
@@ -8617,6 +9100,7 @@ def _fill_unmatched_with_gpt(
         local_counts: Dict[str, Dict[str, int]] = {}
         local_raw: set = set()
         local_grounding: Dict[str, str] = {}
+        local_gbv: Dict[str, Dict[str, str]] = {}
         for _pi, _part in enumerate(_dec_index_parts):
             active = [f for f in batch_fields if f not in local_counts]
             if not active:
@@ -8630,8 +9114,9 @@ def _fill_unmatched_with_gpt(
             )
             _absorb(_call_llm_sync(prompt), active, local_counts, local_raw,
                     local_grounding,
-                    chunk_label=f"{batch_label}:INDEX{_pi + 1}/{len(_dec_index_parts)}")
-        return local_counts, local_raw, local_grounding
+                    chunk_label=f"{batch_label}:INDEX{_pi + 1}/{len(_dec_index_parts)}",
+                    grounding_by_value=local_gbv)
+        return local_counts, local_raw, local_grounding, local_gbv
 
     if _dec_index_parts:
         _a_batches = _pack_field_batches(other_fields, _FIELD_FILL_BATCH)
@@ -8786,7 +9271,8 @@ def _fill_unmatched_with_gpt(
             )
             _absorb(_call_llm_sync(prompt), active, candidate_counts,
                     all_raw_fields, all_question_grounding,
-                    chunk_label=f"I2:{ci + 1}/{_chunk_index.n}")
+                    chunk_label=f"I2:{ci + 1}/{_chunk_index.n}",
+                    grounding_by_value=grounding_by_value)
 
     try:
         _sweep_unread_chunks()
@@ -8798,11 +9284,27 @@ def _fill_unmatched_with_gpt(
     # ── Conflict resolution ───────────────────────────────────────────────────
     # Among candidates from multiple chunks, the most-frequent value wins (majority vote).
     all_filled: dict = {}
+    _rebound = 0
     for field, candidates in candidate_counts.items():
         if not candidates:
             continue
         # Majority vote across chunks — raw text is the ground truth
-        all_filled[field] = max(candidates, key=lambda v: candidates[v])
+        _winner = max(candidates, key=lambda v: candidates[v])
+        all_filled[field] = _winner
+        # THE WINNER COLLECTS ITS OWN CITATION. Without this the quote is
+        # whichever chunk answered LAST, which on a multi-chunk package can be
+        # the chunk that gave the opposite answer - and that quote is what the
+        # evidence gate judges and what the Explanation box prints.
+        _own = (grounding_by_value.get(field) or {}).get(_winner)
+        if _own and all_question_grounding.get(field) != _own:
+            all_question_grounding[field] = _own
+            _rebound += 1
+    if _rebound:
+        logger.info(
+            "gpt_fill EVIDENCE_REBOUND form=%s fields=%d - the majority-vote "
+            "winner carried another answer's citation; each now carries its own",
+            form_id, _rebound,
+        )
 
     # ── Deduplication: remove values duplicated across repeating-slot siblings ─
     # Safety net for when the LLM assigns the same value to multiple _A/_B/_C
@@ -9210,6 +9712,8 @@ def compute_form_gaps(form_id: str, schema: dict, facts: dict) -> Tuple[dict, di
     if not schema:
         return {}, {}, set()
 
+    # Tooltip-driven resolvers read the schema through this thread-local.
+    _set_schema_context(schema)
     mapped: dict = {}
     unmatched: dict = {}
     deterministic_filled: set = set()
@@ -9245,7 +9749,7 @@ def compute_form_gaps(form_id: str, schema: dict, facts: dict) -> Tuple[dict, di
         if sched is not _SCHED_SKIP:
             if sched is not None and not _is_empty_llm_value(sched):
                 mapped[field] = sched
-            elif field.endswith("_A"):
+            elif field.endswith("_A") and _single_row_schedule(field, facts):
                 # MIRROR `_deterministic_map`'s row-A scalar fallback. Without
                 # this, the schedule branch short-circuits and Pass 1 is never
                 # consulted - so an `_ACORD_FIELD_RULES` entry for a field that
@@ -11571,7 +12075,14 @@ def _quote_grounds_claim(quote: str, haystack_norm: str, sentences: Optional[Lis
     if not raw:
         return False
     needle = _normalize_for_search(raw)
-    if len(needle.replace(" ", "")) < 12:   # too short to be a real excerpt, not a value
+    # LOWERED 12 -> 6 on 2026-08-14. The floor exists so a two-letter fragment
+    # cannot match trivially, but 12 was measured to be above real evidence:
+    # "Direct Bill" normalizes to 10 characters, so the phrase this package
+    # prints on all four section dec pages could NEVER ground anything - and
+    # the box duly shipped "No" against four printed DIRECT BILLs. 6 keeps the
+    # anti-fragment purpose (nothing under two short words qualifies) without
+    # excluding short printed VALUES, which are exactly what a dec page states.
+    if len(needle.replace(" ", "")) < 6:
         return False
     if needle in haystack_norm:
         return True
@@ -11675,9 +12186,66 @@ def _is_generic_boilerplate_reuse(
 # branch drops the bogus "No" while keeping a documented explicit "No" (e.g.
 # "no prior cancellations"). Its failure mode is safe - a real "No" phrased
 # without any negation word is rare and merely left blank for ARQ.
+#
+# TWO CORRECTIONS, 2026-08-14, both measured rather than reasoned about:
+#
+# 1. "no" IS THE ABBREVIATION FOR "NUMBER", and every declarations page prints
+#    it - "Policy No. BBC7263", "FEIN No. 84-2210987", "AGENT NO. W6258". The
+#    bare `\bno\b` therefore licensed almost ANY borrowed dec line as proof of
+#    a "No": 4 of 4 junk strings admitted in the reproduction. The code already
+#    knew this - `_COVERAGE_DENIAL_RE`'s comment says "'no' is also the
+#    abbreviation for number" and keeps the broad cue off the Yes side - the
+#    knowledge simply was never applied here. `_strip_number_abbreviations`
+#    removes those occurrences BEFORE the cue test, so "no prior cancellations"
+#    still reads as a negation and "Policy No. BBC7263" no longer does.
+#
+# 2. `free|clear|clean` are not negation cues in insurance prose. "toll free",
+#    "free-standing masonry", "clearance" - all admitted. Bare `free` is gone;
+#    `-free` (asbestos-free) stays, because a hyphenated compound genuinely
+#    negates. Removing a cue can only make the "No" side STRICTER, i.e. fail
+#    toward blank, which is the standing preference.
+#
+# What this does NOT fix is the other half: a genuine implied "No" carries no
+# negation word at all ("All vehicles are owned by the applicant"), and no word
+# list can see that. That is implication, and it is the evidence JUDGE's job
+# (`_judge_evidence_batch`) - this regex is now only the cheap pre-filter.
+# TWO SHAPES, both requiring positive evidence that this "no" is an identifier
+# label rather than a denial. The first cut was `\bno[.:]?\s*(?=[#A-Z0-9])` with
+# re.I - and re.I makes [A-Z] match lowercase, so it stripped the "no" out of
+# "no prior cancellations" and blanked a legitimate No. The suite caught it
+# immediately. Both shapes below are unreachable by a genuine negation:
+#   1. "No." / "No:" followed by a token CONTAINING A DIGIT - "Policy No.
+#      BBC7263", "FEIN No. 84-2210987". A denial is never punctuated that way.
+#   2. A known identifier label directly before it - "POLICY NO 6E7-40-02",
+#      "AGENT NO W6258" - which is how dec pages print it without a period.
+# An all-caps document ("THE APPLICANT HAS NO PRIOR CANCELLATIONS") is safe on
+# both: no period, no digit, no label word.
+_NUMBER_ABBREV_RE = re.compile(
+    r"\bno[.:]\s*(?=\S*\d)"
+    r"|\b(?:policy|agent|account|item|form|fein|tax|serial|vin|claim"
+    r"|certificate|licen[cs]e|id)\s+no\b\.?\s*",
+    re.I,
+)
+
+# Boxes that ask whether a COVERAGE EXISTS on this policy, as opposed to
+# whether an EXPOSURE exists at the applicant. For these - and only these - a
+# printed declarations coverage line is the correct evidence rather than a
+# disqualifying artifact. See the exemption in `_evidence_supports`.
+_COVERAGE_EXISTENCE_FIELD_RE = re.compile(r"Policy_LineOfBusiness_")
+
+
+def _strip_number_abbreviations(text: str) -> str:
+    """Remove "No." used as the abbreviation for NUMBER, so the negation cue
+    below cannot read an identifier label as a denial. Only strips when what
+    follows looks like an identifier (a digit, a '#', or an uppercase code
+    character) - "no claims" and "no subsidiaries" are untouched because a
+    lowercase word follows."""
+    return _NUMBER_ABBREV_RE.sub(" ", str(text or ""))
+
+
 _NEGATION_CUE_RE = re.compile(
-    r"\b(no|not|none|never|without|nor|neither|nil|cannot|lack|absence|"
-    r"free|clear|clean)\b|n't\b|-free\b"
+    r"\b(no|not|none|never|without|nor|neither|nil|cannot|lack|absence)\b"
+    r"|n't\b|-free\b"
 )
 
 
@@ -12818,7 +13386,8 @@ def _is_coverage_artifact_text(text: Any, dec_lines: frozenset, facts: dict) -> 
             or bool(_QUOTE_CTA_RE.match(str(text or "")))
             or _is_name_only_record_echo(text, facts)
             or _is_contract_wording(text)
-            or _is_identity_address_echo(text, facts)):
+            or _is_identity_address_echo(text, facts)
+            or _is_applicant_attribute_echo(text, facts)):
         return True
     # ── THE COLON ESCAPE ─────────────────────────────────────────────────────
     # `_DATA_PAYLOAD_RE` exempts anything shaped "LABEL: value" from the
@@ -12844,7 +13413,8 @@ def _is_coverage_artifact_text(text: Any, dec_lines: frozenset, facts: dict) -> 
                 or _is_contract_wording(_tail)
                 or _is_identity_address_echo(_tail, facts)
                 or _is_line_of_business_name(_tail)
-                or _is_labelled_fact_echo(_tail, facts)):
+                or _is_labelled_fact_echo(_tail, facts)
+                or _is_applicant_attribute_echo(_tail, facts)):
             return True
     return False
 
@@ -12909,6 +13479,56 @@ def _is_identity_address_echo(text: Any, facts: dict) -> bool:
         fact_digits = set(re.findall(r"\d+", str(val)))
         if fact_digits and all(d in fact_digits for d in digit_runs):
             return True
+    return False
+
+
+# ── The applicant's NAMEPLATE offered as evidence ────────────────────────────
+# Live 2026-08-14 run 4, and the same string had already driven the colon
+# escape once: ACORD 125 Q3 "any exposure to flammables?" = Y and Q6 "any past
+# losses relating to abuse or molestation?" = Y, both carried by "BUSINESS
+# DESC: COMMERCIAL GENERAL CONTRA" - the dec page's truncated business
+# description - riding the EXPLANATION path (a Yes survives on a paired
+# explanation, and the colon escape's tail checks knew coverage lines,
+# schedule items, names and contract wording, but not THIS: the applicant's
+# own attribute value). Who the applicant IS can never evidence what HAPPENED
+# to them - the same reasoning as the address echo above, one attribute over.
+#
+# Equality-only against three identity facts, with a length floor of 8:
+# "LLC" (entity type) stays legitimate evidence - short codes ARE answers
+# (test_a_quote_carrying_real_data_still_grounds_a_yes) - while multi-word
+# nameplates ("COMMERCIAL GENERAL CONTRA", "ORBIN CONTRACTING LLC") are
+# caught. operations_description is deliberately EXCLUDED: the full
+# classification text legitimately grounds subcontractor-related answers, and
+# judging that would be the banned topic matching.
+_IDENTITY_ATTRIBUTE_FACT_KEYS = ("applicant_name", "dba_name", "contractor_type")
+
+
+def _is_applicant_attribute_echo(text: Any, facts: dict) -> bool:
+    n = _normalize_for_search(str(text or ""))
+    if len(n) < 8:
+        return False
+    for key in _IDENTITY_ATTRIBUTE_FACT_KEYS:
+        v = _normalize_for_search(str(_fv(facts, key) or ""))
+        if len(v) >= 8 and n == v:
+            return True
+    # The FACT keys jitter run-to-run (contractor_type has three competing
+    # candidates on the live package, and the run that shipped this defect had
+    # merged a different one, which is exactly how the labelled-fact echo went
+    # blind). The verified INDEX does not jitter the same way: an entry the
+    # extraction attributed to the APPLICANT is an identity attribute from the
+    # dec header - who they are, where they sit, what they call themselves -
+    # and can never evidence that an event happened. Same equality + length
+    # floor, so "LLC" stays a legitimate short answer.
+    entries = (facts or {}).get("dec_page_entries")
+    if isinstance(entries, list):
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            if str(e.get("owner") or "").strip().lower() != "applicant":
+                continue
+            v = _normalize_for_search(str(e.get("value") or ""))
+            if len(v) >= 8 and n == v:
+                return True
     return False
 
 
@@ -13081,8 +13701,12 @@ def _final_yn_coherence(mapped: dict, schema: dict, form_id: str,
 def _quote_expresses_negative(quote: str) -> bool:
     """True when the quote contains an explicit negation cue - the hallmark of
     a real 'the document says NO' statement, as opposed to a positive
-    descriptive sentence the model grabbed at random."""
-    return bool(_NEGATION_CUE_RE.search((quote or "").lower()))
+    descriptive sentence the model grabbed at random.
+
+    Identifier labels ("Policy No. BBC7263") are stripped first: "No." there is
+    the abbreviation for NUMBER, not a denial. See `_NUMBER_ABBREV_RE`."""
+    return bool(_NEGATION_CUE_RE.search(
+        _strip_number_abbreviations(quote or "").lower()))
 
 
 # ── Dedicated umbrella-period pass (ACORD 131 only) ───────────────────────────
@@ -13234,6 +13858,163 @@ def _fetch_umbrella_period_sync(raw_text: str) -> Optional[dict]:
     return dict(found)
 
 
+# ── THE EVIDENCE JUDGE ───────────────────────────────────────────────────────
+# WHY THIS EXISTS, and why it is an LLM call in a codebase that prefers
+# deterministic rules everywhere else.
+#
+# The owner's rule for every Yes/No box is: "if we have conclusive evidence of
+# either that says yes or no, only then stamp; if no conclusion, leave it
+# blank." That is a question about IMPLICATION - does this sentence support
+# this answer to this question - and implication is not a property of
+# vocabulary. Sixteen stacked regexes were approximating it, and the measured
+# result was that each fix relocated the failure rather than closing it:
+#
+#   * `_NEGATION_CUE_RE` admitted 4 of 4 dec-page identifier lines as proof of
+#     "No" (`Policy No. BBC7263`) and rejected 3 of 3 genuine implied "No"s
+#     ("All vehicles are owned by the applicant" answering "any vehicles NOT
+#     solely owned?"). The word-list fix above closes the first half; no word
+#     list can close the second.
+#   * `_quote_asserts_something` + `_DATA_PAYLOAD_RE` make "contains a digit or
+#     a colon" the operative definition of a statement, so "Symbol 07" counts
+#     as evidence and "Roofing, gutter and siding installation on residential
+#     structures" does not.
+#
+# So the deterministic layer keeps doing the ONE thing it is genuinely good at
+# - proving a quote is really in the document, and recognising the structural
+# artifacts (coverage lines, contract wording, nameplates) that are never
+# applicant facts - and this judges the one thing it cannot.
+#
+# THREE PROPERTIES THAT MAKE THIS SAFE TO ADD:
+#   1. FAIL-SAFE. Any failure - no API key, a timeout, a malformed reply, an
+#      unparseable verdict - returns "no opinion" for that field and the
+#      deterministic decision stands unchanged. Offline (every test, every CI
+#      run) it is a no-op by construction, which is why the suite's existing
+#      expectations are untouched.
+#   2. BOUNDED. Only fields that already carry an answer AND a quote are
+#      judged, batched `_JUDGE_BATCH` at a time: ~100-300 fields on a real
+#      package, so ~10-15 small calls. It reads no document text.
+#   3. SYMMETRIC. It can reject a kept answer OR rescue a blanked one, so it
+#      corrects in both directions instead of only tightening.
+#
+# Set EVIDENCE_JUDGE=0 to disable and keep the pure-deterministic gate.
+_EVIDENCE_JUDGE_ENABLED = os.getenv(
+    "EVIDENCE_JUDGE", "1").strip().lower() not in ("0", "false", "no")
+_JUDGE_BATCH = int(os.getenv("EVIDENCE_JUDGE_BATCH", "20"))
+_JUDGE_MAX_FIELDS = int(os.getenv("EVIDENCE_JUDGE_MAX_FIELDS", "400"))
+
+_JUDGE_SYSTEM_PROMPT = (
+    "You verify insurance form answers against their cited evidence. You judge "
+    "ONE thing: does the quoted sentence, read plainly, support that answer to "
+    "that question?\n\n"
+    "Return JSON: {\"verdicts\": [{\"id\": string, \"supports\": true|false}]}\n\n"
+    "RULES\n"
+    "1. Judge SUPPORT, not topic overlap. A quote may use none of the "
+    "question's words and still answer it: \"All vehicles are owned by the "
+    "applicant\" SUPPORTS \"No\" to \"are any vehicles not solely owned by the "
+    "applicant?\". That is the whole reason you are here.\n"
+    "2. A quote about a DIFFERENT subject does not support the answer, however "
+    "well it matches in tone. \"No roofing is performed\" does not answer a "
+    "question about hazardous materials.\n"
+    "3. The POLICY describing its own coverage, exclusions, definitions or "
+    "premiums is never evidence about the applicant's operations or history. A "
+    "printed coverage line, a limit, an endorsement title or a premium is what "
+    "the insurer promises, not what the applicant does or has experienced.\n"
+    "4. An identifier, label or nameplate (a policy number, an address, the "
+    "business description, a person's name) states who or what something is. It "
+    "can never establish that an event happened or an exposure exists.\n"
+    "5. For a coverage-existence question (\"is this line of business on the "
+    "policy?\"), a printed declarations line granting that coverage DOES "
+    "support \"Yes\" - that is exactly the right evidence for that question.\n"
+    "6. When the quote leaves the answer genuinely undecided, return false. "
+    "Blank is the correct outcome of insufficient evidence; a wrong answer on "
+    "an insurance application is not.\n"
+    "7. Judge every id you are given, and return no ids you were not given."
+)
+
+_JUDGE_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "evidence_verdicts",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "verdicts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "supports": {"type": "boolean"},
+                        },
+                        "required": ["id", "supports"],
+                        "additionalProperties": False,
+                    },
+                },
+            },
+            "required": ["verdicts"],
+            "additionalProperties": False,
+        },
+        "strict": True,
+    },
+}
+
+
+def _judge_evidence_batch(items: List[dict], form_id: str = "") -> Dict[str, bool]:
+    """Ask whether each quote supports its answer. Never raises.
+
+    `items`: [{"id", "question", "answer", "quote"}]. Returns {id: bool} for
+    the ids the model actually judged - an id absent from the result means NO
+    OPINION, and every caller must leave the deterministic decision alone for
+    those. That asymmetry is deliberate: silence must never be read as a
+    verdict, or a failed call would blank a form.
+    """
+    if not _EVIDENCE_JUDGE_ENABLED or not items:
+        return {}
+    items = items[:_JUDGE_MAX_FIELDS]
+    try:
+        _client = _get_openai_form_fill_client_sync()
+    except Exception as exc:                               # noqa: BLE001
+        logger.info("evidence_judge: unavailable (%s) - deterministic gate stands", exc)
+        return {}
+    out: Dict[str, bool] = {}
+    from utils.llm_limiter import llm_slot_sync
+    for _start in range(0, len(items), max(1, _JUDGE_BATCH)):
+        _slice = items[_start:_start + max(1, _JUDGE_BATCH)]
+        lines = []
+        for it in _slice:
+            lines.append(
+                f"- id: {it['id']}\n"
+                f"  question: {str(it.get('question') or '')[:300]}\n"
+                f"  answer: {str(it.get('answer') or '')[:20]}\n"
+                f"  quote: {str(it.get('quote') or '')[:400]}"
+            )
+        user_msg = "Judge each item.\n\n" + "\n".join(lines)
+        try:
+            with llm_slot_sync():
+                resp = _client.chat.completions.create(
+                    model=GPT_MODEL,
+                    messages=[
+                        {"role": "system", "content": _JUDGE_SYSTEM_PROMPT},
+                        {"role": "user",   "content": user_msg},
+                    ],
+                    temperature=GPT_TEMPERATURE,
+                    response_format=_JUDGE_RESPONSE_FORMAT,
+                    max_completion_tokens=2000,
+                )
+            _log_llm_spend("evidence_judge", form_id or "-", resp)
+            parsed = json.loads(resp.choices[0].message.content or "{}")
+        except Exception as exc:                           # noqa: BLE001
+            logger.warning("evidence_judge: batch failed (%s) - those fields keep "
+                           "their deterministic decision", exc)
+            continue
+        _ids = {it["id"] for it in _slice}
+        for v in (parsed.get("verdicts") or []):
+            if isinstance(v, dict) and v.get("id") in _ids \
+                    and isinstance(v.get("supports"), bool):
+                out[str(v["id"])] = bool(v["supports"])
+    return out
+
+
 async def _fetch_umbrella_period(raw_text: str) -> Optional[dict]:
     """Async wrapper kept for the awaiting caller (extraction_pipeline).
 
@@ -13275,6 +14056,7 @@ def map_facts_to_form(
         COPE fields via apply_acord140_missing_field_highlights — also feeds the download
         hard-block in field_qa.py, unlike plain "missing_required")
     """
+    _set_schema_context(schema)
     if not schema:
         return {}, {}
 
@@ -13422,7 +14204,7 @@ def map_facts_to_form(
         # to GPT — we know the row doesn't exist).
         sched = _resolve_schedule_row(field, facts)
         if sched is not _SCHED_SKIP:
-            if sched is None and field.endswith("_A"):
+            if sched is None and field.endswith("_A")                     and _single_row_schedule(field, facts):
                 # Same mirror as `compute_form_gaps` - see the long note there.
                 # Row A answering None means "the list is empty" OR "row 1 has
                 # nothing in this column"; the second case must still get Pass
@@ -13671,7 +14453,23 @@ def map_facts_to_form(
     # Deterministic (Pass 1 / alias) values never enter gpt_filled_set, so they
     # are untouched here - a checkbox Pass 1 (or alias stamping) already filled
     # from a real extracted fact is never re-litigated by this gate.
+    # THE HAYSTACK INCLUDES THE INDEX, and that is not a relaxation (2026-08-14).
+    # Stage A shows the model the rendered declarations index and asks it to cite
+    # its evidence; the index renders as "Label: value  [owner]" lines that exist
+    # in OUR prompt, not verbatim in the document. So a model that correctly
+    # quoted what it was given failed the gate and its answer was blanked - and
+    # because Stage A removes answered fields from Stage B, there was no second
+    # chance. Every index entry has ALREADY passed `_verify_dec_entries`' literal
+    # -presence check against this document, so accepting index text admits
+    # nothing the document does not print; it just admits it in the shape the
+    # model was handed. Fields answered from the raw walk are unaffected.
     _evidence_hay = _normalize_for_search(raw_text) if raw_text else ""
+    try:
+        _index_text = _render_dec_index((facts or {}).get("dec_page_entries"))
+    except Exception:                                      # noqa: BLE001
+        _index_text = ""
+    if _index_text:
+        _evidence_hay = (_evidence_hay + " " + _normalize_for_search(_index_text)).strip()
     # Per-sentence split for _quote_grounds_claim's paraphrase fallback - kept
     # as ORIGINAL (unnormalized) text so _sim_tokens can tokenize each sentence
     # independently. Split is intentionally simple (sentence-ending punctuation
@@ -13987,13 +14785,32 @@ def map_facts_to_form(
             # or an instruction addressed to the reader - grants or describes
             # coverage; it never reports an applicant fact. THE 2026-08-13
             # ACORD 127 root cause - see _is_coverage_artifact_text.
-            if not negative and _is_coverage_artifact_text(quote, _dec_lines, facts):
+            #
+            # ONE EXEMPTION, and it is the question's own subject matter that
+            # earns it (2026-08-14): a COVERAGE-EXISTENCE box asks "is this line
+            # of business on the policy?", and a printed declarations line
+            # granting that coverage is not merely admissible evidence - it is
+            # the ONLY evidence that can exist. Rejecting artifacts here made
+            # those boxes unevidenceable by construction: nothing the model
+            # could ever cite would be accepted. Scoped by field NAME to the
+            # `Policy_LineOfBusiness_*` family, so every exposure question
+            # ("do you transport hazmat?") keeps the full artifact rule - that
+            # is the mention-versus-grant distinction, and it stays intact.
+            # `_COVERAGE_DENIAL_RE` above still blocks the inverse: a line that
+            # reads "Property - No Coverage" can never tick the Property box.
+            if (not negative and not _COVERAGE_EXISTENCE_FIELD_RE.search(field or "")
+                    and _is_coverage_artifact_text(quote, _dec_lines, facts)):
                 logger.info(
                     "evidence_gate QUOTE_IS_COVERAGE_ARTIFACT form=%s field=%s "
                     "quote=%r", form_id or "unknown", field, str(quote)[:120],
                 )
                 return False
             return True
+
+        # Decisions the semantic judge may revisit - see _judge_evidence_batch.
+        # Populated during Pass A, resolved in one batched call afterwards so a
+        # per-field call is never made.
+        _judge_review: List[dict] = []
 
         # ── Pass A: validate each answered Yes/No field (see _is_gated_field) ──
         for q_field in list(gpt_filled_set):
@@ -14206,22 +15023,117 @@ def map_facts_to_form(
                     "explanation" if exp_present else "quote",
                     str(quote or "")[:200],
                 )
+                _judge_review.append({
+                    "id": q_field, "answer": "Yes", "exp_field": exp_field,
+                    "quote": str(exp_val if exp_present else (quote or "")).strip(),
+                    "kept": True, "value": mapped.get(q_field),
+                })
             elif v in _NEGATIVE_VALUES:
                 if _evidence_supports(quote, negative=True,
                                       allow_paraphrase=exp_field is not None,
                                       field=q_field):
                     if exp_field:
                         mapped[exp_field] = None       # a "No" needs no explanation
+                    _judge_review.append({
+                        "id": q_field, "answer": "No", "exp_field": exp_field,
+                        "quote": str(quote or "").strip(), "kept": True,
+                        "value": mapped.get(q_field),
+                    })
                 else:
+                    # THE RESCUE CASE (2026-08-14). A "No" is blanked here for two
+                    # very different reasons and only one of them is a real
+                    # rejection: either the quote is not in the document (a
+                    # fabrication - stays blanked, no appeal), or the quote IS in
+                    # the document but carries no negation WORD. The second is the
+                    # measured false negative: "All vehicles are owned by the
+                    # applicant" answers "any vehicles NOT solely owned?" with a
+                    # plain No and contains no cue. Queue those - and only those -
+                    # for the judge, which reads implication instead of vocabulary.
+                    _rescuable = bool(
+                        quote and _evidence_hay
+                        and _quote_grounds_claim(quote, _evidence_hay,
+                                                 _evidence_sentences if exp_field else None)
+                        and not _quote_expresses_negative(quote)
+                    )
+                    _prev_val, _prev_exp = mapped.get(q_field), (
+                        mapped.get(exp_field) if exp_field else None)
                     mapped[q_field] = None             # ungrounded "No" -> blank
                     if exp_field:
                         mapped[exp_field] = None
                     _gated += 1
+                    if _rescuable:
+                        _judge_review.append({
+                            "id": q_field, "answer": "No", "exp_field": exp_field,
+                            "quote": str(quote or "").strip(), "kept": False,
+                            "value": _prev_val, "exp_value": _prev_exp,
+                        })
             else:
                 mapped[q_field] = None                 # not a valid Y/N token
                 if exp_field:
                     mapped[exp_field] = None
                 _gated += 1
+
+        # ── Pass A2: the semantic judge ───────────────────────────────────────
+        # One batched call decides what no word list can: does this quote
+        # actually support this answer to this question? It reviews BOTH
+        # directions - rejecting a kept answer whose evidence does not support
+        # it, and restoring a "No" that was blanked only because its genuine
+        # implied denial contained no negation word.
+        #
+        # SILENCE IS NOT A VERDICT. A field the judge does not return keeps its
+        # deterministic decision, so a failed call, a missing API key or an
+        # offline test run changes nothing at all.
+        if _judge_review:
+            try:
+                _j_items = []
+                for _it in _judge_review:
+                    if not str(_it.get("quote") or "").strip():
+                        continue
+                    _tu = str((schema.get(_it["id"]) or {}).get("tu") or "")
+                    _j_items.append({
+                        "id": _it["id"], "answer": _it["answer"],
+                        "quote": _it["quote"],
+                        "question": _compliance_question_text(_tu) or _tu,
+                    })
+                _verdicts = _judge_evidence_batch(_j_items, form_id or "")
+                _j_rejected = _j_rescued = 0
+                for _it in _judge_review:
+                    _v = _verdicts.get(_it["id"])
+                    if _v is None:
+                        continue                       # no opinion -> stand pat
+                    if _it["kept"] and _v is False:
+                        mapped[_it["id"]] = None
+                        if _it.get("exp_field"):
+                            mapped[_it["exp_field"]] = None
+                        _gated += 1
+                        _j_rejected += 1
+                        logger.info(
+                            "evidence_judge REJECTED form=%s field=%s answer=%s "
+                            "quote=%r - the cited sentence does not support this "
+                            "answer", form_id or "unknown", _it["id"],
+                            _it["answer"], str(_it["quote"])[:120],
+                        )
+                    elif not _it["kept"] and _v is True:
+                        mapped[_it["id"]] = _it.get("value")
+                        if _it.get("exp_field") and _it.get("exp_value"):
+                            mapped[_it["exp_field"]] = _it["exp_value"]
+                        _gated = max(0, _gated - 1)
+                        _j_rescued += 1
+                        logger.info(
+                            "evidence_judge RESCUED form=%s field=%s answer=%s "
+                            "quote=%r - a genuine implied answer the negation-cue "
+                            "test could not see", form_id or "unknown", _it["id"],
+                            _it["answer"], str(_it["quote"])[:120],
+                        )
+                if _verdicts:
+                    logger.info(
+                        "evidence_judge form=%s reviewed=%d judged=%d rejected=%d "
+                        "rescued=%d", form_id or "unknown", len(_j_items),
+                        len(_verdicts), _j_rejected, _j_rescued,
+                    )
+            except Exception as _je:                       # noqa: BLE001
+                logger.warning("evidence_judge skipped (form=%s): %s",
+                               form_id or "unknown", _je)
 
         # ── Pass C: promote via non-adjacent companion fields ─────────────────
         # Mirrors Pass B's "rescue a stranded grounded Yes" but for the
@@ -14325,6 +15237,46 @@ def map_facts_to_form(
 
     # ── Guard: a NAIC number labelled for one entity, stamped for another ─────
     _dropped_naic = _drop_mislabeled_naic_codes(mapped, raw_text, gpt_filled_set)
+
+    # ── Guard: a percentage nothing states, and a row about a party who is
+    # not on the form. Both were live 2026-08-14 ACORD 125 defects, and both
+    # are stated once by RULE rather than per-box: 74 percentage fields across
+    # 8 forms, and ACORD's own "As used here ... insured" row convention.
+    try:
+        _dropped_pct = _drop_unstated_percentages(mapped, raw_text, gpt_filled_set,
+                                                  gpt_question_grounding)
+        for _f in _dropped_pct:
+            gpt_filled_set.discard(_f)
+    except Exception as _pct_ex:                          # noqa: BLE001
+        logger.warning("percentage guard skipped (form=%s): %s", form_id, _pct_ex)
+        _dropped_pct = []
+    try:
+        _dropped_party = _drop_unanchored_party_rows(mapped, schema)
+        for _f in _dropped_party:
+            gpt_filled_set.discard(_f)
+    except Exception as _pr_ex:                           # noqa: BLE001
+        logger.warning("party-row guard skipped (form=%s): %s", form_id, _pr_ex)
+        _dropped_party = []
+
+    # ── Guard: an Additional Interest assembled from other parties' details,
+    # and one premises stamped as several location rows. Both live 2026-08-14
+    # ACORD 125 defects; both row-ATOMIC, because the run also proved that
+    # blanking one field of a fabricated row leaves an orphan that reads like
+    # sparse real data.
+    try:
+        _dropped_ai = _drop_fabricated_interest_rows(mapped, gpt_filled_set, facts)
+        for _f in _dropped_ai:
+            gpt_filled_set.discard(_f)
+    except Exception as _ai_ex:                           # noqa: BLE001
+        logger.warning("interest-row guard skipped (form=%s): %s", form_id, _ai_ex)
+        _dropped_ai = []
+    try:
+        _dropped_loc = _dedupe_stamped_premises_rows(mapped, gpt_filled_set)
+        for _f in _dropped_loc:
+            gpt_filled_set.discard(_f)
+    except Exception as _loc_ex:                          # noqa: BLE001
+        logger.warning("premises-row guard skipped (form=%s): %s", form_id, _loc_ex)
+        _dropped_loc = []
 
     # ── DELIBERATELY NOT GUARDED: one printed value in two row columns ───────
     # Run 9's ACORD 127 duplicated three values across vehicle columns -

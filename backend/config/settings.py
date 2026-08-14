@@ -8,6 +8,15 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
+# Load backend/.env by its OWN path, never by working directory. A bare
+# load_dotenv() resolves from the CWD, so a server started from the repo root
+# silently loaded NOTHING - measured 2026-08-14: every .env setting fell back
+# to its default (the dec-index purge ran with PURGE_DEC_INDEX_AFTER_GENERATION
+# printed as =0 in the file, and the OpenAI key was coming from the Windows
+# user environment, which is what hid the failure). The plain call stays as a
+# second pass so a genuinely CWD-local .env (e.g. a deploy override) still
+# wins nothing away: override=False everywhere, real environment always wins.
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 load_dotenv()
 
 DATABASE_URL          = os.getenv("DATABASE_URL", "")

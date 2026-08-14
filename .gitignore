@@ -21,6 +21,9 @@ backend/__pycache__/
 
 # User-uploaded and generated PDF files — never commit real document data
 backend/storage/
+# Dumped declarations indexes (scripts/dump_dec_index.py). These are a verbatim
+# copy of a client's declarations pages — real PII. Inspect locally, never commit.
+dec_index_*.json
 backend/acordly.db
 backend/acordly_audit.db
 backend/acordly_local.db

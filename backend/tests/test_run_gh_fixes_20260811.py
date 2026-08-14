@@ -139,14 +139,41 @@ def test_row_b_narrative_copying_row_a_is_blanked():
 
 
 def test_a_genuinely_different_row_b_narrative_survives():
+    """This test's property is that the DUPLICATE-narrative guard does not eat a
+    legitimately different row B.
+
+    FIXTURE CORRECTED 2026-08-14. It used to plant the row-B narrative with no
+    second named insured anywhere - and ACORD's tooltip says row B *is* the
+    other named insured's operations ("As used here, this is the description of
+    operations for other named insureds"). A description of a party who is not
+    on the form is the client-reported defect, not a value to protect, so the
+    shape was incoherent rather than the guard wrong. Row B now has its insured,
+    which is what the test always meant.
+    """
     other = ("Summit Ridge Property Holdings LLC owns and leases the Boulder "
              "office building to the operating company; no field operations.")
     planted = {
         "CommercialPolicy_OperationsDescription_A": _OPS,
         "CommercialPolicy_OperationsDescription_B": other,
     }
-    mapped = _map_125({}, planted, _OPS + " " + other)
+    # The second insured has to be REAL - an extraction fact - not a planted
+    # gap-fill name. `NamedInsured_FullName_B` is independently blanked without
+    # a supporting fact, so planting the name proves nothing and the whole
+    # row-B block collapses, which is the system being consistent.
+    facts = {"additional_named_insureds": ["Summit Ridge Property Holdings LLC"]}
+    mapped = _map_125(facts, planted, _OPS + " " + other)
+    assert mapped.get("NamedInsured_FullName_B") == "Summit Ridge Property Holdings LLC"
     assert mapped.get("CommercialPolicy_OperationsDescription_B") == other
+
+
+def test_row_b_operations_fall_when_there_is_no_second_insured():
+    """The other half, and the live defect: ACORD 125 shipped "COMMERCIAL
+    GENERAL CONTRA" in DESCRIPTION OF OPERATIONS OF OTHER NAMED INSUREDS on a
+    package with exactly ONE named insured."""
+    planted = {"CommercialPolicy_OperationsDescription_B":
+               "COMMERCIAL GENERAL CONTRA"}
+    mapped = _map_125({}, planted, "COMMERCIAL GENERAL CONTRA")
+    assert mapped.get("CommercialPolicy_OperationsDescription_B") is None
 
 
 def test_short_repeated_codes_are_not_treated_as_narrative_copies():

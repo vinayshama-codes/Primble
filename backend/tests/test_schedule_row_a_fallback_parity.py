@@ -151,3 +151,55 @@ def test_payment_plan_and_audit_codes_are_acords_own(schema125):
     assert not ps._rejects_declared_type(
         "Policy_Audit_FrequencyCode_A",
         schema125["Policy_Audit_FrequencyCode_A"], "A")
+
+
+# ── The bug the fallback shipped on its first day ────────────────────────────
+
+_TWO_LOCATIONS = {
+    "mailing_address": "4800 DAHLIA ST # D13, DENVER, CO 80216-3121",
+    "property_locations": [
+        {"address_city": "Aurora", "address_state": "CO"},      # no street
+        {"address_line1": "1200 Industrial Way", "address_city": "Golden"},
+    ],
+}
+
+
+def test_a_second_location_blocks_the_scalar_fallback():
+    """REPRODUCED FROM A LIVE FORM, 2026-08-14 - the fallback's own defect.
+
+    The reasoning behind it is "one premises, and the description lives on the
+    policy rather than the location". That holds for ONE row and collapses for
+    two: with a second location, row A's empty street is not an invitation to
+    stamp the HEAD OFFICE address into it.
+
+    Before the `_single_row_schedule` gate, a location the document places in
+    Aurora came back with "4800 DAHLIA ST # D13" as its street - the Denver
+    mailing address. Two premises merged into one row is worse than a blank.
+    """
+    assert ps._deterministic_map(
+        "CommercialStructure_PhysicalAddress_LineOne_A", _TWO_LOCATIONS) is None
+    # The location's OWN city is untouched - the gate blocks the fallback, not
+    # the schedule.
+    assert ps._deterministic_map(
+        "CommercialStructure_PhysicalAddress_CityName_A", _TWO_LOCATIONS) == "Aurora"
+
+
+def test_the_gate_is_applied_at_both_form_builders(schema125):
+    for facts, want in ((_TWO_LOCATIONS, None), (_FACTS, _OPS)):
+        gaps, _u, _d = ps.compute_form_gaps("ACORD_125", schema125, facts)
+        mapped, _c = ps.map_facts_to_form(
+            facts, schema125, "ACORD_125", raw_text="x",
+            pre_filled_gpt={"filled_values": {}, "raw_text_fields": set(),
+                            "question_grounding": {}})
+        if want is None:
+            assert gaps.get("CommercialStructure_PhysicalAddress_LineOne_A") is None
+            assert mapped.get("CommercialStructure_PhysicalAddress_LineOne_A") is None
+        else:
+            assert gaps.get(_F) == want and mapped.get(_F) == want
+
+
+def test_a_non_schedule_field_is_never_gated():
+    """`_single_row_schedule` must default to True for anything that is not
+    schedule-backed, or it would silently disable Pass 1 everywhere."""
+    assert ps._single_row_schedule("Producer_MailingAddress_LineOne_A", _TWO_LOCATIONS)
+    assert ps._single_row_schedule("NamedInsured_FullName_A", {})

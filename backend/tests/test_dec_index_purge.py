@@ -57,8 +57,17 @@ def test_the_purge_is_not_on_the_lite_generation_path():
 
 
 def test_the_kill_switch_exists_and_defaults_on():
-    import routes.form_routes as fr
-    assert fr._PURGE_DEC_INDEX_AFTER_GENERATION is True
+    """The DEFAULT is on, which is what "defaults on" means.
+
+    CORRECTED 2026-08-14: this used to assert the module's runtime value, so it
+    failed whenever a developer legitimately set PURGE_DEC_INDEX_AFTER_GENERATION=0
+    - which is exactly what you do to inspect the index on a live run, and is
+    the documented way to do it. A test that breaks when the kill switch is
+    used is testing the developer's .env, not the code.
+    """
+    assert 'os.getenv(\n        "PURGE_DEC_INDEX_AFTER_GENERATION", "1")' in ROUTES \
+        or '"PURGE_DEC_INDEX_AFTER_GENERATION", "1"' in ROUTES, (
+        "the purge no longer defaults to ON")
     assert "PURGE_DEC_INDEX_AFTER_GENERATION" in ROUTES
 
 
@@ -83,9 +92,15 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
     # here is a decision: state where it runs and why the purge is still safe.
     known_files = {
         "extraction_service.py",   # the schema, the merge, the verification
-        "pdf_service.py",          # Stage A index, the duplicate guard, exclusion
+        "pdf_service.py",          # Stage A index, the duplicate guard, exclusion,
+                                   # and the fabricated-interest borrow pool (runs
+                                   # during generation, before the purge)
         "form_routes.py",          # the coverage report and this purge
         "text_selection.py",       # the rescue net, during gap fill
+        "sqs_service.py",          # GL exposure warning: reads entries live, and
+                                   # the purge-surviving dec_states_payroll_basis
+                                   # fact on post-generation recalcs - same answer
+                                   # both sides of the purge by construction
     }
     unexpected = [h for h in hits if h.split(":")[0] not in known_files]
     assert not unexpected, (

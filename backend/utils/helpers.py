@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
@@ -105,6 +106,16 @@ def _state_from_zip(zip_str: str) -> Optional[str]:
     return None
 
 
+# Comma-free tail shapes _parse_address recovers (see its tail-recovery block).
+_ADDR_STATE_ZIP_TAIL_RE = re.compile(
+    r"[\s,]+([A-Za-z]{2})\.?[\s,]+(\d{5}(?:-\d{4})?)\s*$")
+_ADDR_UNIT_THEN_CITY_RE = re.compile(
+    r"^(?P<street>.*?(?:#|\b(?:apt|suite|ste|unit|bldg|building|fl|floor"
+    r"|rm|room)\b\.?)\s*[\w-]+)[\s,]+(?P<city>[A-Za-z][A-Za-z .'-]{2,})$",
+    re.I,
+)
+
+
 def _parse_address(addr: str) -> dict:
     if not addr:
         return {}
@@ -140,6 +151,32 @@ def _parse_address(addr: str) -> dict:
             result["zip"]   = last[1]
         elif len(last) == 1:
             result["state"] = last[0]
+    # ── Comma-free tail recovery (2026-08-14) ────────────────────────────────
+    # Dec pages routinely print the whole address as ONE comma-free run
+    # ("4800 DAHLIA ST # D13 DENVER CO 80216-3121"), and comma-splitting then
+    # leaves city/state/zip fused inside line1 - the live ACORD 125 printed the
+    # street box with the zip inside it AND the zip box filled. Two recoveries,
+    # both anchored on structure rather than guesses:
+    #   1. STATE+ZIP tail: accepted only when the 2-letter token and the ZIP
+    #      corroborate each other (_state_from_zip) - "AVE NW 20500" is not a
+    #      state, and the DC zip proves it.
+    #   2. CITY after the UNIT designator: a US street line ends at its unit
+    #      ("# D13", "STE 400"); alphabetic text after the unit is the city
+    #      ("...STE 400 ENGLEWOOD"). No unit anchor, no attempt - a street/city
+    #      boundary without one is not decidable.
+    line1 = str(result.get("line1") or "")
+    if line1 and not result.get("zip"):
+        tm = _ADDR_STATE_ZIP_TAIL_RE.search(line1)
+        if tm and (_state_from_zip(tm.group(2)[:5]) or "").upper() == tm.group(1).upper():
+            result.setdefault("state", tm.group(1).upper())
+            result["zip"] = tm.group(2)
+            line1 = line1[:tm.start()].strip(" ,")
+            result["line1"] = line1
+    if line1 and not result.get("city"):
+        cm = _ADDR_UNIT_THEN_CITY_RE.match(line1)
+        if cm and cm.group("street").strip():
+            result["city"] = cm.group("city").strip()
+            result["line1"] = cm.group("street").strip(" ,")
     # Validate/correct state against ZIP. The LLM occasionally extracts the
     # wrong state when the document contains multiple addresses from different
     # states (e.g. insured in CO, premises in MO). ZIP codes are unambiguous;

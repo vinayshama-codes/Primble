@@ -1,47 +1,135 @@
 {
   "_comment": [
-    "GROUND TRUTH - ORBIN CONTRACTING LLC package (EMC Insurance, policy term 07/15/25-07/15/26).",
-    "Built by reading the real declarations pages, not by running the pipeline. Used by",
-    "backend/scripts/score_gap_fill.py to put a correctness number on LLM call 2.",
+    "GROUND TRUTH - ORBIN CONTRACTING LLC package (EMC Insurance, 07/15/25-07/15/26).",
+    "Built by reading all 271 real pages. Consumed by backend/scripts/score_gap_fill.py.",
     "",
-    "STATUS: COMPLETE - all 271 pages read.",
-    "Every value below is quoted from a DECLARATIONS or SCHEDULE page, with the page noted.",
-    "Nothing here is inferred from policy wording - that is the whole point.",
+    "WHAT THIS FILE IS: {ACORD field name -> the value the declarations pages state}.",
+    "Everything at the top level without a leading underscore is SCORED. Every field",
+    "name below was validated against forms_schemas/ - a name that exists on no real",
+    "schema scores nothing and hides the gap it was meant to measure.",
     "",
-    "PACKAGE COMPOSITION, all 271 pages: 30 declarations/schedule pages, 241 ISO+AAIS",
-    "standard form pages. 11% signal, 89% boilerplate. Per part: 17% / 9% / 8% - the",
-    "ratio gets WORSE as the package goes on, because every added coverage part brings",
-    "one dec page and dozens of wording pages. This is the haystack, measured.",
+    "PACKAGE: 30 declarations/schedule pages inside 271. 11% signal, 89% standard-form",
+    "wording, and the ratio worsens through the package (17% / 9% / 8%) because every",
+    "added coverage part brings one dec page and dozens of wording pages.",
+    "FIVE parts: Inland Marine (6C7-40-02), Business Auto (6E7-40-02), Umbrella",
+    "(6J7-40-02), General Liability (BBC7263, a DIFFERENT carrier), plus the Common",
+    "Declarations. Property, Crime and Workers Comp are all stated 'No Coverage'.",
     "",
-    "FIVE coverage parts: Inland Marine (6C7-40-02), Business Auto (6E7-40-02),",
-    "Commercial Umbrella (6J7-40-02), General Liability (BBC7263), plus the Common",
-    "Declarations. Property, Crime and Workers Comp are all 'No Coverage'.",
+    "_must_be_blank  boxes whose correct answer is EMPTY - the blank-over-wrong rule.",
+    "_not_scored     values with two or more equally correct printings; scoring them",
+    "                would fail a right answer. Recorded, deliberately ungraded.",
+    "_traps          the specific printed sentences in THIS package that have already",
+    "                produced client-reported wrong values.",
+    "_source_data    per-coverage-part values not yet mapped to a form field, kept for",
+    "                the ACORD 131/141 fixtures. Values only - no commentary.",
     "",
-    "_traps below is not scored - it records the specific boilerplate sentences in THIS",
-    "document that have already produced client-reported wrong values, so a regression on",
-    "any of them is recognised instantly rather than re-diagnosed from scratch."
+    "Page-by-page keep/drop classification and score_gap_fill's own limitations moved",
+    "to orbin_page_metadata.json on 2026-08-14: useful, but a different test."
   ],
   "_doc": "REPLACE_WITH_EXTRACTED_TEXT_PATH",
-  "_forms": ["ACORD_125"],
+  "_forms": [
+    "ACORD_125",
+    "ACORD_126",
+    "ACORD_127"
+  ],
   "_facts": {},
-
   "NamedInsured_FullName_A": "ORBIN CONTRACTING LLC",
   "NamedInsured_MailingAddress_LineOne_A": "4800 DAHLIA ST # D13",
   "NamedInsured_MailingAddress_CityName_A": "DENVER",
   "NamedInsured_MailingAddress_StateOrProvinceCode_A": "CO",
   "NamedInsured_MailingAddress_PostalCode_A": "80216-3121",
   "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A": "Yes",
-
   "Producer_FullName_A": "COMMERCIAL RISK SOLUTIONS, INC.",
   "Producer_MailingAddress_LineOne_A": "9780 S MERIDIAN BLVD STE 400",
   "Producer_MailingAddress_CityName_A": "ENGLEWOOD",
   "Producer_MailingAddress_StateOrProvinceCode_A": "CO",
   "Producer_MailingAddress_PostalCode_A": "80112-6072",
-
   "Policy_EffectiveDate_A": "07/15/2025",
   "Policy_ExpirationDate_A": "07/15/2026",
   "Policy_Payment_EstimatedTotalAmount_A": "$10,663.00",
-
+  "Policy_Payment_DirectBillIndicator_A": "Yes",
+  "Producer_ContactPerson_PhoneNumber_A": "303-996-7800",
+  "Policy_LineOfBusiness_CommercialGeneralLiability_A": "Yes",
+  "Policy_LineOfBusiness_CommercialInlandMarineIndicator_A": "Yes",
+  "Policy_LineOfBusiness_BusinessAutoIndicator_A": "Yes",
+  "Policy_LineOfBusiness_UmbrellaIndicator_A": "Yes",
+  "GeneralLiabilityLineOfBusiness_TotalPremiumAmount_A": "$3,954.00",
+  "CommercialInlandMarineLineOfBusiness_PremiumAmount_A": "$300.00",
+  "CommercialVehicleLineOfBusiness_PremiumAmount_A": "$2,991.00",
+  "CommercialUmbrellaLineOfBusiness_PremiumAmount_A": "$3,418.00",
+  "BusinessInformation_BusinessType_ContractorIndicator_A": "Yes",
+  "CommercialStructure_PhysicalAddress_LineOne_A": "4800 DAHLIA ST # D13",
+  "CommercialStructure_PhysicalAddress_CityName_A": "DENVER",
+  "CommercialStructure_PhysicalAddress_StateOrProvinceCode_A": "CO",
+  "CommercialStructure_PhysicalAddress_PostalCode_A": "80216-3121",
+  "GeneralLiability_EachOccurrence_LimitAmount_A": "$1,000,000",
+  "GeneralLiability_FireDamageRentedPremises_EachOccurrenceLimitAmount_A": "$500,000",
+  "GeneralLiability_MedicalExpense_EachPersonLimitAmount_A": "$10,000",
+  "GeneralLiability_PersonalAndAdvertisingInjury_LimitAmount_A": "$1,000,000",
+  "GeneralLiability_GeneralAggregate_LimitAmount_A": "$2,000,000",
+  "GeneralLiability_ProductsAndCompletedOperations_AggregateLimitAmount_A": "$2,000,000",
+  "GeneralLiability_Products_PremiumAmount_A": "$1,198.00",
+  "GeneralLiability_PremisesOperations_PremiumAmount_A": "$2,756.00",
+  "GeneralLiability_Hazard_ClassCode_A": "91580",
+  "GeneralLiability_Hazard_Classification_A": "Contractors - Executive Supervisors or Executive Superintendents",
+  "GeneralLiability_Hazard_PremiumBasisCode_A": "Payroll",
+  "GeneralLiability_Hazard_Exposure_A": "$39,300",
+  "GeneralLiability_Hazard_PremisesOperationsRate_A": "33.211",
+  "GeneralLiability_Hazard_PremisesOperationsPremiumAmount_A": "$1,305",
+  "GeneralLiability_Hazard_ClassCode_B": "91585",
+  "GeneralLiability_Hazard_Classification_B": "Contrctrs-sub work-in connection w/constrctn,recon,repr,erctn of buildings - NOC",
+  "GeneralLiability_Hazard_PremiumBasisCode_B": "Total Cost",
+  "GeneralLiability_Hazard_Exposure_B": "$350,000",
+  "GeneralLiability_Hazard_PremisesOperationsRate_B": "2.293",
+  "GeneralLiability_Hazard_PremisesOperationsPremiumAmount_B": "$803",
+  "GeneralLiability_Hazard_ProductsRate_B": "3.4240",
+  "GeneralLiability_Hazard_ProductsPremiumAmount_B": "$1,198",
+  "Vehicle_ModelYear_A": "2012",
+  "Vehicle_ManufacturersName_A": "SUBARU",
+  "Vehicle_ModelName_A": "OUTBACK",
+  "Vehicle_BodyCode_A": "SEDAN",
+  "Vehicle_VINIdentifier_A": "4S4BRCGC9C3217772",
+  "Vehicle_CostNewAmount_A": "$26,680",
+  "Vehicle_RateClassCode_A": "7383",
+  "Vehicle_RatingTerritoryCode_A": "111",
+  "Vehicle_ComprehensiveSymbolCode_A": "07",
+  "Vehicle_CollisionSymbolCode_A": "07",
+  "Vehicle_PhysicalAddress_CityName_A": "DENVER",
+  "Vehicle_PhysicalAddress_StateOrProvinceCode_A": "CO",
+  "Vehicle_PhysicalAddress_PostalCode_A": "80216-3121",
+  "Vehicle_Coverage_ComprehensiveOrSpecifiedCauseOfLossDeductibleAmount_A": "$1,000",
+  "Vehicle_Collision_DeductibleAmount_A": "$1,000",
+  "_must_be_blank": {
+    "note": "Fields whose CORRECT answer is an empty box, verified across all 271 pages. Deliberately NOT scored: `score_gap_fill.py::_judge` returns 'missed' for an empty stamp regardless of the expectation, so a null here would score a correct blank as a failure. See _harness_gaps.",
+    "fields": {
+      "NamedInsured_TaxIdentifier_A": "no FEIN printed - see _traps.fein",
+      "NamedInsured_Primary_PhoneNumber_A": "no applicant phone printed - see _traps.applicant_phone",
+      "NamedInsured_Primary_WebsiteAddress_A": "the applicant has no website. TWO decoys: 'Website Address' is a printed, EMPTY, labelled box on page 125 (CA8282), and 'http://go.cms.gov/mirnghp' is the only URL in all 271 pages - printed twice, on pages 142 and 270 (IL8576, both copies).",
+      "NamedInsured_Contact_PrimaryEmailAddress_A": "no email printed anywhere in the package",
+      "Insurer_NAICCode_A": "no NAIC number is printed anywhere in all 271 pages, on any of the four coverage parts",
+      "NamedInsured_NAICSCode_A": "not printed - and per the 2026-08-12 routing decision this is a PRODUCER-facing field anyway. ONE decoy: page 127 (CA8336) discusses 'a rating factor based on the North American Industrial Classification System (NAICS)' at length without ever stating a code.",
+      "NamedInsured_SICCode_A": "not printed",
+      "NamedInsured_FullName_B": "ONE named insured, confirmed on all four section declarations pages (3, 85, 143, 205). Rows B and C stay blank.",
+      "BusinessInformation_FullTimeEmployeeCount_A": "no employee count printed - see _traps.num_employees",
+      "CommercialStructure_AnnualRevenueAmount_A": "no revenue or gross sales figure is printed anywhere in 271 pages. TWO strong decoys, both on page 211: 'Prem Basis: Payroll / Exposure: $39,300' and 'Prem Basis: Total Cost / Exposure: $350,000'. Both are GL RATING exposures - one is payroll, the other is subcontract cost - and neither is revenue. The $350,000 is the largest business-scale figure in the package and is exactly the shape a revenue extractor is looking for.",
+      "Producer_ContactPerson_FullName_A": "the agency is named, no individual contact is",
+      "Producer_ContactPerson_EmailAddress_A": "not printed",
+      "Producer_FaxNumber_A": "not printed",
+      "Producer_AuthorizedRepresentative_Signature_A": "signature line printed and empty on pages 1 and 2",
+      "Policy_SectionAttached_DriverInformationScheduleIndicator_A": "no driver schedule exists",
+      "CommercialPropertyLineOfBusiness_PremiumAmount_A": "'No Coverage' - Section 1",
+      "CrimeLineOfBusiness_PremiumAmount_A": "'No Coverage' - Section 3",
+      "Policy_LineOfBusiness_CommercialProperty_A": "'No Coverage' - do not tick",
+      "Policy_LineOfBusiness_CrimeIndicator_A": "'No Coverage' - do not tick"
+    }
+  },
+  "_not_scored": {
+    "Policy_PolicyNumberIdentifier_A": "FIVE real candidates, one per coverage part - 0482854 (account, p1), 6C7-40-02---26 (IM, p3), 6E7-40-02---26 (Auto, p85), 6J7-40-02---26 (Umbrella, p143), BBC7263 (GL, p148). No single package policy number exists, and the right answer differs per FORM. See _traps.policy_number.",
+    "Insurer_FullName_A": "TWO carriers. Employers Mutual Casualty Company on IM/Auto/Umbrella; EMC Property & Casualty Company on General Liability. Both correct, on different forms. See _traps.insurer_name.",
+    "Policy_Audit_FrequencyCode_A": "THREE answers: GL 'Audit Period: Annual' (p206), Umbrella 'PREMIUM NOT SUBJECT TO AUDIT' (p143), IM and Auto silent. The box asks for THE policy's audit term and this package does not have one.",
+    "Policy_Payment_MinimumPremiumAmount_A": "$100 exists but is Umbrella-only (p143) and conditional on cancellation. There is no package minimum premium.",
+    "CommercialPolicy_OperationsDescription_A": "The dec pages print 'COMMERCIAL GENERAL CONTRA' - truncated by the carrier's own field width on all four section pages. The fuller true statement is the two GL class-code descriptions on p211. Both defensible; see _traps.operations."
+  },
   "_traps": {
     "estimated_total_premium": {
       "correct": "$10,663.00",
@@ -76,7 +164,7 @@
         "proof of mailing will be sufficient proof of notice": "pages 10, 11, 24 - CL0100 / CL0182 / IL0017. The client-reported mailing_address garbage, verbatim.",
         "in compliance with laws, rules, or regulations": "page 10, CL0100 item 4 Inspections. Second half of the same reported string."
       },
-      "note": "Printed THREE ways: '4800 DAHLIA ST # D13' (p1,3,85), same + city on separate line (p8), and '4800 DAHLIA STREET D13 / DENVER CO. 80216-3121' (p89 - STREET spelled out, 'CO.' with a period). _consolidate_property_locations must fold all three into ONE location, not three."
+      "note": "Printed FOUR ways across the package: '4800 DAHLIA ST # D13' all-caps (p1, 3, 85, 143), the same plus city on a separate line (p8), '4800 DAHLIA STREET D13 / DENVER CO. 80216-3121' (p89 - STREET spelled out, 'CO.' with a period), and '4800 Dahlia St # D13 / Denver, CO 80216-3121' in MIXED CASE (p212, the GL 'Location of All Premises Owned, Rented or Occupied'). `_consolidate_property_locations` must fold all four into ONE location, not four. The C49 fix folds parse-variants by street number plus street name, which survives all four spellings - the mixed-case variant is the easiest of the four and the STREET-spelled-out variant remains the hard one."
     },
     "entity_type": {
       "correct": "LLC",
@@ -96,112 +184,879 @@
       },
       "note": "FIVE candidates, no single package policy number. Whatever lands in the box must be one of these and not an invented composite."
     },
-
+    "fein": {
+      "correct": null,
+      "field": "NamedInsured_TaxIdentifier_A",
+      "reason": "ORBIN CONTRACTING's FEIN is NOT printed anywhere in pages 1-90. The box must ship BLANK.",
+      "decoys": {
+        "0482854": "page 1, 'Account Number: 0482854' - the FIRST line of the FIRST page, and a 7-digit all-numeric string sitting immediately above the named insured. THE LITERAL SOURCE of the account-number-as-FEIN defect that `_backfill_empty_facts_from_entries` was built to block (CLAUDE.md C50). It is also repeated in the page footer of pages 1 and 2.",
+        "6C7-40-02---26 / 6E7-40-02---26": "section policy numbers - alphanumeric, so a weaker decoy, but they are the only other identifier-shaped strings in part 1."
+      }
+    },
+    "insurer_name": {
+      "ambiguous": true,
+      "field": "Insurer_FullName_A",
+      "candidates": {
+        "EMPLOYERS MUTUAL CASUALTY COMPANY": "Inland Marine (pages 3-9), Business Auto (85-92) AND Commercial Umbrella (143-148). THREE of the four coverage parts, confirmed on each part's own dec page. This is the majority answer for pages 1-180.",
+        "EMC Insurance Companies": "page 2 - the SERVICING company, at 5445 DTC Parkway Suite 320, Greenwood Village CO. Not the issuing carrier. Also named on page 142 (IL8576 Medicare notice).",
+        "EMC INSURANCE": "page 1 - the logo/brand on the Common Declarations. A group trade name, which `Insurer_FullName_A`'s own tooltip explicitly excludes ('This is not the insurer's group name or trade' name).",
+        "EMC Property & Casualty Company": "page 205 - the issuing company for the GENERAL LIABILITY part. A DIFFERENT legal entity from the same group. Independently confirmed on page 148, the Umbrella's SCHEDULE OF UNDERLYING INSURANCE, which names it as the GL carrier."
+      },
+      "note": "NOT scored, deliberately. Two different companies in the EMC group write this package, so there is no single correct answer and scoring one would mark a defensible fill wrong.",
+      "boilerplate_carrier_name_pages": {
+        "28 / 141 / 204 / 269": "IL7602 Colorado Company Elimination - SIX group companies in one paragraph, 4 copies. Pure boilerplate.",
+        "25-26 / 138-139 / 199 / 264": "IL7004 Mutual Policy Provisions - SIX group companies as signature blocks, 4 copies.",
+        "123": "CA8214 Colorado Policyholder Notice - names 'Employers Mutual Casualty Company' FOUR times in two paragraphs.",
+        "124": "CA8214.1 Colorado Policyholder Notice - the SAME notice naming 'EMCASCO Insurance Company' four times instead. Pages 123 and 124 are consecutive, near-identical, and name two different carriers - the single worst adjacency in the package for a carrier-name question.",
+        "125": "CA8282 footer - SEVEN companies, including 'Hamilton Mutual Insurance Company', which appears NOWHERE else in the package and is not on this policy at all."
+      },
+      "measured": "Across pages 1-180 an EMC group company name is printed on 12 boilerplate pages and on 6 declarations pages. Frequency ranking cannot separate them; only page identity can."
+    },
+    "producer_code": {
+      "ambiguous": true,
+      "field": "Insurer_ProducerIdentifier_A",
+      "candidates": {
+        "W6258-0001": "page 1, 'AGENT NO. W6258-0001' - the Common Declarations printing",
+        "AW 6258": "pages 3, 85 and 143, 'AGENT: AW 6258' - the Inland Marine, Auto and Umbrella printing",
+        "W6258": "page 205, 'AGENT NO. W6258' - the General Liability printing, bare"
+      },
+      "note": "Same agency, THREE printings, and no two of them normalise to each other - `_judge` would call two of the three 'wrong' whichever one the fixture picked. Not scored, deliberately. All three are correct reads of the document. 'W6258' is a substring of 'W6258-0001' so those two would judge as equal; 'AW 6258' would not, and it is the variant used on three of the four coverage parts."
+    },
+    "num_employees": {
+      "correct": null,
+      "reason": "No employee COUNT is printed in pages 1-90. Only a rating BAND is.",
+      "decoys": {
+        "0 - 25": "page 90, ITEM FIVE non-ownership liability, 'NUMBER OF EMPLOYEES 0 - 25'. A rate band, not a count. Stamping it into `BusinessInformation_FullTimeEmployeeCount_A` puts a range in an integer box.",
+        "25": "the same string after any naive numeric extraction - a plausible-looking wrong integer, which is worse than the range because nothing downstream can tell it is wrong."
+      },
+      "note": "Cross-checks the 2026-08-08 `_scan_shape` work: `num_employees` is an integer field and the loose prose capture must not resolve this."
+    },
+    "effective_date_is_not_on_the_common_declarations": {
+      "correct": "07/15/2025",
+      "note": "Page 1 prints ONLY 'Policy Term: See Section Declarations To: 07/15/2026' - there is no FROM date on the package-level page. The effective date exists exclusively on the SECTION dec pages ('POLICY PERIOD: FROM 07/15/25 TO 07/15/26', pages 3 and 85) in 2-digit-year form. A retrieval pass that keeps the Common Declarations and drops the section dec pages gets the expiration date and loses the effective date."
+    },
+    "terrorism_boilerplate_magnitudes": {
+      "correct": null,
+      "reason": "The LARGEST dollar figures anywhere in this package are in terrorism boilerplate and belong to NO field on any ACORD form.",
+      "decoys": {
+        "$100 billion": "page 5 (IL8383.2A) three times, and page 12 (CL0600) as 'one hundred billion dollars' twice - the federal TRIA programme cap",
+        "$5 million": "page 5 and page 12 as 'five million dollars' - the certification threshold",
+        "80%": "page 5 - the federal share of terrorism losses"
+      },
+      "note": "C23's magnitude tiebreak was reduced to 'a real limit beats a literal zero' precisely so figures like these cannot win a currency merge. This package is the regression case: any limit field coming back with a billion-dollar value has re-opened C23."
+    },
+    "terrorism_premium": {
+      "correct_by_section": {
+        "inland_marine": "Waived",
+        "business_auto": "$3",
+        "commercial_umbrella": "$34.00",
+        "general_liability": "$31.00"
+      },
+      "source": "IM: page 4 endorsement schedule 'IL8383.2A 12-20 DISCL PURSUANT TERRSM RISK INS. ACT   WAIVED' and page 5 'SCHEDULE / Terrorism Premium (Certified Acts)  Waived'. Auto: page 87 'CA0001 11-20 BUSINESS AUTO COVERAGE FORM / TERRORISM COVG INCL IN MAIN COV FORM  $ 3'. Umbrella: page 145 'IL8383.2A 12-20 ... $ 34' and page 147 'SCHEDULE / Terrorism Premium (Certified Acts)  $34.00'. GL: page 208 'IL 83 83.2A 12 20 Disclosure Pursuant To Terrorism Risk Insurance Act  $31.00', page 210 'Schedule / Terrorism Premium (Certified Acts)  $31.00' AND page 211 'Premium For Certified Acts of Terrorism  $31.00'.",
+      "note": "THE SHARPEST FREQUENCY TRAP IN THE PACKAGE, now complete and confirmed. IL8383.2A is the SAME form printed three times - pages 5, 147 and 210 - and its SCHEDULE line carries a DIFFERENT value each time: 'Waived', '$34.00', '$31.00'. Three near-identical pages, three different right answers, distinguishable only by which coverage part's stack the page sits in. Any de-duplication that collapses repeated pages destroys two of the three; any frequency ranking picks whichever wording repeats most. Note also that $3, $31 and $34 are the three smallest money figures in the package and are decoys for every premium field - and that $31 is the only one of the four that also appears on a rating schedule (page 211), where it is a component of the $3,954 GL total."
+    },
+    "hired_and_nonowned_auto": {
+      "present": true,
+      "source": "page 90 - ITEM FOUR hired/borrowed autos (cost of hire basis, EXCESS, state CO, 'IF ANY' estimated cost of hire, rate 100, premium $185.00) and ITEM FIVE non-ownership liability (premium $137.00).",
+      "note": "THE 2026-08-07 AUTO SYMBOL FIX'S REPRODUCTION CASE. Real hired and non-owned exposure exists here, and the liability symbol is 01 (any auto), which already designates hired and non-owned autos. `_check_auto_hired_nonowned_symbols` MUST STAY SILENT on this package. A re-run that produces 'Hired/Non-Owned auto exposure detected but coverage symbol(s) not defined' has regressed that fix.",
+      "arithmetic": "$185.00 + $137.00 = $322.00, which is the 'PREMIUM FOR ATTACHED ITEMS 4, 5, AND/OR 6' line on page 85. Exact - use it to confirm both items were read."
+    },
+    "inland_marine_deductible_pool": {
+      "note": "Not a single wrong value - a DENSITY trap. Pages 6-9 print $500 as a deductible SEVEN separate times (contractors equipment per occurrence, leased/rented equipment, installation floater all-perils, installation floater sewer backup, EDP all-perils, EDP earthquake/volcanic, EDP mechanical-breakdown/electrical) plus TWO 'NOT COVERED' deductibles (EQ and flood on the installation floater). Any question of the shape 'what is the deductible' that reaches these four pages has nine same-shaped answers and no way to choose.",
+      "the_real_auto_deductibles": "$1,000 comprehensive and $1,000 collision, pages 85 and 89 - a DIFFERENT coverage part entirely.",
+      "not_covered_strings": "'NOT COVERED' appears 19 times across pages 7-9 as a limit VALUE. It must never be stamped into a currency box; the box stays blank."
+    },
+    "covered_auto_symbols_defined_vs_assigned": {
+      "correct": {
+        "liability": "01",
+        "medical_payments": "02",
+        "um_uim": "02",
+        "comprehensive": "07",
+        "collision": "07"
+      },
+      "source": "page 85, ITEM TWO - the ONLY page that ASSIGNS a symbol to a coverage on this policy.",
+      "decoys": {
+        "Symbols 1 through 9 and 19, with full ACORD descriptions": "pages 94-95, CA 00 01 11 20 Section I.A 'Description Of Covered Auto Designation Symbols'. The standard form DEFINES every symbol that could exist, in a table, in prose the model will read as authoritative.",
+        "8 Hired \"Autos\" Only": "page 94 - printed in full. THIS POLICY DOES NOT USE SYMBOL 8.",
+        "9 Non-owned \"Autos\" Only": "page 94 - printed in full. THIS POLICY DOES NOT USE SYMBOL 9.",
+        "'If Symbols 1, 2, 3, 4, 5, 6 or 19 are entered next to a coverage in Item Two'": "page 95 - a conditional sentence that names seven symbols and looks exactly like an assignment."
+      },
+      "note": "THE 2026-08-07 AUTO SYMBOL WORK'S ADVERSARIAL CASE. `services/auto_symbols.py` reasons over `auto_covered_symbols`, and the defect it replaced fired because nothing was ever written to those facts. The opposite failure is now available: two pages of ISO wording that enumerate symbols 8 and 9 by name, ten pages before the dec page that actually assigns 01/02/07. Reading the definitions as the assignment produces a policy that appears to schedule hired and non-owned symbols it does not have - which would make `_check_auto_hired_nonowned_symbols` pass for the WRONG REASON on the very package built to test it. Symbol 1 satisfies hired/non-owned by breadth; symbols 8 and 9 are not on this policy."
+    },
+    "advisory_notice_lists_forms_not_attached": {
+      "correct": "The attached auto forms are the 27 on page 87. Nothing else.",
+      "decoys": {
+        "~20 'newly introduced' form codes": "pages 128-130, CA8338 2019 Commercial Auto Multistate Forms Revision - CA7203, CA7221, CA7230, CA7236, CA7307, CA7312, CA7320, CA7395, CA7405, CA7437, CA7442, CA7479, CA7490, CA7611, CA7373, CA7429, CA7464, CA7489, CA7314, CA7314.1, CA7598. Every one is prefixed 'may be' - NONE is on this policy.",
+        "11 'withdrawn' form codes": "page 130 - CA7205, CA7206, CA7257, CA7276, CA7279, CA7368, CA7398, CA7400, CA7415, CA7416, CA7417, CA7420. Forms that no longer exist, listed by number.",
+        "$50,000 Hired Auto Physical Damage / $75 per day / maximum $1,000 / $500": "page 129, inside the CA7442 description - dollar limits belonging to an endorsement that is NOT on this policy."
+      },
+      "note": "Three pages that read exactly like an endorsement schedule and are the opposite of one. 33 form codes in a 3-page window is a HIGHER density than the real endorsement schedules on pages 4, 87 and 144-145 - so any 'many form codes together means this is the attached-forms list' heuristic prefers the wrong pages. The distinguishing signal is the modal verb ('may be newly introduced', 'may no longer be attached'), not the layout."
+    },
+    "auto_elite_extension_limit_pool": {
+      "note": "Not a single wrong value - a DENSITY trap, the auto twin of inland_marine_deductible_pool and larger. CA7450 (pages 117-121) prints roughly TWENTY dollar amounts, every one a real limit of some coverage, none of them a declarations value.",
+      "the_amounts": [
+        "$5,000 bail bonds",
+        "$500 a day loss of earnings",
+        "$100 towing (private passenger)",
+        "$500 towing (other)",
+        "$250 locksmith",
+        "$75 per day / $2,500 maximum transportation",
+        "$5,000 electronic equipment added limit",
+        "$100,000 hired auto physical damage",
+        "$1,000 loss of use",
+        "$10,000 auto loan/lease gap",
+        "$500 early termination fees",
+        "$500 personal property of others",
+        "$500 personal effects",
+        "$1,000 extra expense for stolen auto",
+        "$75 per day / $2,250 rental reimbursement",
+        "$2,000 vehicle wrap",
+        "$500 glass replacement deductible",
+        "50% comprehensive deductible reduction (vehicle tracking)"
+      ],
+      "the_real_auto_values": "liability $1,000,000; med pay $5,000; UM/UIM $1,000,000; comp and collision deductibles $1,000 each - pages 85, 88 and 89.",
+      "worst_two": "'$500 deductible applies to the cost of replacing damaged glass' (page 120) is the closest shape in the package to a real auto deductible and is $500 against the true $1,000. '$100,000' hired auto physical damage (page 120) is a limit for a coverage this policy grants only on a cost-of-hire LIABILITY basis (page 90) - there is no hired-auto physical damage limit on any dec page.",
+      "reconciliation": "CA7450 costs $250.00 in total (page 91, class 8556). Twenty limits, one premium line, zero declarations values."
+    },
     "gl_limits": {
       "correct": {
         "each_occurrence": "$1,000,000",
-        "damage_to_premises_rented": "$500,000",
-        "medical_expense": "$10,000",
-        "personal_and_advertising_injury": "$1,000,000",
+        "damage_to_premises_rented": "$500,000 (any one premises)",
+        "medical_expense": "$10,000 (any one person)",
+        "personal_and_advertising_injury": "$1,000,000 (any one person or organization)",
         "general_aggregate": "$2,000,000",
         "products_completed_ops_aggregate": "$2,000,000"
       },
-      "source": "page 205, GENERAL LIABILITY DECLARATIONS (Form CG7000A), EMC Property & Casualty Company, Policy BBC7263-26. Independently confirmed on page 148, the Umbrella's SCHEDULE OF UNDERLYING INSURANCE - the two agree exactly.",
+      "source": "page 205, 'General Liability Declarations', Form CG7000A Ed. 08-99, EMC Property & Casualty Company, 'Policy: BBC7263 - 26', term 07/15/2025-07/15/2026. All six are printed under one 'Limits of Insurance' heading, each with its qualifier. Page 148, the Umbrella's SCHEDULE OF UNDERLYING INSURANCE, independently confirms FOUR of the six - General Aggregate $2,000,000, Products-Completed Operations Aggregate $2,000,000, Personal and Advertising Injury $1,000,000, Each Occurrence $1,000,000 - and agrees exactly on all four. It does NOT restate damage-to-premises-rented or medical expense, which exist only on page 205.",
+      "restated_in_boilerplate": "CG7759 (page 252) sections N and O restate '$500,000' and '$10,000' as the endorsement's own defaults - the SAME figures as the declarations. A benign coincidence, and the only place in 271 pages where a wording page happens to agree with a dec page. Do not mistake it for confirmation: it is a default that would print identically on a policy with different limits.",
       "decoys": {
         "$3,000,000": "page 143, COMMERCIAL UMBRELLA DECLARATIONS - the UMBRELLA's own limits, printed as three clean lines: 'Each Occurrence Limit (Liability Coverage)', 'Personal & Advertising Injury Limit', 'Aggregate Limit (Liability Coverage)'."
       },
       "note": "THE C23 DEFECT'S SOURCE, located, and part 3 makes it worse rather than better. There are now TWO pages titled DECLARATIONS carrying different 'Each Occurrence' limits - page 143 says $3,000,000 (umbrella) and page 205 says $1,000,000 (GL) - SIXTY-TWO PAGES APART. Nothing in the text distinguishes them except which coverage part's dec page you are standing on. That is page identity, and page identity is exactly what a single 175k-token prompt destroys. Chunking restores it."
     },
-
     "gl_premium": {
       "correct": "$3,954.00",
-      "breakdown": {
+      "breakdown_page_205": {
         "products_completed_operations": "$1,198.00",
         "other_than_products_completed_operations": "$2,756.00"
       },
-      "source": "page 205, and again on page 211 (GENERAL LIABILITY SCHEDULE)"
+      "source": "page 205 ('Coverages Provided') and again on page 211 ('Total Estimated Policy Premium', GENERAL LIABILITY SCHEDULE, Form CG7001A Ed. 10-12)",
+      "full_component_breakdown_page_211": {
+        "Location 000 - Fungi Or Bacteria Exclusion": "($33) - a CREDIT, printed in parentheses. The only negative number in 271 pages.",
+        "Location 000 - Limited Pollution Coverage - Work Sites": "$150",
+        "Location 001 - class 91580, All Other Advance Prem": "$1,305",
+        "Location 001 - class 91585, Products/Compl Ops Advance Prem": "$1,198",
+        "Location 001 - class 91585, All Other Advance Prem": "$803",
+        "Policy Level - General Liability Elite Extension": "$500",
+        "Policy Level - Premium For Certified Acts of Terrorism": "$31.00"
+      },
+      "arithmetic": "-33 + 150 + 1,305 + 1,198 + 803 + 500 + 31 = 3,954 EXACTLY. And the page-205 split reconciles to the same components: the $1,198 products line is class 91585's Products/Compl Ops column verbatim, and the other six sum to $2,756. SEVEN components, one of them negative, across two pages - the most demanding reconciliation in the package and the strongest single proof that both GL pages were read.",
+      "why_it_matters": "A run that reads page 205 alone gets the right total from two clean lines. A run that reads page 211 alone can also get there, but only by summing seven numbers including a parenthesised credit that most numeric extractors will read as +33 rather than -33 - which lands on $4,020 and nothing on either page says $4,020."
     },
-
     "gl_class_codes": {
       "correct": [
-        {"code": "91580", "description": "Contractors - Executive Supervisors or Executive Superintendents", "premium_basis": "Payroll", "exposure": "$39,300"},
-        {"code": "91585", "description": "Contrctrs-sub work-in connection w/constrctn,recon,repr,erctn of buildings - NOC", "premium_basis": "Total Cost", "exposure": "$350,000"}
+        {
+          "code": "91580",
+          "description": "Contractors - Executive Supervisors or Executive Superintendents",
+          "premium_basis": "Payroll",
+          "exposure": "$39,300",
+          "products_rate": null,
+          "products_premium": null,
+          "all_other_rate": "33.211",
+          "all_other_premium": "$1,305",
+          "note_on_page": "'Products/Completed Operations are subject to the General Aggregate Limit' - printed under this class only"
+        },
+        {
+          "code": "91585",
+          "description": "Contrctrs-sub work-in connection w/constrctn,recon,repr,erctn of buildings - NOC",
+          "premium_basis": "Total Cost",
+          "exposure": "$350,000",
+          "products_rate": "3.4240",
+          "products_premium": "$1,198",
+          "all_other_rate": "2.293",
+          "all_other_premium": "$803"
+        }
       ],
-      "source": "page 211, GENERAL LIABILITY SCHEDULE (Form CG7001A), Location 001",
+      "source": "page 211, GENERAL LIABILITY SCHEDULE (Form CG7001A Ed. 10-12), Location 001",
+      "extra_decoys_on_the_same_page": "The three RATES - 33.211, 3.4240 and 2.293 - are the only decimal numbers of that shape anywhere in 271 pages. They are not codes, not limits, not premiums, and nothing on any ACORD form asks for them except ACORD 126's own rate columns. A vehicle, driver or exposure question that reaches page 211 now has FOUR class-shaped numbers (91580, 91585, and the two Location headers 000/001), THREE rates, THREE premiums and TWO exposures competing for it.",
       "note": "THE C46 PHANTOM-VEHICLE-ROW DEFECT'S LITERAL SOURCE. CLAUDE.md records ACORD 127 rows 2-3 coming back with 'the General Liability class codes 91580/91585 and the GL exposures ($39,300 payroll, $350,000 subcontract cost) stamped as vehicle COST NEW.' All four values are on this single page. There is ONE vehicle in this package and it is a 2012 Subaru Outback costing $26,680 - these numbers have nothing to do with it. A vehicle-schedule question that reaches this page in an undifferentiated blob will find four numbers shaped exactly like the answer."
     },
-
     "operations": {
       "business_description": "COMMERCIAL GENERAL CONTRACTOR",
       "note": "Printed TRUNCATED as 'COMMERCIAL GENERAL CONTRA' on every dec page (pages 3, 85, 143) - the carrier's field is too narrow. The GL class-code descriptions on page 211 are the fuller statement of what the business actually does: executive supervision plus subcontracted construction, reconstruction, repair and erection of buildings.",
       "rated_location": "4800 Dahlia St # D13, Denver, CO 80216-3121 (page 212, 'Location of All Premises Owned, Rented or Occupied' - ONE location, 'Location 1')"
     },
-
     "gl_deductible": {
       "correct": null,
-      "reason": "There is NO general GL deductible on this policy. The GL declarations page (205) lists limits only.",
+      "reason": "There is NO general GL deductible on this policy. The GL declarations page (205) lists limits only, and there is no deductible line anywhere on it.",
       "decoys": {
-        "$1,000": "page 207, CG 72 76 Limited Pollution Coverage - Work Sites: 'Property Damage Deductible $1,000 Each Pollution Incidents'. That is a POLLUTION deductible inside one endorsement, not the policy's GL deductible. It is the likely source of the '$1,000 GL deductible' in the umbrella_sir_below_gl_deductible false positive already deleted on 2026-08-12."
-      }
+        "$1,000": "page 207, CG 72 76 Limited Pollution Coverage - Work Sites: 'Property Damage Deductible $1,000 Each Pollution Incidents'. A POLLUTION deductible inside one endorsement, not the policy's GL deductible. It is the source of the '$1,000 GL deductible' in the umbrella_sir_below_gl_deductible false positive deleted on 2026-08-12.",
+        "$1,000,000 (twice)": "page 207, the SAME three-line CG 72 76 schedule entry also prints 'Each Pollution Incident Limit - $1,000,000' and 'Pollution Liability Aggregate Limit - $1,000,000'. Those are IDENTICAL to the GL Each Occurrence limit on page 205 - the right number attached to the wrong coverage. A limit question answered from page 207 is correct by accident and would stay correct on a policy where it was not.",
+        "the blank twin": "pages 242-244 are CG7276's own wording, and page 242 prints the SAME schedule with all three boxes EMPTY. The completed values are 35 pages earlier on the endorsement schedule."
+      },
+      "note": "This is now the second confirmed case in the package where a policy's real coverage figures live on an endorsement SCHEDULE line and the endorsement's own FORM prints an empty box - the first being the umbrella's designated-work exclusion. See _blank_form_trap."
     },
-
     "umbrella": {
       "each_occurrence": "$3,000,000",
-      "personal_and_advertising_injury": "$3,000,000",
-      "aggregate": "$3,000,000",
+      "personal_and_advertising_injury": "$3,000,000 (any one person or organization)",
+      "aggregate": "$3,000,000 (except with respect to \"covered autos\")",
       "self_insured_retention": "$0",
-      "premium": "$3,418.00",
-      "source": "pages 143 and 148",
-      "note": "SIR is $0 against a $1,000 Auto comp/collision deductible. That pairing is the false-positive warning already fixed on 2026-08-07 - this package is its literal reproduction case, so a re-run must stay silent on it."
+      "premium": "$3,418.00, printed as 'PREMIUM NOT SUBJECT TO AUDIT'",
+      "minimum_premium": "$100 - 'A $100 MINIMUM POLICY PREMIUM APPLIES IF POLICY IS CANCELLED AFTER THE EFFECTIVE DATE' (page 143). The only minimum premium stated anywhere in the package.",
+      "coverage_trigger": "Occurrence Basis (stated on page 148 for the underlying GL)",
+      "source": "pages 143 (declarations), 144-145 (endorsement schedule), 147 (TRIA schedule) and 148 (CU7001A umbrella schedule)",
+      "note": "SIR is $0 against a $1,000 Auto comp/collision deductible. That pairing is the false-positive warning already fixed on 2026-08-07 - this package is its literal reproduction case, so a re-run must stay silent on it. The $0 SIR is also why `_traps.gl_deductible` matters: there is no GL deductible either, so the deleted `umbrella_sir_below_gl_deductible` rule had nothing valid to compare even if it had been conceptually sound.",
+      "schedule_of_underlying_insurance_page_148": {
+        "general_liability": {
+          "company": "EMC Property & Casualty Company",
+          "policy_number": "BBC7263",
+          "period": "07/15/25 to 07/15/26",
+          "basis": "Occurrence"
+        },
+        "commercial_auto_liability": {
+          "company": "Employers Mutual Casualty Company",
+          "policy_number": "6E74002",
+          "covered_auto_liability": "$1,000,000 Each Accident"
+        },
+        "note": "Only TWO underlying policies are scheduled. Inland Marine and Property are NOT underlying to the umbrella - correctly, since neither is a liability line. An umbrella-attachment check that expects every coverage part to appear here is wrong."
+      },
+      "designated_work_exclusion_page_144": {
+        "form": "CU2103 09-00 EXCL - DESIGNATED WORK",
+        "description_of_your_work": "ANY WORK ARISING OUT OF THE DESIGN, DEVELOPMENT, SITE PREPARATION, CONSTRUCTION, MARKETING, OR SALES OF MULTI-FAMILY HOUSING OR TRACT HOUSING AS DEFINED UNDER SECTION V-DEFINITIONS OF THE PRIMARY POLICY DESCRIBED IN SCHEDULE A AND IS PERFORMED BY YOU OR ON YOUR BEHALF. THIS EXCLUSION ALSO APPLIES TO THE CONVERSION OF AN EXISTING BUILDING OR STRUCTURE INTO MULTI-FAMILY HOUSING OR ADDITIONS TO MULTI-FAMILY HOUSING. THIS EXCLUSION DOES NOT APPLY TO BODILY INJURY OR PROPERTY DAMAGE ARISING OUT OF REMODELING, RENOVATION, MAINTENANCE, OR SERVICE OPERATIONS OF OR ON AN EXISTING BUILDING OR STRUCTURE THAT WAS NOT YOUR WORK.",
+        "why_it_matters": "A substantive, completed, underwriting-material coverage restriction on a general CONTRACTOR - and it is printed on an ENDORSEMENT SCHEDULE page, not on the declarations. Meanwhile the exclusion's own form (CU 21 03, page 169) prints an EMPTY 'Description Of Your Work' box with the standard 'If no entry appears above, information required to complete this endorsement will be shown in the Declarations'. The data and the form are 25 pages apart, and only one of them has the answer.",
+        "the_gl_twin": "The SAME restriction exists on the General Liability part as a named ISO form: 'CG 77 62 05 23 Exclusion Multi Family and Tract Housings' (page 208 endorsement schedule; full wording page 254, which defines 'multi-family housing' as more than four dwelling units and 'tract housing' as developments of more than 20 buildings). So multi-family and tract housing are excluded on BOTH liability parts, by two differently-worded endorsements, one of which states its scope in free text on a schedule and one of which states it in a printed ISO form. Underwriting-wise this is a single consistent restriction on the account; retrieval-wise it is two unrelated pages 110 apart."
+      }
     },
-
     "driver_schedule": {
       "correct": null,
       "reason": "There is NO driver schedule in this package. No licence numbers, no dates of birth, no driver rows.",
       "decoys": {
-        "ERIN ROYAL": "page 92, CA 99 10 A DRIVE OTHER CAR COVERAGE, under 'NAMES OF INDIVIDUALS'. The ONLY personal name in 180 pages, and it is a Drive Other Car named individual, NOT a driver on the vehicle schedule. This is the source of the C22 defect where 'ERIN ROYAL' landed in Driver_TaxIdentifier_A and Driver_GenderCode_A."
-      }
+        "ERIN ROYAL": "page 92, CA 99 10 A DRIVE OTHER CAR COVERAGE, under 'NAMES OF INDIVIDUALS'. A Drive Other Car named individual, NOT a driver on the vehicle schedule. This is the source of the C22 defect where 'ERIN ROYAL' landed in Driver_TaxIdentifier_A and Driver_GenderCode_A.",
+        "Todd A. Strother": "pages 25-26, IL7004 Mutual Policy Provisions - 'Todd A. Strother, Secretary'. CORRECTION to this fixture's earlier claim that ERIN ROYAL was 'the ONLY personal name in 180 pages'. It is not.",
+        "Scott R. Jean": "pages 25-26, IL7004 - 'Scott R. Jean, President'. Printed SEVEN times on page 25 alone, once per group company signature block.",
+        "Doug Van Zanten": "pages 25-26, IL7004 - 'Doug Van Zanten, Secretary'. Printed five times on page 25."
+      },
+      "note": "The three IL7004 signatories are the WORST personal-name decoys in the package and they were missed on the first pass. IL7004 attaches to every coverage part, so it appears 4x (pages 25, 138, 199, 264) - meaning 'Scott R. Jean' is printed roughly 28 times across the package while ERIN ROYAL is printed once and the named insured's own officers are never printed at all. Under `_merge_list_fields`' log1p(freq) ranking a carrier executive's signature outscores every real name in the document. Any person-shaped field coming back with one of these three names is this trap firing."
     },
-
     "_repeated_boilerplate": {
       "note": "A MERGE defect, not a retrieval one - chunking will not fix it. Common interline forms attach to EVERY coverage part, so their text repeats once per part while a real declarations value is printed ONCE. `_merge_list_fields` ranks candidates on log1p(freq) + confidence, so the bias scales with the number of coverage parts. This package has five. CONFIRMED COUNTS across all 271 pages:",
       "final_counts": {
-        "IL 00 17 Common Policy Conditions": {"copies": 4, "pages": [24, 131, 195, 258], "carries": "the client-reported applicant_name garbage sentence"},
-        "IL 70 04 Mutual Policy Provisions": {"copies": 4, "pages": [25, 138, 199, 264]},
-        "IL 76 02 CO Company Elimination": {"copies": 4, "pages": [28, 141, 204, 269]},
-        "IL 02 28 CO Cancellation And Nonrenewal": {"copies": 3, "pages": [136, 197, 262]},
-        "IL 01 25 CO Changes - Civil Union": {"copies": 3, "pages": [134, 196, 261]},
-        "IL 74 47 Notice Of Cancellation": {"copies": 3, "pages": [140, 202, 267]},
-        "IL 83 83.2A TRIA Disclosure": {"copies": 3, "pages": [5, 147, 210]},
-        "IL 00 21 Nuclear Energy Liability": {"copies": 2, "pages": [132, 259]}
+        "IL 00 17 Common Policy Conditions": {
+          "copies": 4,
+          "pages": [
+            24,
+            131,
+            195,
+            258
+          ],
+          "carries": "the client-reported applicant_name garbage sentence"
+        },
+        "IL 70 04 Mutual Policy Provisions": {
+          "copies": 4,
+          "pages": [
+            25,
+            138,
+            199,
+            264
+          ]
+        },
+        "IL 76 02 CO Company Elimination": {
+          "copies": 4,
+          "pages": [
+            28,
+            141,
+            204,
+            269
+          ]
+        },
+        "IL 02 28 CO Cancellation And Nonrenewal": {
+          "copies": 3,
+          "pages": [
+            136,
+            197,
+            262
+          ]
+        },
+        "IL 01 25 CO Changes - Civil Union": {
+          "copies": 3,
+          "pages": [
+            134,
+            196,
+            261
+          ]
+        },
+        "IL 74 47 Notice Of Cancellation": {
+          "copies": 3,
+          "pages": [
+            140,
+            202,
+            267
+          ]
+        },
+        "IL 83 83.2A TRIA Disclosure": {
+          "copies": 3,
+          "pages": [
+            5,
+            147,
+            210
+          ]
+        },
+        "IL 00 21 Nuclear Energy Liability": {
+          "copies": 2,
+          "pages": [
+            132,
+            259
+          ]
+        },
+        "IL 71 68 Asbestos Exclusion": {
+          "copies": 2,
+          "pages": [
+            201,
+            266
+          ],
+          "note": "added on the re-audit - missed on the first pass"
+        },
+        "IL 74 51 Snow And Ice Plowing Exclusion": {
+          "copies": 2,
+          "pages": [
+            203,
+            268
+          ],
+          "note": "added on the re-audit. The only repeated form whose SCHEDULE box is filled in, identically, on both copies."
+        },
+        "IL 85 76 Medicare Notice": {
+          "copies": 2,
+          "pages": [
+            142,
+            270
+          ],
+          "note": "added on the re-audit. Carries the only URL in the package, twice."
+        },
+        "IL 83 84A Terrorism Notice": {
+          "copies": 2,
+          "pages": [
+            146,
+            209
+          ],
+          "note": "added on the re-audit"
+        }
       },
+      "verification": "Every page number in the eight original entries was re-checked against the document on 2026-08-14 and every one is EXACT. The first pass got this table right; it was only incomplete. Four more repeated forms are added above, all of them 2 copies.",
       "the_arithmetic": "log1p(1) = 0.693 for the $10,663 total premium, printed once. log1p(4) = 1.609 for the IL0017 boilerplate. The boilerplate scores 2.3x the real number on frequency alone, before confidence is even considered.",
       "recommendation": "Worth its own fix after the harness produces a baseline. Options include damping frequency for text that appears in a known standard form, or scoring dec-page provenance rather than raw repetition. Do not touch it before there is a number to move."
     },
-
     "_blank_form_trap": {
-      "pages": "125-126",
-      "form": "CA 8282 COLORADO BODILY INJURY UNINSURED MOTORISTS COVERAGE SELECTION/REJECTION",
-      "note": "An UNCOMPLETED form. 'Producer:', 'Insured Name and Mailing Address:', 'Effective Date', 'Policy/Account Number', '(Initials)' and four signature lines are all EMPTY. It also prints '$50,000' as the Colorado statutory minimum UM limit. Two risks: the model reading empty labelled boxes as data, and $50,000 being taken for this policy's UM limit. The real UM limit is $1,000,000 (page 88)."
+      "note": "Forms whose SCHEDULE boxes are printed and EMPTY. Every one is a labelled box with no value, which is the exact shape a field-extraction pass is looking for. All must yield nothing.",
+      "forms": {
+        "CA 8282 (pages 125-126)": {
+          "title": "COLORADO BODILY INJURY UNINSURED MOTORISTS COVERAGE SELECTION/REJECTION",
+          "empty_boxes": [
+            "Date",
+            "Producer:",
+            "Insured Name and Mailing Address:",
+            "Website Address",
+            "Code",
+            "Subcode",
+            "Effective Date",
+            "Expiration Date",
+            "Policy/Account Number",
+            "(Initials) x4",
+            "Signature of Applicant/Named Insured x4",
+            "Other Limit $___"
+          ],
+          "numeric_decoy": "'$50,000' appears FOUR times across the two pages as the Colorado statutory minimum UM limit, plus once as 'Greater Than $50,000 Combined Single Limit'. The real UM limit is $1,000,000 (page 88).",
+          "extra": "'Website Address' is a labelled empty box - and the applicant has no website anywhere in the package, so this box is also the most likely source of a fabricated one. The page footer names SEVEN group companies (see _traps.insurer_name)."
+        },
+        "CA 21 50 (page 110)": {
+          "title": "COLORADO UNINSURED MOTORISTS COVERAGE - BODILY INJURY",
+          "empty_boxes": [
+            "POLICY NUMBER: (top of page, blank)",
+            "SCHEDULE / Limit Of Insurance: $ ____ Each \"Accident\""
+          ],
+          "note": "An ISO form whose schedule is deliberately left blank because the value lives on the declarations: 'Information required to complete this Schedule, if not shown above, will be shown in the Declarations.' The value it points at is the $1,000,000 on page 88."
+        },
+        "CU 21 03 (page 169)": {
+          "title": "EXCLUSION - DESIGNATED WORK",
+          "empty_boxes": [
+            "POLICY NUMBER: (top of page, blank)",
+            "SCHEDULE / Description Of Your Work: (empty box)"
+          ],
+          "note": "THE MOST CONSEQUENTIAL BLANK IN THE PACKAGE. The real designated-work description is a 14-line multi-family/tract-housing exclusion printed on page 144 (see _traps.umbrella.designated_work_exclusion_page_144). The form and its content are 25 pages apart, and the form itself says so: 'If no entry appears above, information required to complete this endorsement will be shown in the Declarations.' Keeping page 169 and dropping page 144 yields an exclusion with no subject."
+        },
+        "CG 72 76 (page 242)": {
+          "title": "LIMITED POLLUTION COVERAGE - WORK SITES",
+          "empty_boxes": [
+            "SCHEDULE / Each Pollution Incident Limit $___",
+            "Pollution Liability Aggregate Limit $___",
+            "Property Damage Deductible $___ Each Pollution Incident"
+          ],
+          "note": "Three empty currency boxes. The completed values - $1,000,000 / $1,000,000 / $1,000 - are on page 207. See _traps.gl_deductible."
+        },
+        "CG 99 09 (pages 256-257)": {
+          "title": "PREMIUM AUDIT NONCOMPLIANCE CHARGE",
+          "empty_boxes": [
+            "POLICY NUMBER: (top of page, blank)",
+            "SCHEDULE / Total Advance Premium: $___",
+            "Audit Noncompliance Charge Factor: ___",
+            "Number Of Written Attempts To Obtain Audit Information: ___",
+            "Reassessment Charge: $___"
+          ],
+          "completed_values_are_on_page_208": {
+            "Audit Noncompliance Charge Factor": "1",
+            "Number of Written Attempts To Obtain Audit Information": "2",
+            "Reassessment Charge": "0"
+          },
+          "note": "THE WORST TRAP IN 271 PAGES, and it is worse than every other blank form because the blank schedule is followed IMMEDIATELY, on the same page, by a filled-in worked example: 'Example: Total Advance Premium: $25,000 / Audit Noncompliance Charge Factor: 1 / Audit Noncompliance Charge: $25,000'. So page 256 offers an empty labelled box called 'Total Advance Premium' and, four lines below it, the string 'Total Advance Premium: $25,000' - on a policy whose GL advance premium is $3,954 and whose package total is $10,663. The page even labels it 'for illustration purposes only', which is the only thing standing between the extractor and a $25,000 premium. Note the factor '1' and the example both being 1 is coincidence, not corroboration."
+        }
+      },
+      "shared_lesson": "FIVE separate forms in this one package print an empty schedule and point AWAY from themselves to the declarations - CA 21 50, CU 21 03, CG 72 76, CG 99 09 and (uncompleted rather than pointing) CA 8282. A retrieval filter that scores pages on 'does this look like a form with fields' keeps all five and can still lose every value they refer to. The one counter-example is IL 74 51 (pages 203 and 268), whose 'Description of Designated Operations' box IS filled in on the form itself - so 'exclusion forms have empty schedules' is not a rule either.",
+      "the_asymmetry": "An empty box costs nothing if it stays empty. The danger is entirely one-directional: these pages supply labels without values, and the pipeline's job is to resist supplying the value from somewhere else on the page. CG 99 09 is the only one that puts a plausible wrong value within four lines of the label."
     }
   },
-
-  "_auto_section_pages_85_90": {
-    "note": "Not scored on ACORD 125 - recorded for the 127 fixture and to pin the vehicle-schedule retrieval case.",
-    "vehicle_1": {
-      "year": "2012", "make": "SUBARU", "model": "OUTBACK", "body": "SEDAN",
-      "vin": "4S4BRCGC9C3217772", "cost_new": "26680", "class": "7383", "territory": "111",
-      "garaged": "4800 DAHLIA STREET D13, DENVER CO 80216-3121"
+  "_source_data": {
+    "package_premium_table_page_1": {
+      "rows": [
+        {
+          "section": "1",
+          "coverage": "Property",
+          "premium": "No Coverage"
+        },
+        {
+          "section": "2",
+          "coverage": "Liability",
+          "premium": "$3,954.00"
+        },
+        {
+          "section": "3",
+          "coverage": "Crime and Fidelity",
+          "premium": "No Coverage"
+        },
+        {
+          "section": "4",
+          "coverage": "Inland Marine",
+          "premium": "$300.00"
+        },
+        {
+          "section": "5",
+          "coverage": "Automobile",
+          "premium": "$2,991.00"
+        },
+        {
+          "section": "6",
+          "coverage": "Workers' Compensation",
+          "premium": "No Coverage"
+        },
+        {
+          "section": "7",
+          "coverage": "Umbrella",
+          "premium": "$3,418.00"
+        },
+        {
+          "section": "8",
+          "coverage": "Other",
+          "premium": null
+        }
+      ],
+      "estimated_total_policy_premium": "$10,663.00",
+      "forms_applicable_note": "'Forms applicable to all sections except: 1. Workers' compensation'"
     },
-    "covered_auto_symbols": {
-      "liability": "01", "medical_payments": "02", "um_uim": "02",
-      "comprehensive": "07", "collision": "07"
+    "issuance": {
+      "date_of_issue": "07/16/2025 - printed '07/16/25' with a 2-digit year on every section page EXCEPT the General Liability part (pages 205-212), which prints '07/16/2025'. Same for the policy term: '07/15/25 TO 07/15/26' on IM, Auto and Umbrella; '07/15/2025-07/15/2026' on GL. The GL part is a different carrier on a different form family and formats every date differently.",
+      "place_of_issue": "Des Moines, IA (pages 1 and 2 only)",
+      "policy_term_wording_page_1": "'Policy Term: See Section Declarations To: 07/15/2026   12:01 A.M. Standard Time  (Unless Changed On The Section Declarations)'",
+      "effective_time": "12:01 A.M. Standard Time - page 1 only. Not repeated on any section dec page.",
+      "billing": "DIRECT BILL - all FOUR section dec pages agree (3, 85, 143, 205), though page 205 prints it inside the named-insured block rather than the producer block. No payment plan code and no deposit printed anywhere.",
+      "minimum_premium": "$100, Umbrella only, page 143, and conditional on cancellation. There is NO package minimum premium.",
+      "audit": "THREE different answers, one per part that says anything. General Liability: 'Audit Period: Annual' (page 206). Umbrella: 'PREMIUM NOT SUBJECT TO AUDIT' (page 143). Inland Marine and Business Auto: silent. `Policy_Audit_FrequencyCode_A` asks for THE policy's audit term and this package does not have one - see _general_liability_pages_205_212.audit_period_is_not_scored.",
+      "authorized_representative_signature": "The signature line is printed on pages 1 and 2 and is EMPTY. `Producer_AuthorizedRepresentative_FullName_A` and `_Signature_A` must stay blank.",
+      "servicing_company": {
+        "name": "EMC Insurance Companies",
+        "address": "5445 DTC Parkway, Suite 320, Greenwood Village, CO 80111-3048",
+        "phone": "720-200-3700",
+        "source": "page 2, and repeated as 'SERVICING CARRIER: (720)200-3700' on pages 3 and 85"
+      },
+      "phone_numbers": "Three exist and none is the applicant's - enumerated once in _traps.applicant_phone rather than repeated here. Count across pages 1-180: each of the three is printed on pages 1/2, 3, 85 AND 143, so each appears four times while the applicant's phone appears zero times. Frequency ranking cannot help; only knowing whose phone it is can."
     },
-    "limits": {
-      "liability_csl": "$1,000,000", "med_pay": "$5,000",
-      "um_uim_csl": "$1,000,000",
-      "comprehensive_deductible": "$1,000", "collision_deductible": "$1,000"
+    "inland_marine_pages_3_9": {
+      "section": {
+        "policy_number": "6C7-40-02---26",
+        "policy_period": "07/15/25 to 07/15/26",
+        "carrier": "EMPLOYERS MUTUAL CASUALTY COMPANY",
+        "form": "CM7000A ED. 3-20 (declarations), CM7001A ED. 9-97 (schedule)",
+        "total_premium": "$300.00"
+      },
+      "coverage_headings_page_3": {
+        "CONTRACTORS EQUIPMENT": "$300.00",
+        "ELECTRONIC DATA PROCESSING": "INCLUDED",
+        "INSTALLATION FLOATER": "INCLUDED"
+      },
+      "policywide_page_6": {
+        "class_870_contractors_essential_industry_extension": {
+          "annual_premium": "$300"
+        },
+        "class_801_contractors_equipment": {
+          "deductible": "$500 per occurrence",
+          "coinsurance": "80%",
+          "catastrophe_limit": "$10,000",
+          "additional_debris_removal_expenses": "$25,000",
+          "employee_tools_acv": "$7,500",
+          "newly_purchased_equipment_pct_of_catastrophe_limit": "30%",
+          "pollutant_cleanup_and_removal": "$25,000",
+          "rental_reimbursement_limit": "$7,500",
+          "rental_reimbursement_waiting_period": "72 HRS",
+          "spare_parts_and_fuel": "$7,500",
+          "unscheduled_contractors_equipment": "$10,000",
+          "most_paid_any_one_item": "$10,000",
+          "valuation": "ACTUAL CASH VALUE",
+          "premium": "INCLUDED"
+        },
+        "class_840_contractors_equipment_leased_or_rented_from_others": {
+          "most_paid_any_one_item": "$50,000",
+          "most_paid_any_one_occurrence": "$50,000",
+          "valuation": "ACTUAL CASH VALUE",
+          "deductible": "$500"
+        }
+      },
+      "installation_floater_class_999_page_7": {
+        "deductible_all_covered_causes": "$500 (except flood, earthquake and sewer backup)",
+        "earthquake_deductible": "NOT COVERED",
+        "flood_deductible": "NOT COVERED",
+        "sewer_backup_deductible": "$500",
+        "catastrophe_limit": "$50,000",
+        "jobsite_limit": "$50,000",
+        "coinsurance": "80%",
+        "additional_debris_removal_expenses": "$5,000",
+        "emergency_removal": "10 DAYS",
+        "limited_fungus_coverage": "$15,000",
+        "contract_penalty": "$5,000",
+        "pollutant_cleanup_and_removal": "$10,000",
+        "sewer_backup_coverage": "$5,000",
+        "storage_locations": "$5,000",
+        "testing": "$5,000",
+        "transit": "$5,000",
+        "business_personal_property": "NOT COVERED",
+        "earthquake_limit": "NOT COVERED",
+        "earthquake_catastrophe_limit": "NOT COVERED",
+        "flood_limit": "NOT COVERED",
+        "flood_catastrophe_limit": "NOT COVERED",
+        "non_reporting_form_premium": "INCLUDED"
+      },
+      "location_001_data_processing_pages_8_9": {
+        "location": "001 - 4800 DAHLIA ST # D13, DENVER, CO 80216-3121",
+        "deductible_all_covered_perils": "$500",
+        "earthquake_and_volcanic_eruption_deductible": "$500",
+        "flood_deductible": "NOT COVERED",
+        "mechanical_breakdown_electrical_power_supply_deductible": "$500",
+        "coinsurance": "80%",
+        "earthquake_aggregate_occurrence_catastrophe_limits": "$15,000 each",
+        "flood_aggregate_occurrence_catastrophe_limits": "NOT COVERED",
+        "sewer_backup_aggregate_occurrence_catastrophe_limits": "$15,000 each",
+        "class_847_computer_coverage": {
+          "valuation": "ACTUAL CASH VALUE",
+          "hardware": "$10,000",
+          "programs_and_applications_and_media": "$5,000",
+          "income_coverage": "NOT COVERED"
+        },
+        "coverage_extensions": {
+          "additional_debris_removal_expenses": "$5,000",
+          "emergency_removal_days": "365",
+          "emergency_removal_expenses": "$1,000",
+          "electrical_and_power_supply_disturbance": "COVERED",
+          "500_feet_limitation": "NOT WAIVED",
+          "fraud_and_deceit": "$1,000",
+          "mechanical_breakdown_coverage": "COVERED"
+        },
+        "supplemental_coverages": {
+          "acquired_locations": "$250,000",
+          "earthquake_coverage": "COVERED",
+          "flood_coverage": "NOT COVERED",
+          "newly_purchased_or_leased_hardware": "$250,000",
+          "off_site_computers": "$2,500",
+          "pollutant_cleanup_and_removal": "$10,000",
+          "property_in_transit": "$5,000",
+          "proprietary_programs_and_data_records": "$5,000",
+          "sewer_backup": "COVERED",
+          "rewards": "$1,000",
+          "software_storage": "$25,000",
+          "virus_and_hacking_any_one_occurrence": "$5,000",
+          "virus_and_hacking_each_12_month_period": "$10,000",
+          "foreign_transit_and_location_limit": "NOT COVERED"
+        },
+        "additional_property_all_not_covered": [
+          "ACCOUNTS RECEIVABLE",
+          "POWER PROTECTION EQUIPMENT",
+          "REPRODUCTION EQUIPMENT",
+          "TELECOMMUNICATIONS EQUIPMENT",
+          "VALUABLE PAPERS"
+        ],
+        "premium": "INCLUDED"
+      },
+      "why_this_matters": "Every limit above is ALSO printed, as a default, inside the IM7000 / IM7100 / IM7201 policy wording on pages 30-84 - which is 55 pages of standard form against 4 pages of schedule. The wording says '$5,000' for employee tools; THIS policy schedules $7,500. The wording says '$25,000' for equipment leased or rented from others; THIS policy schedules $50,000. A retrieval pass that keeps the wording and drops the schedule returns a confidently wrong limit with a real quote behind it, which the evidence gate cannot catch. This is the single most dangerous shape in part 1."
     },
-    "phantom_row_check": "ONE vehicle only. Rows B-N of ACORD 127 must stay blank. This is the C46 phantom-schedule-row case with real data."
+    "auto_section_pages_85_92": {
+      "section": {
+        "policy_number": "6E7-40-02---26",
+        "policy_period": "07/15/25 to 07/15/26",
+        "carrier": "EMPLOYERS MUTUAL CASUALTY COMPANY",
+        "form": "CA7000A 02-22 (declarations), CA7001A / CA7002A 02-22 (items 3/4/5), CA7093A 02-22 (UM/UIM)",
+        "estimated_total_policy_premium": "$2,991.00"
+      },
+      "vehicle_1": {
+        "year": "2012",
+        "make": "SUBARU",
+        "model": "OUTBACK",
+        "body": "SEDAN",
+        "vin": "4S4BRCGC9C3217772",
+        "cost_new": "26680",
+        "class": "7383",
+        "territory": "111",
+        "vehicle_type": "PRIV PASSENGER - COMM",
+        "radius": "NA",
+        "use": "NA",
+        "age": null,
+        "coverage_codes_as_printed": "LIAB-I  PHYS-I",
+        "valuation": "ACV (both comprehensive and collision)",
+        "location": "LOC: 001",
+        "garaged": "4800 DAHLIA STREET D13, DENVER CO 80216-3121",
+        "total_vehicle_premium": "$2,212.00"
+      },
+      "covered_auto_symbols": {
+        "liability": "01",
+        "medical_payments": "02",
+        "um_uim": "02",
+        "comprehensive": "07",
+        "collision": "07"
+      },
+      "limits": {
+        "liability_csl": "$1,000,000",
+        "med_pay": "$5,000 EACH INSURED",
+        "um_uim_csl": "$1,000,000 (Colorado, combined single limit, page 88 CA7093A)",
+        "comprehensive_deductible": "$1,000",
+        "collision_deductible": "$1,000",
+        "deductible_wording": "'$1000 DEDUCTIBLE FOR ALL PERILS FOR EACH COVERED AUTO'"
+      },
+      "item_two_premiums_page_85": {
+        "covered_autos_liability": "$1,496.00",
+        "auto_medical_payments": "$35.00",
+        "uninsured_and_underinsured_motorists": "$258.00",
+        "comprehensive": "$134.00",
+        "collision": "$289.00",
+        "premium_for_attached_items_4_5_and_or_6": "$322.00",
+        "premium_for_endorsements": "$457.00",
+        "estimated_total_policy_premium": "$2,991.00"
+      },
+      "item_three_premium_summary_page_89": {
+        "covered_autos_liability": "$1,496.00",
+        "auto_medical_payments": "$35.00",
+        "uninsured_motorists": "$258.00",
+        "underinsured_motorists": "INCLUDED",
+        "comprehensive": "$134.00",
+        "collision": "$289.00",
+        "total": "$2,212.00"
+      },
+      "item_four_hired_or_borrowed_page_90": {
+        "coverage": "COVERED AUTOS LIABILITY COVERAGE - COST OF HIRE BASIS, for autos NOT used in your motor carrier operations",
+        "basis": "EXCESS",
+        "state": "CO",
+        "estimated_annual_cost_of_hire": "IF ANY",
+        "rate": "100",
+        "premium": "$185.00",
+        "total": "$185.00"
+      },
+      "item_five_non_ownership_page_90": {
+        "class": "OTHER THAN A SOCIAL SERVICE AGENCY",
+        "number_of_employees": "0 - 25",
+        "premium": "$137.00",
+        "total": "$137.00"
+      },
+      "notable_endorsements": {
+        "CA9910A 10-13": "DRIVE OTHER CAR COV FOR NAMED INDIV - the endorsement that carries ERIN ROYAL on page 92 (part 2)",
+        "CA7093A 02-22": "UM/UIM SUPPLEMENTAL SCHEDULE - carries the real $1,000,000 UM limit on page 88",
+        "CA7450 09-24": "COMMERCIAL AUTO ELITE EXTENSION",
+        "CA0440 10-13": "COLORADO AUTO MEDICAL PAYMENTS COV",
+        "CA2150 07-17": "CO UNINSURED MOTORISTS COVERAGE BI",
+        "CA8282 08-18": "CO BODILY INJURY UNINSURED SEL/REJ - the blank form on pages 125-126",
+        "CA0001 11-20": "BUSINESS AUTO COVERAGE FORM, 'TERRORISM COVG INCL IN MAIN COV FORM  $ 3'"
+      },
+      "endorsement_premium_detail_page_91": {
+        "form": "ENDST-A",
+        "rows": [
+          {
+            "endorsement": "DRIVE OTHER CAR - TERRITORY: 104",
+            "class": "6679",
+            "premium": "$204.00"
+          },
+          {
+            "endorsement": "Auto Elite Extension",
+            "class": "8556",
+            "premium": "$250.00"
+          }
+        ],
+        "arithmetic": "$204.00 + $250.00 + $3.00 (terrorism, page 87) = $457.00, which is exactly the 'PREMIUM FOR ENDORSEMENTS' line on page 85. Use it to confirm all three endorsement premiums were read."
+      },
+      "drive_other_car_schedule_page_92": {
+        "form": "CA9910A 10-13 - DRIVE OTHER CAR COVERAGE, BROADENED COVERAGE FOR NAMED INDIVIDUALS",
+        "names_of_individuals": [
+          "ERIN ROYAL"
+        ],
+        "coverages": {
+          "liability": {
+            "limit": "$1,000,000",
+            "premium": "$174.00"
+          },
+          "auto_medical_payments": {
+            "limit": "$5,000",
+            "premium": "$4.00"
+          },
+          "uninsured_motorists": {
+            "limit": "$1,000,000",
+            "premium": "$26.00"
+          },
+          "underinsured_motorists": {
+            "limit": "INCLUDED",
+            "premium": null
+          }
+        },
+        "arithmetic": "$174.00 + $4.00 + $26.00 = $204.00, the DRIVE OTHER CAR line on page 91. Exact."
+      },
+      "phantom_row_check": "ONE vehicle only. Rows B-N of ACORD 127 must stay blank. This is the C46 phantom-schedule-row case with real data.",
+      "no_driver_schedule": "ITEM THREE lists the vehicle only. There is no driver row, no licence number and no date of birth anywhere in pages 85-92."
+    },
+    "umbrella_pages_143_148": {
+      "section": {
+        "policy_number": "6J7-40-02---26 (printed '6J74002---26' on page 148 - a FOURTH spelling of the same number, without the hyphens)",
+        "policy_period": "07/15/25 to 07/15/26",
+        "carrier": "EMPLOYERS MUTUAL CASUALTY COMPANY",
+        "form": "CU7000A ED. 01-07 (declarations), CU7001A ED. 11-15 (schedule of underlying insurance)",
+        "insured_is": "LLC",
+        "business_desc": "COMMERCIAL GENERAL CONTRA (truncated, same as every other section dec page)",
+        "billing": "DIRECT BILL",
+        "agent": "AW 6258"
+      },
+      "limits_and_premium": "Stated once, in _traps.umbrella - not repeated here. That entry is the canonical one because the $3,000,000 limits are the C23 defect's decoy against the GL's $1,000,000.",
+      "endorsements_that_are_underwriting_facts": {
+        "CU2103 EXCL - DESIGNATED WORK": "multi-family / tract housing - full text in _traps.umbrella",
+        "IL7168 ASBESTOS EXCLUSION": "page 145",
+        "IL7451 EXCL-SNOW/ICE PLOWING, RMVL OR TRTMNT": "page 145 - a real operations exclusion on a Colorado contractor",
+        "CU7484 EXCL-ALL OPS COV/CONTROLLED WRAP UP": "page 144 - wrap-up / OCIP exclusion",
+        "CU7346 COMMUNICABLE DISEASE EXCLUSION": "page 144",
+        "CU2150 SILICA OR SILICA RELATED DUST EXCL": "page 144 - material for a contractor",
+        "CU3454 EXCL PERFLUOROALKYL/POLYFLUROALKYL": "page 144 - PFAS",
+        "CU7486 CANNABIS EXCL/EXCP RETAIL SALES CBD": "page 144",
+        "CU3456 / CU8160 CYBER INCIDENT + DATA PRIVACY EXCL": "page 144",
+        "CU2186 EXCL-ACCESS/DISCL OF CONFID/PERSONAL": "page 144",
+        "CU7269 AGG LIMIT - PER LOC AGG FOR PREM OPS": "page 144 - per-LOCATION aggregate",
+        "CU7270 AGG LIMIT - PER PROJ AGG FOR PREM OPS": "page 144 - per-PROJECT aggregate",
+        "CU7460 BLANKET WAIVER OF SUBROG WHEN REQUIR": "page 144",
+        "CU7468 PRIMARY/NONCONT-OTHER INS-AUTOMATIC": "page 144",
+        "CU7293 FOREIGN EXPOSURE FOLLOWING FORM": "page 144"
+      }
+    },
+    "general_liability_pages_205_212": {
+      "section": {
+        "carrier": "EMC Property & Casualty Company (NOT Employers Mutual Casualty - the other three parts' carrier)",
+        "policy_number": "BBC7263 - 26 (printed 'BBC7263 2601' in every page footer, and 'BBC7263' on page 148's underlying-insurance schedule - three spellings)",
+        "policy_term": "07/15/2025-07/15/2026, printed with 4-digit years and an en dash, unlike every other section's '07/15/25 TO 07/15/26'",
+        "form": "CG7000A Ed. 08-99 (declarations), CG7001A Ed. 10-12 (schedule), IL7131A Ed. 04-01 (endorsement schedule)",
+        "organization_type": "LLC",
+        "billing": "DIRECT BILL - printed inside the NAMED INSURED block on page 205, not the producer block as on every other section dec page",
+        "agent": "AGENT NO. W6258 - see _traps.producer_code",
+        "audit_period": "Annual (page 206)",
+        "date_of_issue": "07/16/2025 (4-digit year here; '07/16/25' everywhere else)"
+      },
+      "audit_period_is_not_scored": "'Audit Period: Annual' (page 206) is the ONLY positive audit statement in 271 pages, and the Umbrella separately says 'PREMIUM NOT SUBJECT TO AUDIT'. Inland Marine and Business Auto say nothing. `Policy_Audit_FrequencyCode_A` on ACORD 125 asks for THE policy's audit term and this package has three different answers, so it is recorded and not scored - the same call made for the $100 umbrella minimum premium.",
+      "premium_audit_noncompliance_page_208": {
+        "audit_noncompliance_charge_factor": "1",
+        "number_of_written_attempts_to_obtain_audit_information": "2",
+        "reassessment_charge": "0"
+      },
+      "limited_pollution_coverage_page_207": {
+        "each_pollution_incident_limit": "$1,000,000",
+        "pollution_liability_aggregate_limit": "$1,000,000",
+        "property_damage_deductible": "$1,000 Each Pollution Incident",
+        "premium": "$150 (page 211, Location 000)"
+      },
+      "rated_location_page_212": {
+        "count": 1,
+        "location_1": "4800 Dahlia St # D13, Denver, CO 80216-3121",
+        "heading": "'Location of All Premises Owned, Rented or Occupied' / 'Rated Locations'"
+      },
+      "endorsements_that_are_underwriting_facts": {
+        "CG 22 79 Exclusion - Contractors - Professional Liability": "page 236",
+        "CG 77 62 Exclusion Multi Family and Tract Housings": "pages 208 and 254 - the GL twin of the umbrella's CU2103",
+        "CG 40 28 Broad Abuse Or Molestation Exclusion": "page 237",
+        "CG 21 96 Silica Or Silica-Related Dust Exclusion": "page 235",
+        "CG 40 32 PFAS Exclusion": "pages 238-239",
+        "CG 77 40 Communicable Disease Exclusion": "page 245",
+        "CG 77 43 Wrap-Up Exclusion": "page 246",
+        "CG 77 48 Cannabis Exclusion": "pages 247-248",
+        "CG 21 47 Employment-Related Practices Exclusion": "page 231",
+        "CG 00 69 / CG 21 06 / CG 40 35 data-privacy and cyber exclusions": "pages 229, 230, 240",
+        "IL 71 68 Asbestos Exclusion": "page 266",
+        "IL 74 51 Exclusion - Snow And Ice Plowing, Removal Or Treatment": "page 268 - and unlike every other exclusion in the package its SCHEDULE is completed on the form itself: 'Any and all plowing, removal, or treatment of snow and ice from any exterior surface, including, but not limited to, road, parking lots and sidewalks.'",
+        "CG 77 59 Contractors General Liability Elite Extensions": "pages 249-253 - the only GRANT in the list, and the source of every certificate-relevant feature on the GL part"
+      }
+    },
+    "premium_reconciliation": {
+      "package": "3,954 (GL) + 300 (IM) + 2,991 (Auto) + 3,418 (Umbrella) = 10,663 - page 1",
+      "auto_endorsements": "174 + 4 + 26 = 204 (Drive Other Car, pages 92 -> 91), then 204 + 250 + 3 = 457 = 'PREMIUM FOR ENDORSEMENTS' on page 85",
+      "auto_items_4_and_5": "185 (hired) + 137 (non-ownership) = 322 = 'PREMIUM FOR ATTACHED ITEMS 4, 5, AND/OR 6' on page 85",
+      "general_liability": "-33 + 150 + 1,305 + 1,198 + 803 + 500 + 31 = 3,954 (page 211), and the same components split 1,198 / 2,756 on page 205",
+      "hardest": "The GL chain: seven components, on two pages, one of them a parenthesised NEGATIVE. Read ($33) as +33 and the total lands on $4,020, which appears nowhere in the document.",
+      "pages_required": "1, 3, 85, 89, 90, 91, 92, 143, 205, 211. Ten pages out of 271. A run that reconciles all four chains has demonstrably reached every coverage part."
+    },
+    "coverage_features_acord_25_131": {
+      "waiver_of_subrogation": {
+        "general_liability": "granted, blanket, when agreed in writing and executed prior to loss - CG7759 section S (page 252)",
+        "auto": "granted, blanket, when required by written contract - CA7450 section Z (page 121)",
+        "umbrella": "granted, blanket, when required - CU7460 (pages 144 and 189)",
+        "acord_25_fields": [
+          "Policy_GeneralLiability_SubrogationWaivedCode_A",
+          "Policy_AutomobileLiability_SubrogationWaivedCode_A",
+          "Policy_ExcessLiability_SubrogationWaivedCode_A"
+        ],
+        "answer": "All three liability parts. Granted across the board."
+      },
+      "additional_insured": {
+        "general_liability": "granted, blanket, for BOTH ongoing operations and completed operations, when agreed in a written contract, agreement or permit signed prior to loss - CG7759 section J (pages 250-251). Explicitly extends to 'any architects, engineers or surveyors not engaged by you' whom the contract requires.",
+        "auto": "granted, blanket, when required by written contract executed prior to loss - CA7450 section B (page 117)",
+        "umbrella": "automatic - 'Any additional insured under any policy of \"underlying insurance\" will automatically be an insured under this insurance' (CU 00 01 Section II.3, page 159)",
+        "acord_25_fields": [
+          "CertificateOfInsurance_GeneralLiability_AdditionalInsuredCode_A",
+          "CertificateOfInsurance_AutomobileLiability_AdditionalInsuredCode_A",
+          "CertificateOfInsurance_ExcessLiability_AdditionalInsuredCode_A"
+        ],
+        "answer": "All three liability parts. A certificate for this account can show additional insured and waiver of subrogation on GL, Auto and Umbrella - and NONE of that is on any declarations page."
+      },
+      "primary_and_noncontributory": {
+        "general_liability": "granted - CG7759 section Q (page 252), and again as a condition of the blanket AI grant in section J.5 (page 251)",
+        "auto": "granted when agreed in writing - CA7450 section AA (page 121)",
+        "umbrella": "CU7468 (pages 144 and 190)"
+      },
+      "gl_professional_liability": {
+        "value": "EXCLUDED - CG 22 79 Exclusion - Contractors - Professional Liability (page 236), for engineering, architectural or surveying services. Explicitly does NOT exclude 'construction means, methods, techniques, sequences and procedures'."
+      },
+      "umbrella_form_type": {
+        "value": "Umbrella (not excess) - the form is CU 00 01 COMMERCIAL LIABILITY UMBRELLA COVERAGE FORM and the dec page is titled COMMERCIAL UMBRELLA DECLARATIONS",
+        "trigger": "Occurrence",
+        "acord_25_fields": [
+          "Policy_PolicyType_UmbrellaIndicator_A",
+          "ExcessUmbrella_OccurrenceIndicator_A",
+          "ExcessUmbrella_RetentionIndicator_A",
+          "ExcessUmbrella_Umbrella_DeductibleOrRetentionAmount_A"
+        ],
+        "retention_amount": "$0 (page 148)"
+      },
+      "general_aggregate_applies_per": {
+        "umbrella": "per location AND per project, for premises/operations - CU7269 and CU7270 (page 144; wording pages 182-183). Both unconditional.",
+        "general_liability": "per PROJECT unconditionally (CG7759 section X, page 253: 'The General Aggregate Limit applies separately to each of your construction projects away from premises owned by or rented to you'), and per LOCATION only CONDITIONALLY (section Y: 'but only when required by written contract, written agreement, or certificate of insurance', and expressly not at premises where construction operations are being performed).",
+        "acord_25_fields": [
+          "GeneralLiability_GeneralAggregate_LimitAppliesPerProjectIndicator_A",
+          "GeneralLiability_GeneralAggregate_LimitAppliesPerLocationIndicator_A",
+          "GeneralLiability_GeneralAggregate_LimitAppliesPerPolicyIndicator_A"
+        ],
+        "answer": "PER PROJECT is the safe tick for GL. PER LOCATION is conditional and should not be ticked without the triggering contract - the endorsement grants it only on demand, so ticking it unconditionally overstates the coverage on a certificate. This is the one place in the package where a coverage feature is real but qualified, and the qualification is a single subordinate clause in five pages of endorsement text."
+      }
+    }
   }
 }

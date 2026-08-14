@@ -201,6 +201,12 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
         # This package states no deposit anywhere; the box stamps from a
         # deposit fact or stays blank. Same shape as the fax box above.
         "_resolve_payment_deposit": 1,
+        # +1 on 2026-08-14: the PAYMENT PLAN box. Every verified run stamped
+        # "AN" - a code invented from "Audit Period: Annual", the GL's AUDIT
+        # term. A code abbreviates a printed word, so no verbatim gate can see
+        # the invention; fact-or-blank is the only honest resolution. Same
+        # shape as the deposit box above.
+        "_resolve_payment_schedule": 1,
     }, {k: len(v) for k, v in sorted(claimants.items())}
     # 113 of 548 on ACORD 125 (20.6%). The ceiling exists so the contract can
     # never quietly swallow a form, and it BIT on 2026-08-13 when the

@@ -55,8 +55,12 @@ def test_the_ground_truth_fixture_still_says_what_these_tests_assume(gt):
     assert gt["_traps"]["driver_schedule"]["correct"] is None
     assert "ERIN ROYAL" in gt["_traps"]["driver_schedule"]["decoys"]
     assert len(gt["_traps"]["gl_class_codes"]["correct"]) == 2
-    assert gt["_auto_section_pages_85_90"]["vehicle_1"]["cost_new"] == "26680"
-    assert gt["_auto_section_pages_85_90"]["limits"]["liability_csl"] == "$1,000,000"
+    assert gt["_source_data"]["auto_section_pages_85_92"]["vehicle_1"]["cost_new"] == "26680"
+    assert gt["_source_data"]["auto_section_pages_85_92"]["limits"]["liability_csl"] == "$1,000,000"
+    # RESTRUCTURED 2026-08-14: the vehicle is now SCORED, not just recorded.
+    assert gt["Vehicle_VINIdentifier_A"] == "4S4BRCGC9C3217772"
+    assert gt["Vehicle_CostNewAmount_A"] == "$26,680"
+    assert gt["_forms"] == ["ACORD_125", "ACORD_126", "ACORD_127"]
     assert gt["Policy_Payment_EstimatedTotalAmount_A"] == "$10,663.00"
 
 
@@ -241,7 +245,7 @@ def test_q7_falls_end_to_end():
 def test_the_vehicle_row_the_fixture_confirms_still_stamps(gt):
     """Everything C46/C22 fixed, re-pinned against the real package: one
     vehicle, its VIN, cost new, class, territory and both symbols."""
-    v = gt["_auto_section_pages_85_90"]["vehicle_1"]
+    v = gt["_source_data"]["auto_section_pages_85_92"]["vehicle_1"]
     facts = {"auto_vin_schedule": [{
         "vin": v["vin"], "year": v["year"], "make": v["make"],
         "model": v["model"], "cost_new": v["cost_new"]}]}
@@ -258,7 +262,7 @@ def test_the_comprehensive_and_collision_symbols_may_legitimately_agree(gt):
     agree. Blanking a covered-auto symbol is a coverage misstatement; a wrong
     industry class is a figure the underwriter re-rates. This test exists so
     nobody rebuilds that guard without solving the ambiguity first."""
-    syms = gt["_auto_section_pages_85_90"]["covered_auto_symbols"]
+    syms = gt["_source_data"]["auto_section_pages_85_92"]["covered_auto_symbols"]
     assert syms["comprehensive"] == syms["collision"] == "07"
     src = open(os.path.join(BACKEND, "services", "pdf_service.py"),
                encoding="utf-8").read()

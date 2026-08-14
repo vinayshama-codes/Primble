@@ -653,6 +653,20 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     # ── Format / range validation (utils/validators.py + sqs_service's two
     #    standalone validators) - data-quality issues, not domain-coverage gaps,
     #    so they get their own clusters rather than a domain bucket above.
+    # MUST precede the "Effective date" row: first match wins, and this
+    # message names both dates. Added 2026-08-14 with
+    # `validate_policy_term_not_expired` - the one date check nothing was
+    # doing, found by asking what a dec-page package can be checked for that
+    # nothing checks. Every other rule here looks at the EFFECTIVE date;
+    # nothing compared the EXPIRATION date to today, so a package whose term
+    # ended last month printed both dates under "PROPOSED EFF/EXP DATE" and
+    # raised nothing.
+    ("Policy term already expired", "Date format & range", "required",
+     "legacy_policy_term_expired",
+     _r_field("effective_date", "expiration_date")),
+    ("Policy term expires within", "Date format & range", "recommended",
+     "legacy_policy_term_expiring",
+     _r_field("effective_date", "expiration_date")),
     ("Effective date", "Date format & range", "recommended",
      "legacy_effective_date_format", _r_field("effective_date")),
     ("Expiration date", "Date format & range", "recommended",
