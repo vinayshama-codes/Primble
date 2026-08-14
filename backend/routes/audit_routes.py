@@ -673,6 +673,69 @@ def _grouped_cross_issues_for_panel(cross_issues: list):
         return None
 
 
+def _issues_bound_to_fact(sess: dict, fact: str) -> dict:
+    """Problems the session currently reports that THIS fact participates in.
+
+    Returns {message: [facts that resolve it]}.
+
+    Identity comes from the declared RESOLUTION_MAP binding - the same table
+    that decides which inputs the modal renders - never from matching words in
+    the message. So it stays rule-agnostic: any future rule that lists a fact
+    as one of its remedies is covered the day it is added, and a rule whose
+    wording changes is unaffected.
+
+    Scoping to the applied fact is deliberate. A bare before/after diff of every
+    message would also catch ordinary recompute churn (the stop arrays are
+    rebuilt from scratch, not edited), and a "you broke something" note that
+    cries wolf is worse than no note at all. An issue the typed value is itself
+    a remedy for cannot be churn.
+    """
+    from services.issue_registry import classify_legacy, resolution_for
+    out: dict = {}
+
+    def _add(code, message, tier):
+        message = str(message or "").strip()
+        if not message or message in out:
+            return
+        if not code:
+            code = classify_legacy(message, tier or "soft_warning")[0]
+        facts = (resolution_for(code) or {}).get("facts") or []
+        if fact in facts:
+            out[message] = list(facts)
+
+    for _key, _tier in (("hard_stops", "hard_stop"), ("soft_stops", "soft_warning")):
+        for _m in (sess.get(_key) or []):
+            if isinstance(_m, str):
+                _add(None, _m, _tier)
+    for _i in (sess.get("cross_issues_last") or []):
+        if isinstance(_i, dict):
+            _add(_i.get("code"), _i.get("message"), _i.get("type"))
+    return out
+
+
+def _trade_off_note(introduced: dict, open_facts: list, applied_field: str) -> str:
+    """One sentence naming what the applied value just raised, and - when the
+    remedy is an input already on screen - how to close it without leaving.
+
+    OWNER (2026-08-14): "entering an expiration that misaligns with the
+    umbrella's 07/15/2026 should tell you so in the modal, instead of silently
+    trading one issue for another. That's the loop you've been stuck in."
+    """
+    if not introduced:
+        return ""
+    from services.issue_registry import RESOLUTION_MAP  # noqa: F401  (import guard)
+    msgs = sorted(introduced)
+    head = msgs[0]
+    more = f" (and {len(msgs) - 1} more)" if len(msgs) > 1 else ""
+    note = f"Applied - but it raised a new issue{more}: {head}"
+    here = [f for f in (introduced.get(head) or [])
+            if f in (open_facts or []) and f != applied_field]
+    if here:
+        labels = " / ".join(f.replace("_", " ").title() for f in here)
+        note += f"  You can settle it here - fill in {labels} above and apply again."
+    return note
+
+
 @router.post("/api/audit/resolve-issue")
 async def resolve_issue(
     req: ResolveIssueRequest,
@@ -707,6 +770,11 @@ async def resolve_issue(
     applied = False
     _log_field: str = ""
     _log_value: str = ""
+    # Trade-off detection (field mode only): what this fact was already implicated
+    # in BEFORE the write, so the recompute below can tell "your value raised
+    # this" from "this was already open".
+    _before: dict = {}
+    _open_facts: list = []
 
     if mode == "field":
         field = (req.field or "").strip()
@@ -716,6 +784,13 @@ async def resolve_issue(
         ok, err = _validate_producer_answer(field, value)
         if not ok:
             return JSONResponse({"success": False, "validation_error": err})
+        try:
+            from services.issue_registry import resolution_for as _res_for
+            _before = _issues_bound_to_fact(
+                await get_processing_session(req.session_id), field)
+            _open_facts = (_res_for(req.code) or {}).get("facts") or []
+        except Exception as _bx:
+            logger.warning(f"resolve_issue: pre-apply issue snapshot failed: {_bx}")
         applied, _ = await apply_producer_answer_to_session(req.session_id, field, value)
         if not applied:
             return JSONResponse({
@@ -816,15 +891,19 @@ async def resolve_issue(
     cross_issues = sess.get("cross_issues_last") or []
     package_sqs  = sess.get("package_sqs") or {}
 
-    # Form-selection (recommendations-step) view: the classified hard/soft split +
+    # Form-selection (recommendations-step) view: the hard/soft split +
     # grouped_issues that the confirm-value / marketing-reason routes return, so an
     # inline resolution opened from the Select Forms banners refreshes them in place
     # just like the editor's Cross-Form panel does via grouped_cross_issues above.
-    # The hard/soft lists here are the SAME stored lists, now classify_stops-
-    # processed (a hard stop that downgrades for a non-property submission is shown
-    # as a warning, matching every other Select Forms response). Best-effort: a
-    # display-computation failure must never fail the resolve that already
-    # succeeded server-side, so we fall back to the raw stored lists.
+    #
+    # C75: the DISPLAY reads the RAW stored arrays - the same ones the scorer
+    # reads - so a stop can never render as a warning while capping the score at
+    # 60. `classify_stops` still runs, because its demotion is what decides
+    # whether the producer MAY proceed; it just no longer decides what they SEE.
+    # This route kept the old shape after form_routes.py was fixed, which meant a
+    # severity silently FLIPPED BACK to warning the moment you resolved anything.
+    # Best-effort: a display-computation failure must never fail the resolve that
+    # already succeeded server-side, so we fall back to the raw stored lists.
     _fs_hard = sess.get("hard_stops") or []
     _fs_soft = sess.get("soft_stops") or []
     _fs_grouped = None
@@ -833,10 +912,9 @@ async def resolve_issue(
     try:
         from services.sqs_service import classify_stops
         from services.issue_registry import build_grouped_view
-        _can_proceed_warn, _fs_hard, _warning_stops = classify_stops(
+        _can_proceed_warn, _, _warning_stops = classify_stops(
             sess.get("hard_stops") or [], sess.get("flags") or {}
         )
-        _fs_soft = list(sess.get("soft_stops") or []) + list(_warning_stops)
         _fs_grouped = build_grouped_view(
             sess.get("structured_issues") or [],
             _fs_hard, _fs_soft,
@@ -846,6 +924,23 @@ async def resolve_issue(
         logger.error(f"resolve_issue: form-selection grouped view failed (non-fatal): {_fgx}")
         _fs_hard = sess.get("hard_stops") or []
         _fs_soft = sess.get("soft_stops") or []
+
+    # Did the value the producer just typed raise something new? Scoped to issues
+    # this exact fact is a declared remedy for, so it names a real trade, never
+    # recompute churn. Non-blocking: the write already succeeded and stands.
+    _note = ""
+    if mode == "field" and _log_field:
+        try:
+            _after = _issues_bound_to_fact(sess, _log_field)
+            _introduced = {m: f for m, f in _after.items() if m not in _before}
+            _note = _trade_off_note(_introduced, _open_facts, _log_field)
+            if _note:
+                logger.info(
+                    f"resolve_issue: trade-off surfaced session={req.session_id} "
+                    f"field={_log_field} raised={len(_introduced)}"
+                )
+        except Exception as _nx:
+            logger.warning(f"resolve_issue: trade-off note failed (non-fatal): {_nx}")
 
     return JSONResponse({
         "success":               True,
@@ -861,6 +956,8 @@ async def resolve_issue(
         "grouped_issues":           _fs_grouped,
         "can_proceed_with_warning": _can_proceed_warn,
         "warning_stops":            _warning_stops,
+        # Advisory only - the value WAS applied. Empty string when nothing traded.
+        "note":                     _note,
     })
 
 

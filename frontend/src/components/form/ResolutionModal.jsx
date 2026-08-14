@@ -50,9 +50,27 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   const [prefillLoading, setPrefillLoading] = useState(mode === 'field' || mode === 'narrative');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // A value CAN apply cleanly and still raise something else - changing an
+  // expiration date to clear an expired term misaligns the umbrella's own
+  // printed period. The backend returns that as `note`; we hold the modal open
+  // and say so, instead of closing on a silent trade. The write already
+  // succeeded, so `applied` keeps the authoritative response and EVERY exit
+  // path below must still refresh the panel with it.
+  const [note, setNote] = useState('');
+  const applied = useRef(null);
   // Facts the producer has started editing - the async pre-fill must never
   // overwrite these, or a value would jump under the cursor.
   const touched = useRef(new Set());
+
+  // Leave the modal, refreshing the panel if anything was applied while it was
+  // open. Cancel, the X, Escape and the backdrop all route through here, so a
+  // producer who reads the note and walks away still gets an accurate panel.
+  const finish = () => {
+    const data = applied.current;
+    applied.current = null;
+    if (data) onApplied?.(data, issue);
+    else onClose?.();
+  };
 
   // Pre-fill field inputs (and narrative's "already saved" context) from the
   // current session facts, so reopening a validation shows what was applied.
@@ -122,10 +140,10 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
 
   // Close on Escape.
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape' && !busy) onClose?.(); };
+    const onKey = (e) => { if (e.key === 'Escape' && !busy) finish(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [busy, onClose]);
+  }, [busy, onClose]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const post = async (body) => {
     const res = await fetch(`${API_BASE}/api/audit/resolve-issue`, {
@@ -155,11 +173,13 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
       ([k, v]) => touched.current.has(k) && String(v || '').trim()
     );
     if (!filled.length) { setErr('Enter at least one value.'); return; }
-    setBusy(true); setErr('');
+    setBusy(true); setErr(''); setNote('');
     let last = null;
     try {
       // Apply each provided fact; each re-runs the rules, the final response is
-      // authoritative for the panel refresh.
+      // authoritative for the panel refresh. Filling BOTH sides of a trade-off
+      // in one go therefore reports no note: the second write clears what the
+      // first one raised, and only the last response is read.
       for (const [field, value] of filled) {
         last = await post({ mode: 'field', field, value: String(value).trim() });
         if (!last?.success) {
@@ -167,6 +187,17 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
           setBusy(false);
           return;
         }
+      }
+      // Applied, but it raised something else. Hold the modal open on the note
+      // so the producer can settle it here instead of discovering it later on
+      // the panel and starting the loop again. The value stands either way -
+      // `applied` carries it to whichever exit they take.
+      if (last?.note) {
+        applied.current = last;
+        setNote(String(last.note));
+        touched.current.clear();
+        setBusy(false);
+        return;
       }
       onApplied?.(last, issue);
     } catch {
@@ -210,7 +241,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   const stop = (e) => e.stopPropagation();
 
   return (
-    <div style={overlay} onMouseDown={() => { if (!busy) onClose?.(); }}>
+    <div style={overlay} onMouseDown={() => { if (!busy) finish(); }}>
       <div style={card} onMouseDown={stop}>
         {/* Header */}
         <div style={{ padding: '18px 20px 12px', borderBottom: '1px solid #f1f5f9' }}>
@@ -227,7 +258,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
             </div>
             <button
               type="button"
-              onClick={() => onClose?.()}
+              onClick={finish}
               disabled={busy}
               aria-label="Close"
               style={{
@@ -267,6 +298,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                     disabled={busy}
                     autoFocus={(resolution.facts || [])[0] === fact}
                     onChange={(e) => { touched.current.add(fact); setValues((v) => ({ ...v, [fact]: e.target.value })); if (err) setErr(''); }}
+                    onFocus={() => { if (note) setNote(''); }}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyField(); }}
                   />
                 </label>
@@ -326,6 +358,15 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
             </div>
           )}
 
+          {/* Applied, but it traded one issue for another. Amber, not red - the
+              value saved; this is the heads-up the producer never used to get. */}
+          {note && (
+            <div style={{ marginTop: 12, fontSize: 12.5, color: '#78350f', lineHeight: 1.55, background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 10, padding: '11px 13px' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>Saved - one thing to check</div>
+              {note}
+            </div>
+          )}
+
           {err && mode !== 'schedule' && (
             <div style={{ marginTop: 10, fontSize: 12, fontWeight: 600, color: '#b91c1c' }}>{err}</div>
           )}
@@ -343,14 +384,18 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
             </>
           ) : (
             <>
-              <button type="button" style={ghostBtn} disabled={busy} onClick={() => onClose?.()}>Cancel</button>
+              {/* `finish` not `onClose`: once a value has been applied the panel
+                  behind this modal is stale, whichever way the producer leaves. */}
+              <button type="button" style={ghostBtn} disabled={busy} onClick={finish}>
+                {note ? 'Done' : 'Cancel'}
+              </button>
               <button
                 type="button"
                 style={primaryBtn}
                 disabled={busy || (mode === 'schedule' && (loading || !schedule))}
                 onClick={mode === 'field' ? applyField : mode === 'narrative' ? applyNarrative : applySchedule}
               >
-                {busy ? 'Applying...' : 'Apply'}
+                {busy ? 'Applying...' : note ? 'Apply the fix' : 'Apply'}
               </button>
             </>
           )}

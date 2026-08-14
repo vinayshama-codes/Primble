@@ -485,6 +485,100 @@ orphaned phone that rode along with the fabricated name. Tests:
 pre-existing, zero regressions. Prompt inspector PASS — no LLM call added, removed or
 reprompted.
 
+### C76 — the resolver stops trading one issue for another, and C75's fix reaches the resolve path (2026-08-14), NO LLM change, NO scoring-engine change
+
+**Owner, verbatim: "The date resolver should be umbrella-aware — entering an expiration that
+misaligns with the umbrella's 07/15/2026 should tell you so in the modal, instead of silently
+trading one issue for another. That's the loop you've been stuck in."**
+
+**The loop, measured on the live ORBIN package.** `legacy_policy_term_expired` offered exactly
+two inputs, effective and expiration. The umbrella carries its OWN printed period (07/15/2026),
+so any other expiration cleared the expired term and immediately raised
+`umbrella_gl_expiration_misaligned` — a different issue, in a different column, with no
+connection drawn between them. Fix one, another appears; fix that, the first returns. Both
+engines were behaving correctly; nothing joined them up for the producer.
+
+**Three changes.**
+
+1. **`umbrella_expiration_date` is a third, OPTIONAL input on BOTH term rows**
+   (`legacy_policy_term_expired` and `legacy_policy_term_expiring` — the same modal with the
+   same trade; fixing only the reported half would leave the identical trap one rule over).
+   No new UI plumbing: `_r_field` already renders one pre-filled box per fact, and the modal
+   submits only the facts actually TOUCHED, so a blank umbrella box behaves exactly as before.
+   The pre-fill is the quiet half of the fix — the umbrella's date is now **visible beside the
+   date being changed**, so the conflict is legible before it is caused.
+2. **`/api/audit/resolve-issue` reports what a value RAISED.** Snapshot before the write,
+   snapshot after the recompute, difference = what this value caused. **Scoped to issues the
+   applied fact is a DECLARED remedy for** (`RESOLUTION_MAP` — the same table that decides
+   which inputs the modal renders), never by matching words in the message. That scope is
+   load-bearing twice over: it keeps the feature rule-agnostic (any future rule listing a fact
+   as a remedy is covered the day it is added, and `test_the_binding_comes_from_the_resolution_
+   map_not_from_words` fails the build if keyword matching reappears), and it is what stops the
+   note crying wolf on ordinary recompute churn — the stop arrays are rebuilt from scratch on
+   every recalculation, so a bare before/after diff of every message would fire constantly.
+   Advisory only: the write already succeeded and stands.
+3. **C75 had leaked.** `form_routes.py` was fixed so the display reads the same arrays the
+   scorer reads; **this route kept the old shape**, so severity silently flipped BACK to
+   "warning" the moment you resolved anything. `classify_stops` still runs — its demotion still
+   decides whether the producer MAY proceed — it just no longer decides what they SEE.
+
+**Frontend (`ResolutionModal.jsx`):** a note holds the modal OPEN on an amber "Saved - one thing
+to check" banner naming what was raised and, when the remedy is an input already on screen,
+saying so. Filling both boxes in one pass reports nothing — the second write clears what the
+first raised and only the last response is read. Because the first value did save, **every**
+exit (Apply again, Cancel, X, Escape, backdrop) routes through one `finish()` helper that
+refreshes the panel with the authoritative response.
+
+Tests: `backend/tests/test_umbrella_aware_date_resolver.py` (23), including the live strings
+verbatim and both anti-rot guards. Suite **2687 passed / 2 failed** — the same two pre-existing
+unrelated failures, zero regressions. Frontend production build verified. No LLM call added,
+removed or reprompted; prompt inspector untouched by this change.
+
+### C75 — nothing may be invisible: severity on screen now equals severity in the score (2026-08-14), NO LLM change, NO scoring-engine change
+
+**Owner's rule, verbatim: "If it is a hard stop then show it on the hard stop not on the
+warning ... every hardstop/warning should be shown to user."** Three fixes, all display-side
+or issue-routing; `calculate_package_sqs` is untouched and **no score moves**.
+
+**1. The screen honoured a demotion the scorer ignored.** `classify_stops` demotes a hard
+stop for the PROCEED decision; the display was handed the demoted lists while the scorer
+kept reading the raw ones. Measured on the live ORBIN session: grouped counts
+`{hard_stops: 0, warnings: 1}` and a banner reading "caps your SQS at 85", while the score
+was capped at **60** by that same stop. All five route call sites now pass the display the
+same arrays the scorer reads. `warning_stops` still carries `_downgraded` - that is what
+powers the "proceed anyway" banner, so the demotion still decides whether you MAY proceed,
+it just no longer decides what you SEE. **Verified: the demotion never dropped anything, it
+relabelled** (pinned by a count-in/count-out test).
+
+**2. A suggestion may not become a blocker.** Cross-form rules run against `triggered_ids`,
+which pre-selection is the RECOMMENDED forms - so a form the producer never chose could
+raise a hard stop about its own missing data and cap the score by 8 points. Client report:
+"there should not be any Builders Risk questions or an ACORD 133 - there is no builders risk
+exposure". Demoted **generically for every form-scoped rule** (test-pinned rule-agnostic, so
+it cannot decay into an ACORD_133 special case); the issue stays VISIBLE as a warning with
+its own card and returns to full hard-stop force once that form is actually selected.
+**Audited while here: 18 of 19 flag-gated rules already require a corroborating extracted
+fact** - the discipline was already the norm; the cascade was the real hole.
+
+**3. Blocking means hard stop, and relevance is a precondition.** The client's Property
+Integrity directive - quoted verbatim in `GENERATION_BLOCKING_RECONCILABLE_KEYS` - is
+"generate a warning and require review BEFORE FORMS ARE GENERATED". That is blocking, and
+the scorer has always capped at 60 for it; only the display called it a warning. It now
+raises as a hard stop, routed from the two DECLARED sets in `underwriting_consistency`
+(no second local list - that duplication is exactly how these layers drifted). **Gated on
+relevance** per the owner: a building-value disagreement cannot block a package with no
+property coverage - there is no ACORD 140 to generate and no box for the number - so it
+stays a visible warning there instead of capping. Never dropped, only downgraded.
+
+**CORRECTION to C74's audit triage, on the record.** Two of the eight findings I confirmed
+were wrong on my part: (a) the legacy/coded suppression is ALREADY gated on the coded twin
+being present (`_present_codes`) - I read the stripping line without the six lines above it;
+(b) the building-value stop is NOT invisible - it always rendered a card, as a *warning*.
+The real defect in both areas was severity mismatch, not disappearance.
+
+Tests: `tests/test_stop_visibility_c75.py` (13). Suite **2660 passed / 2 failed** - the same
+two pre-existing unrelated failures, zero regressions.
+
 ### C74 — the evidence-layer audit: 8 findings, all 8 reproduced, 4 closed at the mechanism (2026-08-14), **+1 LLM stage** (the evidence judge), fail-safe by construction
 
 **An external audit of the Yes/No evidence layer was checked claim by claim rather than

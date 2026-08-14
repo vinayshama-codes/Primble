@@ -299,7 +299,10 @@ async def run_extraction_pipeline(
     if not processed_docs:
         raise ValueError("no_readable_text")
 
-    return await _finalize_pipeline(processed_docs, user_id, progress_reporter=reporter)
+    # The ONE first-extraction path: document text is new here, so this is the
+    # only place the umbrella-date probe can learn anything (see its default).
+    return await _finalize_pipeline(processed_docs, user_id, progress_reporter=reporter,
+                                    probe_umbrella=True)
 
 
 async def _finalize_pipeline(
@@ -310,6 +313,15 @@ async def _finalize_pipeline(
     integrity_override: Optional[dict] = None,
     confirmations: Optional[dict] = None,
     submission_label: Optional[str] = None,
+    # DEFAULT OFF, and opted INTO by the one true first-extraction call site.
+    # There are eight `_finalize_pipeline` callers and seven of them are
+    # RE-RUNS (confirm a value, resolve, reclassify, exclude a doc, marketing
+    # reason). Defaulting this ON meant every one of them re-ran the optional
+    # whole-document umbrella-date LLM probe in the request path - which is the
+    # multi-second wait on "Open to fix". Opt-in is the safe polarity: a re-run
+    # added later is fast by default, and the probe can only be lost by
+    # deliberately removing it from the extraction path.
+    probe_umbrella: bool = False,
     progress_reporter: Any = None,
 ) -> dict:
     """Run everything AFTER per-document extraction: merge facts, cross-doc
@@ -416,7 +428,14 @@ async def _finalize_pipeline(
     # submission never spends the call; only fills a fact the extraction
     # genuinely missed (never overrides one it got right); any failure is
     # logged and swallowed - this is advisory, must never block the pipeline.
-    if mflags.get("has_umbrella"):
+    # SKIPPED ON A RE-RUN (C75). This probe reads DOCUMENT TEXT, and a
+    # confirmation / reclassification / marketing-reason re-run changes FACTS,
+    # never the text - so re-scanning can only ever produce the answer it
+    # already produced. It was running on every "Open to fix": a whole-document
+    # LLM scan (chunked at 60k chars) in the request path, which is the
+    # multi-second delay the owner reported when resolving a stop. First
+    # extraction is untouched, so nothing that works today stops working.
+    if mflags.get("has_umbrella") and probe_umbrella:
         from services.pdf_service import _fetch_umbrella_period, _is_empty_llm_value
         _has_umb_eff = not _is_empty_llm_value(merged_facts.get("umbrella_effective_date"))
         _has_umb_exp = not _is_empty_llm_value(merged_facts.get("umbrella_expiration_date"))
@@ -683,17 +702,66 @@ async def _finalize_pipeline(
     # below does not double-report them as formatting conflicts.
     underwriting = assess_underwriting_consistency(active_docs, merged_facts, confirmations)
     if underwriting.get("review_required"):
+        # ── BLOCKING MEANS HARD STOP, AND RELEVANCE IS A PRECONDITION (C75) ───
+        # Two owner rules applied here, both to the same loop.
+        #
+        # SEVERITY. The client's Property Integrity directive - quoted verbatim
+        # in underwriting_consistency.GENERATION_BLOCKING_RECONCILABLE_KEYS -
+        # is "generate a warning and require review BEFORE FORMS ARE
+        # GENERATED". That is blocking, and `calculate_package_sqs` has always
+        # treated it as a hard stop (it caps the score at 60). The display
+        # called it a warning, so the producer saw a soft item that was
+        # actually costing 8 points and holding up generation. Owner's rule:
+        # "if anything can be blocking, put it in hard stop". The two
+        # DECLARED sets in underwriting_consistency are the authority - no
+        # local list, so adding a key there is still a one-line change.
+        #
+        # RELEVANCE. Owner: "this is not a mandatory hard stop, it should only
+        # be shown if declaration page has some relevant data". A building
+        # value the documents disagree about cannot block anything on a
+        # package that has no property coverage - there is no ACORD 140 to
+        # generate and no box for the number. The flag is the dec page's own
+        # statement (and it is already downgraded by the declared-absent scan
+        # when the document says "No Coverage"), so this gates on evidence
+        # rather than on a guess. Irrelevant conflicts stay a warning; they are
+        # never silently dropped.
+        try:
+            from services.underwriting_consistency import (
+                HARD_STOP_RECONCILABLE_KEYS, GENERATION_BLOCKING_RECONCILABLE_KEYS,
+            )
+            _blocking_keys = set(HARD_STOP_RECONCILABLE_KEYS) | set(
+                GENERATION_BLOCKING_RECONCILABLE_KEYS)
+        except Exception:                                  # noqa: BLE001
+            _blocking_keys = set()
+        # Keys whose conflict only matters when that coverage actually exists.
+        _relevance_flag = {
+            "property_building_value": "has_property_coverage",
+            "property_bpp_value":      "has_property_coverage",
+        }
         for f in underwriting["fields"]:
             if f.get("review_required"):
+                _key = f.get("fact_key", "field")
                 _uw_msg = (
                     f"{f['label']}: documents disagree "
                     f"({', '.join(v['display'] for v in f['values'])}). "
                     "Fix: Confirm the correct value to apply it across forms."
                 )
-                soft_stops = list(soft_stops) + [_uw_msg]
+                _needs_flag = _relevance_flag.get(_key)
+                _relevant = (not _needs_flag) or bool(mflags.get(_needs_flag))
+                _blocking = _key in _blocking_keys and _relevant
+                if _blocking:
+                    hard_stops = list(hard_stops) + [_uw_msg]
+                else:
+                    soft_stops = list(soft_stops) + [_uw_msg]
+                    if _needs_flag and not _relevant:
+                        logger.info(
+                            "underwriting %s conflict kept as a warning - %s is "
+                            "false, so this cannot block form generation",
+                            _key, _needs_flag,
+                        )
                 structured_issues.append(make_issue(
-                    f"underwriting_reconciliation_{f.get('fact_key', 'field')}",
-                    "soft_warning", _uw_msg,
+                    f"underwriting_reconciliation_{_key}",
+                    "hard_stop" if _blocking else "soft_warning", _uw_msg,
                 ))
 
     # ── Cross-document source conflicts ─────────────────────────────────────
@@ -792,15 +860,41 @@ async def _finalize_pipeline(
         # ── Cross-form validation ────────────────────────────────────────────
         cross_form_issues = run_cross_form_validation(merged_facts, mflags, triggered_ids)
         cf_hard, cf_soft, cf_advisories = split_cross_form_issues(cross_form_issues)
+        # ── A SUGGESTION MAY NOT BECOME A BLOCKER (owner's decision, C75) ─────
+        # `triggered_ids` here is the RECOMMENDED forms - nothing is selected
+        # yet at extraction time. So a cross-form rule scoped to a form the
+        # producer never chose could raise a HARD STOP about that form's own
+        # missing data. Client report: "there should not be any Builders Risk
+        # questions or an ACORD 133 - there is no builders risk exposure", and
+        # the ACORD 133 rule fires purely because ACORD_133 landed in
+        # `triggered_ids`. Compounded by the fact that a hard stop caps the
+        # score, so a form we merely SUGGESTED cost the producer 8 points.
+        #
+        # Generic by construction: every cross-form rule is form-scoped, so
+        # this demotes the whole class rather than special-casing builders
+        # risk. The issue is NOT discarded - it becomes a warning, stays
+        # visible with its own card, and returns to full hard-stop force the
+        # moment the producer actually selects that form (the post-selection
+        # path re-runs this validation with the SELECTED ids).
         if cf_hard:
-            logger.warning("Cross-form hard stops: %s", cf_hard)
-            hard_stops = list(hard_stops) + cf_hard
+            logger.info(
+                "Cross-form hard stops demoted to warnings pre-selection "
+                "(no form chosen yet): %s", cf_hard,
+            )
+            soft_stops = list(soft_stops) + cf_hard
+            cf_soft = list(cf_soft) + cf_hard
+            cf_hard = []
         if cf_soft:
-            soft_stops = list(soft_stops) + cf_soft
+            soft_stops = list(soft_stops) + [m for m in cf_soft if m not in soft_stops]
         for _cf_issue in cross_form_issues:
+            _t = _cf_issue.get("type", "soft_warning")
+            # Same demotion on the structured (card) copy, so the card's
+            # severity matches the array it now lives in.
+            if _t == "hard_stop":
+                _t = "soft_warning"
             structured_issues.append(make_issue(
                 _cf_issue.get("code", "cross_form_issue"),
-                _cf_issue.get("type", "soft_warning"),
+                _t,
                 _cf_issue.get("message", ""),
                 _cf_issue.get("forms"),
             ))
@@ -915,7 +1009,7 @@ async def resolve_submission_integrity(
             raise ValueError("integrity_resolve_all_removed")
         return await _finalize_pipeline(
             remaining, user_id or session.get("user_id"),
-            session_id=session_id,
+            session_id=session_id, probe_umbrella=False,
             confirmations=session.get("underwriting_confirmations") or {},
         )
 
@@ -1198,7 +1292,7 @@ async def confirm_underwriting_value(
     return await _finalize_pipeline(
         docs, user_id or session.get("user_id"),
         session_id=session_id, integrity_override=override,
-        confirmations=confirmations,
+        confirmations=confirmations, probe_umbrella=False,
     )
 
 

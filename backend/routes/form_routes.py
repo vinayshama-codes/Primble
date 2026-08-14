@@ -418,8 +418,15 @@ async def upload_declaration(
         ]
 
         _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
-        _final_soft_stops = soft_stops + _downgraded
-        _grouped_issues = build_grouped_view(structured_issues, _remaining_hard, _final_soft_stops)
+        # A HARD STOP RENDERS AS A HARD STOP (owner's rule, 2026-08-14).
+        # `classify_stops` demotes a stop for the PROCEED decision, but the
+        # scorer keeps reading the raw list - so the demoted item showed as a
+        # warning "capping at 85" while it was actually capping the score at 60.
+        # The display now reads the same arrays the scorer does, so severity and
+        # penalty can never disagree. `_downgraded` still feeds `warning_stops`,
+        # which is what powers the "proceed anyway" banner. See C75.
+        _final_soft_stops = soft_stops
+        _grouped_issues = build_grouped_view(structured_issues, hard_stops, _final_soft_stops)
 
         return JSONResponse({
             "success": True, "session_id": sid,
@@ -627,9 +634,11 @@ async def submission_integrity_resolve(
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(
         result.get("hard_stops") or [], result.get("mflags") or {}
     )
-    _final_soft_stops = (result.get("soft_stops") or []) + _downgraded
+    # A hard stop renders as a hard stop - see the note at the first call site.
+    _final_soft_stops = result.get("soft_stops") or []
     _grouped_issues = build_grouped_view(
-        result.get("structured_issues") or [], _remaining_hard, _final_soft_stops
+        result.get("structured_issues") or [], result.get("hard_stops") or [],
+        _final_soft_stops
     )
     return JSONResponse({
         "success": True,
@@ -718,9 +727,11 @@ async def document_reclassify(
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(
         result.get("hard_stops") or [], result.get("mflags") or {}
     )
-    _final_soft_stops = (result.get("soft_stops") or []) + _downgraded
+    # A hard stop renders as a hard stop - see the note at the first call site.
+    _final_soft_stops = result.get("soft_stops") or []
     _grouped_issues = build_grouped_view(
-        result.get("structured_issues") or [], _remaining_hard, _final_soft_stops
+        result.get("structured_issues") or [], result.get("hard_stops") or [],
+        _final_soft_stops
     )
 
     # §4.2 item #5: recompute the Submission Readiness (SQS) from the corrected,
@@ -908,9 +919,11 @@ async def underwriting_confirm_value(
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(
         result.get("hard_stops") or [], result.get("mflags") or {}
     )
-    _final_soft_stops = (result.get("soft_stops") or []) + _downgraded
+    # A hard stop renders as a hard stop - see the note at the first call site.
+    _final_soft_stops = result.get("soft_stops") or []
     _grouped_issues = build_grouped_view(
-        result.get("structured_issues") or [], _remaining_hard, _final_soft_stops
+        result.get("structured_issues") or [], result.get("hard_stops") or [],
+        _final_soft_stops
     )
     return JSONResponse({
         "success": True,
@@ -1942,13 +1955,14 @@ async def get_extraction_result(
     mflags     = proc_session.get("flags", {})
     _can_proceed_warn, _remaining_hard, _downgraded = classify_stops(hard_stops, mflags)
     integrity  = proc_session.get("integrity") or {}
-    _final_soft_stops = proc_session.get("soft_stops", []) + _downgraded
+    # A hard stop renders as a hard stop - see the note at the first call site.
+    _final_soft_stops = proc_session.get("soft_stops", [])
     # cross_issues_last is passed explicitly: cross-form issues are never copied
     # into structured_issues, so without it every one of them lands in
     # build_grouped_view's uncoded safety net and collapses into a single
     # "Other validations" cluster instead of its real one.
     _grouped_issues = build_grouped_view(
-        proc_session.get("structured_issues") or [], _remaining_hard, _final_soft_stops,
+        proc_session.get("structured_issues") or [], hard_stops, _final_soft_stops,
         cross_issues=proc_session.get("cross_issues_last") or [],
     )
 

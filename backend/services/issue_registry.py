@@ -661,12 +661,20 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     # nothing compared the EXPIRATION date to today, so a package whose term
     # ended last month printed both dates under "PROPOSED EFF/EXP DATE" and
     # raised nothing.
+    # `umbrella_expiration_date` is the THIRD, optional input on both term rows
+    # (2026-08-14). Typing a new expiration to clear an expired term silently
+    # created an umbrella misalignment - the umbrella carries its own printed
+    # period (07/15/2026 on the live package) and nothing on this modal showed
+    # it, so the producer traded one issue for another and looped. The modal
+    # pre-fills every fact it renders and submits only the ones actually
+    # touched, so the umbrella date is now VISIBLE next to the date being
+    # changed, and leaving it blank behaves exactly as it did before.
     ("Policy term already expired", "Date format & range", "required",
      "legacy_policy_term_expired",
-     _r_field("effective_date", "expiration_date")),
+     _r_field("effective_date", "expiration_date", "umbrella_expiration_date")),
     ("Policy term expires within", "Date format & range", "recommended",
      "legacy_policy_term_expiring",
-     _r_field("effective_date", "expiration_date")),
+     _r_field("effective_date", "expiration_date", "umbrella_expiration_date")),
     ("Effective date", "Date format & range", "recommended",
      "legacy_effective_date_format", _r_field("effective_date")),
     ("Expiration date", "Date format & range", "recommended",
@@ -741,7 +749,29 @@ _LEGACY_SUPERSEDED_BY_CODE: Dict[str, str] = {
     "peril_deductible_referenced_but_undefined": "Peril-specific deductibles referenced but not defined",
     "property_valuation_method_missing":         "Property valuation method not specified",
     "umbrella_no_underlying_coverage":           "Umbrella detected but no underlying",
-    "umbrella_sir_below_gl_deductible":          "Umbrella SIR",
+    # REMOVED 2026-08-14: `umbrella_sir_below_gl_deductible` was deleted from
+    # BOTH engines by C46 (an Umbrella SIR and a GL deductible protect
+    # different exposures - the rule was never correct), so this row keyed on a
+    # code nothing can emit and could never suppress anything. Found by
+    # test_every_suppression_entry_names_a_code_that_can_actually_be_emitted,
+    # which now fails the build on any such dead row.
+    # Reported live 2026-08-14: the SAME umbrella/GL period problem rendered
+    # TWICE - the coded rule as a hard stop naming both dates ("Umbrella
+    # expiration date (07/15/2026) does not match GL/policy expiration date
+    # (08/15/26)") and the legacy string as a separate warning ("Umbrella and
+    # GL expiration dates misaligned"). Resolving the hard stop left its twin
+    # sitting in the warnings column, which is what made warnings look like
+    # they only appear AFTER hard stops are cleared. The coded twin is the one
+    # to keep: it names the two dates and carries a typed resolution.
+    # Codes taken from the live session, not from the rule names: the coded
+    # issue on the wire is `umbrella_gl_EXPIRATION_misaligned` (the effective-
+    # date twin is `..._period_misaligned`), and guessing the wrong one is a
+    # silent no-op - suppression is keyed on the code actually present.
+    "umbrella_gl_expiration_misaligned":         "Umbrella and GL expiration dates misaligned",
+    "umbrella_auto_expiration_misaligned":       "Umbrella and Auto expiration dates misaligned",
+    "umbrella_gl_period_misaligned":             "Umbrella and GL effective dates misaligned",
+    "umbrella_auto_period_misaligned":           "Umbrella and Auto effective dates misaligned",
+    "umbrella_wc_period_misaligned":             "Umbrella and WC effective dates misaligned",
     "auto_split_limits_incomplete":              "Split liability limits incomplete",
     "bi_coverage_no_limit":                      "Business Income coverage detected",
 }

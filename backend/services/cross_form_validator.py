@@ -630,6 +630,19 @@ def _check_acord125_always_present(
     """
     issues: List[dict] = []
 
+    # AN EMPTY FORM SET IS NOT A FINDING (2026-08-14). Every rule here is
+    # gated on which forms are in scope, and this one reads that set to decide
+    # whether the anchor form is missing. When the set is EMPTY - which is the
+    # state before the producer reaches form selection, and on any re-run that
+    # passes `selected_form_ids` while nothing is selected - "was ACORD 125
+    # included?" has no answer, and answering "no" put a false warning in front
+    # of the producer on every single run while the system was simultaneously
+    # RECOMMENDING ACORD 125. Verified on the live session: recommendations
+    # contained ACORD_125 and `selected_form_ids` was []. Silence here is
+    # correct; the rule fires normally the moment a real form set exists.
+    if not triggered_ids:
+        return issues
+
     if "ACORD_125" not in triggered_ids:
         # NOTE: surfaced as a soft warning so the user can still proceed.
         # The decision-tree spec calls this a hard stop, but the product
