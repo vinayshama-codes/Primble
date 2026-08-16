@@ -52,7 +52,7 @@ from services.issue_registry import make_issue, classify_legacy
 from services.submission_integrity import assess_submission_integrity
 from services.underwriting_consistency import (
     assess_underwriting_consistency, apply_confirmations, validate_confirmation,
-    RECONCILABLE_FIELDS, RECONCILABLE_FIELD_KEYS,
+    RECONCILABLE_FIELDS, RECONCILABLE_FIELD_KEYS, unresolved_withheld_keys,
 )
 from repositories.session_repository import new_processing_session, upd_processing_session
 
@@ -701,6 +701,32 @@ async def _finalize_pipeline(
     # differ. Owns RECONCILABLE_FIELD_KEYS so the crude raw-string detector
     # below does not double-report them as formatting conflicts.
     underwriting = assess_underwriting_consistency(active_docs, merged_facts, confirmations)
+    # Client 2026-08-15 ("unresolved conflicts must remain unresolved"): facts
+    # whose cross-document conflict is unresolved are listed on the session
+    # facts so the stamping layer withholds their value until the picker
+    # confirms one (pdf_service._resolve_conflicted_fact_blank). Recomputed
+    # every pipeline run - the confirm endpoint re-runs this pipeline, so a
+    # confirmation clears the withhold with no extra wiring. The fact itself
+    # stays in facts: scoring, warnings and the picker keep reading it.
+    try:
+        # UNION, never replace: merge_facts may already have withheld a limit
+        # whose conflict is INSIDE one document (extraction_service.
+        # _flag_intra_document_limit_conflicts). Overwriting here would silently
+        # release exactly the value the client asked us to hold. A key the user
+        # has now CONFIRMED is dropped from both sources.
+        _confirmed = set((confirmations or {}).keys())
+        _withheld = set(unresolved_withheld_keys(underwriting, confirmations))
+        _withheld |= {
+            k for k in (merged_facts.get("_uw_conflicted_keys") or [])
+            if k not in _confirmed
+        }
+        if _withheld:
+            merged_facts["_uw_conflicted_keys"] = sorted(_withheld)
+            logger.info("underwriting: stamped-value withhold active for %s", sorted(_withheld))
+        else:
+            merged_facts.pop("_uw_conflicted_keys", None)
+    except Exception as _wex:  # noqa: BLE001 — never block the pipeline
+        logger.warning("underwriting: withheld-key computation failed: %s", _wex)
     if underwriting.get("review_required"):
         # ── BLOCKING MEANS HARD STOP, AND RELEVANCE IS A PRECONDITION (C75) ───
         # Two owner rules applied here, both to the same loop.

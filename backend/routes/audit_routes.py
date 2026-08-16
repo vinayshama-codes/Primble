@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -32,9 +33,12 @@ from services.audit_service import (
     set_issue_status,
     get_issue_statuses,
     get_audit_trail_export,
+    active_score_credits,
 )
 from services.auth_service import get_current_user
-from services.sqs_service import SQS_MODEL_VERSION, generate_sqs_narrative
+from services.sqs_service import (
+    SQS_MODEL_VERSION, generate_sqs_narrative, final_score_with_credits,
+)
 from config.settings import ENABLE_PRODUCER_ANSWERS
 
 router = APIRouter(tags=["audit"])
@@ -43,17 +47,14 @@ logger = logging.getLogger(__name__)
 
 def _grade_from_score(score: int) -> tuple:
     """Return (grade, tier, tier_color) for a given SQS score.
-    Mirrors the frontend sqsGradeFromScore + tierMap so DB and UI always agree.
+
+    Delegates to sqs_service.tier_for_score - the ONE ladder. This function used
+    to carry its own copy that returned "Submission Ready" at exactly 90, while
+    both scorers require ABOVE 90, so a dismissal credit landing on 90 relabelled
+    a submission the scorers still called "Almost There".
     """
-    if score >= 90:
-        return "A", "Submission Ready", "green"
-    if score >= 80:
-        return "B", "Almost There", "yellow"
-    if score >= 70:
-        return "C", "Needs Work", "orange"
-    if score >= 60:
-        return "D", "Major Gaps", "red"
-    return "F", "Not Ready", "red"
+    from services.sqs_service import tier_for_score
+    return tier_for_score(score)
 
 
 def _cap_from(hard_count: int, soft_count: int) -> int:
@@ -88,22 +89,11 @@ def _credited_score(base: int, impact: int, cap: int) -> int:
     return min(min(100, base + impact), cap)
 
 
-def _dismiss_earned_credit(override_reason, score_impact) -> bool:
-    """Did this dismissal earn a score credit?
-
-    A plain "Dismiss" with no reason intentionally hides the card without crediting
-    the score - the gap remains on record. Only a real typed reason (not the default
-    sentinel) with a positive impact credits.
-
-    Single source of truth on purpose: the dismiss route uses it to decide whether to
-    APPLY a credit and the reopen path uses it to decide whether to REVERSE and replay
-    one. If the two predicates ever drifted, scores would silently mis-restore.
-    """
-    return (
-        override_reason not in (None, "", "No reason provided")
-        and score_impact is not None
-        and score_impact > 0
-    )
+# Single source of truth, now in the service layer so the RESCORE path can use
+# the same predicate. It previously lived here and called itself the single
+# source of truth while recalculate_session_scores knew nothing about credits at
+# all - which is exactly why every recalculation silently erased them.
+from services.audit_service import dismiss_earned_credit as _dismiss_earned_credit
 
 
 async def _apply_dismiss_score_credit(
@@ -174,23 +164,58 @@ async def _apply_dismiss_score_credit(
             # Package ceiling: field-level + cross-form (the combined totals).
             pkg_cap  = _cap_from(hard_total, soft_total)
 
-            # Find every form that has this rec_id in its recommendations list.
+            # Credit STILL IN FORCE, read from the audit table rather than
+            # compounded onto whatever number happens to be on screen. The
+            # just-dismissed row is already written by the time this runs, so it
+            # is included. Credits whose field has since been genuinely filled
+            # retire inside active_score_credits instead of stacking on top of
+            # the pillar improvement they duplicate (owner decision 2026-08-16).
+            # An ABSOLUTE total is what lets the rescore re-apply the same value
+            # idempotently; the old compounding model could not, which is why
+            # every recalculation silently erased outstanding credits.
+            _sess_facts = await conn.fetchval(
+                "SELECT data->'facts' FROM processing_sessions WHERE id = $1",
+                session_id,
+            )
+            if isinstance(_sess_facts, str):
+                try:
+                    _sess_facts = json.loads(_sess_facts)
+                except Exception:
+                    _sess_facts = None
+            credits_total, _credit_rows = await active_score_credits(
+                session_id, facts=_sess_facts if isinstance(_sess_facts, dict) else None,
+            )
+            _credit_json = json.dumps([
+                {"rec_id": r["rec_id"], "impact": int(r["score_impact"])}
+                for r in _credit_rows
+            ])
+
+            # Every generated form, with the credit total scoped to the
+            # recommendations THAT form actually carries. Scoping matters: a
+            # session-wide total applied to a form holding none of the dismissed
+            # items would credit a gap that form never had. The package below
+            # keeps the session-wide total, which is its documented behaviour.
             affected_rows = await conn.fetch(
                 """
                 SELECT ge.key AS form_id,
-                       (ge.value->'sqs'->>'sqs_score')::int AS score
+                       (ge.value->'sqs'->>'sqs_score')::int AS score,
+                       (ge.value->'sqs'->>'raw_sqs_score')::int AS raw_score,
+                       COALESCE((
+                           SELECT SUM((c->>'impact')::int)
+                           FROM jsonb_array_elements($2::jsonb) AS c
+                           WHERE EXISTS (
+                               SELECT 1
+                               FROM jsonb_array_elements(
+                                   COALESCE(ge.value->'sqs'->'recommendations', '[]'::jsonb)
+                               ) AS r
+                               WHERE r->>'rec_id' = c->>'rec_id'
+                           )
+                       ), 0) AS form_credits
                 FROM processing_sessions ps,
                      jsonb_each(COALESCE(ps.data->'generated_forms', '{}'::jsonb)) AS ge
                 WHERE ps.id = $1
-                  AND EXISTS (
-                      SELECT 1
-                      FROM jsonb_array_elements(
-                               COALESCE(ge.value->'sqs'->'recommendations', '[]'::jsonb)
-                           ) AS r
-                      WHERE r->>'rec_id' = $2
-                  )
                 """,
-                session_id, rec_id,
+                session_id, _credit_json,
             )
 
             # Credit package from its own independent baseline.
@@ -199,8 +224,20 @@ async def _apply_dismiss_score_credit(
                 "FROM processing_sessions WHERE id = $1",
                 session_id,
             )
-            pkg_base      = existing_pkg if existing_pkg is not None else score_at_action
-            new_pkg_score = _credited_score(pkg_base, score_impact, pkg_cap)
+            existing_pkg_raw = await conn.fetchval(
+                "SELECT (data->'package_sqs'->>'raw_sqs_score')::int "
+                "FROM processing_sessions WHERE id = $1",
+                session_id,
+            )
+            if existing_pkg_raw is not None:
+                new_pkg_score = final_score_with_credits(
+                    existing_pkg_raw, credits_total, pkg_cap,
+                )
+            else:
+                # Legacy session scored before raw_sqs_score existed: keep the
+                # original compounding behaviour so old submissions still credit.
+                pkg_base      = existing_pkg if existing_pkg is not None else score_at_action
+                new_pkg_score = _credited_score(pkg_base, score_impact, pkg_cap)
             _, new_pkg_tier, _ = _grade_from_score(new_pkg_score)
 
             # Build per-form updates: bump each affected form independently.
@@ -208,9 +245,23 @@ async def _apply_dismiss_score_credit(
             now_ts = datetime.now(timezone.utc).isoformat()
 
             for row in affected_rows:
-                fid        = row["form_id"]
-                base_score = row["score"] if row["score"] is not None else score_at_action
-                new_score  = _credited_score(base_score, score_impact, form_cap)
+                fid = row["form_id"]
+                _form_credits = int(row["form_credits"] or 0)
+                if row["raw_score"] is not None:
+                    # A form carrying none of the dismissed recommendations has
+                    # zero scoped credit, so this is a no-op resync for it.
+                    new_score = final_score_with_credits(
+                        row["raw_score"], _form_credits, form_cap,
+                    )
+                elif _form_credits:
+                    # Legacy session scored before raw_sqs_score existed: keep the
+                    # original compounding behaviour so old submissions still credit.
+                    base_score = row["score"] if row["score"] is not None else score_at_action
+                    new_score  = _credited_score(base_score, score_impact, form_cap)
+                else:
+                    continue
+                if row["score"] is not None and new_score == int(row["score"]):
+                    continue                      # nothing changed for this form
                 new_grade, new_tier, new_tier_color = _grade_from_score(new_score)
 
                 await conn.execute(
@@ -495,26 +546,29 @@ async def _reapply_dismiss_credits(session_id: str, exclude_rec_id: str) -> None
     reopen that was rare; reopen would make it routine - dismissing three recs
     (+8, +12, +5) and reopening the +8 one would drop the score by all 25.
 
-    Replaying is safe because _credited_score compounds from whatever the current base
-    is, so applying the surviving dismissals in their original order reproduces the
-    same sequence of credits. The reopened rec is already action=NULL (or is excluded
-    here), so it can never be double-credited.
+    Since 2026-08-16 credits are applied as an ABSOLUTE total on top of the stored
+    raw score rather than compounded onto the displayed one, so this is a single
+    idempotent resync rather than a per-row replay - looping would apply the whole
+    total once per surviving dismissal. The reopened rec is already action=NULL by
+    the time this runs, so active_score_credits excludes it automatically and it can
+    never be double-credited.
     """
     try:
-        for row in await get_dismissed_recommendations(session_id):
-            if row.get("rec_id") == exclude_rec_id:
-                continue
-            if not _dismiss_earned_credit(row.get("override_reason"), row.get("score_impact")):
-                continue
-            await _apply_dismiss_score_credit(
-                session_id=session_id,
-                rec_id=row["rec_id"],
-                # Only a fallback for a NULL stored score. The recalculation that just
-                # ran always writes live per-form and package scores, so the real base
-                # is read from the session and this value is never reached.
-                score_at_action=0,
-                score_impact=int(row["score_impact"]),
-            )
+        if not any(
+            _dismiss_earned_credit(r.get("override_reason"), r.get("score_impact"))
+            for r in await get_dismissed_recommendations(session_id)
+            if r.get("rec_id") != exclude_rec_id
+        ):
+            return                     # nothing outstanding to restore
+        await _apply_dismiss_score_credit(
+            session_id=session_id,
+            rec_id=exclude_rec_id,
+            # Fallbacks only, for a legacy session with no stored raw score. The
+            # recalculation that just ran always writes live per-form and package
+            # scores, so on a current session neither value is reached.
+            score_at_action=0,
+            score_impact=0,
+        )
     except Exception as ex:
         logger.error(f"_reapply_dismiss_credits failed for {session_id}: {ex}")
 

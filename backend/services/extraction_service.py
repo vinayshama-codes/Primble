@@ -264,6 +264,8 @@ _EXTRACT_SCHEMA = (
     '  "umbrella_limit": string or null, "umbrella_sir": string or null,\n'
     '  "umbrella_attachment_point": string or null,\n'
     '  "umbrella_effective_date": string or null, "umbrella_expiration_date": string or null,\n'
+    '  "umbrella_um_limit": string or null, "umbrella_uim_limit": string or null,\n'
+    '  "umbrella_medical_payments_limit": string or null,\n'
     '  "underlying_policies": [{"line": string, "limit": string, "carrier": string, "policy_no": string}],\n'
     '  "schedule_of_underlying_insurance": string or null,\n'
     '  "umbrella_follow_form": string or null,\n'
@@ -503,7 +505,11 @@ _EXTRACT_PROMPT_PREFIX = (
     'umbrella_effective_date/umbrella_expiration_date even when it differs from effective_date/'
     'expiration_date. Do not collapse it into the current-policy dates just because both are present '
     'in the same document — a differing umbrella period is a real, common attachment scenario, not '
-    'an error to normalize away.\n\n'
+    'an error to normalize away. umbrella_um_limit / umbrella_uim_limit / '
+    'umbrella_medical_payments_limit are the UM/UIM/medical-payments coverages of the UMBRELLA '
+    'POLICY ITSELF, only when the umbrella declarations state them for the umbrella — the '
+    'underlying AUTO policy\'s UM/UIM/med-pay limits belong to auto_um_uim_limit and must NEVER '
+    'be copied into the umbrella keys; when the umbrella states none, all three stay null.\n\n'
     'RULE 2 — Schedule tables: output ONE JSON object per row.\n'
     '  • Vehicle schedule      → one entry per vehicle in auto_vin_schedule\n'
     '  • WC class code table   → one entry per class code row in wc_class_codes\n'
@@ -1691,15 +1697,37 @@ def _validate_parsed(result: dict, context: str) -> dict:
     return result
 
 
+# ── Extraction output-token cap (improving-ll.md C51) ────────────────────────
+# The reply this cap bounds is one chunk's WHOLE fact set: ~150 scalar facts,
+# every schedule (vehicles, drivers, locations, class codes, loss rows) and up
+# to 150 `dec_page_entries`, each with label/value/section/owner/policy_number/
+# line_of_business. On a dense declarations chunk that reply is large, and at
+# 16,000 tokens it was being CUT OFF mid-object - which is what made a chunk
+# unparseable and (before the salvage + retry fix below) 500'd the client's
+# 271-page upload on 2026-08-15.
+#
+# Raising the cap does not raise the bill: output tokens are billed on what the
+# model actually writes, and the cap only decides where the text is severed.
+# `gpt-5.4-mini` allows 128,000 output tokens, so 32,000 is 4x headroom and
+# still a quarter of what the model would permit. Lower it with
+# EXTRACT_MAX_OUTPUT_TOKENS if a future model needs it; the salvage path below
+# stays as the safety net either way, because a cap can always be reached.
+_EXTRACT_MAX_OUTPUT_TOKENS = int(os.getenv("EXTRACT_MAX_OUTPUT_TOKENS", "32000"))
+
+
 # ── Fix 2: Strict JSON parse for extraction output ────────────────────────────
 
 # ASYNC-SAFE
 async def _safe_json_parse(raw: str, context: str = "") -> dict:
     """
     Parse LLM extraction output. Expects: {"facts": {...}, "flags": {...}}.
-    On parse failure: LLM repair (max 2 repair attempts), full raw passed each time.
+    On parse failure: DETERMINISTIC salvage of the completed portion first
+    (utils.json_salvage — free, and truncation at the output cap is the usual
+    cause), then LLM repair (max 2 attempts, fed the first 3,000 chars).
     After parse: _validate_parsed() enforces strict schema.
-    Raises RuntimeError on any failure — never returns empty silently.
+    Raises RuntimeError on any failure — never returns empty silently. The
+    CALLER (_gather_chunks_async._one) degrades that to a failed chunk rather
+    than aborting the upload; see the note there.
     """
     for attempt in range(3):
         raw = raw.strip()
@@ -1708,6 +1736,7 @@ async def _safe_json_parse(raw: str, context: str = "") -> dict:
             raw = raw.rstrip("`").strip()
         s = raw.find("{")
         e = raw.rfind("}")
+        parsed = None
         if s != -1 and e != -1:
             candidate = raw[s : e + 1]
             try:
@@ -1715,6 +1744,36 @@ async def _safe_json_parse(raw: str, context: str = "") -> dict:
             except (json.JSONDecodeError, ValueError):
                 parsed = None
 
+        # ── Deterministic salvage BEFORE spending an LLM repair call ─────────
+        # The dominant real-world cause of an unparseable extraction reply is
+        # TRUNCATION at the output-token cap: the schema is large (up to 150
+        # dec_page_entries, plus every schedule), and a reply cut mid-object
+        # leaves `rfind("}")` pointing at a nested close, so the candidate is
+        # unbalanced and json.loads fails.
+        #
+        # The old path went straight to an LLM repair fed `raw[:3000]` - the
+        # first 3,000 CHARACTERS of a reply that may be 60,000 - so the repair
+        # saw a fragment of a fragment, and each subsequent attempt re-truncated
+        # the previous repair's output. Three attempts later the chunk was
+        # declared unparseable and the whole upload 500'd (live 2026-08-15, the
+        # client's 271-page package).
+        #
+        # Rewinding to the last completed element recovers everything the model
+        # DID write, costs nothing, and cannot invent a value. Same parser the
+        # gap-fill stage has used since the C-series work (utils.json_salvage).
+        if parsed is None and s != -1:
+            from utils.json_salvage import salvage_truncated_json
+            _sal = salvage_truncated_json(raw[s:])
+            if isinstance(_sal, dict) and _sal:
+                logger.warning(
+                    "_safe_json_parse [%s]: reply was not valid JSON (almost always "
+                    "truncation at the output cap) - SALVAGED %d top-level key(s) "
+                    "from the completed portion instead of discarding the chunk",
+                    context, len(_sal),
+                )
+                parsed = _sal
+
+        if parsed is not None:
             if isinstance(parsed, dict):
                 # If the model returned a bare field-dict without the facts/flags wrapper,
                 # wrap it automatically. This happens when the model echoes the schema
@@ -2215,7 +2274,10 @@ async def extract_facts(
         + _EXTRACT_PROMPT_SUFFIX
     )
 
-    raw = await groq_chat(LLM_MODEL, [{"role": "user", "content": prompt}], max_tokens=16000)
+    raw = await groq_chat(
+        LLM_MODEL, [{"role": "user", "content": prompt}],
+        max_tokens=_EXTRACT_MAX_OUTPUT_TOKENS,
+    )
 
     result   = await _safe_json_parse(raw, context=f"key={ck[:8]}")
     annotated, manual_conf = _annotate_facts(result["facts"], low_confidence_tokens, source=source)
@@ -3415,6 +3477,13 @@ def _merge_list_fields(partials: List[dict], list_keys: List[str]) -> dict:
         winner_nk, winner_score, winner_c = scored[0]
         merged_facts[field] = winner_c["record"]
         if len(scored) > 1:
+            # Kept for the intra-document conflict check: a limit whose merge had
+            # to CHOOSE between two materially different amounts is unresolved,
+            # not decided (client 2026-08-15, the $3M/$1M umbrella limit inside
+            # one package). Private key, stripped before the facts are stored.
+            merged_facts.setdefault("_merge_rejected", {})[field] = [
+                nk for nk, _sc, _c in scored[1:]
+            ]
             rejected = [
                 f"{nk!r}(score={sc:.2f},freq={c['freq']})"
                 for nk, sc, c in scored[1:]
@@ -3883,9 +3952,38 @@ async def _gather_chunks_async(
                     else:
                         logger.debug(f"chunk {idx}: ok chars={c_start}–{c_end}")
                     return result
-                except RuntimeError:
-                    # Schema/JSON failure — not transient, do not retry.
-                    raise
+                except RuntimeError as ex:
+                    # Schema / JSON-parse failure. This used to `raise`, on the
+                    # theory that it is "not transient". That theory cost the
+                    # client a whole upload on 2026-08-15: ONE chunk of a
+                    # 271-page package came back unparseable and the raise blew
+                    # straight through `asyncio.gather`, past the per-chunk
+                    # retry budget, past the smaller-chunk document retry, past
+                    # the PARTIAL-coverage reporting - every degradation path
+                    # this function has - and returned a 500 to the browser.
+                    #
+                    # It is also not true. The usual cause is TRUNCATION at the
+                    # output cap (now salvaged deterministically in
+                    # `_safe_json_parse`), and what survives that is a
+                    # non-deterministic model reply that a retry genuinely
+                    # re-rolls. So it takes the ordinary retry path, and if the
+                    # budget runs out the chunk is marked `chunk_failed` like
+                    # any other failure - which `_run_extraction` already
+                    # handles LOUDLY: failed indices, char ranges and coverage
+                    # percentage are logged, `extraction_complete` goes False,
+                    # and an all-chunks-failed document still raises.
+                    #
+                    # Losing one chunk of a document is a bad day. Losing the
+                    # document is a worse one.
+                    last_ex = ex
+                    wait = 2 ** attempt + random.uniform(0, 0.5)
+                    logger.warning(
+                        f"chunk {idx} attempt {attempt + 1}/{_CHUNK_MAX_RETRIES} "
+                        f"(chars {c_start}–{c_end}) JSON/schema failure — "
+                        f"retrying in {wait:.1f}s: {ex}"
+                    )
+                    if attempt < _CHUNK_MAX_RETRIES - 1:
+                        await asyncio.sleep(wait)
                 except Exception as ex:
                     # Permanent errors — retrying will never succeed, fail fast to avoid
                     # burning API quota and spamming the upstream provider:
@@ -4048,23 +4146,88 @@ _DEC_INDEX_MAX_CHUNKS = int(os.getenv("DEC_INDEX_MAX_CHUNKS", "0"))
 # carry 40+ entries at ~35 tokens each; 16,000 holds several such pages.
 _DEC_INDEX_MAX_TOKENS = int(os.getenv("DEC_INDEX_MAX_TOKENS", "16000"))
 
+# PURPOSE FIRST, RULES SECOND (2026-08-16). The previous version opened with
+# "you have exactly one job: list every label:value pair" and then governed
+# `label`, `value` and `section` with seven rules - leaving `owner`,
+# `policy_number` and `line_of_business` with NO rule at all. Those three ARE
+# the relationship the client asked us to preserve, and the live index showed
+# exactly what an ungoverned key produces: FOUR keys for TWO policies
+# ('6E7-40-02---26' 77 entries / '6E74002' 4, 'BBC7263 - 26' 51 / 'BBC7263' 8),
+# the Inland Marine number keyed WITH its OCR spacing ('6 C 7 - 4 0 - 0 2---26',
+# which then printed that way on the client's ACORD 125), two names for one line
+# ('General Liability' 37 / 'Commercial General Liability' 40), and one phone
+# number owned by 'carrier' on one page and 'producer' on the next.
+#
+# The fix is the EVIDENCE-versus-KEY distinction, which the old prompt did not
+# make: label/value/section are quotations and stay verbatim; owner/
+# policy_number/line_of_business are join keys. Rule 1's verbatim instruction
+# was being applied to fields it was never meant to govern.
+#
+# EXHAUSTIVENESS IS NOT A JUDGMENT CALL and must never read as one. Stating the
+# downstream purpose creates pull toward "only record what fills a box", which
+# would reverse the reason this pass exists (under-reporting). Rule 1 carries
+# the counterweight explicitly - keep the two together if this is ever edited.
+#
+# WHAT THE PROMPT CAN AND CANNOT DO, measured on a re-run of the same package:
+#   WORKS - owner definitions (one value owned two ways: 2 -> 0) and the
+#           label-repeats-value rule (19 -> 1). Recall also rose 212 -> 261
+#           entries, recovering the whole Inland Marine sub-limit schedule.
+#   FAILS - asking for a canonical policy number or a fixed line vocabulary.
+#           Both were tried as rules 8 and 9 and both made their metric WORSE
+#           (a third umbrella spelling appeared; off-vocabulary line values went
+#           2 -> 7). Deleted. That work is deterministic and now lives in
+#           `_canonicalise_dec_entry_keys`, which runs after verification.
+# The lesson generalises: ask the model for judgment it can exercise from the
+# page in front of it, and do identity arithmetic in code.
+#
+# SIX PHRASES IN HERE ARE PINNED BY ANTI-ROT TESTS and are kept verbatim: the
+# behaviours they guard all survive this rewrite, only the surrounding prose
+# changed. tests/test_dec_index_dedicated_pass.py pins "VERBATIM",
+# "BE EXHAUSTIVE", "one entry PER printed cell" and "NEVER concatenate";
+# tests/test_run_20260814b_form_fixes.py pins "labels must differ exactly as the
+# printed captions differ", "the amount's LABEL, not a separate entry" and
+# "never shorten, reorder or reword". Each records a real production incident -
+# a dozen inland-marine sub-limits labelled with the same row id collapsed 80
+# entries into 26, and a paraphrased heading cost 17 entries their section. If
+# you reword this prompt, run those two files before anything else.
 _DEC_INDEX_SYSTEM_PROMPT = (
-    "You transcribe insurance DECLARATIONS and SCHEDULE pages. You have exactly "
-    "one job: list EVERY label:value pair printed in the text.\n\n"
+    "WHAT YOU ARE BUILDING AND WHY\n"
+    "This index is the evidence base for automatically filling ACORD insurance "
+    "forms. Downstream code never re-reads the document: it reads your entries, "
+    "joins them on their keys, and stamps the values into named boxes.\n\n"
+    "WHAT MUST SURVIVE INTO EVERY ENTRY\n"
+    "  * a value stays attached to its own policy and coverage part\n"
+    "  * a carrier stays attached to its own policy, never another's\n"
+    "  * an amount stays attached to what it MEASURES\n"
+    "  * a figure stays attached to the party it is about\n"
+    "If you cannot establish one of these, say so with null. A null key is "
+    "recoverable; a confident wrong key is not.\n\n"
     "Return JSON: {\"dec_page_entries\": [{\"label\": string, \"value\": string, "
     "\"section\": string or null, \"owner\": "
     "\"applicant\"|\"producer\"|\"carrier\"|\"policy\"|\"other\", "
     "\"policy_number\": string or null, \"line_of_business\": string or null}]}\n\n"
+    "THE FIELDS ARE TWO DIFFERENT JOBS.\n"
+    "  * label, value, section are EVIDENCE - copied verbatim. A later step "
+    "discards any entry whose text is not literally in the document, so cleaning "
+    "up a value destroys it.\n"
+    "  * owner, policy_number, line_of_business are KEYS - what the joins run "
+    "on. They say which party, which contract and which coverage part an entry "
+    "belongs to. Keep them consistent across entries that share them.\n\n"
     "RULES\n"
-    "1. COPY label and value VERBATIM as printed. Do not normalise, expand an "
+    "1. RECORD EVERYTHING - BE EXHAUSTIVE. This is not a judgment call and never "
+    "becomes one. Every premium, limit, deductible, date, code, identifier, "
+    "address, phone, name, percentage, valuation and coverage line - including "
+    "EVERY numeric column of every row in a rating or class table (rate, factor, "
+    "exposure, cost new, per-row premium), not just the identity columns. A page "
+    "with forty printed values must return forty entries. You do not know which "
+    "forms will be selected, so never skip a value because you cannot see a box "
+    "for it. Under-reporting is the failure mode this pass exists to fix; your "
+    "judgment applies to how an entry is ATTRIBUTED, never to whether it is "
+    "worth recording.\n"
+    "2. COPY label and value VERBATIM as printed. Do not normalise, expand an "
     "abbreviation, reformat a number or fix a typo. An entry that is not "
-    "literally in the text is discarded, so a paraphrase is a wasted entry.\n"
-    "2. BE EXHAUSTIVE. Every premium, limit, deductible, date, code, "
-    "identifier, address, phone, name, percentage, valuation and coverage line. "
-    "In a rating or class table that includes EVERY numeric column of every "
-    "row - rate, factor, exposure, cost new, per-row premium - not just the "
-    "identity columns. A page with forty printed values must return forty "
-    "entries. Under-reporting is the failure mode this pass exists to fix.\n"
+    "literally in the text is discarded, so a paraphrase is a wasted entry. The "
+    "label NAMES the value and is never part of it.\n"
     "3. 'No Coverage', 'Included', 'Waived', 'Not Applicable' are VALUES. "
     "Record them - a line the policy declines to cover is data.\n"
     "4. section = the heading printed at the top of the page the entry appears "
@@ -4074,6 +4237,15 @@ _DEC_INDEX_SYSTEM_PROMPT = (
     "prints, not your own paraphrase - a reworded heading is discarded). This "
     "is the only thing that says which coverage part a figure belongs to: two "
     "parts print the identical label with different amounts.\n"
+    # REVERTED to the pre-2026-08-16 wording, measured. The rewrite added
+    # "never split one printed fact into two entries" immediately before the
+    # 'Payroll $39,300' example, and the model read "do not split" as "collapse
+    # the row": the GL class table went from SIX entries to ONE
+    # ("Location 001 91580 Prem Basis" = "Payroll"), losing $39,300, $350,000,
+    # class 91585 and the Total Cost basis - the client's own headline number
+    # gone from the index. The original text below is imperfect (the model still
+    # emits basis and amount as two entries) but it PRESERVES BOTH VALUES, and a
+    # recorded pair beats a tidy single entry with the number missing.
     "5. TABLES: one entry PER printed cell. label = the caption printed for "
     "THAT value - the column heading and/or the row's own name (the coverage "
     "name, class code or location number), as printed. NEVER label several "
@@ -4084,10 +4256,59 @@ _DEC_INDEX_SYSTEM_PROMPT = (
     "classification wording are TWO entries, and a basis word printed beside "
     "an amount ('Payroll $39,300') is the amount's LABEL, not a separate "
     "entry. A joined value is not literally printed anywhere and is "
+    # REVERTED 2026-08-16 (C60). An example was appended here asking the model
+    # to split a captionless run of figures - `COVERED AUTOS LIABILITY:
+    # '01 $ 1,000,000 .$ 1,496.00'` - into symbol / limit / premium. Run
+    # c655a44b returned those rows BYTE-IDENTICAL: measured zero effect. It was
+    # removed rather than kept as harmless, because a measured-useless
+    # instruction is not neutral in THIS prompt - rule 7 looked harmless too and
+    # cost the GL class table for three runs. Nothing downstream needs the split
+    # either: covered-auto symbols have `auto_covered_symbols` (per-coverage
+    # attribution, 2026-08-07), line premiums have `_resolve_lob_premium`, the
+    # limits have their own facts. Cost is a little Stage A retrieval quality on
+    # those boxes; no value and no relationship is lost. Do not retry this in the
+    # prompt - splitting a rating row positionally is C46's phantom-row pattern.
     "discarded.\n"
     "6. Record NOTHING from policy wording, endorsement legal text, exclusions, "
-    "definitions or hypothetical examples. Declarations and schedules only.\n"
-    "7. If this text contains no declarations content, return an empty list."
+    "definitions or hypothetical examples. Declarations and schedules only - "
+    "that text describes what coverage WOULD mean, not what this policy "
+    "grants.\n"
+    # SCOPED 2026-08-16 after a measured regression. The first wording was the
+    # general instruction "Give the value the caption printed above or beside
+    # it", which is a second, competing theory of what a label IS - and on a
+    # rating table it beat rule 5's. Rule 5 says the basis word beside an amount
+    # labels that amount ('Payroll' labels '$39,300'). Rule 7 pointed at the
+    # column header ABOVE the basis word ('Prem Basis') and made 'Payroll' the
+    # VALUE - at which point the amount had no entry left to live in. The GL
+    # class table went 6 entries -> 1 and $39,300, $350,000, class 91585 and the
+    # 'Total Cost' basis vanished from two consecutive runs after being present
+    # in all seven before. Rule 5 was byte-identical across that change and was
+    # wrongly blamed first. Now rule 7 states its one case and yields explicitly,
+    # so the two can no longer disagree about the same cell.
+    "7. If an entry's label would be the SAME TEXT as its value, it records "
+    "nothing - give it the caption printed above or beside that value, or omit "
+    "it. That identical-text case is the ONLY thing this rule covers. In a "
+    "rating or class table, rule 5 already decides which cell is the label and "
+    "rule 5 wins: a basis word beside an amount labels THAT AMOUNT, and the "
+    "amount must still be recorded.\n"
+    # RULES 8 AND 9 WERE HERE AND ARE DELETED, on measurement, not opinion.
+    # They asked the model to emit ONE canonical policy number per contract and
+    # to map line names onto a fixed vocabulary. Re-running the same package:
+    # policies carrying more than one key went 2 -> 3 (the model invented a
+    # THIRD umbrella spelling, '6J74002---26', beside '6J7-40-02---26'), and
+    # off-vocabulary line values went 2 -> 7 (the Common Declarations rows came
+    # back as 'Liability', 'Automobile', 'Umbrella', 'Crime and Fidelity' -
+    # exactly what rule 9 forbade). They cost ~250 tokens per indexed chunk and
+    # made both metrics WORSE. Canonicalising a join key is deterministic work
+    # and now happens in `_canonicalise_dec_entry_keys` after verification,
+    # where it can be proven. Do not reinstate them here.
+    "8. owner - who the value is ABOUT, not who printed it, and the same for "
+    "every page that item appears on. applicant = the insured. producer = the "
+    "agency or broker. carrier = the insurance company (including its "
+    "claim-reporting and servicing numbers). policy = the contract itself - "
+    "numbers, terms, limits, deductibles, premiums, coverages, schedules. "
+    "other = a third party such as a mortgagee or loss payee.\n"
+    "9. If this text contains no declarations content, return an empty list."
 )
 
 
@@ -5555,6 +5776,242 @@ def _verify_dec_entries(entries: Any, full_text: str) -> List[dict]:
     return kept
 
 
+# ── The join keys are canonicalised in CODE, not by the prompt (2026-08-16) ───
+# `policy_number` and `line_of_business` are what every downstream consumer
+# JOINS on - the ACORD 131 underlying grid, the 125 prior-carrier grid, the Q4
+# grid, the section-form header identity. When one contract carries two keys,
+# each of those sees half its evidence, and the surfaces starve one fact at a
+# time (which is the shape of every "why is this box blank" report in
+# FIX_TRACKING_2026-08-15.md).
+#
+# ASKING THE MODEL FOR THIS WAS TRIED AND MEASURED AND FAILED. Prompt rules 8
+# and 9 instructed exactly this; on a re-run of the same package the model
+# invented a THIRD umbrella spelling ('6J74002---26') and produced MORE
+# off-vocabulary line names, not fewer. Identity arithmetic is deterministic
+# work; it belongs here, where it can be proven and tested.
+#
+# THE FUNCTION NEVER INVENTS. It only elects one printing from the printings the
+# verified entries already carry, and it only rewrites the KEY - `value` stays
+# verbatim, so the evidence and the `_verify_dec_entries` literal-presence
+# guarantee are both untouched. Two numbers merge only when one is a prefix of
+# the other after stripping punctuation and OCR spacing, which is how a single
+# contract is printed several ways ('6E7-40-02---26' / '6E74002',
+# 'BBC7263 - 26' / 'BBC7263', '6 C 7 - 4 0 - 0 2---26'). Two genuinely different
+# numbers share no such prefix and are left alone.
+_DEC_LINE_DISPLAY: Dict[str, str] = {
+    "general_liab":   "General Liability",
+    "auto":           "Commercial Auto",
+    "umbrella":       "Commercial Umbrella",
+    "inland_marine":  "Inland Marine",
+    "workers_comp":   "Workers Compensation",
+    "property":       "Property",
+    "crime":          "Crime",
+    "cyber":          "Cyber",
+}
+
+
+# Two letters + exactly four 2-digit groups (spaced or contiguous): the ISO
+# form-number-with-edition shape ("CG 99 09 12 19", "CG00011213"). See the
+# clearing loop in _canonicalise_dec_entry_keys for why this can never be a
+# contract key and why real policy numbers cannot match it.
+_ISO_FORM_NUMBER_KEY_RE = re.compile(r"^[A-Za-z]{2}(\s?\d{2}){4}$")
+
+
+def _entry_self_attributes_its_own_identifier(entry: Any) -> bool:
+    """The entry's `policy_number` IS its own `value`, and its own label does
+    not claim that value is a policy number.
+
+    THE SHAPE THIS CATCHES, from run 47556cd2: the common declarations page
+    prints `Account Number: 0482854`, and the model - asked which contract the
+    entry belongs to, on the one page that belongs to ALL of them - reached for
+    the only identifier in front of it and keyed the entry to itself. That
+    invented a fifth policy on a four-policy package.
+
+    Deliberately NOT a denylist of label words ("account", "agent no", "claim
+    number", "form number" ...). The tell is structural and needs no vocabulary:
+    a contract key is something OTHER entries are filed under. An identifier
+    whose only support is the entry that prints it has attributed nothing.
+    `POLICY NUMBER: 6C7-40-02---26` is the same self-reference and is KEPT,
+    because its own label says the value is a policy number.
+    """
+    if not isinstance(entry, dict):
+        return False
+    pn = re.sub(r"[^A-Za-z0-9]", "", str(entry.get("policy_number") or "")).upper()
+    if not pn:
+        return False
+    val = re.sub(r"[^A-Za-z0-9]", "", str(entry.get("value") or "")).upper()
+    if pn != val:
+        return False
+    return "policy" not in str(entry.get("label") or "").lower()
+
+
+def _canonicalise_dec_entry_keys(entries: Any) -> None:
+    """Collapse each contract's several printings to ONE `policy_number`, and
+    each line's several wordings to ONE `line_of_business`. Mutates in place;
+    never raises; never invents a value that is not already present."""
+    if not isinstance(entries, list) or not entries:
+        return
+    try:
+        # ── Drop identifiers that key nothing but their own entry ────────────
+        # Runs BEFORE the election so a phantom key can never become a head and
+        # pull real printings into its group. Both conditions are required: the
+        # entry must self-attribute AND no other entry may be filed under that
+        # key - a thin document where a real policy genuinely has one entry is
+        # left alone, because there the key is doing its job.
+        _uses: Dict[str, int] = {}
+        for e in entries:
+            if isinstance(e, dict) and e.get("policy_number"):
+                k = str(e["policy_number"]).strip()
+                _uses[k] = _uses.get(k, 0) + 1
+        for e in entries:
+            if not _entry_self_attributes_its_own_identifier(e):
+                continue
+            if _uses.get(str(e["policy_number"]).strip(), 0) > 1:
+                continue
+            logger.info(
+                "dec_entries: %r keyed only its own entry (label=%r) - not a "
+                "contract key, cleared", str(e.get("policy_number")),
+                str(e.get("label"))[:40],
+            )
+            e["policy_number"] = None
+        # An ISO FORM NUMBER is not a contract. Run 34efbef4 keyed the PREMIUM
+        # AUDIT NONCOMPLIANCE endorsement's entries to "CG 99 09 12 19" - a
+        # fifth policy on a four-policy package. The shape is unmistakable and
+        # exact: two letters then FOUR two-digit groups (line prefix, form
+        # number pair, edition MM YY). Real policy numbers never fit it -
+        # "WC-99-123" fails on its three-digit group, "BBC7263 - 26" on its
+        # three letters. The key is cleared; the entry and its value survive.
+        for e in entries:
+            if not isinstance(e, dict) or not e.get("policy_number"):
+                continue
+            if _ISO_FORM_NUMBER_KEY_RE.match(str(e["policy_number"]).strip()):
+                logger.info(
+                    "dec_entries: %r is an ISO form number, not a contract "
+                    "key - cleared", str(e.get("policy_number")))
+                e["policy_number"] = None
+        # ── THE INVARIANT: a contract key is PRINTED as a policy number ──────
+        # Run 7e95e3ae: the account number returned as a key in a STRONGER
+        # shape - the model filed FOUR Common-Declarations entries under
+        # "0482854", so the single-entry guard above correctly stood aside and
+        # the phantom policy came back with four coverage lines. The first fix
+        # pinned the measured case; this is the class: every real contract in
+        # every observed package prints its number under a policy-labelled
+        # entry ("POLICY NUMBER", "Policy", "POLICY NO", ...), and a key with
+        # no such witness anywhere in the document is an identifier the model
+        # promoted, never a contract. CONDITIONAL on the document proving it
+        # labels policy numbers at all (at least one key has a witness) - a
+        # recording with no policy labels anywhere gives the invariant no
+        # basis to judge, and it stands aside rather than clearing every key.
+        def _is_policy_label(lab: str) -> bool:
+            low = str(lab or "").lower()
+            return "policy" in low or bool(re.search(r"\bpol\b", low))
+        _keys_in_use = {
+            str(e.get("policy_number")).strip()
+            for e in entries
+            if isinstance(e, dict) and e.get("policy_number")
+        }
+        _key_norm = {k: re.sub(r"[^A-Za-z0-9]", "", k).upper()
+                     for k in _keys_in_use}
+        _witnessed: set = set()
+        for e in entries:
+            if not isinstance(e, dict) or not _is_policy_label(e.get("label")):
+                continue
+            vn = re.sub(r"[^A-Za-z0-9]", "", str(e.get("value") or "")).upper()
+            if len(vn) < 4:
+                continue
+            for k, kn in _key_norm.items():
+                if len(kn) >= 4 and (kn.startswith(vn) or vn.startswith(kn)):
+                    _witnessed.add(k)
+        if _witnessed:
+            for e in entries:
+                if not isinstance(e, dict) or not e.get("policy_number"):
+                    continue
+                k = str(e["policy_number"]).strip()
+                if k and k not in _witnessed:
+                    logger.info(
+                        "dec_entries: %r is never printed as a policy number "
+                        "anywhere in the document - not a contract key, "
+                        "cleared (label=%r)", k, str(e.get("label"))[:40])
+                    e["policy_number"] = None
+        # ── policy_number ────────────────────────────────────────────────────
+        printings = {
+            str(e.get("policy_number")).strip()
+            for e in entries
+            if isinstance(e, dict) and e.get("policy_number")
+            and str(e.get("policy_number")).strip()
+        }
+        norm = {p: re.sub(r"[^A-Za-z0-9]", "", p).upper() for p in printings}
+        # ELECTION ORDER, and every clause is load-bearing:
+        #   1. longest normalised form  - a short printing joins the fuller one
+        #      instead of starting its own group ('BBC7263' -> 'BBC7263 - 26').
+        #   2. fewest spaces            - between two printings of the SAME
+        #      characters, the OCR-spaced one is the corrupt one. Without this
+        #      the alphabetical tie-break elected '6 C 7 - 4 0 - 0 2---26',
+        #      which is the exact string that printed on the client's ACORD 125.
+        #   3. longest raw              - '6J7-40-02---26' over '6J74002---26':
+        #      same characters, but the printing that kept its punctuation kept
+        #      more of the document's own structure. Ground truth confirms the
+        #      dashed form is what page 143 prints.
+        #   4. alphabetical             - only so the result is deterministic.
+        # OCR LETTER-SPACING REPAIR, display only. Run 7e95e3ae: the Inland
+        # Marine contract's ONLY surviving printing was "6 C 7 - 4 0 - 0 2---26"
+        # (the page prints its header letter-spaced), so the election - which
+        # never invents a printing - correctly shipped the spaced form as the
+        # join key and it landed on the client's ACORD 125 Q4. Collapsing the
+        # spacing is FORMATTING repair of an OCR artifact, not invention: it
+        # fires only on the unmistakable fingerprint (three or more single
+        # alphanumeric characters separated by spaces), so an ordinarily
+        # spaced printing like "BBC7263 - 26" ('-' is not alphanumeric) can
+        # never match, and entry VALUES keep the verbatim spaced printing.
+        def _despace(p: str) -> str:
+            toks = p.split(" ")
+            if sum(1 for t in toks if len(t) == 1 and t.isalnum()) >= 3:
+                return "".join(toks)
+            return p
+        canonical: Dict[str, str] = {}          # printing -> elected printing
+        heads: List[str] = []                   # elected printings, by norm
+        for p in sorted(printings,
+                        key=lambda x: (-len(norm[x]), x.count(" "), -len(x), x)):
+            n = norm[p]
+            if not n:
+                continue
+            for h in heads:
+                hn = norm[h]
+                if hn.startswith(n) or n.startswith(hn):
+                    canonical[p] = _despace(h)
+                    break
+            else:
+                heads.append(p)
+                canonical[p] = _despace(p)
+        merged = {p: h for p, h in canonical.items() if p != h}
+        # ── line_of_business ─────────────────────────────────────────────────
+        remapped: Dict[str, str] = {}
+        for e in entries:
+            if not isinstance(e, dict):
+                continue
+            raw_pn = str(e.get("policy_number") or "").strip()
+            if raw_pn and raw_pn in canonical:
+                e["policy_number"] = canonical[raw_pn]
+            raw_lob = str(e.get("line_of_business") or "").strip()
+            if raw_lob:
+                display = _DEC_LINE_DISPLAY.get(_canon_line(raw_lob) or "")
+                # No display name means the canonicaliser cannot place this
+                # wording. Leave it exactly as printed - dropping it would
+                # destroy an attribution the model did establish.
+                if display and display != raw_lob:
+                    e["line_of_business"] = display
+                    remapped[raw_lob] = display
+        if merged or remapped:
+            logger.info(
+                "dec_entries KEYS canonicalised: %d policy printing(s) merged "
+                "(%s), %d line wording(s) mapped (%s)",
+                len(merged), "; ".join(f"{k!r}->{v!r}" for k, v in list(merged.items())[:4]),
+                len(remapped), "; ".join(f"{k!r}->{v!r}" for k, v in list(remapped.items())[:4]),
+            )
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning("dec_entries key canonicalisation skipped: %s", exc)
+
+
 def _dec_entry_token_match(a: str, b: str) -> bool:
     """Two tokens name the same thing: identical, or prefix-stems (>=4 chars,
     the same rule pdf_service._stem_match uses, so 'comprehensive'~'comp')."""
@@ -5704,6 +6161,333 @@ _BILLING_VOCAB = (
     ("DIRECT BILL", re.compile(r"\bdirect bill\b")),
     ("AGENCY BILL", re.compile(r"\bagency bill\b")),
 )
+
+
+# ── THE ROOT FIX: repair the line -> policy relationship (client 2026-08-15) ──
+# Live run, `merge coverage_lines FINAL`:
+#     ('Property','None','6C7-40-02---26')  ('Liability','$3,954','6C7-40-02---26')
+#     ('Automobile','$2,991','6C7-40-02---26') ('Umbrella','$3,418','6C7-40-02---26') ...
+# ONE policy number - the Inland Marine one, the last the model happened to read -
+# attached to all EIGHT lines. Every downstream consumer was then working from a
+# fact in which "which policy covers which line" had already been destroyed, which
+# is the client's report #1 ("policy numbers are crossing lines of business") at
+# its actual source. Stamping guards can only refuse to print a corrupt pairing;
+# they cannot recover the real one.
+#
+# `dec_page_entries` CAN. Each entry is verified verbatim against the uploaded
+# text (_verify_dec_entries) and carries its own `line_of_business` and
+# `policy_number` as printed together on the page. On this package the correct
+# pairs are all there - 6E7 with Covered Autos, 6J7 with the Umbrella, BBC7263
+# with the CGL - which is exactly why ACORD 125's Q4 grid printed them correctly
+# while the section forms did not.
+#
+# So: when the line list is self-contradictory, rebuild its policy numbers from
+# the verified entries. A line the entries cannot settle gets None - blank, never
+# another line's number.
+# SPECIFIC coverage names, tried FIRST. "Liability" is deliberately absent:
+# it is the weakest word on a declarations page - "Commercial Auto Liability",
+# "Commercial Liability Umbrella" and "Employers Liability" are all liability,
+# and none of them is the General Liability part. A first version of this ranked
+# by phrase LENGTH and therefore read "Commercial Liability Umbrella" as General
+# Liability, which is the very defect this function exists to repair (caught by
+# test_auto_beats_bare_liability_in_line_canonicalisation, not in production).
+_LOB_CANON_SPECIFIC: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("workers_comp",  ("workers compensation", "workers comp", "employers liability")),
+    ("umbrella",      ("umbrella", "excess")),
+    ("inland_marine", ("inland marine", "installation", "contractors equipment")),
+    ("auto",          ("auto", "automobile", "vehicle", "trucker", "motor carrier",
+                       "garage")),
+    ("property",      ("property", "building")),
+    ("crime",         ("crime", "fidelity")),
+    ("cyber",         ("cyber",)),
+)
+# Only consulted when nothing specific matched.
+_LOB_CANON_GENERIC: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("general_liab", ("general liability", "cgl", "liability", "premises")),
+)
+
+
+def _canon_line(text: Any) -> Optional[str]:
+    """Which standard line of business a free-text line name denotes.
+
+    Specific coverage names win over the generic word "liability", and the
+    order within the specific table is deliberate - "Employers Liability" is
+    Workers Comp, so it must be tested before "auto"/"umbrella" can claim it.
+    Returns None when the text names no line we recognise, so callers can tell
+    "not this line" from "cannot tell" and blank rather than guess.
+    """
+    s = re.sub(r"[^a-z ]", " ", str(text or "").lower())
+    s = re.sub(r"\s+", " ", s).strip()
+    if not s:
+        return None
+    for table in (_LOB_CANON_SPECIFIC, _LOB_CANON_GENERIC):
+        for key, phrases in table:
+            if any(p in s for p in phrases):
+                return key
+    return None
+
+
+def _looks_like_a_policy_number(value: Any) -> bool:
+    """Reject ISO/AAIS FORM numbers ('CG 00 01 04 13', 'IM 7100 06 04') and
+    obvious non-identifiers. A form number names the coverage WORDING; a policy
+    number names THIS contract. Mirrors pdf_service._looks_like_a_form_number,
+    kept local to avoid importing the stamping layer into extraction."""
+    s = str(value or "").strip()
+    if len(s) < 4 or not re.search(r"\d", s):
+        return False
+    return not re.match(r"^[A-Z]{2}[ -]?\d{2,4}(?:[ -]\d{2}){2,3}$", s, re.I)
+
+
+def _policy_numbers_by_line(entries: Any) -> Dict[str, set]:
+    """{canonical_line: {policy numbers the document printed for it}} from the
+    VERIFIED dec entries - the only place the pairing survives intact."""
+    out: Dict[str, set] = {}
+    if not isinstance(entries, list):
+        return out
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        pn = str(e.get("policy_number") or "").strip()
+        if not pn or not _looks_like_a_policy_number(pn):
+            continue
+        # The entry's own line, else the declarations SECTION heading it was
+        # printed under ("COMMERCIAL UMBRELLA DECLARATIONS") - that heading is
+        # precisely what says which coverage part a figure belongs to.
+        line = _canon_line(e.get("line_of_business")) or _canon_line(e.get("section"))
+        if line:
+            out.setdefault(line, set()).add(pn)
+    return out
+
+
+def _coverage_lines_are_self_contradictory(lines: Any) -> bool:
+    """True when one policy number is attached to two or more DIFFERENT lines of
+    business - it cannot be identifying a policy, so the pairing is corrupt."""
+    if not isinstance(lines, list):
+        return False
+    by_number: Dict[str, set] = {}
+    for e in lines:
+        if not isinstance(e, dict):
+            continue
+        pn = re.sub(r"[^a-z0-9]", "", str(e.get("policy_number") or "").lower())
+        line = _canon_line(e.get("line"))
+        if pn and line:
+            by_number.setdefault(pn, set()).add(line)
+    return any(len(v) > 1 for v in by_number.values())
+
+
+def _carriers_by_line(entries: Any) -> Dict[str, set]:
+    """{canonical_line: {carrier names printed under that line}}.
+
+    The Orbin ground truth is why this is per-line and not a scalar: EMC
+    Property & Casualty Company issues the GENERAL LIABILITY part while
+    Employers Mutual Casualty Company issues Inland Marine, Auto and Umbrella.
+    Two legal entities from one group on one package - so "the carrier" cannot
+    be one value without being wrong on some form.
+    """
+    out: Dict[str, set] = {}
+    if not isinstance(entries, list):
+        return out
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        if str(e.get("owner") or "").strip().lower() != "carrier":
+            continue
+        name = str(e.get("value") or "").strip()
+        if len(name) < 4:
+            continue
+        line = _canon_line(e.get("line_of_business")) or _canon_line(e.get("section"))
+        if line:
+            out.setdefault(line, set()).add(name)
+    return out
+
+
+def _repair_coverage_lines_from_entries(mf: dict) -> None:
+    """Re-attach each coverage line to ITS OWN policy number, or to none.
+
+    Acts only when the list is self-contradictory - a healthy list is never
+    touched, so a package whose extraction was clean behaves exactly as before.
+    Carrier is repaired on the same pass from the same evidence, and only when
+    the document names exactly ONE carrier for that line; anything ambiguous is
+    left for `_section_carrier_pair`, which refuses to pair on ambiguity.
+    """
+    lines = mf.get("coverage_lines")
+    if not isinstance(lines, list) or not lines:
+        return
+    if not _coverage_lines_are_self_contradictory(lines):
+        return
+    by_line = _policy_numbers_by_line(mf.get("dec_page_entries"))
+    by_carrier = _carriers_by_line(mf.get("dec_page_entries"))
+    for e in lines:
+        if not isinstance(e, dict):
+            continue
+        canon = _canon_line(e.get("line"))
+        names = by_carrier.get(canon) if canon else None
+        if names and len(names) == 1:
+            e["carrier"] = next(iter(names))
+    repaired = cleared = 0
+    for e in lines:
+        if not isinstance(e, dict):
+            continue
+        canon = _canon_line(e.get("line"))
+        candidates = by_line.get(canon) if canon else None
+        if candidates and len(candidates) == 1:
+            new_pn = next(iter(candidates))
+            if str(e.get("policy_number") or "").strip() != new_pn:
+                e["policy_number"] = new_pn
+                repaired += 1
+        else:
+            # The document cannot settle this line's policy number. Blank beats
+            # a number belonging to a different coverage part.
+            if e.get("policy_number") is not None:
+                e["policy_number"] = None
+                cleared += 1
+    logger.warning(
+        "coverage_lines REPAIRED from verified dec entries: one policy number "
+        "was attached to several different lines of business - %d line(s) "
+        "re-paired to their own policy number, %d cleared as unresolvable",
+        repaired, cleared,
+    )
+
+
+# ── A conflict INSIDE one document is still a conflict (client 2026-08-15) ───
+# "The original Umbrella declarations show a $3,000,000 limit. A later COI
+# states that the limit was reduced from $3,000,000 to $1,000,000... Primble
+# showed $1M in one part of the workflow and $3M in another, and ultimately
+# populated $3M on the form."
+#
+# The cross-DOCUMENT reconciler already holds a conflicted value back until the
+# producer confirms it - but it compares documents, and this client uploads ONE
+# 271-page package containing the dec page AND the later COI. One document in,
+# no disagreement seen, and the merge quietly stamped the figure that appeared
+# most often. Repetition is not authority: a superseded limit printed on every
+# dec page beats a corrected one printed once, every time.
+#
+# The merge already knows: `_merge_list_fields` records the candidates it
+# REJECTED. When a limit-class fact was chosen over a materially different
+# rival, that IS the unresolved conflict, and the withhold list is exactly the
+# right place to say so.
+_CONFLICT_SENSITIVE_LIMITS: Tuple[str, ...] = ("umbrella_limit",)
+
+
+def _flag_intra_document_limit_conflicts(mf: dict, rejected_by_field: Dict[str, List[str]]) -> None:
+    """Add a limit fact to the stamped-value withhold list when the merge had to
+    choose between two materially different amounts for it.
+
+    Only ever ADDS to `_uw_conflicted_keys`, which the stamping layer reads to
+    leave a box blank pending confirmation. The fact itself is untouched, so
+    scoring, warnings and the picker all still see it.
+    """
+    for key in _CONFLICT_SENSITIVE_LIMITS:
+        chosen = _fv(mf, key)
+        if not chosen:
+            continue
+        amounts = {_amount_key(chosen)}
+        for cand in rejected_by_field.get(key) or []:
+            amounts.add(_amount_key(cand))
+        # EVERY STATED WITNESS COUNTS, not only the merge's rejects. Client
+        # run 2026-08-16: the 131 still shipped $3,000,000 while the package's
+        # own narrative carries the COI's reduction to $1,000,000 effective
+        # 7/25/25. The merge only records a REJECT when both amounts arrive as
+        # candidates for this same fact - a limit stated in a certificate or a
+        # narrative sentence never does, so the conflict was invisible to the
+        # withhold and the most-repeated figure stamped unchallenged.
+        # `_stated_umbrella_limits` reads the sources that DO carry it.
+        if key == "umbrella_limit":
+            amounts |= {_amount_key(v) for v in _stated_umbrella_limits(mf)}
+        amounts.discard(None)
+        if len(amounts) > 1:
+            existing = list(mf.get("_uw_conflicted_keys") or [])
+            if key not in existing:
+                existing.append(key)
+                mf["_uw_conflicted_keys"] = sorted(existing)
+            logger.warning(
+                "intra-document conflict on %r: the document states %d different "
+                "amounts (%s) and no endorsement settles which is authoritative - "
+                "the stamped value is WITHHELD pending producer confirmation",
+                key, len(amounts), sorted(a for a in amounts if a),
+            )
+
+
+# An umbrella/excess limit stated in prose, e.g. the COI's "the Umbrella limit
+# was reduced from $3,000,000 to $1,000,000 effective 7/25/25". BOTH figures in
+# that sentence are stated umbrella limits, which is precisely the
+# disagreement - so the clause is matched WHOLE (to the sentence end) and every
+# amount inside it is harvested. A first-amount-only capture was tried and
+# found half the evidence: it returned the $3,000,000 the form already had and
+# missed the $1,000,000 that makes it a conflict.
+_UMBRELLA_PROSE_CLAUSE_RE = re.compile(r"(?:umbrella|excess)[^.]{0,160}", re.I)
+# $1,000,000 and up: seven characters of digits-and-commas. A four-figure
+# deductible, premium or fee cannot reach it.
+_ANY_AMOUNT_RE = re.compile(r"\$\s?[\d,]{7,}")
+
+
+def _stated_umbrella_limits(mf: dict) -> List[str]:
+    """Umbrella/excess limit amounts the package states OUTSIDE the merged
+    fact - narrative remarks and the coverage-line summary.
+
+    Deliberately narrow. Only sentences that NAME the umbrella or excess line
+    are read, and only amounts of $1,000,000 or more (the regex's 7-digit
+    floor), so a deductible, a premium or an unrelated GL figure cannot
+    manufacture a conflict. Returning extra amounts can only ever WITHHOLD a
+    stamped value pending confirmation - it never changes a fact and never
+    fills a box - so the failure direction is the client's own: unresolved
+    rather than silently resolved.
+    """
+    out: List[str] = []
+    for key in ("acord101_remarks", "additional_remarks_text",
+                "account_description", "umbrella_notes"):
+        text = str(_fv(mf, key) or "")
+        if not text:
+            continue
+        for m in _UMBRELLA_PROSE_CLAUSE_RE.finditer(text):
+            # the whole clause, so "reduced from $3,000,000 to $1,000,000"
+            # contributes BOTH figures, not just the first
+            out.extend(_ANY_AMOUNT_RE.findall(m.group(0)))
+    lines = _fv(mf, "coverage_lines")
+    if isinstance(lines, list):
+        for e in lines:
+            if not isinstance(e, dict):
+                continue
+            if _canon_line(str(e.get("line") or "")) != "umbrella":
+                continue
+            for k in ("limit", "each_occurrence", "aggregate"):
+                v = str(e.get(k) or "")
+                if re.search(r"\d", v):
+                    out.append(v)
+    return out
+
+
+def _amount_key(v: Any) -> Optional[int]:
+    """Whole dollars, or None when there is no figure to compare."""
+    digits = re.sub(r"[^\d]", "", str(v or "").split(".")[0])
+    return int(digits) if digits else None
+
+
+# ── is_renewal, deterministically (client: "Primble correctly identifies this ──
+# submission as a Renewal"). On the live run it did NOT: the STATUS OF
+# TRANSACTION boxes came out blank and the expired-term HARD stop fired, because
+# the renewal fixes are gated on this fact and the model had left it null. The
+# document states it in print - "RENEWAL OF: 6E7-40-02---25" - so this is a
+# copy, not an inference.
+_RENEWAL_TEXT_RE = re.compile(
+    r"\b(?:renewal\s+of|renewal\s+policy|renewal\s+declarations?|"
+    r"this\s+is\s+a\s+renewal|renewal\s+certificate)\b", re.I)
+
+
+def _backfill_is_renewal(mf: dict, full_text: str) -> None:
+    """Set is_renewal from the document's own printed wording when extraction
+    left it empty. Never overrides a value the model DID state."""
+    if _fv(mf, "is_renewal"):
+        return
+    m = _RENEWAL_TEXT_RE.search(full_text or "")
+    if not m:
+        return
+    mf["is_renewal"] = {"value": "yes", "confidence": "filled", "source": "dec_entry"}
+    logger.info(
+        "is_renewal BACKFILL value='yes' - the document prints %r; extraction "
+        "merged the fact empty, which left the renewal date routing and the "
+        "renewal hard-stop exception disengaged", m.group(0)[:40],
+    )
 
 
 def _entries_state_payroll(entries: Any) -> bool:
@@ -5879,14 +6663,22 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
                 _all_entries.extend(_lst)
         _full_text = " ".join(str(_d.get("text") or "") for _d in docs)
         _verified = _verify_dec_entries(_all_entries, _full_text)
+        _canonicalise_dec_entry_keys(_verified)
         mf["dec_page_entries"] = _verified
-        _backfill_empty_facts_from_entries(mf, _verified)
         # Durable one-bit derivation, computed while the entries still exist:
         # the purge (C57) deletes the entries after generation, and the GL
         # exposure warning re-evaluates on every recalc - without this fact the
         # warning would stand down before generation and refire after it.
+        #
+        # BEFORE the backfill, deliberately: both used to sit after it inside
+        # this one try block, so a single exception anywhere in the backfill
+        # took the payroll flag down WITH the entries (the except clause pops
+        # `dec_page_entries`) and the GL-exposure warning fired on a package
+        # that plainly states its payroll. Deriving first makes the flag
+        # independent of every later step.
         if _entries_state_payroll(_verified):
             mf["dec_states_payroll_basis"] = True
+        _backfill_empty_facts_from_entries(mf, _verified)
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: dec-entry verification/backfill failed: %s", exc)
         mf.pop("dec_page_entries", None)
@@ -5904,4 +6696,160 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: location consolidation failed: %s", exc)
 
+    # ── Relationship repair, then renewal handling (client 2026-08-15) ───────
+    # ORDER IS LOAD-BEARING:
+    #   1. repair coverage_lines from the verified entries - every line-scoped
+    #      stamping resolver reads that fact, so it must be correct first;
+    #   2. backfill is_renewal from the document's printed wording - the two
+    #      renewal behaviours below are gated on it and silently no-op without it;
+    #   3. route the dates, which needs (2) to have run.
+    try:
+        _repair_coverage_lines_from_entries(mf)
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: coverage_lines repair failed: %s", exc)
+    # A limit the merge had to CHOOSE between two different amounts for is
+    # unresolved - withhold the stamped value until a human settles it. Runs
+    # before the private merge bookkeeping is stripped below.
+    try:
+        _flag_intra_document_limit_conflicts(mf, mf.get("_merge_rejected") or {})
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: intra-document conflict check failed: %s", exc)
+    mf.pop("_merge_rejected", None)
+    try:
+        _backfill_is_renewal(mf, " ".join(str(_d.get("text") or "") for _d in docs))
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: is_renewal backfill failed: %s", exc)
+    try:
+        _route_renewal_dates(mf)
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: renewal date routing failed: %s", exc)
+
     return mf, mg
+
+
+def _route_renewal_dates(mf: dict) -> None:
+    """On a Renewal, an already-ENDED extracted term is the EXPIRING policy's
+    term, not the term being applied for - route it to the prior_* namespace.
+
+    Client (2026-08-15, Orbin package): ACORD 131 stamped 07/15/2025 as the
+    proposed effective date because RULE 1's "current policy" IS the expiring
+    dec page on a renewal, and the fact schema had no concept of "the term
+    being applied for". "For a renewal, Primble needs to distinguish the
+    expiring policy period from the proposed renewal period."
+
+    Acts only on POSITIVE evidence, both conditions required:
+      * the is_renewal fact is affirmative, AND
+      * the extracted expiration date is in the past - a term that ended
+        cannot be the term being proposed, so the assignment is provably wrong.
+    A FUTURE-dated term on a renewal is left alone: it is plausibly the real
+    renewal term (a renewal quote's dates). Non-renewals are never touched.
+
+    After routing, effective_date/expiration_date are EMPTY: Tier-1 lists the
+    proposed effective date as missing, the questionnaire asks for it, and
+    `pdf_service._resolve_renewal_proposed_period` keeps the application
+    forms' proposed-date boxes as owned blanks (gap fill excluded) until a
+    human supplies the real term. Unknown stays unknown - never assumed.
+    """
+    if str(_fv(mf, "is_renewal") or "").strip().lower() not in (
+            "yes", "y", "true", "1", "renewal", "renew"):
+        return
+    exp_raw = _fv(mf, "expiration_date")
+    if not exp_raw:
+        return
+    iso = normalize_date(exp_raw)
+    if not iso:
+        return
+    from datetime import datetime
+    try:
+        exp_d = datetime.strptime(iso, "%Y-%m-%d")
+    except ValueError:
+        return
+    if exp_d >= datetime.now():
+        return                       # future term - plausibly the renewal term
+    # Move the whole stored entries (value+confidence envelope intact) into the
+    # prior namespace - as a PAIR, and only when BOTH prior slots are empty.
+    # Audit 2026-08-15 #7: with a genuinely-extracted prior_effective_date of
+    # 07/15/2024 and no prior_expiration_date, the old per-slot guards wrote
+    # the EXPIRING term's end date next to it, fabricating a 2024-2026 prior
+    # term no document states. Half of one term never joins half of another;
+    # a partially-known prior term stays partially known.
+    if not _fv(mf, "prior_effective_date") and not _fv(mf, "prior_expiration_date"):
+        if _fv(mf, "effective_date"):
+            mf["prior_effective_date"] = mf.get("effective_date")
+        mf["prior_expiration_date"] = mf.get("expiration_date")
+    # ── DERIVE the proposed term; do NOT leave the application empty ─────────
+    # First cut of this blanked both boxes and made the producer type them.
+    # That was wrong in both directions: it stripped ACORD 125's PROPOSED EFF
+    # DATE (a field Tier 1 requires, so it immediately re-appeared as a
+    # "minimum field missing" task), and it treated a KNOWN quantity as
+    # unknown. A renewal takes effect when the expiring policy ends - that is
+    # what renewing means - so the proposed term is DERIVED from the document's
+    # own expiring term, not invented and not guessed at.
+    #
+    # It carries `source="derived"` / `confidence="low_confidence"` so the E&O
+    # layer highlights it for review and the producer can correct it in one
+    # click, which is the client's "confirmed rather than guessed" - confirmed
+    # meaning a human signs off on a stated value, not a human doing data entry
+    # the document already answers.
+    from datetime import timedelta
+    prop_eff = exp_d
+    prop_exp = None
+    eff_prev = normalize_date(_fv(mf, "effective_date") or "")
+    if eff_prev:
+        try:
+            _term_days = (exp_d - datetime.strptime(eff_prev, "%Y-%m-%d")).days
+            if 300 <= _term_days <= 400:          # an ordinary annual term
+                prop_exp = exp_d + timedelta(days=_term_days)
+        except ValueError:
+            pass
+    mf["effective_date"] = {"value": prop_eff.strftime("%m/%d/%Y"),
+                            "confidence": "low_confidence", "source": "derived"}
+    if prop_exp is not None:
+        mf["expiration_date"] = {"value": prop_exp.strftime("%m/%d/%Y"),
+                                 "confidence": "low_confidence", "source": "derived"}
+    else:
+        mf.pop("expiration_date", None)
+    # ── THE PER-LINE TERMS ARE EXPIRING TOO, AND NOTHING SAID SO ─────────────
+    # Client session 2026-08-16: after the false "Umbrella and GL policy
+    # periods misaligned" hard stop was removed, the review screen went SILENT
+    # on the umbrella term - and silence is not the right answer either. Every
+    # per-line date (`umbrella_*`, `auto_*`, `wc_*`) is read off that line's
+    # own DEC PAGE, so on a renewal every one of them is an EXPIRING date; the
+    # routing above only ever handled the package pair, so the proposed term
+    # for each underlying line stayed genuinely unknown and unannounced.
+    #
+    # Recorded as a fact, not a message: `renewal_lines_expiring` lists the
+    # lines whose stated term has ended, and the SQS layer turns it into ONE
+    # recommended, resolvable item ("confirm the proposed term"). Nothing is
+    # derived here - deriving a per-line renewal term is exactly the guess the
+    # client's "unknown must remain unknown" rule forbids, and the underlying
+    # policies may genuinely renew on their own dates.
+    _expiring_lines: List[str] = []
+    for _line, _pfx in (("Umbrella", "umbrella"), ("Auto", "auto"),
+                        ("Workers Compensation", "wc"), ("Property", "property")):
+        _line_exp = normalize_date(_fv(mf, f"{_pfx}_expiration_date") or "")
+        if not _line_exp:
+            continue
+        try:
+            if datetime.strptime(_line_exp, "%Y-%m-%d") < datetime.now():
+                _expiring_lines.append(_line)
+        except ValueError:
+            continue
+    if _expiring_lines:
+        mf["renewal_lines_expiring"] = _expiring_lines
+        logger.info(
+            "merge_facts: RENEWAL - %d underlying line(s) carry an EXPIRED "
+            "stated term (%s); their proposed terms are unknown and will be "
+            "asked for, never derived", len(_expiring_lines),
+            ", ".join(_expiring_lines),
+        )
+    # Plain bool, not an envelope: consumed by the stamping-layer resolver and
+    # excluded from the auto-scalar reconciliation sweep (bools are skipped).
+    mf["renewal_dates_routed"] = True
+    logger.info(
+        "merge_facts: RENEWAL date routing - expiring term (%s) moved to "
+        "prior_effective/expiration_date; proposed term DERIVED as %s to %s "
+        "(flagged for producer confirmation)", iso,
+        mf["effective_date"]["value"],
+        (mf.get("expiration_date") or {}).get("value", "(unset)"),
+    )

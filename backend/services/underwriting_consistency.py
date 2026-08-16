@@ -467,6 +467,16 @@ RECONCILABLE_FIELDS: Dict[str, Dict[str, Any]] = {
         "kind":  "currency",
         "forms": ["ACORD_127"],
     },
+    # Client 2026-08-15 (Orbin): dec page $3,000,000, later COI $1,000,000 -
+    # credible sources disagreeing on a LEGAL LIMIT. Curated as currency (the
+    # auto-discovery sweep degraded it to identity kind: string-length ranking,
+    # no forms list, loose text validation). Also in CONFLICT_WITHHOLD_KEYS
+    # below: an unresolved conflict on it withholds the stamped value.
+    "umbrella_limit": {
+        "label": "Umbrella / Excess Limit",
+        "kind":  "currency",
+        "forms": ["ACORD_131"],
+    },
     # ── Extend here (no other code change needed) ────────────────────────────
     # Add a one-line entry: {"label": ..., "kind": "currency"|"integer", "forms": [...]}.
 }
@@ -486,6 +496,40 @@ HARD_STOP_RECONCILABLE_KEYS = frozenset({
 GENERATION_BLOCKING_RECONCILABLE_KEYS = frozenset({
     "property_building_value",
 })
+
+# Fields whose unresolved conflict WITHHOLDS the stamped value (the box ships
+# blank until the picker confirms) without blocking generation. Client
+# 2026-08-15: "Unresolved conflicts must remain unresolved. When credible
+# sources disagree, Primble should preserve that conflict and ask for
+# confirmation rather than choosing whichever value seems most likely." A
+# legal limit is exactly where the merge's most-frequent-wins ranking must
+# never pick a winner silently. Extend by adding the key here - the stamping
+# side (pdf_service._resolve_conflicted_fact_blank) is generic.
+CONFLICT_WITHHOLD_KEYS = frozenset({
+    "umbrella_limit",
+})
+
+
+def unresolved_withheld_keys(uw_result: Optional[dict],
+                             confirmations: Optional[dict]) -> List[str]:
+    """Fact keys whose stamped value must be withheld right now.
+
+    A key qualifies when the stored reconciliation flags it review_required,
+    it is in CONFLICT_WITHHOLD_KEYS, and the user has not confirmed a value
+    for it. Consumed at generation/re-stamp time to build
+    facts["_uw_conflicted_keys"]; confirming in the picker clears it on the
+    next recompute, which is what lets the confirmed value stamp.
+    """
+    confirmed = set((confirmations or {}).keys())
+    out = []
+    for f in (uw_result or {}).get("fields") or []:
+        if not isinstance(f, dict):
+            continue
+        key = f.get("fact_key")
+        if (key in CONFLICT_WITHHOLD_KEYS and f.get("review_required")
+                and key not in confirmed):
+            out.append(key)
+    return sorted(set(out))
 
 # Keys excluded from the crude cross-doc conflict detectors so this engine is
 # the single source of truth for them (prevents un-normalized false positives).
@@ -928,6 +972,48 @@ def assess_underwriting_consistency(
         # Nothing extracted and nothing confirmed → field not present; skip it.
         if not groups and confirmed_value is None:
             continue
+
+        # ── Strict entity promotion (audit 2026-08-15 round 10) ──────────────
+        # The coarse normalizers are EQUIVALENCE tools and merge legally
+        # different entities: normalize_carrier reduced EMC Property & Casualty
+        # AND Employers Mutual Casualty to "emc", normalize_name reduced an
+        # LLC and an Inc to the same base - so the two REAL carriers on the
+        # client's package grouped as ONE candidate and the picker never
+        # opened. When a name/carrier field's sources coarsely agree but name
+        # materially different entities (each carrying a word the other
+        # lacks), the group is RE-SPLIT on the strict key so the conflict
+        # surfaces and the client is asked - "unresolved conflicts must remain
+        # unresolved". Formatting/truncation/suffixless variants stay merged.
+        if kind == "identity" and len(groups) == 1:
+            try:
+                from services.normalization import (
+                    entity_identity_conflict, strict_entity_key,
+                    NAME_FIELDS, CARRIER_FIELDS,
+                )
+                _is_entity_field = (
+                    fact_key in NAME_FIELDS or fact_key in CARRIER_FIELDS
+                    or _infer_field_category(fact_key) in ("name", "carrier"))
+                if _is_entity_field:
+                    _raws = [s["raw"] for g in groups.values()
+                             for s in g["sources"]]
+                    if entity_identity_conflict(_raws):
+                        _regrouped: Dict[str, dict] = {}
+                        for g in groups.values():
+                            for s in g["sources"]:
+                                sk = strict_entity_key(s["raw"]) or g["normalized"]
+                                ng = _regrouped.setdefault(
+                                    sk, {"normalized": sk,
+                                         "display": s["raw"], "sources": []})
+                                ng["sources"].append(s)
+                        groups = _regrouped
+                        logger.info(
+                            "underwriting: %s promoted to conflict - the "
+                            "sources name materially different entities that "
+                            "the coarse normalizer had merged", fact_key)
+            except Exception as _pex:                     # noqa: BLE001
+                logger.warning(
+                    "underwriting: strict entity promotion failed for %s: %s",
+                    fact_key, _pex)
 
         values = list(groups.values())
         distinct = len(values)

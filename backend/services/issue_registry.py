@@ -587,6 +587,14 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
      "legacy_umbrella_el_below_minimum", _r_field("employers_liability_limits")),
     ("Claims-made GL policy requires retro date for umbrella", "Claims-made continuity", "recommended",
      "legacy_umbrella_retro_date_required", _r_field("retro_date")),
+    # BEFORE the misalignment rows: first-match-wins on substring, and this
+    # message contains neither of their phrases, but keeping the renewal item
+    # adjacent to them documents that it REPLACED their false positive on a
+    # renewal rather than being an extra warning stacked on top.
+    ("Renewal: the umbrella's proposed policy term is not stated",
+     "Umbrella policy period alignment", "recommended",
+     "legacy_umbrella_renewal_term_unknown",
+     _r_field("umbrella_effective_date", "umbrella_expiration_date")),
     ("Umbrella and GL policy periods misaligned", "Umbrella policy period alignment", "required",
      "legacy_umbrella_gl_period_misaligned", _r_field("umbrella_effective_date", "effective_date")),
     ("Umbrella and GL expiration dates misaligned", "Umbrella policy period alignment", "required",

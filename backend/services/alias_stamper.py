@@ -249,6 +249,12 @@ def stamp_form_fields(
     if not alias_map:
         return {}
 
+    # Facts under an unresolved cross-document conflict are withheld from
+    # stamping until the picker confirms a value (client 2026-08-15). The
+    # deterministic-map door is closed by _resolve_conflicted_fact_blank;
+    # this closes the alias door with the same list.
+    _withheld = set((facts or {}).get("_uw_conflicted_keys") or ())
+
     filled: Dict[str, str] = {}
     for field in target_fields:
         canonical = alias_map.get(field)
@@ -257,6 +263,8 @@ def stamp_form_fields(
 
         extraction_key = CANONICAL_TO_EXTRACTION.get(canonical)
         if not extraction_key:
+            continue
+        if extraction_key in _withheld:
             continue
 
         raw = _fv(facts, extraction_key)

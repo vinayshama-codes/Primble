@@ -1762,6 +1762,51 @@ same invariant.
 `dec_entries BACKFILL fact=...`, `dec_entries DROPPED_UNVERIFIED`, and
 `TEXT_SELECTION FACT_RESCUE`. Backfills carry `source="dec_entry"` in the fact envelope.
 
+### C51 — extraction had no truncation salvage, and one truncated chunk killed the upload (2026-08-15), cost NEGATIVE
+
+**Live incident, the client's 271-page Orbin package: HTTP 500 on upload.**
+`RuntimeError: _safe_json_parse: could not parse valid JSON after 3 attempts`. One chunk's
+reply was unparseable; the whole document was lost.
+
+**Three defects, all in the same failure path:**
+
+1. **No deterministic salvage.** The gap-fill stage learned in the C-series that a parse
+   failure is almost always TRUNCATION at the output cap, and that re-sending the prompt
+   re-bills every input token to get the same truncation back at temperature 0 - hence
+   `_salvage_truncated_json`. **Extraction never got that lesson.** It went straight to an
+   LLM repair fed `raw[:3000]` - the first 3,000 CHARACTERS of a reply that can be 60,000 -
+   so the repair saw a fragment of a fragment, and each further attempt re-truncated the
+   previous repair's output. Measured on the incident log: repair call `in=858 out=842`,
+   i.e. three paid calls that could not succeed by construction. The parser now lives in
+   `utils/json_salvage.py` and BOTH stages call it. One implementation, not two - a drift
+   between two copies of a parser is invisible until it eats a document.
+2. **The output cap was the trigger.** `max_tokens=16000` bounded a reply carrying ~150
+   scalar facts, every schedule, AND up to 150 `dec_page_entries` with six fields each.
+   Now `_EXTRACT_MAX_OUTPUT_TOKENS` (env `EXTRACT_MAX_OUTPUT_TOKENS`, default **32,000**).
+   **This does not raise the bill**: output tokens are billed on what the model actually
+   writes; the cap only decides where the text is severed. `gpt-5.4-mini` permits 128,000
+   output tokens, so this is 4x headroom and still a quarter of the model's own limit.
+   Cost is NEGATIVE overall - a truncated chunk previously cost 1 wasted extraction call
+   plus 2 futile repair calls, then lost the document anyway.
+3. **A chunk failure was fatal.** `_gather_chunks_async._one` carried
+   `except RuntimeError: raise` with the comment "not transient, do not retry". That raise
+   blew through `asyncio.gather` and past every degradation path the extractor already has:
+   the per-chunk retry budget, the halve-the-chunk-size document retry, and the PARTIAL
+   coverage report (`failed_indices`, `failed_ranges`, `coverage=%`, `extraction_complete
+   = False`). A JSON/schema failure now takes the ordinary retry path and then degrades to
+   `chunk_failed` like every other error. An all-chunks-failed document still raises.
+   Losing one chunk is a bad day; losing the document is a worse one.
+
+**Salvage drops the half-written element rather than closing it.** Cutting at the last
+comma at ANY depth leaves a partial object - a dec entry with a label and no value, a
+vehicle row with a VIN and no make - which is exactly the broken half-relationship the
+2026-08-15 client direction forbids. It now prefers the last comma SHALLOWER than the
+truncation depth, and falls back to the old rule when there is none (the gap-fill shape,
+where the innermost container is the payload and its finished pairs are what we want).
+
+**No prompt bytes changed**, so the cached prefix and every prefix-caching test are
+untouched. Tests: `backend/tests/test_extraction_json_salvage.py` (15).
+
 ### C48 — Step 2 shipped: standard-form pages dropped by their OWN printed footer (2026-08-12), cost NEGATIVE
 
 **The fill-rate lever finally engages on the client's document.** The density filter
@@ -2490,6 +2535,68 @@ or must not be guessed at all.
    (`test_arq_acord125_missing_only` — an `httpx`/`openai` version conflict — and
    `test_normalization`).
 
+### C54 — remaining relationship fixes: fields REMOVED from gap fill, zero prompt change (2026-08-15), cost NEGATIVE
+
+Second pass on the client's relationship-preservation directive. **No prompt text, batch
+size, chunking, or call structure changed** — every fix is deterministic ownership, so the
+only LLM-visible effect is a SMALLER gap-fill union (fewer questions, same calls or fewer):
+
+1. **ACORD 131 `UnderlyingPolicy_*` grid** (identity attrs of Automobile / GeneralLiability /
+   EmployersLiability / OtherPolicy rows) resolves from `coverage_lines` or ships blank —
+   ~20 fields off the union when per-line evidence exists. Was the source of the fabricated
+   "AUTO policy number + DERIVED renewal dates" underlying row (Pass-1 scalar rules, not
+   even gap fill — but the fields are now excluded from BOTH doors).
+2. **Declared-absent coverage families** (`WorkersCompensation*`, `Policy_WorkersCompensation*`,
+   `UnderlyingPolicy_EmployersLiability_*`) are owned blanks when the package prints the line
+   as "No Coverage" and nothing grants it — ~12 more fields off the union on such packages.
+   ACORD 130 exempt (it applies FOR workers comp).
+3. **`CertificateOfInsurance_CertificateNumberIdentifier`/`RevisionNumberIdentifier`** —
+   producer-assigned; owned blank unless a `certificate_number` fact exists. The Pass-1 rule
+   that mapped certificate number to `policy_number` is deleted.
+4. **The umbrella-period override on ACORD 131 yields to a routed renewal** unless the
+   umbrella's own term verifiably has not ended. The PROBE itself is unchanged (still fires
+   for 131/25 when the facts are silent — its result still serves the ACORD 25 row, which is
+   exempt as a certificate), so probe call count and cost are untouched.
+5. Guard-layer only (no LLM interaction): pairwise insurer-roster dedup, single-letter
+   name-fragment rejection.
+
+**Test-suite discipline note:** `map_facts_to_form` WITHOUT `pre_filled_gpt` takes the
+legacy per-form branch and fires LIVE LLM calls. Every end-to-end test must pass the
+combined-path envelope (`{"filled_values": ..., "raw_text_fields": ..., "question_grounding": ...}`)
+— `tests/test_remaining_relationship_fixes_20260815.py` documents this at `_env()`.
+
+**Round-12 addendum (2026-08-16 — ONE extraction-prompt change, everything else deterministic):**
+LLM call 1's schema gains three keys (`umbrella_um_limit`, `umbrella_uim_limit`,
+`umbrella_medical_payments_limit`) plus ~60 words of RULE-1 scoping ("the umbrella policy's
+OWN UM/UIM/med-pay, never the underlying auto's; null when unstated") — the round-10
+stamping resolver read these keys but nothing wrote them, so a genuine umbrella UM election
+could never be captured. Cached-prefix cost ≈ zero (same C33 shape); call 2 untouched.
+Deterministic side: the fleet-grid resolver's fact key corrected to `auto_vin_schedule`
+(the key extraction actually writes — the round-11 spelling was a phantom that never fired),
+and the `underlying_policies`-vs-`coverage_lines` precedence became a CROSS-CHECK
+(disagreement on a line's identity blanks and asks; the unrepaired source never outranks
+the repaired one). A read-what-is-written source guard now pins every fact key the
+relationship resolvers consume against the extraction source.
+
+**Round-7 addendum (2026-08-15, third fresh run — still zero prompt/call changes):** more
+fields leave the gap-fill union deterministically: the WC/EL family now suppresses on the
+line-inventory CENSUS (≥2 policy-evidenced lines, WC absent — no denial capture needed),
+the EBL family (`ExcessUmbrella_EmployeeBenefits_*`) and every
+`UnderlyingPolicy_*_ModificationFactor` are owned, watercraft/tail/retroactive-date boxes
+became Guard-6 dependents of their trigger questions, and requirement-shaped line entries
+(limits, no premium/number) no longer count as granted lines anywhere stamping decides
+line presence. The meaning gate gained fact-based witnesses (line premiums, package total,
+umbrella limit) and a property-"value" category — post-fill arithmetic only.
+
+**Round-6 addendum (2026-08-15, fresh-run verdict — still zero prompt/call changes):**
+the declared-absent suppression now also fires from a `dec_page_entries` denial (RULE 16
+keeps denied lines out of `coverage_lines`, so on real runs round 5's version never
+engaged — the WC family stays IN the union no longer), line matching is canon-strict (a
+bare "Liability" row can no longer hand the EL row to gap fill's replacement), and ACORD
+25's `OtherPolicy_*` row family (~9 fields) is owned. The meaning gate's `amt < 100` skip
+now exempts only values with no dollar marker — "$34" (a TRIA premium) was stamping into
+FOREIGN GROSS SALES through it. Net LLM effect remains: fewer questions, same calls.
+
 ### Environment knobs added by this work
 
 | Var | Default | Effect |
@@ -2515,3 +2622,574 @@ or must not be guessed at all.
 | `SLOT_VALUE_DEDUP` | `0` (**off**) | Restores the post-fill per-value sibling dedup. Off by default because it was measured deleting 40+ correct fleet cells in one run — see C18 before turning it on. |
 | `MAX_FIELDS_BLOCK_CHARS` | `FIELD_FILL_BATCH × 250` | Constant fields-block allowance that keeps document chunk boundaries stable. |
 | `MAX_COMPLIANCE_BLOCK_CHARS` | `COMPLIANCE_BATCH × 800` | Same, for the compliance pass. |
+
+---
+
+## C55 - 2026-08-16 relationship round 13: no prompt or call change, two fewer field families asked
+
+**No LLM call was added, removed or re-batched, and no prompt byte changed.**
+Logged anyway because the registry is meant to be able to prove that, and
+because the deterministic surface moved in the direction that matters for cost.
+
+**Fields REMOVED from gap fill** (deterministic answers or owned blanks, so the
+model is never asked):
+* `UnderlyingPolicy_*` on ACORD 131 and the section-form header policy numbers
+  now resolve from the dedicated `underlying_policies` fact when
+  `coverage_lines` has lost the number - answers that used to be a gap-fill
+  guess are now deterministic.
+* ACORD 125's Q4 grid and PRIOR CARRIER grid likewise.
+* `UnderlyingCoverage_Coverage_AdditionalInterestsIndicator_*` and the four
+  `Coverage_Other{Indicator,Description}` rows on ACORD 131 became owned blanks
+  (no fact can state them; two of three live ticks were fabrications).
+* ACORD 127's two physical-damage deductible columns now stamp from
+  `auto_deductible_comp` / `auto_deductible_collision` on real fleet rows.
+
+Measured on the delivered-run fact shape, three forms selected:
+`ACORD_125 = 215`, `ACORD_127 = 265`, `ACORD_131 = 180` fields asked
+(union 660). Direction is down; the change is small in isolation and is not the
+point - it is a correctness change that happens not to cost anything.
+
+**One quality-only change on the evidence gate.** `_quote_is_policy_form_wording`
+rejects a grounding quote that points at its own document ("of this
+endorsement", "in PARAGRAPH B.1.") or speaks in two or more quoted defined
+terms. It runs post-fill, costs nothing, and matters because a kept Yes writes
+its grounding quote into the paired Explanation box - so a policy-wording quote
+was shipping as the applicant's own explanation.
+
+**Two candidate rules were measured and deleted rather than shipped**, which is
+the part worth remembering: a widened coverage-vocabulary test rejected
+"Subcontractors are required to carry coverage." (one of C46's own recorded
+false blanks), and `_quote_asserts_something` on the Yes side was wrong in both
+directions. Neither is in the tree; both are documented at the call site so the
+next session does not rebuild them.
+
+## C56 - 2026-08-16 dec-index prompt: purpose + attribution keys, one pass, no call change
+
+**Call sites touched: one system prompt (`_DEC_INDEX_SYSTEM_PROMPT`). No new call,
+no batching change, no change to LLM call 1 or call 2.** The dedicated dec-index
+pass already existed (C-series, `_harvest_dec_index`); this rewrites what it asks
+for. `FACT_EXTRACTION_PROMPT` is byte-identical, so its cached prefix survives,
+and call 2 never sees this pass.
+
+**Why.** The old prompt opened "you have exactly one job: list every label:value
+pair" and then governed `label`, `value` and `section` with seven rules -
+leaving `owner`, `policy_number` and `line_of_business` with **no rule at all**.
+Those three carry the relationship the client's 2026-08-15 letter is entirely
+about. Measured on the live index for session 221b1da3 (212 verified entries):
+
+| Defect | Count |
+|---|---|
+| `6E7-40-02---26` vs `6E74002` - one Auto policy, two keys | 77 / 4 |
+| `BBC7263 - 26` vs `BBC7263` - one GL policy, two keys | 51 / 8 |
+| `6 C 7 - 4 0 - 0 2---26` - Inland Marine keyed WITH its OCR spacing | 13 |
+| `General Liability` vs `Commercial General Liability` | 37 / 40 |
+| `Commercial Auto` vs `Commercial Auto Liability` | 77 / 4 |
+| one phone number, `owner` = carrier on one page and producer on the next | - |
+| entries whose label repeats their value (`"CG 21 06 12 23" : same`) | 18 |
+
+Four keys for two policies. The spaced Inland Marine number reached the client's
+ACORD 125 Q4 grid and printed there.
+
+**The change, and then the correction.** First cut: an EVIDENCE-versus-KEY
+distinction the old prompt never made, a purpose preamble, and four new rules -
+7 (label repeating value), 8 (canonical policy number), 9 (fixed line
+vocabulary), 10 (owner definitions).
+
+**MEASURED ON A RE-RUN OF THE SAME PACKAGE, and half of it failed.** Scored with
+`scratchpad/dec_score.py` against the 221b1da3 baseline:
+
+| metric | was | first cut | verdict |
+|---|---|---|---|
+| entries | 212 | **261** | recall up - whole IM sub-limit schedule recovered |
+| keys with OCR spacing | 1 | **0** | the string that printed on the client's 125, gone |
+| label identical to value | 19 | **1** | rule 7 works |
+| same value, two owners | 2 | **0** | rule 10 works |
+| policies with >1 key | 2 | **3** | **rule 8 FAILED** - model invented `6J74002---26` |
+| off-vocabulary line values | 2 | **7** | **rule 9 FAILED** - `Liability`, `Automobile`, ... |
+| GL class table entries | 6 | **1** | **REGRESSION - see below** |
+
+**The regression was mine.** The rewritten rule 5 added *"never split one printed
+fact into two entries"* immediately before the `'Payroll $39,300'` example, and
+the model read "do not split" as "collapse the row": the GL class table came back
+as ONE entry (`"Location 001 91580 Prem Basis" = "Payroll"`), losing **$39,300,
+$350,000, class 91585 and the Total Cost basis** - the client's own headline
+number, gone from the index. Rule 5 is REVERTED to its pre-2026-08-16 wording,
+which still emits basis and amount as two entries but preserves both values. A
+recorded pair beats a tidy single entry with the number missing. (Severity note:
+`gl_class_code_schedule` is extracted by LLM call 1 - untouched - and is the
+meaning gate's witness for the payroll-vs-sales case, so the FORM was not at
+risk. The loss was dec-index corroboration.)
+
+**Rules 8 and 9 are deleted.** Asking a model to elect a canonical identifier is
+identity arithmetic, not judgment, and it measurably got worse at it. That work
+moved to `_canonicalise_dec_entry_keys`, called immediately after
+`_verify_dec_entries` in `merge_facts`. On the same live file: 8 policy keys ->
+5 (four real policies plus package-level `null`), off-vocabulary line values
+7 -> 0, and `label`/`value` provably untouched so the verification guarantee
+holds. Election order is longest-normalised, then fewest spaces, then longest
+raw - the middle clause exists because the first tie-break elected
+`'6 C 7 - 4 0 - 0 2---26'`, the exact string this whole entry is about. Pinned by
+`tests/test_dec_entry_key_canonicalisation.py` (12), including anti-rot tests
+that fail the build if rules 8/9 return to the prompt or if rule 5's preserving
+wording is lost again.
+
+**What survives in the prompt:** the purpose preamble, the evidence/key
+distinction, rule 1's "exhaustiveness is never a judgment call", rule 7 and
+rule 8 (owner definitions, renumbered from 10). All measured, all net-positive.
+
+**Two things deliberately NOT done.**
+1. *No form catalogue.* An earlier draft named the 17 forms and their lines. It
+   was cut: the model does not choose forms, so it cannot act on the list, and
+   naming forms creates pull toward "only record what fills a box" - which is
+   the exact failure (under-reporting) this pass exists to fix. Rule 1 now
+   states that exhaustiveness is never a judgment call and says where judgment
+   DOES apply. Keep those together.
+2. *No blocklist of observed failures.* A draft rule 5 listed the two specific
+   violations seen in the file. Cut for the same reason the codebase rejects
+   token blocklists elsewhere - third incident, third token set. Rule 5 states
+   the principle that generates them instead.
+
+**Rule 9's eight values are `_canon_line`'s eight classes, deliberately**, so the
+model's answer and the canonicaliser agree by construction rather than the code
+repairing the model. Do not add "Builders Risk" (`_canon_line` returns None) or
+"Contractors Equipment" (maps to inland_marine).
+
+**Cost, measured not estimated** (`ast.literal_eval` on both versions of the
+constant): the system prompt goes 2,528 -> 4,383 chars, **~632 -> ~1,095 tokens,
+so +463 tokens per indexed chunk**. An earlier draft of this entry said ~450 as a
+guess, then the first cut measured +759; deleting rules 8 and 9 gave ~296 of that
+back. The pass is gated to chunks clearing
+`DEC_INDEX_MIN_AUTHORITY` (a handful per package), so the absolute add is small
+against a dec chunk's own thousands of tokens - but it is not negligible on a
+package whose declarations spread widely, and `DEC_INDEX_MAX_CHUNKS` remains the
+emergency valve. It invalidates this pass's own cached prefix once, then
+re-warms. No other stage is affected: `FACT_EXTRACTION_PROMPT` is byte-identical
+and LLM call 2 never sees this pass.
+
+**Known limit, stated rather than assumed.** A prompt raises the hit rate on a
+canonical key; it does not make it deterministic. Rule 5 was already correct and
+was violated twice in the file above. The durable form of this fix is
+`_canonicalise_dec_entry_keys()` immediately after `_verify_dec_entries` - prompt
+asks, code enforces, the same shape `_verify_dec_entries` already applies to
+literal presence. Deliberately NOT shipped in this change so the prompt's own
+effect can be measured on a re-run of the same package first.
+
+## C58 - 2026-08-16 the declarations index now carries all six recorded fields
+
+**Owner: "why cant we just send whole json, i dont want to reduce anything from it,
+unless there is a reason ... make it use fully and not just for these two fields but
+all the fields."**
+
+`_render_dec_index` shipped four of the six recorded fields to LLM call 2 - section,
+label, value, owner - and dropped `policy_number` and `line_of_business` at render
+time. Those two are the join keys the entire deterministic layer runs on
+(`_resolve_section_policy_identity`, `_policy_numbers_by_line`, `_line_denied_by_
+document`, `_build_amount_witnesses`), so the C56 canonicalisation that finally gave
+each of the client's four contracts ONE key improved the deterministic path and did
+nothing at all for the model. Call 2 was left inferring a value's contract from the
+page heading.
+
+**Measured wrong six times on the client's own package.** The umbrella's SCHEDULE OF
+UNDERLYING INSURANCE prints the GL policy's carrier, number, period and products
+aggregate, plus the auto policy's carrier and number, under a heading reading
+`C O M M E R C I A L  U M B R E L L A  S C H E D U L E`. The entries carry the right
+keys; only the rendering threw them away.
+
+**Shipped: group on (section, policy_number, line_of_business), not section alone.**
+Headings become `[page section | policy <number> | <coverage line>]`. That one page
+now renders as three headings - umbrella / GL / auto - each owning its own rows.
+
+**Why not send the raw JSON, measured rather than argued:**
+
+| option | chars | tokens | verdict |
+|---|---|---|---|
+| four fields (old) | 15,906 | ~3,976 | loses the two join keys |
+| **all six, grouped headings** | **18,316** | **~4,579** | **shipped: +15%** |
+| raw JSON compact | 51,435 | ~12,858 | 2.8x for the same six facts |
+| raw JSON pretty | 62,398 | ~15,599 | 3.4x |
+
+Nothing is reduced - the JSON's punctuation is. Keys ride the HEADING because they
+are near-constant within a group; per-line repetition was ~60%. 33 -> 42 headings.
+Index still renders as ONE part against the 224,000-char budget (12x headroom), so
+the C23 co-visibility invariant is untouched. It sits inside the cached prefix, so
+the marginal cost bills at ~10%.
+
+**`owner: other` is now printed too** - it was suppressed as "the default, so it says
+nothing". The live 261-entry package disproves that: exactly ONE entry carries it and
+it is the Drive Other Car named individual (ERIN ROYAL), the value that has been
+mistaken for a driver (C22) and for the applicant. `test_owner_is_rendered_only_when_
+it_carries_information` encoded the old assumption and was reversed with the count.
+
+**De-dup key widened to include the policy.** Keying on (section, label, value) alone
+collapses one label:value printed for TWO policies into one entry and silently keeps
+whichever came first - a real shape here, where three policies share a term.
+
+Zero new LLM calls, zero change to Stage B, zero change to the compliance pass.
+Tests: +5 in `test_dec_index_stage_a.py` including the client's literal
+underlying-schedule shape. Suite **3025 passed / 2 failed** - the same two
+pre-existing unrelated failures, zero regressions.
+
+## C59 - 2026-08-16 dec-index rule 7 scoped so it stops arguing with rule 5
+
+**The GL class table regression, fixed at the cause.** Rule 7 shipped in C56 as the
+GENERAL instruction "Give the value the caption printed above or beside it". That is
+a second theory of what a label IS, and on a rating table it beat rule 5's. Rule 5:
+a basis word beside an amount labels THAT AMOUNT ('Payroll' labels '$39,300'). Rule 7
+pointed one row higher at the column header ('Prem Basis'), made 'Payroll' the VALUE,
+and the amount had no entry left to live in.
+
+Measured across nine runs of the same package:
+
+| | GL class-table entries | $39,300 | $350,000 | class 91585 | 'Total Cost' |
+|---|---|---|---|---|---|
+| 7 runs before C56 | 6 | present | present | present | present |
+| 2 runs after C56 | 1 | GONE | GONE | GONE | GONE |
+
+**Rule 5 was byte-identical across that change and was wrongly blamed first** - the
+revert landed and the table stayed collapsed, which is what exonerated it. Diffing
+the COMPILED prompt string rather than the file is what settled it; do that first
+next time.
+
+Rule 7 now states its one case (label and value would be the SAME TEXT) and yields
+explicitly: "rule 5 wins: a basis word beside an amount labels THAT AMOUNT, and the
+amount must still be recorded." The `label == value` defect it was built for (19 -> 1
+on the C56 run) is untouched by the scoping - that shape is exactly identical text.
+
+Cost: +524 tokens per indexed chunk against the pre-C56 baseline (was +463; the
+yield clause is ~61). Prompt only - zero new calls, zero change to LLM call 2.
+Tests: `test_rule_7_states_its_one_case_and_yields_to_rule_5` fails the build if
+either the scope or the precedence clause is reworded away. Suite **3026 passed /
+2 failed**, the same two pre-existing unrelated failures.
+
+**CONFIRMED on run 47556cd2 (2026-08-16 06:14).** The GL SCHEDULE section returns
+all six class-table entries - `Prem Basis: Payroll`, `Exposure: $39,300`,
+`Prem Basis: Total Cost`, `Exposure: $350,000`, `91580 Contractors - Executive
+Supervisors`, `91585 Contrctrs-sub work-in connection`. All four lost values are back.
+
+**`SCHEDULE OF UNDERLYING INSURANCE` came back with it** - 20 entries -> 0 on the two
+C56 runs, restored here, and now rendering as two correctly-keyed headings (BBC7263 /
+General Liability and 6E7-40-02 / Commercial Auto) thanks to C58.
+
+**Entry count fell and recall ROSE.** raw 400 -> 244, verified 261 -> 222, while 36 of
+36 checked package values are present (every premium, limit, deductible, policy number,
+carrier, class code, exposure, VIN and symbol on the Orbin ground-truth list). The count
+was measuring duplicate and label-echo entries, not data. **Do not use entry count as a
+recall metric on this pass** - it moved in the opposite direction to quality twice in
+one day and cost two runs to work out.
+
+Scorecard on the same run: 0 policies with more than one key, 0 off-vocabulary line
+values, 0 values claimed by two owners, index renders in ONE part at 15,231 chars.
+
+**Two residuals, neither a regression, both logged not fixed:**
+1. Some auto rating rows come back as whole-row dumps rather than cells -
+   `COVERED AUTOS LIABILITY: '01 $ 1,000,000 .$ 1,496.00'`, `COMPREHENSIVE:
+   '07 SEE ITEM SIX . 134.00'`. Rule 5 forbids concatenating cells; the values are
+   present and literally printed so verification passes, but a cell would retrieve
+   better than a row.
+2. The account number `0482854` is attributed as a `policy_number`, creating a
+   phantom fifth policy. Blast radius is one entry - the account-number entry
+   itself - and it carries no line, so no section resolver can act on it.
+
+## C60 - 2026-08-16 two residuals from run 47556cd2: one code, one prompt
+
+**Deliberately split by KIND, because the day's record is unambiguous.** On this pass,
+prompt changes are 0-for-2 (rules 8/9 made both their own metrics worse; rule 7
+collapsed the GL class table) and code changes are 2-for-2 (`_canonicalise_dec_entry_
+keys`, the six-field render). So anything decidable from the recorded entries alone
+goes in code, and only what genuinely needs the page in front of it stays in the prompt.
+
+**1. The account number became a fifth policy - CODE.** The common declarations page
+belongs to all four contracts, so asked which one an entry is from, the model reached
+for the only identifier in front of it: `Account Number: 0482854` keyed itself.
+`_entry_self_attributes_its_own_identifier` clears a `policy_number` when BOTH hold -
+it equals the entry's own `value`, its own label does not say "policy", and no other
+entry is filed under it. Runs BEFORE the printing election so a phantom key can never
+become a head and pull real printings into its group.
+
+**No denylist of label words** ("account", "agent no", "claim number", "form number").
+The tell is structural and needs no vocabulary: a contract key is something OTHER
+entries are filed under; an identifier supported only by the entry that prints it has
+attributed nothing. `POLICY NUMBER: 6C7-40-02---26` is the same self-reference and is
+KEPT because its own label says the value is a policy number. A thin document where a
+real policy legitimately has one supporting entry is untouched by the second condition.
+Verified on 47556cd2: 5 distinct policies -> 4, class table intact, the value `0482854`
+still present as evidence (only the KEY was cleared, never the entry).
+
+**2. Auto rating rows came back as whole rows in one cell - PROMPT, unavoidably.**
+`COVERED AUTOS LIABILITY: '01 $ 1,000,000 .$ 1,496.00'`, `COMPREHENSIVE: '07 SEE ITEM
+SIX . 134.00'`. Nothing is lost - the row IS printed, so `_verify_dec_entries` passes
+it - but a symbol, a limit and a premium sharing one value cannot be retrieved as any
+of the three. Splitting this in code is impossible: the column headings ("Covered
+Autos", "Limit", "Premium") exist on the page and NOT in the entry, so code would have
+to invent the labels, which is the one thing rule 5 forbids.
+
+Fixed as an EXAMPLE appended to rule 5's existing anti-concatenation clause, not a new
+rule. That distinction is the whole lesson of C59: a new rule competes with the old
+ones and can win on cases nobody considered; an example narrows an existing rule's
+scope. **Scoped to CAPTIONLESS runs of figures on purpose** - `Exposure: $39,300`
+carries its own caption inside the value and is the exact shape that restored the class
+table, so it must stay legal.
+
+Cost: +about 45 tokens per indexed chunk. Suite **3031 passed / 2 failed** (same two
+pre-existing), +5 tests including an anti-rot pair pinning both the new rule 5 wording
+and the `Payroll $39,300` clause it must not displace.
+
+**MEASURED on run c655a44b - item 1 shipped, item 2 REVERTED.**
+
+Item 1 works. `[Common Declarations | policy 0482854]` is now `[Common Declarations]`,
+distinct policies 5 -> 4, and the value `0482854` is still present as evidence: only
+the false key was cleared.
+
+Item 2 did nothing. The auto rows came back BYTE-IDENTICAL - `COVERED AUTOS LIABILITY:
+'01 $ 1,000,000 .$ 1,496.00'`, `COMPREHENSIVE: '07 SEE ITEM SIX . 134.00'`. The example
+was **removed rather than kept as harmless**, and that is the decision worth recording:
+a measured-useless instruction is not neutral in this prompt. Rule 7 looked harmless
+too and cost the GL class table for three runs. Every instruction here has to earn its
+place or come out.
+
+Nothing downstream needed the split. `auto_covered_symbols` owns the covered-auto
+symbols with per-coverage attribution (2026-08-07), `_resolve_lob_premium` owns the line
+premiums, the limits have their own facts. The cost of the row shape is a little Stage A
+retrieval quality on those boxes - no value and no relationship is lost. Splitting a
+rating row positionally in code is C46's phantom-row pattern and was not attempted.
+
+**THE RECORD FOR THE DAY, because it should decide how the next defect is approached:**
+
+| change | kind | outcome |
+|---|---|---|
+| C56 rules 8/9 (canonical keys, line vocabulary) | prompt | both metrics WORSE - deleted |
+| C56 rule 7 (general caption instruction) | prompt | destroyed the GL class table |
+| C59 rule 7 scoped | prompt | fixed what C56 rule 7 broke - net zero |
+| C60 rule 5 example (split rating rows) | prompt | zero effect - reverted |
+| `_canonicalise_dec_entry_keys` | code | worked first run |
+| C58 six-field render | code | worked first run |
+| C60 self-attributed key guard | code | worked first run |
+
+Prompt 0-for-3 on net-new capability; code 3-for-3. **Anything decidable from the
+recorded entries alone belongs in code.** Reserve the prompt for what genuinely requires
+the page in front of it, and expect to pay a full run to find out whether it worked.
+
+**State of the index at c655a44b (222 entries, stable across two consecutive runs):**
+GL class table complete; 4 real policies each with ONE key; 0 off-vocabulary lines;
+0 values claimed by two owners; carrier-to-policy pairing correct on both carriers;
+`COMMERCIAL UMBRELLA SCHEDULE` and `SCHEDULE OF UNDERLYING INSURANCE` each split into
+per-policy headings so call 2 can no longer read the GL carrier as the umbrella's.
+
+## C61 - 2026-08-16 five audit findings traced to mechanism, five code fixes, zero prompt changes
+
+**Method change, on the owner's direct instruction: attribute first, fix once.** Every
+finding from the fresh-run audit (session 3855121c) was traced to its exact mechanism
+before anything was edited. The dec-index JSON was CORRECT for all five - four breaks
+were in call 2's guards/resolvers, one in a deterministic consumer. No LLM call, no
+prompt, no batching was touched; the registry entry exists because the gate changes
+alter what gap fill may ship.
+
+| finding | mechanism | fix |
+|---|---|---|
+| 131 SQ FT OF BLDG OCC = 4800 (street no.) | number boxes outside the meaning gate; addresses witness nothing | "address" pseudo-witness (value-shape only) + address-only rule; "Enter number" boxes in scope for it (zero rule stays amount-only); "area" category added LAST |
+| 131 Q2 ISO edition = "11 20" (the AUTO form's) | no resolver owned the field; gap fill borrowed across the line heading | `_resolve_underlying_gl_form_edition`: CG 00 01's own edition from GL-line entries or owned blank; endorsement editions never answer |
+| 127 FACTOR=01 / SEAT=5 / RADIUS=50 vs printed "RADIUS: NA" | unbound schedule columns fell to gap fill; model invents rating cells | `_resolve_vehicle_rating_cell`: schedule row -> auto dec entry -> owned blank on positive auto-dec evidence; legacy sessions keep gap fill |
+| 131 Q7 false "Y" on a composed sentence | punctuation-free table page = ONE "sentence"; 75% token coverage vs a page's vocabulary passed | `_QUOTE_SENTENCE_MAX_CHARS=400` cap on the paraphrase fallback only; verbatim containment untouched |
+| 125: 6E7-40-02---26 in Q4, 6E74002 in prior grid | `underlying_policies` rows carry the raw printing; grid stamped it unjoined | `_canonical_policy_printing` joins any printing to the elected dec-index key; applied on a COPY in `_prior_coverage_grid` - the stored fact keeps its verbatim printing |
+
+**A regression caught by probing the REAL index before shipping, not by a re-run:**
+"location" as an address-label trigger captured the GL schedule's own row labels
+("Location 001": "91580 Contractors...", "Location 000": "...$150"), making the class
+codes and an endorsement premium address-only witnesses. The trigger was cut to the
+VALUE's own structural shape (street/ZIP) plus the literal word "address". Verified on
+the live 222-entry index: 91580/91585/150 carry no address witness; 26,680 stays cost;
+300 stays premium; the address-only set is contact-block digits alone.
+
+Tests: `tests/test_client_findings_20260816.py` (21, all driving real functions with
+the run's literal values, including the pre-fix mechanism repro for the Q7 table-page
+hole so the cap test cannot go vacuous). Suite **3052 passed / 2 failed** - the same
+two pre-existing unrelated failures, zero regressions.
+
+**Proven offline vs. needs the next run:** F1/F2/F3/F5 are deterministic and verified
+against the real index/facts shapes offline. F4 closes the only structural hole in
+`_quote_grounds_claim`, with the mechanism reproduced offline; whether the MODEL still
+answers Q7 "Y" (to be then blanked by the gate) only a live run shows. NAIC stays
+unpopulated by design - the numbers appear nowhere in the package's dec pages, and a
+pair that cannot be evidenced is not stamped. The umbrella $3M/$1M conflict (client
+defect 5) is deliberately deferred by the owner.
+
+## C62 - 2026-08-16 round-2 audit findings: six code fixes, one deliberate non-fix, zero prompt changes
+
+Run 34efbef4 confirmed all five C61 fixes held (SQ FT, ISO edition, rating cells, Q7,
+prior-grid printings). These are the findings that surfaced once they did - same method,
+attribute first, fix once, all deterministic. LLM calls, prompts and batching untouched;
+registry entry because two guards change what gap fill may ship.
+
+| finding (literal, from the forms) | fix |
+|---|---|
+| 127 interest block: name "Trust", an address, REFERENCE/LOAN # = the package's own GL policy number | `_blank_pseudo_entity_names` (a bare legal-structure word is an entity TYPE, not a name; de-named row falls to the orphan machinery) + `_blank_own_policy_as_reference` (canonical identity check - every printing of the contract caught) |
+| 127 Q4 "Y" on '"autos" you lease, hire, rent or borrow' - the Business Auto form's own DEFINITION text, verbatim | `_is_policy_wording_fragment` veto in the gate's `_present`: ISO's quoted-lowercase-term drafting signature marks coverage-form language, which never evidences applicant conduct. Structural, not topical - the standing no-topic-matching rule is untouched. THE MOST "WE" PAY (uppercase) does not match |
+| 131 #28: 0 swimming pools / 0 diving boards | REVERSED C61's number-box zero exemption, on measurement: the exemption shipped and the very next run fabricated count zeros. Number boxes now need a category-matched stated zero - deliberately without the untyped any-zero escape, or the umbrella's real $0 SIR unlocks every fabricated count |
+| 125: BBC7263 in Q4 vs BBC7263 - 26 in the prior grid | `_join_policy_printings` - the canonical join now runs on EVERY PolicyNumber box after all passes; per-resolver joining was whack-a-mole |
+| index: "CG 99 09 12 19" a fifth policy key | `_ISO_FORM_NUMBER_KEY_RE` clearing in `_canonicalise_dec_entry_keys` - two letters + four 2-digit groups is the ISO form+edition shape; WC-99-123 (three-digit group) and BBC7263 - 26 (three letters) cannot match. Verified on the real file: 5 keys -> 4 |
+| 131 Q9 blank while the index PROVES it ($185 hired + $137 non-ownership premiums) | `_resolve_umbrella_hired_nonowned` - a premium paid IS the coverage provided; deterministic "Y" + an explanation built solely from the two verbatim figures. Conjunctive: one premium or a $0 falls through to the compliance pass |
+
+**Deliberately NOT fixed:** "0 - 25" as # FULL TIME EMPL. The document literally prints
+"NUMBER OF EMPLOYEES: 0 - 25"; blanking document-grounded data labeled by the document
+itself would violate the standing rule against blanking legitimate answers. It is the
+auto non-ownership rating band - noted, kept.
+
+Tests: `tests/test_client_findings_round2_20260816.py` (18) + the C61 zero-exemption
+test reversed in place with its measurement. Suite **3068 passed / 2 failed** - the
+same two pre-existing unrelated failures, zero regressions (every evidence-gate suite
+green under the wording-fragment veto). End-to-end proof on the real 34efbef4 index:
+form-number key cleared, Q9 resolves "Y", Trust blanked, loan-ref blanked, Q4 printing
+joined.
+
+**Needs the next run:** whether the model still tries the Q4 "Y" (to then be vetoed)
+and whether Q9's deterministic Y lands on the printed form. Everything else is proven
+offline. Umbrella $3M/$1M conflict remains deferred by the owner; NAIC stays blank by
+design.
+
+## C63 - 2026-08-16 round 3 (run 7e95e3ae): class-level fixes, one withdrawn by the regression wall
+
+All six client items and every round-1/2 fix HELD on this run - verified on the forms
+before anything was touched. Four fixes shipped, one was written and WITHDRAWN before
+shipping because the suite caught it destroying a pinned contract. Zero prompt changes.
+
+| finding (literal) | fix |
+|---|---|
+| "0482854" back as a key with FOUR lines - multi-entry attribution outflanked the single-entry guard | THE INVARIANT, not another instance: a contract key must be printed under a policy-labelled entry somewhere ("POLICY NUMBER", "Policy", "POL"); an unwitnessed key is cleared everywhere it appears. CONDITIONAL on the document proving it labels policy numbers at all, so recordings without policy labels (and every older synthetic fixture) are untouched. Real file: 5 keys -> 4, each with one line |
+| 127 RADIUS = 104 (the DOC TERRITORY, misfiled by call-1 into the schedule's radius column) | `_resolve_vehicle_rating_cell` REORDERED: the dec's own printed cell first, and its stated "NA" VETOES the schedule fact. A resolver must not trust a derived fact over the document's printed cell |
+| 131 # EMPL = "1", row #28 "1 story / 1 unit" | `BusinessInformation_EmployeeCount` joins `_resolve_exposure_count` (stamps the document's own "0 - 25", owned blank without it); `_resolve_property_rating_row` owns the #28 family. EXACT pairing - see below |
+| Q4 printed "6 C 7 - 4 0 - 0 2---26" (only the letter-spaced printing survived verification this run) | `_despace` on ELECTED keys only: fires on the OCR fingerprint (>=3 single alnum chars space-separated), so "BBC7263 - 26" can never match; entry VALUES keep the verbatim printing |
+
+**WITHDRAWN before shipping - the 125 %-of-sales owned blank.** The suite caught it
+red-handed: `test_a_percentage_the_document_prints_survives` pins the 2026-08-14
+contract that a DOCUMENT-STATED percentage survives with its citation (rule 8d +
+`_percentage_is_stated`). A blanket blank deletes legitimate answers; the fabricated
+"30%" is a QUOTE-GATE defeat to be fixed from the run log's actual grounding - queued
+with the 127 Q2/Q12 borrows.
+
+**Tripped twice more and corrected in-session, which is the wall working:** widening
+the exposure-count resolver to `(Contractors|BusinessInformation)_<any count>` re-made
+a mistake whose history was already written in test_run_20260813i ("broke three pinned
+ACORD 125 behaviours") - 5 suites went red, the regex was narrowed to exactly
+`Contractors_(Full|Part)Time...` + `BusinessInformation_EmployeeCount`, all green.
+
+Tests: `tests/test_client_findings_round3_20260816.py` (12, literal values, including
+pins that the invariant stands aside without policy labels, that BBC7263 - 26 can never
+be despaced, and that the percent boxes are DELIBERATELY not owned). Suite **3080
+passed / 2 failed** - the same two pre-existing unrelated failures, zero regressions.
+End-to-end on the real 7e95e3ae index: 4 clean keys, RADIUS blank against the polluted
+schedule fact, # EMPL = "0 - 25", row #28 owned, the 125's employee boxes untouched.
+
+**Open, waiting on the run log (grep `evidence_gate KEPT_YES` / `question_grounding`):**
+127 Q2 "Y" (>50% employees), Q12 "N" (drivers not covered by WC - on a package whose
+dec DENIES WC, "N" is at best unknowable), the 30% quote-gate defeat, and the CCC/Q6
+text borrows. Umbrella $3M/$1M stays deferred by the owner.
+
+## C64 - 2026-08-16 the producer's review screen: three false hard stops, an unresolvable fix loop, and the umbrella conflict
+
+Reported from a live session on run f50825ae. No prompt change, no LLM call change.
+
+**W1/W2 - "Umbrella policy period alignment" x3, none of them real, and none
+fixable.** The screen read *"Umbrella effective date (07/15/25) does not match
+GL/policy effective date (07/15/2026)"* and neither date is wrong:
+`umbrella_effective_date` is read off the umbrella's own DEC PAGE (on a renewal, the
+EXPIRING term) while `effective_date`, after `_route_renewal_dates`, is the DERIVED
+PROPOSED renewal term. The validator compared expiring against proposed and called the
+difference a misalignment - **the client's own chronology rule broken inside a
+validator**, and as `hard_stop` it also capped SQS at 60.
+
+It was UNRESOLVABLE by construction, which is what the producer hit: the fix panel
+offers the two dates it compared, so 07/15/2026 -> 09/15/2026 simply re-raised the
+issue as 09/15/2027. No value a human can type makes an expiring term equal a proposed
+one. `_package_period_on_umbrella_footing` now returns the term that shares the
+umbrella's footing - `prior_*` on a routed renewal - and STANDS DOWN when there is no
+comparable term rather than falling back across footings. The message names which term
+it used. The sibling Auto/WC check is untouched and still fires: those dates come off
+their own dec pages, so they share the umbrella's footing by construction.
+
+**W3 - "GL coverage detected but no revenue or payroll found"** on a package whose GL
+schedule prints Prem Basis: Payroll / Exposure: $39,300. Two fixes: the AUTHORITATIVE
+source is now checked first (`gl_class_code_schedule`'s basis+amount pair, the client's
+own "exposure amount + exposure basis" relationship in one row - independent of the dec
+index surviving, of which label shape the recorder chose, and of the derived flag); and
+`dec_states_payroll_basis` is now derived BEFORE `_backfill_empty_facts_from_entries`
+instead of after, because both sat in one try block whose except pops `dec_page_entries`
+- any backfill exception took the payroll flag down with the entries.
+
+**W4 - the $3M/$1M umbrella conflict (client defect 5).** The withhold machinery was
+sound but could only see amounts the MERGE rejected, and a limit stated in a
+certificate or a narrative sentence never arrives as a competing candidate for the same
+fact - so one document in, no reject recorded, and the most-repeated figure stamped
+unchallenged. `_stated_umbrella_limits` now reads the sources that DO carry it:
+narrative remarks and umbrella-line `coverage_lines`. The clause is matched WHOLE to
+the sentence end - a first-amount-only capture was tried and found half the evidence
+(it returned the $3,000,000 the form already had and missed the $1,000,000 that makes
+it a conflict). Narrow by construction: only clauses NAMING umbrella/excess, only
+amounts of $1,000,000+, and extra amounts can only ever WITHHOLD a stamped value
+pending confirmation - never change a fact, never fill a box.
+
+Tests: `tests/test_review_screen_warnings_20260816.py` (13, the producer's literal
+screen values), including pins that a genuine misalignment still fires, that a
+non-renewal is byte-identical, that the Auto/WC check still fires, that agreement never
+manufactures a conflict, and an anti-rot ordering check on the payroll derivation.
+Suite **3093 passed / 2 failed** - the same two pre-existing, zero regressions.
+
+**W1 HAD A SECOND COPY, found by the producer immediately after C64 shipped.**
+`sqs_service.evaluate_stops` re-implemented the identical comparison
+(`umbrella_effective_date` vs `effective_date`), so the screen still showed the legacy
+copy's own wording - "Umbrella and GL policy periods misaligned." - with no dates in
+it. **That is the THIRD time this exact duplication has cost a fix** (Auto hired/
+non-owned symbols; Umbrella SIR - both in CLAUDE.md), and the legacy engine is the copy
+that drives the 60/85 caps, so the hard stop survived the fix that was supposed to
+remove it. The legacy site now delegates to `_package_period_on_umbrella_footing`
+(lazy import - `cross_form_validator` already imports `sqs_service`, so a module-level
+one would be circular) and falls back to the old pair only if the import fails.
+Verified end-to-end on the client's fact shape: both misalignment messages and the GL
+exposure warning are gone, a genuine misalignment still fires, and
+`test_the_legacy_engine_delegates_instead_of_reimplementing` fails the build if anyone
+re-derives the comparison there. Swept the remaining line-date comparisons: the Auto
+and WC checks read their own dec-page dates and share the umbrella's footing by
+construction - correct, untouched.
+
+**Verified offline; needs the next run to confirm live.** W4 depends on where the
+$1,000,000 actually lives in this package's facts - if the COI's figure is neither in
+the narrative nor in `coverage_lines`, the withhold still will not fire and the real
+gap is that certificates are excluded from the dec index by recorder rule 6 (the
+one-clause change already scoped in C60).
+
+## C65 - 2026-08-16 removing a false warning is only half the job: the real unknown now speaks
+
+**Producer, immediately after C64: "if there are real warnings and hard stops then why
+are you hiding them".** Correct instinct, and the gap was real. C64 removed a
+comparison that could never be satisfied (the umbrella's EXPIRING dates against the
+package's DERIVED PROPOSED dates - this package's umbrella and GL are perfectly
+concurrent at 07/15/25-07/15/26, so there was no misalignment to report and no value a
+human could type would create one). But it put NOTHING in its place, and there IS
+something to say: on a renewal, every per-line date (`umbrella_*`, `auto_*`, `wc_*`,
+`property_*`) is read off that line's own dec page, so every one of them is an EXPIRING
+date - and the routing only ever handled the package pair, so each underlying line's
+PROPOSED term stayed unknown and unannounced.
+
+`_route_renewal_dates` now records `renewal_lines_expiring` (the lines whose stated
+term has already ended) and `evaluate_stops` turns it into one message:
+
+    Renewal: the umbrella's proposed policy term is not stated in the documents -
+    confirm the proposed effective and expiration dates.
+
+**Nothing is derived per line, deliberately.** The package term is derivable (a renewal
+takes effect when the expiring policy ends); an underlying line's is NOT - the
+underlying policies may renew on their own dates, and guessing is exactly what "unknown
+must remain unknown" forbids. So the fact is recorded, the question is asked.
+
+**recommended, not a hard stop** - an unknown the documents do not answer must not cap
+the package at 60, which is the same mistake the expired-term stop made before C61.
+Registered in `_LEGACY_MESSAGE_RULES` with cluster "Umbrella policy period alignment",
+tier `recommended`, code `legacy_umbrella_renewal_term_unknown`, and resolution
+`_r_field("umbrella_effective_date", "umbrella_expiration_date")` - verified live to
+return `mode: field` with both dates, so Resolve opens two typeable boxes instead of
+the dead button the legacy-rules work exists to prevent.
+
+Tests: +6 in `test_review_screen_warnings_20260816.py` (22 total), including a
+future-dated line NOT being flagged, the warning never appearing in `hard`, and the
+full classify+resolve round trip. `test_legacy_rules.py` (65 anti-rot guards) green -
+the new row is shadow-free and its code is namespaced. Suite **3102 passed / 2 failed**
+- the same two pre-existing, zero regressions.

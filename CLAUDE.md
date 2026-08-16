@@ -323,6 +323,70 @@ this area again):**
   residual (~2-3 borrowed false "N"s per run, an LLM limitation, not a bug) are in
   "Dedicated Compliance Yes/No Question Pass" and the two sections above it, below.
 
+### Relationship Preservation: Policy/Line Identity, Value Meaning, Conflicts, Renewal Dates - FIXED (2026-08-15)
+**Client (Orbin package, 271 pages, tested on ACORD 125/127/131): "do not optimize for
+extracting or populating more values right now. Optimize for preserving what each value
+means and where it belongs."** Seven reported defects, three root causes, five fixes.
+Full per-fix detail in `FIX_TRACKING_2026-08-15.md` (repo root); tests in
+`backend/tests/test_relationship_preservation_20260815.py` (40, all driving real code with
+the client's literal values).
+
+1. **RC1 - flat global facts erased policy/line identity.** One `policy_number` /
+   `carrier_name` / `carrier_naic` / `effective_date` for a 3-policy package; each merged
+   independently by frequency+confidence and stamped on every form via Pass-1 rules AND the
+   alias bridge. Result: the AUTO number (6E7-40-02---26) on the UMBRELLA application, and
+   Employers Mutual recombined with EMC P&C's NAIC 25186 - a pair no document prints.
+   FIX: `_resolve_section_policy_identity` - section forms resolve header identity from the
+   `coverage_lines` entry matching THAT form's line (`_SECTION_FORM_LINE_PHRASES`, matched
+   with the proven `_lob_tokens` machinery); carrier+NAIC only ever as a pair from ONE
+   entry; untrustworthy line list -> blank; no `coverage_lines` -> legacy path preserved
+   byte-identical. 125/101 keep package-level scalars (correct there); ACORD 25 rows were
+   already owned by `_resolve_current_policy_line_cell`. `_form_id` context is injected as
+   a shallow facts copy in `map_facts_to_form`/`compute_form_gaps`.
+2. **RC1b - renewal dates.** RULE 1's "current policy" IS the expiring dec on a renewal, so
+   07/15/2025-07/15/2026 stamped as the PROPOSED term, and the (2026-08-14) expired-term
+   hard stop then capped the score at 60 for our own upstream mis-assignment - while
+   `is_renewal` correctly ticked the Renew box. FIX: `_route_renewal_dates` (merge tail):
+   renewal + already-ENDED term -> dates move to prior_*, proposed stays EMPTY (Tier-1 asks
+   for the real term); `_resolve_renewal_proposed_period` keeps the proposed boxes owned
+   blanks (25/28 exempt - certificates document the EXISTING policy); the hard stop
+   downgrades to a soft "confirm the renewal term" when `is_renewal` is affirmative.
+3. **RC2 - no meaning guard on gap-filled amounts.** $39,300 (payroll exposure, GL class
+   91580) also stamped as Annual Gross Sales; absent foreign sales became "$0". FIX:
+   `_enforce_numeric_meaning_gate` (gap fill only, no prompt change): an amount whose
+   verified witnesses (dec_page_entries labels + gl_class_code_schedule basis/exposure
+   pairs) ALL carry a different category (sales/payroll/premium/limit/deductible) than the
+   target field is blanked; a gap-filled $0 with no literal stated zero is blanked. No
+   witnesses = no opinion.
+4. **RC3 - conflicts detected but stamping raced ahead.** The reconciler flagged the $3M
+   dec vs $1M COI umbrella limit and the form stamped $3M anyway. FIX: `umbrella_limit`
+   curated as currency; `CONFLICT_WITHHOLD_KEYS` + `unresolved_withheld_keys()` write
+   `facts["_uw_conflicted_keys"]` in the pipeline; `_resolve_conflicted_fact_blank` (first
+   door in `_deterministic_map`) + an alias_stamper skip withhold the STAMPED value until
+   the picker confirms. The fact stays in facts - SQS pillars unchanged; the confirm
+   endpoint re-runs the pipeline, clearing the withhold automatically.
+
+**Right-or-blank is the contract everywhere:** identity fields either carry their own
+line's value or ship blank and are excluded from gap fill (the LLM reading "the nearest
+number in the raw text" is the defect, not the fallback). Legacy sessions without
+`coverage_lines` behave exactly as before.
+
+5. **The dec entries are PRIMARY evidence, `coverage_lines` is a summary.**
+   `_policy_number_from_dec_entries` lets the section-identity resolver ask the verified
+   entries directly. It was unreachable in two ways worth remembering: the
+   untrustworthy-list branch returned blank BEFORE consulting them, and a
+   `coverage_lines` row with no premium fails `_line_entry_grants_coverage`, so the
+   resolver skipped out first. **Never let a corrupt summary stand in for absent
+   evidence.** Verified on the 2026-08-15 fresh run: ACORD 131 finally printed its own
+   6J7-40-02---26, and the underlying GL row paired EMC Property & Casualty with BBC7263.
+
+**The next defect class is NOT this one.** What remains on those forms is gap fill
+answering questions about coverage parts the policy does not carry - Employers Liability
+and WC rows on a package whose dec page says "No Coverage", watercraft LENGTH 4800 (the
+street number), EBL, advertising media. Same shape as C46's phantom vehicle rows and the
+same fix: suppress whole form SECTIONS on declared-absent coverage so the model is never
+asked. Read `FIX_TRACKING_2026-08-15.md` before starting it.
+
 ### Dec-Page Values Must Reach The Form: Three Leaks Plugged, And The Fill-Rate Fix Finally Engages - FIXED (2026-08-12, second session)
 **Owner's end goal, verbatim: "form should not be blank if values are present in declaration
 page."** Four changes, all measured against the client's live package. Full detail in

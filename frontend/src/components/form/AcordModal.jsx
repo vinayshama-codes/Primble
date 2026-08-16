@@ -1955,8 +1955,15 @@ function DashboardStep({ token, onResume, onNewPackage }) {
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: diffDays > 300 ? "numeric" : undefined });
   };
 
-  const avgSqs = sqsMap => {
-    const scores = Object.values(sqsMap || {}).map(s => s?.sqs_score).filter(n => n != null);
+  // The submission's OWN score, never an average of the per-form scores. The
+  // package score is computed independently by the backend; averaging the form
+  // scores here produced a different number from the one shown inside the
+  // submission, and it drove the "Quote Ready" badge at a 90 threshold that
+  // belongs to the package score. The average remains only as a fallback for
+  // sessions saved before package_sqs_score was returned by the list endpoint.
+  const sessionSqs = s => {
+    if (s?.package_sqs_score != null) return s.package_sqs_score;
+    const scores = Object.values(s?.sqs || {}).map(x => x?.sqs_score).filter(n => n != null);
     return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
   };
   // Decision_Tree.txt §522-527: A≥90 (green), B≥80 (yellow), C≥70 (orange),
@@ -2099,7 +2106,7 @@ function DashboardStep({ token, onResume, onNewPackage }) {
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {sessions.map(s => {
-                  const avg   = avgSqs(s.sqs);
+                  const avg   = sessionSqs(s);
                   const color = avg != null ? sqsColor(avg) : "#94a3b8";
                   const bg    = avg != null ? sqsBg(avg)    : "rgba(148,163,184,0.08)";
                   const grade = avg != null ? sqsGrade(avg) : null;

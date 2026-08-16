@@ -50,7 +50,7 @@ from services.pdf_service import (
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
     check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION, classify_stops,
-    _check_loss_run_insured_match, _extract_narrative_doc_text,
+    _check_loss_run_insured_match, _extract_narrative_doc_text, doc_consistency_stops,
 )
 from services.issue_registry import (
     build_grouped_view, build_structured_from_sources, make_issue, normalize_issue_type,
@@ -1453,11 +1453,28 @@ async def lite_generate_internal(session_id: str, current_user: dict = Depends(g
         await count_session_usage(str(current_user["id"]), session_id)
 
     sqs_list  = [r["sqs"] for r in results.values() if r.get("sqs")]
-    avg_score = round(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0
     first_sqs = sqs_list[0] if sqs_list else {}
+    # The submission's OWN score, never an average of the per-form scores.
+    # This path caps itself to one form above, so the old average happened to
+    # agree - but it pasted an averaged number over the FIRST form's tier and
+    # breakdown, which becomes silently wrong the moment that cap is lifted.
+    # Reading the stored package score keeps every surface on one number.
+    _pkg = (await get_processing_session(session_id)).get("package_sqs") or {}
+    if _pkg.get("package_sqs_score") is not None:
+        _sqs_payload = {
+            **first_sqs,
+            "sqs_score":     _pkg["package_sqs_score"],
+            "raw_sqs_score": _pkg.get("raw_sqs_score"),
+            "cap_applied":   _pkg.get("cap_applied"),
+            "cap_reason":    _pkg.get("cap_reason"),
+            "breakdown":     _pkg.get("pillars", first_sqs.get("breakdown", {})),
+            "tier":          _pkg.get("tier", first_sqs.get("tier")),
+        }
+    else:
+        _sqs_payload = dict(first_sqs)
     return JSONResponse({
         "success": True,
-        "sqs": {**first_sqs, "sqs_score": avg_score},
+        "sqs": _sqs_payload,
         "hard_stops": session.get("hard_stops", []),
         "soft_stops": session.get("soft_stops", []),
         "flags": session.get("flags", {}),
@@ -1694,6 +1711,18 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             fresh_flags["has_workers_comp"] = False
 
         _re_hard, _re_soft = evaluate_stops(updated_facts, fresh_flags)
+        # Cross-DOCUMENT identity conflicts are a third detector that runs at
+        # extraction only. This block rebuilds the stop list from scratch, so
+        # without re-running it an unresolved FEIN / applicant-name / policy-date
+        # conflict stopped capping the score on the first field edit while its
+        # card stayed on screen. Merged into the field-level list to match what
+        # form generation feeds the per-form scorer. Per-document facts are not
+        # changed by a producer edit to the merged facts, so a genuine conflict
+        # correctly persists here until it is confirmed in the Data Consistency
+        # picker - which re-runs the full pipeline and clears it properly.
+        _dc_hard, _dc_soft = doc_consistency_stops(session)
+        _re_hard = list(_re_hard) + [m for m in _dc_hard if m not in _re_hard]
+        _re_soft = list(_re_soft) + [m for m in _dc_soft if m not in _re_soft]
         _triggered_ids = set(session.get("selected_form_ids") or []) | {form_id}
         _cf_issues = run_cross_form_validation(updated_facts, fresh_flags, _triggered_ids)
         _cf_hard, _cf_soft, _cf_advisories = split_cross_form_issues(_cf_issues)

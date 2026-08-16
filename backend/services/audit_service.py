@@ -4,7 +4,7 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from config.database import get_pool
 from models.schemas import (
@@ -445,7 +445,8 @@ async def get_dismissed_recommendations(session_id: str) -> List[dict]:
     try:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
-                """SELECT rec_id, form_id, message, score_impact, override_reason, action_at
+                """SELECT rec_id, form_id, field, message, score_impact,
+                          override_reason, action_at
                    FROM sqs_recommendation_audit
                    WHERE session_id=$1 AND action='dismissed'
                    ORDER BY action_at ASC""",
@@ -455,6 +456,73 @@ async def get_dismissed_recommendations(session_id: str) -> List[dict]:
     except Exception as ex:
         logger.error(f"Failed to get dismissed recommendations: {ex}")
         return []
+
+
+# ── Dismissal score credits ──────────────────────────────────────────────────
+# A dismissal with a real typed reason earns points; a plain dismiss does not.
+# The predicate lives HERE rather than in the route because three callers need
+# it - the dismiss route (to award), the reopen route (to reverse) and the
+# rescore (to re-apply). It used to live in audit_routes with a docstring
+# calling itself the single source of truth while the rescore path knew nothing
+# about credits at all, which is why every recalculation silently erased them.
+
+def dismiss_earned_credit(override_reason, score_impact) -> bool:
+    """Did this dismissal earn a score credit?
+
+    Only a real typed reason (not the default sentinel) with a positive impact
+    credits. A plain "Dismiss" hides the card and leaves the gap on record.
+    """
+    return (
+        override_reason not in (None, "", "No reason provided")
+        and score_impact is not None
+        and score_impact > 0
+    )
+
+
+async def active_score_credits(
+    session_id: str,
+    facts: Optional[dict] = None,
+) -> Tuple[int, List[dict]]:
+    """Total dismissal credit still in force, plus the rows backing it.
+
+    A credit compensates for a gap that could not be filled. Once the underlying
+    field IS genuinely filled, the submission earns those points through the
+    pillars instead, so the credit RETIRES rather than stacking on top of the
+    real improvement (owner decision, 2026-08-16).
+
+    Credits are capped at 100 in aggregate purely as a sanity bound; the real
+    ceiling is applied later by sqs_service.final_score_with_credits.
+    """
+    try:
+        from services.extraction_service import _fv
+    except Exception:                                          # pragma: no cover
+        _fv = None
+
+    def _filled(key: str) -> bool:
+        if not key or not isinstance(facts, dict):
+            return False
+        val = _fv(facts, key) if _fv else facts.get(key)
+        if isinstance(val, (list, dict)):
+            return bool(val)
+        return str(val).strip() not in ("", "None", "null")
+
+    total, kept = 0, []
+    try:
+        for row in await get_dismissed_recommendations(session_id):
+            if not dismiss_earned_credit(row.get("override_reason"), row.get("score_impact")):
+                continue
+            if _filled(row.get("field")):
+                logger.info(
+                    "credit retired: session=%s rec=%s field=%s now filled",
+                    session_id, row.get("rec_id"), row.get("field"),
+                )
+                continue
+            total += int(row["score_impact"])
+            kept.append(row)
+    except Exception as ex:
+        logger.error(f"active_score_credits failed for {session_id}: {ex}")
+        return 0, []
+    return min(100, total), kept
 
 
 # ASYNC-SAFE

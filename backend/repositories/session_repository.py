@@ -405,6 +405,11 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
                 )                                                    AS applicant_name,
                 data->'facts'->'lines_of_business'                   AS lines_of_business,
                 data->'clarity_result'->'sqs_combined'               AS clarity_sqs,
+                -- The submission's OWN score. The list used to average the
+                -- per-form scores client-side and label the result "Quote
+                -- Ready" at 90 - which is the PACKAGE threshold - so the badge
+                -- could disagree with the banner inside the same submission.
+                (data->'package_sqs'->>'package_sqs_score')::int      AS package_sqs_score,
                 (SELECT jsonb_object_agg(key, value->'sqs')
                    FROM jsonb_each(COALESCE(data->'generated_forms', '{}'::jsonb)))
                                                                      AS sqs_scores,
@@ -457,6 +462,7 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
             "lines":              lines,
             "form_ids":           form_ids,
             "sqs":                sqs_scores,
+            "package_sqs_score":  row["package_sqs_score"],
             "status":             compute_session_status({
                                       "arq_pending":        bool(row.get("arq_pending")),
                                       "last_downloaded_at": row["last_downloaded_at"],

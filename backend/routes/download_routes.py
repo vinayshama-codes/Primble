@@ -483,7 +483,14 @@ async def download_all(
     _ck = _cover_cache_key(facts, list(generated.keys()), sqs_results, flags)
     ai_content = _COVER_CACHE.get(_ck)
     if ai_content is None:
-        ai_content = await generate_ai_cover_narrative(facts=facts, flags=flags, sqs_results=sqs_results, form_ids=list(generated.keys()), org_name=org_name, user=fresh)
+        # Pass the submission's OWN score so the cover page states the same
+        # number the app shows. Without it this narrative averaged the per-form
+        # scores, which disagreed with the package score everywhere else.
+        ai_content = await generate_ai_cover_narrative(
+            facts=facts, flags=flags, sqs_results=sqs_results,
+            form_ids=list(generated.keys()), org_name=org_name, user=fresh,
+            package_score=(proc_session.get("package_sqs") or {}).get("package_sqs_score"),
+        )
         _COVER_CACHE[_ck] = ai_content
         logger.debug(f"cover narrative cached for key {_ck[:8]}")
     else:
@@ -645,8 +652,27 @@ async def lite_cover_sheet(session_id: str, request: Request, current_user: dict
     clarity_result  = proc_session.get("clarity_result", {})
     generated_forms = proc_session.get("generated_forms", {})
 
+    # The submission's OWN score comes first. This branch used to average the
+    # per-form scores and paste that average over the FIRST form's tier, grade
+    # and breakdown - so the number and the explanation beside it described
+    # different things, and neither matched the score shown in the app
+    # (2026-08-16 audit). The average survives only for a legacy session that
+    # has generated forms but no stored package score.
+    _pkg = proc_session.get("package_sqs") or {}
     if clarity_result.get("sqs_combined"):
         sqs = clarity_result["sqs_combined"]
+    elif _pkg.get("package_sqs_score") is not None:
+        _first = next((r["sqs"] for r in generated_forms.values() if r.get("sqs")), {})
+        sqs = {
+            **_first,
+            "sqs_score":     _pkg["package_sqs_score"],
+            "raw_sqs_score": _pkg.get("raw_sqs_score"),
+            "cap_applied":   _pkg.get("cap_applied"),
+            "cap_reason":    _pkg.get("cap_reason"),
+            "breakdown":     _pkg.get("pillars", _first.get("breakdown", {})),
+            "tier":          _pkg.get("tier", _first.get("tier")),
+            "routing_decision": _pkg.get("routing_decision", _first.get("routing_decision")),
+        }
     elif generated_forms:
         sqs_list  = [r["sqs"] for r in generated_forms.values() if r.get("sqs")]
         avg_score = int(sum(s.get("sqs_score", 0) for s in sqs_list) / max(len(sqs_list), 1)) if sqs_list else 0

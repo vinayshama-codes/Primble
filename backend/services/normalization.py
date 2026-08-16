@@ -33,7 +33,7 @@ Design notes
 
 import re
 from datetime import datetime
-from typing import Any, List, Optional, Set
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 NORMALIZATION_MODEL_VERSION = "1.0.0"
 
@@ -566,6 +566,90 @@ def normalize_value(field: str, value: Any) -> str:
         return normalize_name(value)
     # 3. Generic fallback (insurance synonyms, currency, punctuation).
     return normalize_general(value)
+
+
+# ── Strict entity identity (audit 2026-08-15 round 10) ───────────────────────
+# The coarse normalizers above are EQUIVALENCE tools: normalize_carrier
+# collapses a carrier GROUP's printings to one family token (right for
+# document clustering and the foreign-entity drop), normalize_name strips the
+# entity suffix (right for matching a suffixless COI mention to the insured).
+# Used as the CONFLICT comparator they are blind by construction: EMC Property
+# & Casualty vs Employers Mutual Casualty both reduce to "emc", and Orbin
+# Contracting LLC vs Orbin Contracting Inc both reduce to "orbin contracting" -
+# so the reconciler pronounced the two REAL carriers on the client's package
+# consistent and the picker never opened. That is client complaint #2 at its
+# root, one layer above every stamping guard.
+#
+# The strict layer keeps every distinguishing word and canonicalizes only
+# SPELLING (Co./Company, Inc/Incorporated, L.L.C./Limited Liability Company).
+# Compatibility is token-SUBSET: a truncation ("Travelers" vs "Travelers
+# Indemnity Company", a suffixless name vs its suffixed form) is the same
+# entity under-specified; two names that EACH carry a word the other lacks
+# (Property+Casualty vs Employers+Mutual, LLC vs Inc, Fire vs Casualty) are
+# different entities and MUST conflict.
+_STRICT_PHRASE_CANON: List[Tuple[str, str]] = [
+    ("limited liability company", "llc"),
+    ("limited liability co", "llc"),
+    ("limited liability corporation", "llc"),
+    ("limited partnership", "lp"),
+    ("limited liability partnership", "llp"),
+    ("professional corporation", "pc"),
+]
+_STRICT_TOKEN_CANON: Dict[str, str] = {
+    "llc": "llc", "pllc": "pllc", "lp": "lp", "llp": "llp", "pc": "pc",
+    "ltd": "ltd", "limited": "ltd",
+    "inc": "inc", "incorporated": "inc",
+    "corp": "corp", "corporation": "corp",
+    "co": "company", "cos": "company", "company": "company", "companies": "company",
+    "ins": "insurance", "insurance": "insurance",
+    "assur": "assurance", "assurance": "assurance",
+    "indem": "indemnity", "indemnity": "indemnity",
+    "mut": "mutual", "mutual": "mutual",
+    "cas": "casualty", "casualty": "casualty",
+    "natl": "national", "national": "national",
+    "grp": "group", "group": "group",
+}
+_STRICT_NOISE_TOKENS = frozenset({"the", "of", "and", "a", "an"})
+
+
+def _strict_entity_tokens(value: Any) -> FrozenSet[str]:
+    s = _basic(value)
+    if not s:
+        return frozenset()
+    for phrase, canon in _STRICT_PHRASE_CANON:
+        s = re.sub(rf"\b{re.escape(phrase)}\b", canon, s)
+    return frozenset(
+        _STRICT_TOKEN_CANON.get(t, t)
+        for t in s.split() if t not in _STRICT_NOISE_TOKENS)
+
+
+def strict_entity_key(value: Any) -> str:
+    """Spelling-canonical, distinction-preserving comparison key for a legal
+    entity name (person, organization, or carrier)."""
+    s = _basic(value)
+    if not s:
+        return ""
+    for phrase, canon in _STRICT_PHRASE_CANON:
+        s = re.sub(rf"\b{re.escape(phrase)}\b", canon, s)
+    out = [_STRICT_TOKEN_CANON.get(t, t)
+           for t in s.split() if t not in _STRICT_NOISE_TOKENS]
+    return " ".join(out)
+
+
+def entity_identity_conflict(raw_values: List[Any]) -> bool:
+    """True when two values name MATERIALLY different legal entities.
+
+    Token-subset compatibility: equal sets, or one a subset of the other
+    (truncation / missing suffix), are the same entity. Each carrying a token
+    the other lacks is a real disagreement the review picker must surface.
+    """
+    keys = [t for t in (_strict_entity_tokens(v) for v in raw_values) if t]
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            a, b = keys[i], keys[j]
+            if not (a <= b or b <= a):
+                return True
+    return False
 
 
 def distinct_normalized(field: str, raw_values: List[Any]) -> Set[str]:

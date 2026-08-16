@@ -210,11 +210,42 @@ def test_row_b_survives_when_the_second_insured_is_real():
 
 # ── 5. The stop nothing was making ──────────────────────────────────────────
 
-def test_an_expired_policy_term_is_a_hard_stop():
+def test_an_expired_policy_term_a_producer_stated_is_a_hard_stop():
+    """NARROWED 2026-08-15 on client direction, deliberately.
+
+    This stop shipped on 2026-08-14 asserting "the application proposes a
+    period that ended". That assertion only holds if a PERSON proposed the
+    period. The dominant real input is a carrier declarations page for the
+    policy now ending - uploaded precisely so the next submission can be built
+    from it - and hard-stopping on that capped the client's package at 60 and
+    made every other remediation look dead (their report: "the system is
+    correctly recognizing Renewal in one place while another part treats the
+    expired source policy as a defect").
+
+    So the stop now turns on PROVENANCE, which the fact envelope already
+    records. A producer-typed dead term is still a block; a term read off an
+    uploaded document is a confirm-the-dates warning. Verified against the
+    Orbin package, which never uses the word "renewal" in 271 pages - gating
+    this on `is_renewal` alone would have fixed nothing.
+    """
     from services.sqs_service import evaluate_stops
-    hard, _soft = evaluate_stops(
-        {"effective_date": "07/15/2020", "expiration_date": "07/15/2021"}, {})
+    hard, _soft = evaluate_stops({
+        "effective_date": {"value": "07/15/2020", "source": "producer",
+                           "confidence": "filled"},
+        "expiration_date": {"value": "07/15/2021", "source": "producer",
+                            "confidence": "filled"},
+    }, {})
     assert any("already expired" in m for m in hard), hard
+
+
+def test_an_expired_term_read_off_a_document_is_a_warning_not_a_block():
+    from services.sqs_service import evaluate_stops
+    hard, soft = evaluate_stops({
+        "effective_date": {"value": "07/15/2020", "source": "ai", "confidence": "ai_high"},
+        "expiration_date": {"value": "07/15/2021", "source": "ai", "confidence": "ai_high"},
+    }, {})
+    assert not any("already expired" in m for m in hard), hard
+    assert any("already expired" in m for m in soft), soft
 
 
 def test_a_current_term_raises_nothing():

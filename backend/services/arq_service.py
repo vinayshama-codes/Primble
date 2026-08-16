@@ -3659,7 +3659,7 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
     from services.sqs_service import (
         evaluate_stops, calculate_sqs, calculate_sqs_from_facts,
         calculate_package_sqs, _check_loss_run_insured_match, check_tier2,
-        _extract_narrative_doc_text,
+        _extract_narrative_doc_text, doc_consistency_stops,
     )
     from services.extraction_service import _fv as _sqs_fv
     from services.cross_form_validator import (
@@ -3700,6 +3700,19 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
 
     # Re-evaluate field-level + cross-form stops from the latest facts.
     re_hard, re_soft = evaluate_stops(facts, flags)
+    # Cross-DOCUMENT identity conflicts (applicant name / FEIN / effective /
+    # expiration) are a THIRD detector. It runs at extraction only, and this
+    # function rebuilds the stop list from scratch - so before this call an
+    # unresolved FEIN conflict silently stopped capping the score on the first
+    # recalculation while its card stayed on screen, i.e. the score rose because
+    # a blocker stopped counting rather than because anything was fixed.
+    # Merged into the FIELD-LEVEL list because that is where form generation puts
+    # them (form_service.process_single_form feeds the per-form scorer the
+    # combined session list) and because _apply_dismiss_score_credit derives
+    # "field-level" as combined-minus-cross, which assumes exactly this.
+    _dc_hard, _dc_soft = doc_consistency_stops(proc)
+    re_hard = list(re_hard) + [m for m in _dc_hard if m not in re_hard]
+    re_soft = list(re_soft) + [m for m in _dc_soft if m not in re_soft]
     triggered        = set(selected_ids) | set(generated.keys())
     cf_issues        = run_cross_form_validation(facts, flags, triggered)
     cf_hard, cf_soft, _cf_adv = split_cross_form_issues(cf_issues)
@@ -3771,6 +3784,54 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
     except Exception as ex:
         logger.error(f"recalc package SQS failed: {ex}", exc_info=True)
         package_sqs = proc.get("package_sqs")
+
+    # ── Re-apply outstanding dismissal credits (2026-08-16) ──────────────────
+    # This function replaces every `sqs` dict wholesale from the current facts,
+    # which silently ERASED every credit a producer had earned by dismissing a
+    # recommendation with a written reason. Only the reopen path replayed them;
+    # an ordinary answer did not, so points a producer had legitimately earned
+    # vanished with no trace on their next edit.
+    #
+    # Credits are added to the RAW (uncapped) score and then re-capped, so
+    # clearing the stops releases the full value earned - owner's rule: raw 65
+    # capped to 60, +10 credited, stops cleared -> 75, not 70. A credit whose
+    # field has since been genuinely filled retires inside active_score_credits
+    # rather than stacking on top of the pillar improvement it duplicates.
+    try:
+        from services.audit_service import active_score_credits
+        from services.sqs_service import _resolve_cap, final_score_with_credits
+
+        _credits_total, _credit_rows = await active_score_credits(
+            processing_session_id, facts=facts,
+        )
+        if _credits_total:
+            # Per-form ceiling uses FIELD-LEVEL stops only; the package ceiling
+            # adds the cross-form stops. Same split the scorers themselves use.
+            _form_cap, _ = _resolve_cap(re_hard, re_soft)
+            _pkg_cap, _  = _resolve_cap(hard_stops, soft_stops)
+
+            for _fid, _fdata in (generated or {}).items():
+                _s = _fdata.get("sqs") if isinstance(_fdata, dict) else None
+                if not isinstance(_s, dict) or _s.get("raw_sqs_score") is None:
+                    continue
+                _s["sqs_score"] = final_score_with_credits(
+                    _s["raw_sqs_score"], _credits_total, _form_cap,
+                )
+                _s["credits_applied"] = _credits_total
+
+            if isinstance(package_sqs, dict) and package_sqs.get("raw_sqs_score") is not None:
+                package_sqs["package_sqs_score"] = final_score_with_credits(
+                    package_sqs["raw_sqs_score"], _credits_total, _pkg_cap,
+                )
+                package_sqs["credits_applied"] = _credits_total
+            logger.info(
+                "recalc: re-applied %d credit point(s) from %d dismissal(s) (session %s)",
+                _credits_total, len(_credit_rows), processing_session_id,
+            )
+    except Exception as _cx:
+        # Non-fatal: a failure here must never break remediation. Worst case the
+        # scores stay at their freshly-computed values, i.e. the prior behaviour.
+        logger.error(f"recalc: credit re-application failed (non-fatal): {_cx}", exc_info=True)
 
     # ── Post-remediation issue diff (Figure 24) ──────────────────────────────
     # Compare the issue set BEFORE this recalculation against the one after, so

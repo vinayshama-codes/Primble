@@ -154,7 +154,9 @@
       "Bash(py -m pytest tests/test_dec_index_stage_a.py -q)",
       "Bash(grep -n \"^#\\\\|^## \\\\|^| \\\\`GAP_FILL\\\\|^### \" CALL2_RETRIEVAL_REDESIGN.md)",
       "Bash(py -m pytest tests/test_run5_authorship_and_attachment.py::test_a_mapped_section_box_still_answers_from_its_own_rule tests/test_transaction_party_and_q5.py::test_the_attachment_box_follows_the_filtered_schedule -q)",
-      "Bash(py -c \"import ast;[compile\\(open\\(p,encoding='utf-8'\\).read\\(\\),p,'exec'\\) for p in \\('services/pdf_service.py','routes/form_routes.py'\\)];print\\('compile OK'\\)\")"
+      "Bash(py -c \"import ast;[compile\\(open\\(p,encoding='utf-8'\\).read\\(\\),p,'exec'\\) for p in \\('services/pdf_service.py','routes/form_routes.py'\\)];print\\('compile OK'\\)\")",
+      "Bash(py -m pytest -q tests/test_client_findings_round3_20260816.py tests/test_client_findings_round2_20260816.py tests/test_client_findings_20260816.py tests/test_dec_entry_key_canonicalisation.py tests/test_dec_index_dedicated_pass.py)",
+      "Bash(py -m pytest -q tests/test_run_20260813i.py tests/test_fill_integrity_guards.py tests/test_authoritative_blank_contract.py tests/test_client_findings_round3_20260816.py)"
     ],
     "additionalDirectories": [
       "c:\\Users\\lenovo\\OneDrive\\Desktop\\Primble\\backend\\services"

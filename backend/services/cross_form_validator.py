@@ -408,8 +408,7 @@ def _check_umbrella_attachment_stack(
     # 2. Policy period alignment - underlying must match umbrella
     umb_eff = _fv(facts, "umbrella_effective_date")
     umb_exp = _fv(facts, "umbrella_expiration_date")
-    gl_eff  = _fv(facts, "effective_date")
-    gl_exp  = _fv(facts, "expiration_date")
+    gl_eff, gl_exp, _term_label = _package_period_on_umbrella_footing(facts)
 
     # Spec: misaligned effective/expiration dates = HARD STOP unless explained.
     # An ACORD 101 narrative is treated as the "explained" exception.
@@ -421,9 +420,9 @@ def _check_umbrella_attachment_stack(
             _date_sev,
             "umbrella_gl_period_misaligned",
             (
-                f"Umbrella effective date ({umb_eff}) does not match GL/policy "
-                f"effective date ({gl_eff}). Policy periods must align or be "
-                "explained via ACORD 101."
+                f"Umbrella effective date ({umb_eff}) does not match "
+                f"{_term_label} effective date ({gl_eff}). Policy periods must "
+                "align or be explained via ACORD 101."
             ),
             ["ACORD_125", "ACORD_131"],
         ))
@@ -433,9 +432,9 @@ def _check_umbrella_attachment_stack(
             _date_sev,
             "umbrella_gl_expiration_misaligned",
             (
-                f"Umbrella expiration date ({umb_exp}) does not match GL/policy "
-                f"expiration date ({gl_exp}). Periods must align or be explained "
-                "via ACORD 101."
+                f"Umbrella expiration date ({umb_exp}) does not match "
+                f"{_term_label} expiration date ({gl_exp}). Periods must align "
+                "or be explained via ACORD 101."
             ),
             ["ACORD_125", "ACORD_131"],
         ))
@@ -1227,6 +1226,47 @@ def _check_claims_made_prior_acts(
         ))
 
     return issues
+
+
+def _package_period_on_umbrella_footing(facts: dict):
+    """The package term that is CHRONOLOGICALLY COMPARABLE to the umbrella's
+    extracted dates, plus a label for the message.
+
+    THE DEFECT THIS FIXES (client run, 2026-08-16): the review screen showed
+    three "Umbrella policy period alignment" issues -
+
+        Umbrella effective date (07/15/25) does not match GL/policy
+        effective date (07/15/2026)
+
+    - and neither date is wrong. `umbrella_effective_date` is read off the
+    umbrella's own DEC PAGE, so on a renewal it is the EXPIRING term; and
+    `effective_date`, after `_route_renewal_dates`, is the DERIVED PROPOSED
+    renewal term. The check was comparing the expiring umbrella against the
+    proposed package - apples to oranges - and calling the difference a
+    misalignment. It is the client's own chronology rule ("existing/expiring
+    policy information, later policy changes, proposed renewal information,
+    and application dates need to remain distinct") broken inside a validator.
+
+    It was also UNRESOLVABLE, which is what the producer hit: the fix panel
+    offers the two dates it compared, so correcting either one just moves the
+    mismatch (07/15/2026 -> 09/15/2026 re-raised it as 09/15/2027), and no
+    value the producer can type makes an expiring term equal a proposed one.
+
+    On a routed renewal the comparable package term is the EXPIRING one, which
+    `_route_renewal_dates` parks in prior_effective_date/prior_expiration_date.
+    Returning those blanks when they are absent is deliberate: the caller
+    already guards on both dates being present, so "no comparable term" means
+    the check stands down rather than comparing across footings again.
+    The sibling Auto/WC check needs none of this - those dates come off their
+    own dec pages, so they share the umbrella's footing by construction.
+    """
+    if _fv(facts, "renewal_dates_routed"):
+        return (_fv(facts, "prior_effective_date"),
+                _fv(facts, "prior_expiration_date"),
+                "expiring GL/policy")
+    return (_fv(facts, "effective_date"),
+            _fv(facts, "expiration_date"),
+            "GL/policy")
 
 
 def _check_umbrella_period_vs_auto_wc(

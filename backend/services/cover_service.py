@@ -21,7 +21,17 @@ async def generate_ai_cover_narrative(
     form_ids: List[str],
     org_name: str,
     user: dict = None,
+    package_score: int = None,
 ) -> dict:
+    """Cover-page narrative.
+
+    `package_score` is the submission's real SQS, computed independently by
+    calculate_package_sqs. Pass it whenever it is available: this function used
+    to AVERAGE the per-form scores and print that as the submission score, which
+    disagreed with the score shown everywhere else in the app (2026-08-16 audit).
+    The average survives only as a fallback for callers that have no package
+    score - it is never the preferred number.
+    """
     sqs_summary = [
         {"form": fid, "score": sqs.get("sqs_score"), "grade": sqs.get("grade"),
          "tier": sqs.get("tier"), "routing": sqs.get("routing_decision"),
@@ -29,7 +39,12 @@ async def generate_ai_cover_narrative(
          "recommendations": sqs.get("recommendations", [])}
         for fid, sqs in sqs_results.items()
     ]
-    avg_sqs = int(sum(s.get("sqs_score", 0) for s in sqs_results.values()) / max(len(sqs_results), 1)) if sqs_results else 0
+    # The submission's own score. Falls back to a per-form average ONLY when no
+    # package score was supplied (legacy callers); see the docstring above.
+    if package_score is not None:
+        avg_sqs = int(package_score)
+    else:
+        avg_sqs = int(sum(s.get("sqs_score", 0) for s in sqs_results.values()) / max(len(sqs_results), 1)) if sqs_results else 0
     applicant = _fv(facts, 'applicant_name') or 'Unknown'
     _cover_cache_key = "cover_ai:" + hashlib.md5(
         f"{applicant}|{','.join(sorted(form_ids))}|{avg_sqs}|{org_name}".encode()

@@ -85,15 +85,76 @@ def test_both_conflicting_values_are_in_one_call():
     assert "$3,000,000" in out and "$1,000,000" in out
 
 
-def test_owner_is_rendered_only_when_it_carries_information():
+def test_every_owner_is_rendered_including_other():
     """`owner` is the guard against the producer's phone in the applicant's box.
-    "other" is the default and says nothing, so printing it is pure noise."""
+
+    REVERSED 2026-08-16. "other" used to be suppressed as "the default, so it
+    says nothing". The live 261-entry package disproves that: exactly ONE entry
+    carries it, and it is the Drive Other Car named individual - the value that
+    has previously been mistaken for a driver and for the applicant. A model
+    told "this person is a third party" is better armed than one told nothing.
+    """
     out = ps._render_dec_index([
         _entry("Agent Phone", "303-996-7800", None, owner="producer"),
-        _entry("Something", "Else", None, owner="other"),
+        _entry("Names Of Individuals", "ERIN ROYAL", None, owner="other"),
     ])
     assert "Agent Phone: 303-996-7800  [producer]" in out
-    assert "Something: Else\n" in out and "[other]" not in out
+    assert "Names Of Individuals: ERIN ROYAL  [other]" in out
+
+
+# ── The join keys must reach the model, not just the deterministic layer ─────
+
+def _keyed(label, value, section, policy=None, line=None, owner="policy"):
+    return {"label": label, "value": value, "section": section, "owner": owner,
+            "policy_number": policy, "line_of_business": line}
+
+
+def test_the_heading_carries_the_policy_and_the_coverage_line():
+    out = ps._render_dec_index([
+        _keyed("Each Occurrence Limit", "$1,000,000", "GL DECLARATIONS",
+               "BBC7263 - 26", "General Liability")])
+    assert "[GL DECLARATIONS  |  policy BBC7263 - 26  |  General Liability]" in out
+
+
+def test_the_underlying_schedule_rows_are_not_read_as_the_umbrella_s():
+    """THE CLIENT'S OWN DEFECT SHAPE. The umbrella's underlying-insurance
+    schedule prints the GL policy's carrier and number under a heading that says
+    UMBRELLA. The entries know better; before this change the rendering did not,
+    and the model saw only the heading."""
+    out = ps._render_dec_index([
+        _keyed("Self Insured Retention", "$ 0", "COMMERCIAL UMBRELLA SCHEDULE",
+               "6J7-40-02---26", "Commercial Umbrella"),
+        _keyed("Commercial General Liability - Company",
+               "EMC Property & Casualty Company", "COMMERCIAL UMBRELLA SCHEDULE",
+               "BBC7263 - 26", "General Liability", owner="carrier"),
+    ])
+    gl_block = out.split("policy BBC7263 - 26")[1]
+    assert "General Liability]" in gl_block
+    assert "EMC Property & Casualty Company" in gl_block
+    # and it is NOT sitting under the umbrella's own heading
+    umb = out.split("policy 6J7-40-02---26")[1].split("[")[0]
+    assert "EMC Property & Casualty" not in umb
+
+
+def test_a_missing_key_leaves_the_heading_short_rather_than_borrowing():
+    """Blank-over-wrong, applied to the heading. The common declarations page
+    genuinely has no single policy - `None` is the honest answer there."""
+    out = ps._render_dec_index([
+        _keyed("Account Number", "0482854", "Common Declarations", None, None)])
+    assert "[Common Declarations]" in out
+    assert "policy None" not in out and "|  None" not in out
+
+
+def test_one_label_value_printed_for_two_policies_stays_two_entries():
+    """The de-dup key includes the policy. Keying on (section, label, value)
+    alone would keep whichever came first and silently drop the other."""
+    out = ps._render_dec_index([
+        _keyed("Policy Period", "07/15/25 to 07/15/26", "SCHEDULE", "BBC7263 - 26",
+               "General Liability"),
+        _keyed("Policy Period", "07/15/25 to 07/15/26", "SCHEDULE", "6E7-40-02---26",
+               "Commercial Auto"),
+    ])
+    assert out.count("Policy Period: 07/15/25 to 07/15/26") == 2
 
 
 def test_an_entry_missing_a_half_is_dropped_not_rendered_blank():

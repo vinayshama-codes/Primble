@@ -560,6 +560,48 @@ def validate_effective_date_window(facts: dict) -> tuple | None:
     return None
 
 
+def _is_renewal_submission(facts: dict) -> bool:
+    """The extracted `is_renewal` fact, read affirmatively.
+
+    Mirrors how the stamping layer reads the same fact (pdf_service's Policy
+    Status family ticks RENEW on these tokens). Kept local - importing from
+    pdf_service here would be a circular import.
+    """
+    return str(_fv(facts, "is_renewal") or "").strip().lower() in (
+        "yes", "y", "true", "1", "renewal", "renew",
+    )
+
+
+def _dates_are_producer_asserted(facts: dict) -> bool:
+    """True when a HUMAN stated the policy term, rather than the pipeline having
+    read it off an uploaded carrier document.
+
+    THE DISTINCTION THIS WHOLE CHECK TURNS ON (client 2026-08-15). A broker's
+    normal workflow is to upload the CURRENT policy - a carrier declarations
+    page whose term is, by definition, the term now ending - and build the next
+    submission from it. `effective_date` / `expiration_date` are then a COPY of
+    the source document, carrying `source: "ai"`. Treating that copy as "the
+    period the applicant is proposing" is what produced a hard stop on an
+    ordinary submission, capped the package at 60, and made every other
+    remediation look dead.
+
+    A producer answer or client questionnaire answer is different in kind: a
+    person typed those dates as the term being applied for, so a term that has
+    already ended really is an application for a period that does not exist.
+    Provenance is recorded on the fact envelope itself (`source`), so this is a
+    read, not an inference.
+    """
+    _PRODUCER_SOURCES = {"producer", "client_arq", "user", "human"}
+    for key in ("effective_date", "expiration_date"):
+        raw = (facts or {}).get(key)
+        if isinstance(raw, dict):
+            if str(raw.get("source") or "").strip().lower() in _PRODUCER_SOURCES:
+                return True
+            if str(raw.get("confidence") or "").strip().lower() in ("filled", "deterministic"):
+                return True
+    return False
+
+
 def validate_policy_term_not_expired(facts: dict) -> tuple | None:
     """The proposed term has already ended.
 
@@ -595,6 +637,27 @@ def validate_policy_term_not_expired(facts: dict) -> tuple | None:
         return None
     now = datetime.now()
     if d < now - timedelta(days=30):
+        # WHOSE DATES ARE THESE? (client 2026-08-15) A hard stop here asserts
+        # "the applicant is proposing a period that already ended". That is only
+        # true if a PERSON proposed it. When the dates were read off an uploaded
+        # carrier declarations page - the ordinary case, and the only case on a
+        # dec-page-only submission - they are a copy of the EXPIRING policy's
+        # term, and the honest answer is "confirm the term you are applying
+        # for", not a submission-blocking defect that caps the score at 60.
+        #
+        # Renewal wording makes it certain; producer-typed dates make the hard
+        # stop legitimate again. Both are checked, so this behaves correctly
+        # whether or not the package happens to say the word "renewal" - the
+        # Orbin package does NOT say it anywhere in 271 pages, which is exactly
+        # why gating this on `is_renewal` alone would have fixed nothing.
+        if _is_renewal_submission(facts) or not _dates_are_producer_asserted(facts):
+            _why = ("on a Renewal submission" if _is_renewal_submission(facts)
+                    else "read from an uploaded policy document")
+            return ("soft", (
+                f"Policy term already expired ({exp}) {_why} - these dates are "
+                "the existing/expiring policy's term, not the term being "
+                "applied for. Fix: Confirm the proposed effective and "
+                "expiration dates for the new term."))
         return ("hard", (
             f"Policy term already expired ({exp}) - the application proposes a "
             "period that ended. Fix: Update the proposed effective and "
@@ -660,6 +723,22 @@ def _dec_entries_state_payroll(facts: dict) -> bool:
     """
     if (facts or {}).get("dec_states_payroll_basis"):
         return True
+    # THE CLASS SCHEDULE IS THE AUTHORITATIVE HOME for this question and is
+    # checked FIRST among the live sources (client run 2026-08-16: the warning
+    # fired again on a package whose GL schedule states "Prem Basis: Payroll /
+    # Exposure: $39,300"). `gl_class_code_schedule` carries the basis and the
+    # amount as ONE row - the client's own "exposure amount + exposure basis"
+    # relationship - so it answers "did the document state a GL exposure
+    # basis?" without depending on the dec index surviving, on which label
+    # shape the recorder chose, or on the derived flag having been written.
+    rows = _fv(facts, "gl_class_code_schedule")
+    if isinstance(rows, list):
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            if str(r.get("premium_basis") or "").strip() and re.search(
+                    r"\d", str(r.get("exposure_amount") or "")):
+                return True
     try:
         from services.extraction_service import _entries_state_payroll
     except Exception:                                      # noqa: BLE001
@@ -883,15 +962,50 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
                         "minimum preferred by umbrella markets."
                     )
 
+        # ── ONE IMPLEMENTATION, NOT TWO ─────────────────────────────────────
+        # This was a SECOND, INDEPENDENT COPY of the cross-form umbrella-period
+        # check, comparing `umbrella_effective_date` (read off the umbrella's
+        # own dec page - on a renewal, the EXPIRING term) against
+        # `effective_date` (after `_route_renewal_dates`, the DERIVED PROPOSED
+        # term). Expiring versus proposed: neither date wrong, the comparison
+        # meaningless. C64 fixed the cross-form copy and the producer's screen
+        # STILL showed "Umbrella and GL policy periods misaligned" - this
+        # copy's own wording - because the legacy engine is the one that drives
+        # the 60/85 caps.
+        #
+        # That is the third time this exact duplication has cost a fix (see the
+        # Auto hired/non-owned symbols and the Umbrella SIR entries in
+        # CLAUDE.md). So this no longer re-implements the comparison: it asks
+        # the same helper which package term shares the umbrella's footing, and
+        # a blank pair means no comparable term and no message - never a
+        # fall-back to the proposed one.
+        try:
+            from services.cross_form_validator import (
+                _package_period_on_umbrella_footing as _umb_footing)
+            gl_eff, gl_exp, _ = _umb_footing(facts)
+        except Exception:                                  # noqa: BLE001
+            gl_eff, gl_exp = _fv(facts, "effective_date"), _fv(facts, "expiration_date")
+
         umb_eff = _fv(facts, "umbrella_effective_date")
-        gl_eff  = _fv(facts, "effective_date")
         if umb_eff and gl_eff and _dates_differ(umb_eff, gl_eff):
             soft.append("Umbrella and GL policy periods misaligned.")
 
         umb_exp = _fv(facts, "umbrella_expiration_date")
-        gl_exp  = _fv(facts, "expiration_date")
         if umb_exp and gl_exp and _dates_differ(umb_exp, gl_exp):
             soft.append("Umbrella and GL expiration dates misaligned.")
+
+        # ── THE REAL UNKNOWN, WHICH SILENCE WAS HIDING ──────────────────────
+        # Removing the false misalignment left nothing at all in its place, and
+        # there IS something to say: on a renewal the umbrella's stated term is
+        # its EXPIRING one, and no document states the term being applied for.
+        # That is a genuine gap in the submission - recommended, not a hard
+        # stop (it caps nothing), and resolvable by typing the two dates.
+        if "Umbrella" in (_fv(facts, "renewal_lines_expiring") or []):
+            soft.append(
+                "Renewal: the umbrella's proposed policy term is not stated in "
+                "the documents - confirm the proposed effective and expiration "
+                "dates."
+            )
 
         # REMOVED 2026-08-12 - "Umbrella SIR is lower than GL deductible", a
         # HARD STOP that fired on the ordinary structure and therefore capped
@@ -1382,7 +1496,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     if "fein" not in confirmed_keys and len(distinct_normalized("fein", fein_raw)) > 1:
         issues.append(
             "[hard_stop] code=fein_conflict "
-            "FEIN differs across uploaded documents. Submission blocked."
+            "FEIN differs across uploaded documents. Score is capped at 60 until this is confirmed."
             + _bracket("fein", _DATA_CONSISTENCY_FIX)
         )
 
@@ -1413,7 +1527,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     elif len(distinct_normalized("effective_date", eff_raw)) > 1:
         issues.append(
             f"{_date_prefix} code=date_conflict "
-            "Policy date mismatch across documents. Submission blocked unless explained."
+            "Policy date mismatch across documents. Score is capped at 60 unless the difference is explained."
             + _bracket("effective_date", _DATA_CONSISTENCY_FIX + " Or add an ACORD 101 explanation of the date difference.")
         )
     elif len(eff_raw) >= 2 and _raw_differ(eff_raw):
@@ -1425,7 +1539,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     elif len(distinct_normalized("expiration_date", exp_raw)) > 1:
         issues.append(
             f"{_date_prefix} code=expiration_conflict "
-            "Policy expiration date mismatch across documents. Submission blocked unless explained."
+            "Policy expiration date mismatch across documents. Score is capped at 60 unless the difference is explained."
             + _bracket("expiration_date", _DATA_CONSISTENCY_FIX + " Or add an ACORD 101 explanation of the date difference.")
         )
     elif len(exp_raw) >= 2 and _raw_differ(exp_raw):
@@ -1468,6 +1582,82 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     # and no user-confirmation path - so it is intentionally not duplicated.
 
     return issues
+
+
+# ── Cross-document issue parsing (single source of truth) ─────────────────────
+# check_doc_consistency() returns tagged strings ("[hard_stop] code=x <msg>").
+# extraction_pipeline used to parse them inline; the two rescore paths did not
+# re-run the detector at all, so its hard stops silently vanished from the cap
+# list on every recalculation while their cards stayed on screen. The parser now
+# lives here, next to its producer, and every caller uses it - a second copy is
+# exactly what let that divergence exist.
+
+_DOC_ISSUE_TOKEN_RE = re.compile(r"^(?:field|code)=(\S+)\s*")
+
+
+def split_doc_consistency_issues(
+    issues: List[str],
+) -> Tuple[List[str], List[str], List[str], List[dict]]:
+    """Split check_doc_consistency() output into its four severities.
+
+    Returns (hard_msgs, soft_msgs, info_msgs, doc_conflicts) where the message
+    strings have had their machine token stripped exactly as extraction_pipeline
+    has always stripped it - the text must stay byte-identical or issue_id
+    hashing, dedupe and stored resolution status all stop matching.
+    """
+    hard: List[str] = []
+    soft: List[str] = []
+    info: List[str] = []
+    conflicts: List[dict] = []
+
+    for issue in issues or []:
+        if issue.startswith("[hard_stop]"):
+            rest = issue[len("[hard_stop]"):].strip()
+            code_part, _, msg = rest.partition(" ")
+            code = code_part.split("=", 1)[1] if "=" in code_part else "conflict"
+            conflicts.append({"code": code, "message": msg, "hard_stop": True})
+            hard.append(msg)
+        elif issue.startswith("[warning]"):
+            rest = issue[len("[warning]"):].strip()
+            _m = _DOC_ISSUE_TOKEN_RE.match(rest)
+            code = _m.group(1) if _m else "conflict"
+            soft.append(_DOC_ISSUE_TOKEN_RE.sub("", rest))
+            conflicts.append({"code": code, "message": soft[-1], "hard_stop": False})
+        elif issue.startswith("[info]"):
+            info.append(_DOC_ISSUE_TOKEN_RE.sub("", issue[len("[info]"):].strip()))
+        else:
+            # Unknown prefix - treat as a warning so it can never silently cap at 60.
+            soft.append(issue)
+
+    return hard, soft, info, conflicts
+
+
+def doc_consistency_stops(session_data: dict) -> Tuple[List[str], List[str]]:
+    """Re-run the cross-document identity checks against a STORED session.
+
+    The rescore paths rebuild `hard_stops` from scratch; without this they drop
+    the applicant-name / FEIN / effective-date / expiration-date conflicts and
+    stop capping a submission that is still in conflict. Values already confirmed
+    in the Data Consistency picker are excluded, matching the extraction path.
+
+    Fails open (returns empty lists) - a rescore must never break because a
+    legacy session stored its documents in an older shape.
+    """
+    try:
+        docs = [
+            d for d in ((session_data or {}).get("docs") or [])
+            if isinstance(d, dict) and not d.get("excluded") and isinstance(d.get("facts"), dict)
+        ]
+        if len(docs) < 2:
+            return [], []          # nothing to compare against
+        confirmed = set(((session_data or {}).get("underwriting_confirmations") or {}).keys())
+        hard, soft, _info, _conf = split_doc_consistency_issues(
+            check_doc_consistency(docs, confirmed)
+        )
+        return hard, soft
+    except Exception as exc:                                   # pragma: no cover
+        logger.error("doc_consistency_stops failed (non-fatal): %s", exc, exc_info=True)
+        return [], []
 
 
 # ── Confidence-weighted fill rate ────────────────────────────────────────────
@@ -3297,6 +3487,94 @@ SPEC_PILLAR_WEIGHTS = {
     "narrative_quality":       0.10,    # ACORD 101 clarity
 }
 
+# ── Score caps and credits ───────────────────────────────────────────────────
+# Behaviour is UNCHANGED from the three inline copies this replaces: a cap is a
+# CEILING, never a floor (a submission already below it keeps its own value - 42
+# with a hard stop stays 42 and is never raised to 60), hard takes absolute
+# precedence over soft, and stops never stack, so one hard stop and fifteen
+# produce the identical ceiling. The only additions are a single source of truth
+# and a recorded REASON, so a capped score can be audited without reading code.
+#
+# WORDING: hard stops and warnings do NOT block anything. Nothing in the product
+# gates generation or download on them. Their only effect is the ceiling below
+# plus the card rendered on screen. Do not reintroduce "blocked" language.
+
+HARD_STOP_CAP = 60
+SOFT_STOP_CAP = 85
+
+
+def _resolve_cap(
+    hard_stops: Optional[List[str]],
+    soft_stops: Optional[List[str]],
+    hard_cross: Optional[List[str]] = None,
+    extra_hard_reason: Optional[str] = None,
+    extra_soft_reason: Optional[str] = None,
+) -> Tuple[Optional[int], Optional[str]]:
+    """Return (cap, reason) for the current stop set, or (None, None) if uncapped.
+
+    `reason` names the specific condition that caused the cap so a score reads as
+    one sentence - "88 raw, held at 60 by <reason>". `extra_*_reason` carries the
+    per-form gates (COPE=0, umbrella=0, property hard/soft) that live outside
+    either list.
+    """
+    _hard = [str(m) for m in (hard_stops or []) if m]
+    _hard += [str(m) for m in (hard_cross or []) if m]
+    if extra_hard_reason:
+        _hard.append(extra_hard_reason)
+    if _hard:
+        return HARD_STOP_CAP, _hard[0]
+
+    _soft = [str(m) for m in (soft_stops or []) if m]
+    if extra_soft_reason:
+        _soft.append(extra_soft_reason)
+    if _soft:
+        return SOFT_STOP_CAP, _soft[0]
+
+    return None, None
+
+
+def tier_for_score(score: int) -> Tuple[str, str, str]:
+    """Return (grade, tier, tier_color) - the single tier ladder.
+
+    A score of 90 or above is "Submission Ready" (owner decision, 2026-08-16).
+
+    This boundary previously disagreed with itself in three places: both scorers
+    used `> 90` while audit_routes._grade_from_score and BOTH frontend readiness
+    surfaces ("Quote Ready" on the session list, "Ready to Send Submission" on
+    the banner) used `>= 90`. A submission scoring exactly 90 therefore showed
+    "Almost There" on its tier chip and "Ready to Send Submission" on the banner
+    beside it. Everything now resolves through this function at `>= 90`, which
+    is also where the "A" grade already sat, so the letter and the label agree.
+    """
+    score = int(score or 0)
+    grade = "A" if score >= 90 else "B" if score >= 80 else "C" if score >= 70 else "D" if score >= 60 else "F"
+    if score >= 90:
+        return grade, "Submission Ready", "green"
+    if score >= 80:
+        return grade, "Almost There", "yellow"
+    if score >= 70:
+        return grade, "Needs Work", "orange"
+    if score >= 60:
+        return grade, "Major Gaps", "red"
+    return grade, "Not Ready", "red"
+
+
+def final_score_with_credits(
+    raw_uncapped: int,
+    credits_total: int = 0,
+    cap: Optional[int] = None,
+) -> int:
+    """The number shown to the user: raw + earned credits, then capped.
+
+    Credits are added to the RAW score, never to an already-capped one, so
+    clearing the stops releases the full value the submission actually earned
+    (owner's worked example: raw 65 capped to 60, +10 credited, stops then
+    cleared -> 75, not 70). The cap still binds while a stop is open.
+    """
+    total = int(raw_uncapped or 0) + int(credits_total or 0)
+    total = max(0, min(100, total))
+    return total if cap is None else min(total, int(cap))
+
 
 def _present_doc_types(session_data: dict) -> set:
     """Set of canonical doc_types present in the session (Beta Report §4.2).
@@ -3602,22 +3880,23 @@ def calculate_package_sqs(
             p5 * SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"] +
             p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
         )
-    if hard_stops or hard_cross:
-        raw = min(raw, 60)
-    elif soft_stops:
-        raw = min(raw, 85)
+    # The UNCAPPED weighted sum is preserved before capping. It used to be
+    # overwritten here, which made a capped score impossible to audit (an 88 held
+    # at 60 was indistinguishable from a genuine 60) and meant later gains had to
+    # compound off the capped value instead of the real one. Owner's rule: keep
+    # the raw score, cap only what is DISPLAYED, and add any later gain to the
+    # raw - so raw 65 capped to 60, then +10 earned, must read 75 and not 70.
+    raw_uncapped = max(0, min(100, raw))
+    cap_applied, cap_reason = _resolve_cap(
+        hard_stops, soft_stops,
+        hard_cross=[i.get("message") for i in hard_cross if isinstance(i, dict)],
+    )
+    raw = raw_uncapped if cap_applied is None else min(raw_uncapped, cap_applied)
     raw = max(0, min(100, raw))
 
-    # Tier boundary aligned with the frontend submission banner: "Submission Ready"
-    # (and "Ready for submission") require a score ABOVE 90, so exactly 90 reads as
-    # "Almost There" / "Ready to Download Forms" - the two never disagree at 90.
-    tier = (
-        "Submission Ready" if raw > 90 else
-        "Almost There"     if raw >= 80 else
-        "Needs Work"       if raw >= 70 else
-        "Major Gaps"       if raw >= 60 else
-        "Not Ready"
-    )
+    # Single tier ladder (tier_for_score). 90+ is "Submission Ready", matching
+    # the frontend readiness surfaces and the "A" grade boundary.
+    tier = tier_for_score(raw)[1]
 
     history   = list(session_data.get("sqs_history", []))
     stage     = calculation_stage
@@ -3754,6 +4033,13 @@ def calculate_package_sqs(
 
     return {
         "package_sqs_score": raw,
+        # Audit trail for the cap (2026-08-16). `package_sqs_score` is what the
+        # user sees; these three say what it would have been and why it was held.
+        # raw_sqs_score is also the base every later credit is added to, so a
+        # released cap returns the full value the submission actually earned.
+        "raw_sqs_score":     raw_uncapped,
+        "cap_applied":       cap_applied,
+        "cap_reason":        cap_reason,
         "tier": tier,
         "lob": lob,
         "pillars": {
@@ -3886,22 +4172,21 @@ def calculate_package_sqs_spec_compliant(
             p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
         )
 
-    # Hard/soft stop penalties
+    # Hard/soft stop penalties. Uses the SHARED cap resolver and tier ladder so
+    # this retained-for-imports variant cannot drift from the live scorer - it
+    # previously carried its own copy of both, including a tier ladder that
+    # returned "Submission Ready" at exactly 90 where the live scorer requires
+    # ABOVE 90 (2026-08-16 audit).
     hard_cross = [i for i in cross_issues if i.get("type") == "hard_stop"]
-    if hard_stops or hard_cross:
-        raw = min(raw, 60)
-    elif soft_stops:
-        raw = min(raw, 85)
+    raw_uncapped = max(0, min(100, raw))
+    cap_applied, cap_reason = _resolve_cap(
+        hard_stops, soft_stops,
+        hard_cross=[i.get("message") for i in hard_cross if isinstance(i, dict)],
+    )
+    raw = raw_uncapped if cap_applied is None else min(raw_uncapped, cap_applied)
     raw = max(0, raw)
 
-    # Tier determination - spec: 90 / 80 / 70 / 60 / <60
-    tier = (
-        "Submission Ready" if raw >= 90 else
-        "Almost There"     if raw >= 80 else
-        "Needs Work"       if raw >= 70 else
-        "Major Gaps"       if raw >= 60 else
-        "Not Ready"
-    )
+    tier = tier_for_score(raw)[1]
 
     # SQS history - copy the list so we don't mutate the caller's session_data
     # by reference (concurrent callers would otherwise share the same list).
@@ -4820,24 +5105,32 @@ def calculate_sqs(
     cope_hard = fid in ("ACORD_140", "ACORD_141", "ACORD_133") and breakdown["property_integrity"] == 0
     umb_fail  = flags.get("has_umbrella") and umbrella_score is not None and umbrella_score == 0
 
-    if hard_stops or cope_hard or umb_fail or _prop_hard:
-        raw_score = min(raw_score, 60)
-    elif soft_stops or _prop_soft:
-        raw_score = min(raw_score, 85)
+    # Preserve the UNCAPPED score before the ceiling is applied (2026-08-16).
+    # It used to be overwritten, so a capped form score could not be told apart
+    # from a genuinely low one, and later credits had to compound off the capped
+    # value instead of the real one.
+    raw_uncapped = max(0, min(100, raw_score))
+    cap_applied, cap_reason = _resolve_cap(
+        hard_stops, soft_stops,
+        extra_hard_reason=(
+            "Minimum Viable COPE incomplete" if cope_hard else
+            "Umbrella present with no underlying GL or Auto limits" if umb_fail else
+            "Property integrity gate" if _prop_hard else None
+        ),
+        extra_soft_reason="Property integrity warning" if _prop_soft else None,
+    )
+    if cap_applied is not None:
+        raw_score = min(raw_score, cap_applied)
 
+    # fraud_penalty is applied AFTER the cap, exactly as before. It is currently
+    # always 0 (never assigned anywhere), so this ordering is behaviour-neutral -
+    # it is preserved rather than "improved" so nothing shifts silently.
     raw_score = max(0, raw_score - fraud_penalty)
 
     # ── Tier and routing ──────────────────────────────────────────────────────
-    # Top boundary uses ">" 90 to match the package tier ladder (calculate_package_sqs)
-    # and the submission banner: exactly 90 reads as "Almost There", not "Submission
-    # Ready", so the form chip and the package chip never disagree at 90.
-    tier, tc = (
-        ("Submission Ready", "green")  if raw_score > 90 else
-        ("Almost There",     "yellow") if raw_score >= 80 else
-        ("Needs Work",       "orange") if raw_score >= 70 else
-        ("Major Gaps",       "red")    if raw_score >= 60 else
-        ("Not Ready",        "red")
-    )
+    # Single tier ladder (tier_for_score), shared with the package scorer and
+    # audit_routes, so the form chip and the package chip can never disagree.
+    _grade_label, tier, tc = tier_for_score(raw_score)
     routing = (
         "auto_quote"      if raw_score > 85 else
         "priority_review" if raw_score >= 70 else
@@ -4888,9 +5181,13 @@ def calculate_sqs(
 
     return {
         "sqs_score":           raw_score,
+        # Cap audit trail (2026-08-16) - see calculate_package_sqs for the rule.
+        "raw_sqs_score":       raw_uncapped,
+        "cap_applied":         cap_applied,
+        "cap_reason":          cap_reason,
         "tier":                tier,
         "tier_color":          tc,
-        "grade":               "A" if raw_score >= 90 else "B" if raw_score >= 80 else "C" if raw_score >= 70 else "D" if raw_score >= 60 else "F",
+        "grade":               _grade_label,   # from the shared tier ladder
         "routing_decision":    routing,
         "breakdown":           breakdown,   # umbrella_limit_adequacy may be None
         "risk_drivers":        risk_drivers,
