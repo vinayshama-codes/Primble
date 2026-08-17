@@ -928,6 +928,13 @@ const isUnderwriting = (q) => !isClientFacing(q) && !isNeverSend(q) && !isAgency
 // and the no-taxonomy fallback selects everything by default.
 const SHOW_UNDERWRITING_REVIEW_BUCKET = false;
 
+// TEMPORARILY HIDDEN (client request): the non-selectable "Never send" row in the
+// Send-to-Client questionnaire. Its markup is kept intact - flip this back to true
+// to re-introduce it exactly as it was. Do not delete it. No selection guard is
+// needed here: these rows are non-selectable by design and the classifier already
+// marks them suppressed, so hiding them cannot send anything to a client.
+const SHOW_NEVER_SEND_BUCKET = false;
+
 function ScoreImpactBadges({ q }) {
   const si = q.score_impact || {};
   const badges = [];
@@ -1385,8 +1392,11 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
             </div>
           )}
 
-          {/* ── Never send (non-selectable): fax numbers, barcodes, system IDs ── */}
-          {neverSendQuestions.length > 0 && (
+          {/* ── Never send (non-selectable): fax numbers, barcodes, system IDs ──
+              TEMPORARILY HIDDEN (client request) via SHOW_NEVER_SEND_BUCKET at the
+              top of this file. The markup below is deliberately left intact - set
+              that constant back to true to re-introduce this row. ── */}
+          {SHOW_NEVER_SEND_BUCKET && neverSendQuestions.length > 0 && (
             <div style={{ marginTop: 8, border: "1px dashed #fca5a5", borderRadius: 10, background: "#fff5f5" }}>
               <button onClick={() => setShowNeverSend(s => !s)}
                 style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>

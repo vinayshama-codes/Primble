@@ -263,7 +263,8 @@
       "Bash(echo \"--- exit: $? \\(no output above = none\\) ---\")",
       "PowerShell(npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1)",
       "PowerShell($env:VITE_API_BASE = \"https://api.primble.io\"; npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1 | Select-Object -Last 12)",
-      "PowerShell($env:VITE_API_BASE = \"https://api.primble.io\"; npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1 | Select-Object -Last 8)"
+      "PowerShell($env:VITE_API_BASE = \"https://api.primble.io\"; npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1 | Select-Object -Last 8)",
+      "PowerShell($env:VITE_API_BASE = \"https://api.primble.io\"; npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1 | Select-Object -Last 6)"
     ],
     "additionalDirectories": [
       "\\tmp",
