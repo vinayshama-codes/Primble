@@ -683,6 +683,37 @@ def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP
     Returns a summary count dict for the UI header.
     """
     selected = 0
+
+    # Rank by what the question is WORTH before deciding what to pre-tick.
+    #
+    # Client, 2026-08-17: "Loss History is currently 45%, and the scoring
+    # specification confirms that an insured no-loss attestation would improve
+    # that pillar to 60. Yet the loss-history question is not pre-selected while
+    # Submission Urgency is."
+    #
+    # He was right, and the cause was structural: priority is a STATIC tier
+    # label describing what a complete submission needs, never what THIS one is
+    # missing or what closing it is worth. Submission Urgency then reached the
+    # top through a hand-coded exception while carrying zero scoring value.
+    #
+    # `sqs_points` is the measured gain the scorer now attaches to its own
+    # recommendations (sqs_service._measure_recommendation_impacts). Questions
+    # are processed highest-value first, so a fixed cap spends itself on the
+    # gaps that actually move the submission. Questions with no measured value
+    # keep their existing relative order - this only ever promotes, never demotes.
+    _priority_rank = {
+        PRIORITY_CRITICAL: 0, PRIORITY_IMPORTANT: 1,
+        PRIORITY_OPTIONAL: 2, PRIORITY_INTERNAL: 3, PRIORITY_SUPPRESSED: 4,
+    }
+    ordered = sorted(
+        enumerate(questions),
+        key=lambda iq: (
+            _priority_rank.get(iq[1].get("priority", PRIORITY_OPTIONAL), 5),
+            -float(iq[1].get("sqs_points") or 0),
+            iq[0],                      # stable: original order breaks ties
+        ),
+    )
+
     counts = {
         "total": len(questions),
         "client": 0, "producer": 0, "internal": 0, "do_not_send": 0, "carrier": 0,
@@ -694,10 +725,11 @@ def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP
         "default_selected": 0, "suggested": 0, "suppressed": 0,
     }
 
-    for q in questions:
+    for _idx, q in ordered:
         audience  = q.get("audience", AUDIENCE_CLIENT)
         priority  = q.get("priority", PRIORITY_OPTIONAL)
         suppressed = bool(q.get("suppressed"))
+        points     = float(q.get("sqs_points") or 0)
 
         counts[audience] = counts.get(audience, 0) + 1
         bucket = q.get("bucket") or _AUDIENCE_TO_BUCKET.get(audience, BUCKET_UNDERWRITING)
@@ -716,7 +748,14 @@ def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP
         elif is_client and priority == PRIORITY_IMPORTANT:
             q["suggested"] = True
             counts["suggested"] += 1
-            if q.get("field_name") in _FORCE_PRESELECT_FIELDS and selected < cap:
+            # An Important question that MEASURABLY moves the score is pre-ticked.
+            # This is what the client asked for: the loss attestation is worth
+            # real points and was only suggested, while a zero-value question was
+            # pre-ticked by hand. `_FORCE_PRESELECT_FIELDS` still holds (the
+            # approved mockup shows Urgency ticked) but it is now last in line
+            # rather than ahead of everything that matters.
+            if (points > 0 or q.get("field_name") in _FORCE_PRESELECT_FIELDS) \
+                    and selected < cap:
                 q["default_selected"] = True
                 selected += 1
                 counts["default_selected"] += 1

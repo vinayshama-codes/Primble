@@ -207,6 +207,13 @@ def test_ownership_check_is_scoped_to_the_named_resolvers():
         # the invention; fact-or-blank is the only honest resolution. Same
         # shape as the deposit box above.
         "_resolve_payment_schedule": 1,
+        # +3 on 2026-08-17: NO. OF MEMBERS AND MANAGERS, rows A/B/C. The
+        # client's run printed a fabricated "1". "member" appears 0 times
+        # across all 275 dec-index entries and no fact in the registry carries
+        # it - an LLC's member count is organisational data the producer
+        # supplies, so a declarations page has no reason to state it and gap
+        # fill can only invent. Same shape as the deposit box above.
+        "_resolve_member_manager_count": 3,
     }, {k: len(v) for k, v in sorted(claimants.items())}
     # 113 of 548 on ACORD 125 (20.6%). The ceiling exists so the contract can
     # never quietly swallow a form, and it BIT on 2026-08-13 when the

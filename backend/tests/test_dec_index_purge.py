@@ -97,6 +97,22 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
                                    # during generation, before the purge)
         "form_routes.py",          # the coverage report and this purge
         "text_selection.py",       # the rescue net, during gap fill
+        # fact_equivalence.PackageContext (2026-08-17). THIS ONE DOES RUN AFTER
+        # GENERATION - every producer answer re-runs the pipeline - so it was
+        # measured rather than waved through:
+        #   * `coverage_lines` SURVIVES the purge and carries the policy
+        #     numbers. Verified on a real session: stripping dec_page_entries
+        #     left contracts={BBC7263-26, 6E7-40-02---26, 6J7-40-02---26,
+        #     6C7-40-02---26} and is_multi_contract still True.
+        #   * PER-DOCUMENT `dec_page_entries` are untouched by the purge, which
+        #     only deletes the MERGED session fact. Second, independent source.
+        # So the multi-contract signal survives and no extra data is retained.
+        # Degrades safely in any case: no evidence means no opinion, which is
+        # exactly today's behaviour.
+        # NOTED, out of scope: the purge is therefore less complete than its
+        # comment implies - the per-document copies remain. That is a
+        # data-minimisation question for the owner, not a correctness one.
+        "fact_equivalence.py",
         "sqs_service.py",          # GL exposure warning: reads entries live, and
                                    # the purge-surviving dec_states_payroll_basis
                                    # fact on post-generation recalcs - same answer

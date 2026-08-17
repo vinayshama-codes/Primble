@@ -1969,6 +1969,9 @@ _AUTHORITATIVE_BLANK_RESOLVERS = (
     "_resolve_vehicle_deductible_cell",
     # Producer-assigned certificate/revision numbers: no uploaded document can
     # state them, so gap fill reading a policy number there is always wrong.
+    # NO. OF MEMBERS AND MANAGERS: organisational data no carrier document
+    # states. Owned blank; a live run printed a fabricated "1".
+    "_resolve_member_manager_count",
     "_resolve_certificate_producer_ids",
     # The certificate's OTHER policy row: the one leftover coverage line's own
     # identity or blank - never a fabricated number/date/waiver pairing.
@@ -1985,6 +1988,11 @@ _AUTHORITATIVE_BLANK_RESOLVERS = (
     "_resolve_auto_liability_limit_cell",
     "_resolve_other_policy_cell",
     "_resolve_other_lob_row",
+    # The 15 enumerated LINES OF BUSINESS boxes: ticked only where the package's
+    # own granted lines (or an existing flag) name them. Every one of them used
+    # to be asked of the model, which ticked CYBER AND PRIVACY off a General
+    # Liability EXCLUSION title. See _resolve_standard_lob_box.
+    "_resolve_standard_lob_box",
     "_resolve_policy_status",
     "_resolve_additional_interest_type",
     "_resolve_address_line_two",
@@ -2169,6 +2177,72 @@ def _looks_like_a_form_number(value: Any) -> bool:
     return bool(_FORM_NUMBER_RE.match(str(value or "").strip()))
 
 
+# ── ONE POLICY PRINTED TWO WAYS IS STILL ONE POLICY ─────────────────────────
+# Client audit 2026-08-17, ACORD 125 Q4. The grid printed:
+#
+#   Liability                | BBC7263 - 26        Inland Marine | 6C7-40-02---26
+#   (blank)                  | 6E74002             Covered Autos Liability | 6E7-40-02---26
+#
+# `6E74002` and `6E7-40-02---26` are THE SAME Commercial Auto policy: the
+# `---26` tail is the policy TERM marker, printed on 6C7 and 6J7 too, and the
+# umbrella's schedule of underlying insurance refers to the auto policy without
+# it ("Commercial Auto Liability Policy Number = 6E74002"). Counting them as two
+# policies cost the grid two of its four slots for one contract and pushed the
+# UMBRELLA off the form entirely - a real policy displaced by a duplicate.
+#
+# The suffix must be SEPARATED in the printed string ("---26", " - 26") for the
+# two to merge. That is what keeps "POL123" and "POL12345" apart: their digits
+# run together, so they stay two policies.
+def _same_policy_contract(a: Any, b: Any) -> bool:
+    x, y = _norm_policy_no(a), _norm_policy_no(b)
+    if not x or not y:
+        return False
+    if x == y:
+        return True
+    (lo, raw_lo), (hi, raw_hi) = sorted(
+        ((x, str(a or "")), (y, str(b or ""))), key=lambda p: len(p[0]))
+    if len(lo) < 5 or not hi.startswith(lo):
+        return False
+    if not re.fullmatch(r"\d{2}", hi[len(lo):]):
+        return False
+    # The tail is a term marker only if the document printed it separated.
+    return bool(re.search(r"[\s\-]\s*\d{2}\s*$", raw_hi.strip()))
+
+
+def _dedupe_rows_by_policy_contract(rows: List[dict]) -> List[dict]:
+    """One row per POLICY, keeping the entry whose name actually names a line of
+    business. "Covered Autos Liability" is a coverage PART printed on the auto
+    declarations; "Business Auto" is the line. Both carry the auto policy's
+    number, so the grid must show ONE row - and it must be the line."""
+    index = _lob_indicator_index()
+
+    def _names_a_standard_line(name: str) -> bool:
+        doc = _lob_tokens(name)
+        return bool(doc) and any(
+            doc == ts for token_sets in index.values() for ts in token_sets)
+
+    groups: List[List[dict]] = []
+    for e in rows:
+        for g in groups:
+            if _same_policy_contract(g[0].get("policy_number"),
+                                     e.get("policy_number")):
+                g.append(e)
+                break
+        else:
+            groups.append([e])
+    out: List[dict] = []
+    for g in groups:
+        best = next((e for e in g if _names_a_standard_line(
+            str(e.get("line") or ""))), g[0])
+        if len(g) > 1:
+            logger.info(
+                "other_policy: %d printings of one policy collapsed to %r "
+                "(dropped %s)", len(g), str(best.get("line"))[:40],
+                [str(e.get("line"))[:28] for e in g if e is not best])
+        out.append(best)
+    return out
+
+
 def _resolve_other_policy_cell(field_name: str, facts: dict):
     m = _OTHER_POLICY_LINE_RE.match(field_name)
     if not m:
@@ -2222,18 +2296,12 @@ def _resolve_other_policy_cell(field_name: str, facts: dict):
         if not number:
             continue
         rows.append(dict(e, policy_number=number))
-    # One row per DISTINCT policy number. A live run stamped the same number on
-    # every Q4 row because extraction attached one number to several lines —
-    # visibly wrong on the form, and a duplicate row carries no information.
-    seen_numbers: set = set()
-    unique_rows = []
-    for e in rows:
-        pn_key = re.sub(r"[^a-z0-9]", "", str(e.get("policy_number")).lower())
-        if pn_key in seen_numbers:
-            continue
-        seen_numbers.add(pn_key)
-        unique_rows.append(e)
-    rows = unique_rows
+    # One row per DISTINCT POLICY. A live run stamped the same number on every
+    # Q4 row because extraction attached one number to several lines - visibly
+    # wrong on the form, and a duplicate row carries no information. "Distinct"
+    # compares CONTRACTS, not strings: the same policy printed with and without
+    # its term marker used to take two slots and displace a real policy.
+    rows = _dedupe_rows_by_policy_contract(rows)
     idx = _ROW_LETTER_TO_IDX[letter]
     if idx >= len(rows):
         return None
@@ -2942,6 +3010,98 @@ def _other_lob_row_names(facts: dict) -> Optional[List[str]]:
         if name not in rows:
             rows.append(name)
     return rows
+
+
+# ── THE ENUMERATED LINE-OF-BUSINESS GRID WAS ENTIRELY MODEL-GUESSED ──────────
+# Client audit 2026-08-17: ACORD 125 shipped CYBER AND PRIVACY ticked, with no
+# premium beside it. The word "cyber" appears NOWHERE in the 271-page package -
+# measured, 0 of 275 dec-index entries. The single "privacy" hit is a General
+# Liability EXCLUSION form title:
+#
+#   Form CG 00 69 12 23 = "Exclusion - Violation of Law Addressing Data ..."
+#
+# So the model ticked a line of business off a clause saying the policy does NOT
+# cover it. Mention-versus-grant, on the box that declares what the applicant is
+# applying for.
+#
+# Measured cause: **all 15 enumerated LOB checkboxes were asked of the model.**
+# `_INDICATOR_RULES` maps every one of them to a flag, but `_derive_indicator`
+# returns None when that flag is absent, and None falls through to gap fill. So
+# "the document never said" became "let the model decide" - the inversion of the
+# client's rule 4, and the reason last round's fabrication simply moved from the
+# OTHER rows (hardened) to the named boxes beside them (not hardened).
+#
+# The grid is now owned by the package's own line inventory - the twin of
+# `_other_lob_row_names`. A box ticks when a GRANTED `coverage_lines` entry names
+# it (ACORD's own checkbox wording, via `_lob_indicator_index`) OR when the
+# existing flag rule already answers Yes, so nothing that ticks today stops
+# ticking. Everything else is an authoritative blank. No `coverage_lines` at all
+# -> _SCHED_SKIP, legacy behaviour byte-identical.
+_ENUM_LOB_BOX_RE = re.compile(r"^Policy_LineOfBusiness_(?!Other)(\w+?)_([A-N])$")
+
+
+def _evidenced_standard_lob_boxes(facts: dict) -> Optional[frozenset]:
+    """Row-stripped LOB checkbox names the granted lines name, or None when
+    there is no per-line inventory to reason from."""
+    lines = _fv(facts, "coverage_lines")
+    if not isinstance(lines, list) or not lines:
+        return None
+    try:
+        from services.extraction_service import _line_entry_grants_coverage
+    except Exception:                                     # noqa: BLE001
+        def _line_entry_grants_coverage(_e):              # type: ignore
+            return True
+    index = _lob_indicator_index()
+    out: set = set()
+    for entry in lines:
+        if not isinstance(entry, dict):
+            continue
+        # A line that states its OWN POLICY NUMBER is carried, whether or not
+        # its premium was captured - the same identity-versus-grant distinction
+        # the package header needed. The 08/17 run stated four policy numbers
+        # and no premiums; requiring the grant test alone blanked the whole
+        # grid, including four boxes that were ticking correctly.
+        has_own_number = bool(str(entry.get("policy_number") or "").strip()) \
+            and not _looks_like_a_form_number(entry.get("policy_number"))
+        if not has_own_number and not _line_entry_grants_coverage(entry):
+            continue
+        doc = _lob_tokens(str(entry.get("line") or ""))
+        if not doc:
+            continue
+        # A name that fits SEVERAL boxes places NONE of them. A bare "Liability"
+        # matches General Liability, Fiduciary Liability AND Liquor Liability -
+        # the first cut of this resolver ticked all three off the client's own
+        # dec-page row label. `_resolve_lob_premium` and `_standard_lob_box_for`
+        # already refuse in exactly this case; so does this.
+        hits = [field for field, token_sets in index.items()
+                if any(_tokens_describe_same_line(doc, ts) for ts in token_sets)]
+        if len(hits) == 1:
+            out.add(re.sub(r"_[A-N]$", "", hits[0]))
+        elif len(hits) > 1:
+            logger.info(
+                "lob-grid: line %r fits %d checkboxes - placing none of them",
+                str(entry.get("line"))[:40], len(hits))
+    return frozenset(out)
+
+
+def _resolve_standard_lob_box(field_name: str, facts: dict):
+    m = _ENUM_LOB_BOX_RE.match(field_name)
+    if not m:
+        return _SCHED_SKIP
+    evidenced = _evidenced_standard_lob_boxes(facts)
+    if evidenced is None:
+        return _SCHED_SKIP                 # no per-line data - legacy path
+    if re.sub(r"_[A-N]$", "", field_name) in evidenced:
+        return "Yes"
+    # The flag rules keep their say, so a line the inventory happens not to name
+    # is not silently dropped - but a box no evidence supports is an owned
+    # blank, never a question for the model.
+    if _derive_indicator(field_name, facts) == "Yes":
+        return "Yes"
+    logger.info(
+        "lob-grid: %s left blank - no granted coverage line and no flag names "
+        "this line of business", field_name)
+    return None
 
 
 def _resolve_other_lob_row(field_name: str, facts: dict):
@@ -5115,6 +5275,24 @@ _CERT_ID_FACTS = {
 }
 
 
+# ── NO. OF MEMBERS AND MANAGERS is not on any carrier document ───────────────
+# Client audit 2026-08-17: ACORD 125 printed "1" there. The package never says
+# it - measured, 0 hits for "member" across all 275 dec-index entries - and no
+# fact in the registry carries it, so the box was pure gap fill and the value
+# pure invention. An LLC's member/manager count is ORGANISATIONAL data the
+# producer or applicant supplies; a declarations page has no reason to state it.
+# Owned blank on every form, and never asked - same contract as the
+# producer-assigned certificate identifiers below.
+_MEMBER_COUNT_RE = re.compile(
+    r"^NamedInsured_LegalEntity_MemberManagerCount_[A-Z]$")
+
+
+def _resolve_member_manager_count(field_name: str, facts: dict):
+    if not _MEMBER_COUNT_RE.match(field_name):
+        return _SCHED_SKIP
+    return None
+
+
 def _resolve_certificate_producer_ids(field_name: str, facts: dict):
     m = _CERT_PRODUCER_IDS_RE.match(field_name)
     if not m:
@@ -5305,6 +5483,47 @@ _PACKAGE_HEADER_RE = re.compile(
     r"^(?:(Policy_PolicyNumberIdentifier)_A|(Insurer_NAICCode)_([A-Z]))$")
 
 
+# ── COUNT THE POLICIES, NOT ONE FACT'S OPINION OF THEM ───────────────────────
+# Round 14 blanked the package header when `coverage_lines` itself stated two or
+# more policy numbers. The 2026-08-17 run then printed 6E7-40-02---26 again,
+# because on THAT run the numbers reached the form from elsewhere: Q4 and the
+# PRIOR CARRIER grid both filled correctly from `underlying_policies` and the
+# verified dec index while `coverage_lines` carried none. One fix, one source,
+# one run later - the same defect through a different door.
+#
+# A policy number is evidence of a policy wherever it is recorded, so the count
+# reads EVERY per-line source the forms themselves read. `dec_page_entries` is
+# the strongest of them: every entry is verified present in the uploaded text
+# and carries the policy it was printed under.
+#
+# Policies are counted as CONTRACTS via `_same_policy_contract`, so one policy
+# printed with and without its term marker ("6E74002" / "6E7-40-02---26") is one
+# policy, not two - the same equivalence Q4 uses.
+def _distinct_package_policies(facts: dict) -> List[str]:
+    """Every distinct POLICY the session evidences, as printed."""
+    seen: List[str] = []
+
+    def _offer(raw: Any) -> None:
+        s = str(raw or "").strip()
+        if not s or _looks_like_a_form_number(s) or not _norm_policy_no(s):
+            return
+        if any(_same_policy_contract(s, kept) for kept in seen):
+            return
+        seen.append(s)
+
+    for key, sub in (("coverage_lines", "policy_number"),
+                     ("underlying_policies", "policy_no"),
+                     ("prior_coverage_by_line", "policy_no"),
+                     ("dec_page_entries", "policy_number")):
+        rows = _fv(facts, key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict):
+                _offer(row.get(sub))
+    return seen
+
+
 def _resolve_package_header_identity(field_name: str, facts: dict):
     m = _PACKAGE_HEADER_RE.match(field_name)
     if not m:
@@ -5312,6 +5531,29 @@ def _resolve_package_header_identity(field_name: str, facts: dict):
     form_id = str((facts or {}).get("_form_id") or "")
     if not form_id or form_id in _SECTION_FORM_LINE_PHRASES:
         return _SCHED_SKIP                # section forms have their own resolver
+    # ── A POLICY NUMBER IS IDENTITY EVIDENCE, NOT GRANT EVIDENCE ─────────────
+    # Client audit 2026-08-17: ACORD 125's header printed 6E7-40-02---26, the
+    # AUTO policy number, as the PACKAGE number - the client's defect #1 on a
+    # different form. Round 14 counted only `coverage_lines`; whether a line's
+    # PREMIUM was captured, or which fact happened to record its number, says
+    # nothing about whether the package has a single policy number.
+    #
+    # RUNS FIRST, ahead of the `coverage_lines` gate below, because the numbers
+    # do not always arrive in that fact - on the 08/17 run Q4 and the PRIOR
+    # CARRIER grid filled correctly from `underlying_policies` and the dec index
+    # while `coverage_lines` carried none, and the header stamped the scalar
+    # again. A session with no per-line evidence at all counts zero policies and
+    # is therefore untouched.
+    if m.group(1) == "Policy_PolicyNumberIdentifier":
+        distinct = _distinct_package_policies(facts)
+        if len(distinct) > 1:
+            logger.info(
+                "package-header: %s form=%s left blank - the session evidences "
+                "%d distinct policies (%s), so the package has none of its own",
+                field_name, form_id, len(distinct),
+                ", ".join(distinct[:4]))
+            return None
+
     lines = _fv(facts, "coverage_lines")
     if not isinstance(lines, list) or not lines:
         return _SCHED_SKIP                # legacy sessions: unchanged
@@ -7571,6 +7813,11 @@ def _deterministic_map(field_name: str, facts: dict):
     if underlying_row is not _SCHED_SKIP:
         return underlying_row
 
+    # ── NO. OF MEMBERS AND MANAGERS: organisational data, never on a dec page ─
+    members = _resolve_member_manager_count(field_name, facts)
+    if members is not _SCHED_SKIP:
+        return members
+
     # ── Producer-assigned certificate identifiers: never from a document ─────
     cert_id = _resolve_certificate_producer_ids(field_name, facts)
     if cert_id is not _SCHED_SKIP:
@@ -7671,6 +7918,11 @@ def _deterministic_map(field_name: str, facts: dict):
     other_lob = _resolve_other_lob_row(field_name, facts)
     if other_lob is not _SCHED_SKIP:
         return other_lob
+
+    # ── The enumerated LOB grid: evidenced lines only, never a model guess ────
+    std_lob = _resolve_standard_lob_box(field_name, facts)
+    if std_lob is not _SCHED_SKIP:
+        return std_lob
 
     # ── Status of transaction: fact-driven when the document states it ──────
     status_cell = _resolve_policy_status(field_name, facts)
@@ -13893,7 +14145,8 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
     for field in list(mapped.keys()):
         m_rate = re.match(
             r"^Vehicle_(SpecialIndustryClassCode|PrimaryLiabilityRatingFactor"
-            r"|NetRatingFactor|FarthestZoneCode)_([A-Z])$", field)
+            r"|NetRatingFactor|FarthestZoneCode|RadiusOfUse"
+            r"|SeatingCapacityCount)_([A-Z])$", field)
         if not m_rate:
             continue
         val = _norm_tok(mapped.get(field))
@@ -13903,7 +14156,30 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
         cls = _norm_tok(mapped.get(f"Vehicle_RateClassCode_{letter}"))
         terr = _norm_tok(mapped.get(f"Vehicle_RatingTerritoryCode_{letter}"))
         borrowed = None
-        if col == "FarthestZoneCode":
+        # ── A QUANTITY IS NEVER ZERO-PADDED ──────────────────────────────────
+        # Client audit 2026-08-17: RADIUS printed "07" while the auto dec states
+        # "RADIUS = NA" twice. 07 is the comp/collision symbol, three cells to
+        # the right, carried across in its own symbol formatting.
+        #
+        # No sibling comparison is used, deliberately. The first cut compared
+        # RADIUS to the symbol cell and got it exactly backwards on the bench:
+        # the symbol stamps as "7", so an exact compare kept the padded borrow
+        # and deleted a genuine 7-mile radius. Zero-insensitive compare has the
+        # opposite flaw - it deletes a real radius of 7 on any vehicle whose
+        # symbol is 7.
+        #
+        # The padding IS the tell, on its own. ACORD declares these two boxes
+        # "Enter number:" - a whole-number quantity - and a quantity is never
+        # written "07"; a CODE is. So a leading zero in a quantity box means the
+        # value came from a code column, whatever that code happens to be.
+        if col in ("RadiusOfUse", "SeatingCapacityCount"):
+            _raw_q = str(mapped.get(field) or "").strip()
+            # TERMINAL for these two columns. An unpadded quantity must NOT fall
+            # through to the code comparisons below: on the bench, a genuine
+            # 7-mile radius was deleted there for equalling the row's symbol 7.
+            if re.match(r"^0\d", _raw_q):
+                borrowed = "a zero-padded code, not a quantity"
+        elif col == "FarthestZoneCode":
             if terr and val == terr:
                 borrowed = "the territory code"
         else:
@@ -13921,6 +14197,8 @@ def _enforce_post_fill_guards(mapped: dict, schema: dict, facts: dict,
                 # coverage applies to. Same row, same digits, different meaning.
                 # Leading zeros are cosmetic on a symbol ("07" and "7" are the
                 # same covered-auto symbol), so they are stripped on both sides.
+                # This comparison is for the CODE columns only - the two quantity
+                # columns are settled above, by their own padding.
                 _bare = val.lstrip("0") or val
                 for _sym_col in ("ComprehensiveSymbolCode", "CollisionSymbolCode",
                                  "SymbolCode"):
@@ -15413,6 +15691,28 @@ _POLICY_SELF_REFERENCE_RE = re.compile(
 _DEFINED_TERM_RE = re.compile(r"['\"‘“][A-Za-z][A-Za-z \-]{1,24}['\"’”]")
 
 
+# ── A SEAM PROVES THE QUOTE WAS ASSEMBLED, NOT CITED ────────────────────────
+# Client audit 2026-08-17, ACORD 127 Q8. The explanation shipped as:
+#   "...waiver of recovery applies only when agreed in writing and executed
+#    prior to loss.mary an"
+# A sentence-ending period followed immediately by a lowercase letter, with no
+# space, cannot occur in prose that was copied out of a document. It is the join
+# where two fragments were welded together - and the trailing "mary an" is the
+# tail of a third. The gate's contract is a CONTIGUOUS citation; this is the
+# same defect the ellipsis rule catches, in the shape that carries no ellipsis.
+#
+# Guarded against the only realistic innocent source of "letter-dot-lowercase",
+# which is a URL or an e-mail address.
+_QUOTE_SEAM_RE = re.compile(r"[A-Za-z]{3,}[.!?][a-z]")
+
+
+def _quote_has_a_concatenation_seam(quote: Any) -> bool:
+    text = str(quote or "")
+    if not text or "://" in text or "www." in text or "@" in text:
+        return False
+    return bool(_QUOTE_SEAM_RE.search(text))
+
+
 def _quote_is_policy_form_wording(quote: Any) -> bool:
     """True when the quote is drafted as POLICY WORDING rather than reported as
     a fact about this applicant."""
@@ -15499,12 +15799,42 @@ _POLICY_SELF_SUBJECT_RE = re.compile(
     # COVERAGE" - a forms-revision notice offered as proof of hold-harmless
     # agreements. Same grammatical role as "this/these": the policy pointing
     # at its own contents.
-    r"^\W*(?:this|these|those|such|the\s+following)\s+"
+    # TWO SUBJECT SHAPES, and the second one earns a TIGHTER verb rule.
+    #
+    # Client audit 2026-08-17: ACORD 127 Q8 answered Y on "Additional insured
+    # provisions apply when required by written contract... waiver of recovery
+    # applies only when agreed in writing" - a BARE instrument noun as the
+    # subject, no determiner, so the determiner-led shape below never saw it.
+    #
+    # Simply making the determiner optional was tried and REVERTED THE SAME
+    # MINUTE by `test_no_acord_tooltip_is_flagged`, which flagged 14 of ACORD's
+    # own tooltips ("Enter deductible: The deductible amount that is to apply to
+    # this subject of insurance."). That guard exists precisely to stop this
+    # pattern learning to blank legitimate answers, and it did its job.
+    #
+    # The separation is ADJACENCY. A bare-noun subject must be followed by its
+    # operative verb directly - "provisions apply", "waiver of recovery applies"
+    # - allowing only a single "of <noun>" and an adverb between them. ACORD's
+    # tooltip puts "amount that is to" between the noun and the verb, and a
+    # colon straight after it, so it cannot match. A determiner-led subject
+    # keeps the proven 60-character window.
+    r"^\W*(?:"
+    r"(?:this|these|those|such|the\s+following)\s+(?:\w+\s+){0,2}?"
+    r"(?:polic(?:y|ies)|insurance|coverages?|coverage\s+part|exclusions?|"
+    r"endorsements?|conditions?|provisions?|clauses?|forms?|agreements?|"
+    r"waivers?|limits?|deductibles?|sections?|paragraphs?|amendments?)\b"
+    r"[^.]{0,60}?"
+    r"|"
     r"(?:\w+\s+){0,2}?"
     r"(?:polic(?:y|ies)|insurance|coverages?|coverage\s+part|exclusions?|"
     r"endorsements?|conditions?|provisions?|clauses?|forms?|agreements?|"
-    r"limits?|deductibles?|sections?|paragraphs?|amendments?)\b"
-    r"[^.]{0,60}?\b(?:applies|apply|does\s+not|do\s+not|shall|will\s+\w+|"
+    # "waiver" completes the instrument-noun class, same standing as
+    # "endorsement" - a waiver of subrogation IS a policy instrument. From the
+    # 08/17 Q8 stitch: "waiver of recovery applies only when agreed in writing".
+    r"waivers?|limits?|deductibles?|sections?|paragraphs?|amendments?)"
+    r"(?:\s+of\s+\w+)?\s+(?:\w+ly\s+)?"
+    r")"
+    r"\b(?:applies|apply|does\s+not|do\s+not|shall|will\s+\w+|"
     r"means?|covers?|excludes?|extends?|includes?|provides?|"
     # Completing the VERB CLASS is not the enumeration this comment warns about.
     # These are present-tense contract-operation verbs, the same grammatical
@@ -17835,6 +18165,26 @@ def map_facts_to_form(
             # _quote_is_policy_form_wording for the client's literal case.
             if _quote_is_policy_form_wording(quote):
                 logger.info("evidence_gate policy_form_wording rejected=%s (%r)",
+                            field, str(quote)[:70])
+                return False
+            # ...and an ELIDED citation is not a citation. Client audit
+            # 2026-08-17, ACORD 127 Q8 ("any hold harmless agreements?"):
+            #   "Blanket Additional Insured status ... on a primary and
+            #    noncontributory basis when required as an additional insured
+            #    under the contract agreement."
+            # The gate's entire contract is that a quote is a CONTIGUOUS phrase
+            # present in the document. An internal ellipsis says outright that
+            # the model joined two fragments, and the per-sentence paraphrase
+            # fallback then accepted the join. No real contiguous citation
+            # contains one.
+            if re.search(r"\.\.\.|…", str(quote)):
+                logger.info("evidence_gate elided_quote rejected=%s (%r)",
+                            field, str(quote)[:70])
+                return False
+            # ...and a quote welded together out of fragments, which the 08/17
+            # run produced without an ellipsis ("...prior to loss.mary an").
+            if _quote_has_a_concatenation_seam(quote):
+                logger.info("evidence_gate stitched_quote rejected=%s (%r)",
                             field, str(quote)[:70])
                 return False
             # ...and a DEFINITION from the policy's glossary. A 271-page

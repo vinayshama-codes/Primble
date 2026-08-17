@@ -97,8 +97,24 @@ def _build_trigger_facts(form_id: str, facts: dict) -> Tuple[List[dict], Optiona
     spec = _FORM_EVIDENCE_FACTS.get(form_id)
     if not spec:
         return [], None
+    # An UNRESOLVED fact is not evidence (client 2026-08-17). The umbrella limit
+    # was withheld from the form and simultaneously printed here as "Umbrella
+    # limit: $3,000,000" on ACORD 25 AND 131 - the stamping layer obeyed the
+    # withhold and this display path had never heard of it. Falls through to the
+    # form's generic message, which is the same path an unextracted fact takes.
+    try:
+        from services.underwriting_consistency import is_withheld
+    except Exception:                                         # pragma: no cover
+        def is_withheld(_f, _k):                              # type: ignore
+            return False
     present: List[dict] = []
     for key, label in spec["facts"]:
+        if is_withheld(facts, key):
+            logger.info(
+                "form evidence: %s withheld on %s - unresolved conflict, the "
+                "recommendation will not publish a value the picker is still "
+                "asking about", key, form_id)
+            continue
         val = _fv(facts, key)
         if _is_empty(val):
             continue

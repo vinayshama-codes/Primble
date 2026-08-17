@@ -897,3 +897,189 @@ Liability"), pinned by test as a decision rather than a surprise - loosening
 it would print MORE values, the opposite of what the client asked for. ACORD
 127's empty driver block needs eyes on the source package; ISO edition-date
 jitter and Q8's borrowed quote remain.
+
+---
+
+## ROUND 14 - 2026-08-17: "ACORD 125 and 127 contain no unsupported critical values"
+
+Scope narrowed by the owner to 125/127, with one standard: nothing on those two
+forms may be a value the document does not support. Under-filling is acceptable;
+fabrication is not. Evidence for this round is the client's fresh run plus
+`dec_index_c89a7dca-...json` (275 verified declarations entries).
+
+**Caveat respected throughout: the dec index covers DECLARATIONS PAGES ONLY, not
+the whole package.** Absence from it is not proof of fabrication - the evidence
+gate verifies against the full raw text. Values confirmed REAL and left alone:
+`CLASS 7383`, `ACV`, and - found while checking - `COMPREHENSIVE ACV 1000 DED` /
+`COLLISION ACV 1000 DED`, so the $1,000 deductibles ARE in the source and the
+open item there is extraction lifting them, not the form binding.
+
+- **65. The package header took one line's policy number** (ACORD 125 printed
+  6E7-40-02---26, the AUTO number - the client's defect #1 on a new form).
+  Measured cause: **the header and Q4 used different evidence bars.** Q4 fills a
+  row from any entry with a line name and a number; the header only counted
+  entries that also passed the GRANT test (premium or limit). This run's entries
+  stated numbers but no premium, so `evidenced` fell under 2, the resolver
+  returned `_SCHED_SKIP`, and the flat scalar stamped. Now: a policy number is
+  IDENTITY evidence - several distinct numbers in the inventory means the
+  package has none of its own, whatever was captured about premiums. Verified: a
+  genuine single-policy package still stamps; no-`coverage_lines` sessions keep
+  the scalar path byte-identical.
+- **66. One policy printed two ways took two of Q4's four slots and displaced
+  the umbrella.** `6E74002` and `6E7-40-02---26` are the same Commercial Auto
+  policy - the `---26` tail is the term marker, and the umbrella's schedule of
+  underlying insurance refers to the auto policy without it. `_same_policy_
+  contract` merges them only when the tail is printed SEPARATED (`---26`,
+  ` - 26`) over a base of 5+ chars, so `POL123`/`POL12345` stay two policies
+  (7/7 on the separation corpus). `_dedupe_rows_by_policy_contract` then keeps
+  the entry that names a standard line, so "Covered Autos Liability" (a coverage
+  PART on the auto dec) yields to "Business Auto". Q4 now prints all four real
+  policies, umbrella included.
+  **The coverage-part vocabulary test was tried first and REJECTED by
+  measurement** - it classes "Business Auto" and "Commercial Liability Umbrella"
+  as parts while missing "Covered Autos Liability". It would have deleted the
+  two real lines and kept the fake one.
+- **67. The entire enumerated LINES OF BUSINESS grid was model-guessed.** ACORD
+  125 shipped CYBER AND PRIVACY ticked with no premium; "cyber" appears 0 times
+  in 275 dec entries and the one "privacy" hit is a General Liability EXCLUSION
+  title (`Form CG 00 69 12 23`). Measured: **all 15 named boxes were asked of the
+  model**, because `_INDICATOR_RULES` maps each to a flag and `_derive_indicator`
+  returns None when the flag is absent - so "the document never said" became
+  "let the model decide". That is why last round's fabrication moved from the
+  OTHER rows (hardened) to the named boxes beside them. `_resolve_standard_lob_
+  box` now ticks only what a granted or number-bearing `coverage_lines` entry
+  names, or what an existing flag already answered Yes - nothing that ticked
+  before stops ticking. **Two of my own false positives were caught before
+  shipping**: a bare "Liability" row ticked Fiduciary AND Liquor (fixed by the
+  existing "fits several boxes, places none" rule), and the first evidence bar
+  blanked four boxes that were ticking correctly (fixed by accepting a stated
+  policy number as identity evidence, same distinction as fix 65).
+- **68. NO. OF MEMBERS AND MANAGERS printed a fabricated "1".** No fact carries
+  it and no declarations page states an LLC's member count - organisational data
+  the producer supplies. Owned blank on every form, rows A/B/C, and declared in
+  the ownership-contract test.
+- **69. An elided citation is not a citation.** ACORD 127 Q8 ("any hold harmless
+  agreements?") answered Y on `"Blanket Additional Insured status ... on a
+  primary and noncontributory basis ..."`. The gate's whole contract is that a
+  quote is a CONTIGUOUS phrase in the document; an internal ellipsis says the
+  model joined two fragments, and the per-sentence paraphrase fallback accepted
+  the join. Rejected now, on Y and N. 0 false positives across the real-evidence
+  corpus. **Honest limit: I could not confirm from the delivered PDF alone that
+  the stored quote carries the ellipsis rather than a renderer adding it, so
+  this may or may not be what produced that particular Y.** The rule is correct
+  either way; Q8's underlying wrong-subject borrow remains the documented
+  residual.
+
+### Verified after the fixes, on the delivered shape
+125 header blank (was the auto number) and not asked; CYBER blank; NO. OF
+MEMBERS blank; LOB grid ticking exactly Business Auto / Inland Marine / Umbrella;
+Q4 printing all four policies with the umbrella restored and no half-rows.
+Tests: `backend/tests/test_no_unsupported_values_20260817.py` (31). Suite
+**3356 passed / 2 failed** - the same two pre-existing unrelated failures, zero
+regressions. Note: total test count rose sharply this round because a parallel
+session has added files to this tree.
+
+### Still open on 125/127, named not hidden
+`auto_deductible_comp` / `_collision` are not being lifted out of the dec labels
+`COMPREHENSIVE ACV 1000 DED` / `COLLISION ACV 1000 DED`, so the two deductible
+boxes stay blank (under-fill, extraction side). ACORD 127's MODEL cell reads
+"Outback Sedan" with BODY TYPE empty. The Drive-Other-Car endorsement is still
+indexed as a declarations section, which is what put a coverage PART into the
+line inventory in the first place - fix 66 contains it at the form, but the
+upstream attribution is untouched. 127's driver block is empty and needs eyes on
+the source package.
+
+---
+
+## ROUND 15 - 2026-08-18: the last three unsupported values on ACORD 125/127
+
+The 08/17 run shipped 125, 127 AND 131, so the client's four 131-only examples
+were verifiable for the first time since 08/16. Evidence: those three forms plus
+`dec_index_ac1f3c69-...json` (338 verified declarations entries).
+
+**Client's seven examples, on that paper:** #2 carrier+NAIC, #3 $39,300 stays
+payroll, #4 foreign sales blank, #6 renewal chronology - all FIXED and holding.
+#1 FIXED on 131 (header 6J7-40-02---26, EXPIRING POL # blank) but NOT on 125,
+which still printed the Auto number. #5 NOT fixed - EA OCC and AGG both stamped
+$3,000,000. #7 not observable on paper.
+
+**All three fixes below closed a defect that had already survived a fix aimed at
+the same thing.** That is the pattern of this whole arc and it is worth stating
+plainly: harden one surface and the same defect reappears on the next surface
+that shares the weakness.
+
+- **70. The package header counted one fact's opinion, not the policies.**
+  Round 14 blanked the 125 header when `coverage_lines` itself stated two or
+  more policy numbers. On the 08/17 run the numbers arrived through
+  `underlying_policies` and the dec index instead - Q4 and the PRIOR CARRIER
+  grid both filled correctly while `coverage_lines` carried none - so the count
+  saw fewer than two and the flat scalar stamped the Auto number again. One
+  fix, one source, one run later. `_distinct_package_policies` now reads EVERY
+  per-line source the forms themselves read (`coverage_lines`,
+  `underlying_policies`, `prior_coverage_by_line`, `dec_page_entries`), counting
+  CONTRACTS via `_same_policy_contract`, and it runs AHEAD of the
+  `coverage_lines` gate. Verified across all four arrival paths; a genuine
+  single-policy package still stamps, including when printed with and without
+  its term marker; a session with no per-line evidence anywhere is untouched.
+  Pinned by an anti-rot test so a fifth source cannot be added without being
+  counted.
+- **71. RADIUS printed 07 while the auto dec states "RADIUS = NA" twice.** The
+  comp/collision symbol, three cells right, in its own zero-padded formatting.
+  Guard 2e already owns this borrow class; `Vehicle_RadiusOfUse` and
+  `Vehicle_SeatingCapacityCount` were simply not in its column list.
+  **The obvious fix was measured and was exactly backwards.** Comparing RADIUS
+  to the symbol cell: the symbol stamps as "7", so an exact compare KEPT the
+  padded borrow and DELETED a genuine 7-mile radius; a zero-insensitive compare
+  deletes a real radius of 7 on any vehicle whose symbol is 7. No sibling is
+  used. ACORD declares both boxes "Enter number:" - a quantity is never written
+  "07", a code is - so the padding alone settles it, and the branch is TERMINAL
+  so an unpadded quantity never reaches the code comparisons.
+- **72. ACORD 127 Q8 "any hold harmless agreements?" = Y.** `"hold harmless"`
+  appears 0 times in 338 dec entries. Two independent faults, so two rules:
+  * **A seam proves the quote was assembled, not cited.**
+    `"...executed prior to loss.mary an"` - a sentence-ending period followed
+    immediately by a lowercase letter cannot occur in copied prose. Same defect
+    the round-14 ellipsis rule catches, in the shape carrying no ellipsis.
+    URL/e-mail guarded.
+  * **A BARE instrument noun is still the contract as its own subject.**
+    "Additional insured provisions apply...", "waiver of recovery applies only
+    when..." - grammatically identical to "these provisions apply", which
+    `_POLICY_SELF_SUBJECT_RE` already rejected. The determiner was never what
+    made it contract language.
+    **Making the determiner optional was reverted the same minute by
+    `test_no_acord_tooltip_is_flagged`**, which flagged 14 of ACORD's OWN
+    tooltips ("Enter deductible: The deductible amount that is to apply to this
+    subject of insurance."). That guard exists to stop this pattern learning to
+    blank legitimate answers, and it earned its keep. The separation is
+    ADJACENCY: a bare-noun subject must be followed by its operative verb
+    directly, allowing one "of <noun>" and an adverb; a determiner-led subject
+    keeps the proven 60-character window. `waivers?` completes the instrument-
+    noun class.
+    Measured 8/8 rejected, **0 false positives across 15 real sentences plus
+    ACORD's own tooltip - including "The applicant signed a hold harmless
+    agreement with the general contractor", which is the LEGITIMATE Yes for
+    this very question and must survive.** The 5,852-tooltip sweep passes.
+
+**Confirmed supported and deliberately left alone**, checked against the index
+rather than assumed: `COST NEW 26680` (printed twice - I had wrongly flagged it
+as possibly invented in round 14), `COMPREHENSIVE/COLLISION ACV 1000 DED` (the
+deductibles now stamp), `CLASS 7383`, `TERR 111`, `ACV`, `DIRECT BILL`, all four
+line premiums, `$10,663`. `SEAT CP` blank is correct - "seating capacity"
+appears 0 times. And `cyber` now appears twice in the index, **both as
+exclusions** - proof the round-14 Cyber fix was reading an exclusion as coverage.
+
+Tests: `backend/tests/test_no_unsupported_values_20260818.py` (43). Suite
+**3399 passed / 2 failed** - the same two pre-existing unrelated failures, zero
+regressions.
+
+### Named, not fixed
+125's AUDIT box prints "A": partly supported (the GL dec says "Audit Period =
+Annual") but the Umbrella dec says "PREMIUM NOT SUBJECT TO AUDIT", so one
+package-level code asserts something the lines disagree about, and "A" is our
+abbreviation rather than the document's word. Owner's call.
+On 131 (not this round's scope): the $3M umbrella limit still stamps against the
+$1M COI; a limit is concatenated with a line name ("$3,000,000 Commercial Ge...");
+Q7 answers Y with text listing what IS insured against a question about what is
+NOT; a document title sits in the underlying-coverage-information box; the ISO
+edition date reads "04 13". 127's driver block is empty and needs eyes on the
+source package.

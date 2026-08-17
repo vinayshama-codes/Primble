@@ -477,6 +477,26 @@ TIER2_FIELDS = {
 
 # ── Tier checks ───────────────────────────────────────────────────────────────
 
+def producer_fields_exempt(flags: dict | None) -> bool:
+    """True when the producer's OWN details must not be scored as missing.
+
+    A declarations page is issued by the CARRIER. It does not print the
+    producing agency's name or the applicant's contact details, so counting
+    them as gaps marks a submission down for something its document type can
+    never carry.
+
+    ONE definition, because there were two. `check_tier1` (which the PACKAGE
+    score uses) applied this exemption; `calculate_sqs`'s ACORD 125 checklist
+    kept its own copy of the same six checks and did not. Measured on a live
+    dec-page session 2026-08-17: answering `contact_name` moved ACORD 125 from
+    63 to 68 while the package sat unmoved at 68, because the two scorers
+    disagreed about whether contact information was required at all. Same fact,
+    same session, two rules. The recommendation is still RAISED either way - we
+    still want the contact details - it just stops being a score penalty.
+    """
+    return (flags or {}).get("_doc_type") == "dec_page"
+
+
 def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
     if flags.get("is_certificate_doc") or flags.get("has_certificate_request"):
         missing = []
@@ -486,8 +506,7 @@ def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
             missing.append("Proposed effective date")
         return len(missing) == 0, missing
     missing = []
-    is_dec_page          = flags.get("_doc_type") == "dec_page"
-    skip_producer_fields = is_dec_page
+    skip_producer_fields = producer_fields_exempt(flags)
     for field, label in TIER1_FIELDS.items():
         if skip_producer_fields and field == "producer_name":
             continue
@@ -1386,8 +1405,42 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     confirmed_keys = confirmed_keys or set()
     issues: List[str] = []
 
+    # Package context for the equivalence filter, built ONCE and BEFORE the
+    # first check that uses it. (Built lower down in the first cut, which meant
+    # the identity checks called it before it existed - the exception was
+    # swallowed by the fail-open guard and the filter silently never fired. A
+    # fix that looks applied and is not is worse than no fix.)
+    _pkg_ctx = None
+    try:
+        from services.fact_equivalence import PackageContext
+        _pkg_ctx = PackageContext(None, docs)
+    except Exception as _cx:                                  # noqa: BLE001
+        logger.warning("check_doc_consistency: package context unavailable - %s", _cx)
+
     def _raw(key: str) -> List:
         return [_fv(d["facts"], key) for d in docs if _fv(d["facts"], key)]
+
+    def _still_differs(key: str, raw_values: List) -> bool:
+        """True when the values genuinely differ AFTER the equivalence filter.
+
+        `distinct_normalized` compares normalized TEXT, so it cannot see that
+        one address is a COMPONENT of another, that a code carries its printed
+        description, or that two printings name one contract. This is the same
+        filter the Data Consistency picker uses, so the two surfaces can never
+        disagree about whether something is a conflict - probe run B raised the
+        identical address non-problem on both.
+
+        Fail-open: any problem returns True and the caller behaves as today.
+        """
+        try:
+            from services.fact_equivalence import equivalent_index
+            vals = [str(v) for v in raw_values if str(v or "").strip()]
+            if len(vals) < 2:
+                return True
+            merged = equivalent_index(key, vals, _pkg_ctx)
+            return not merged or (len(vals) - len(merged)) > 1
+        except Exception:                                     # noqa: BLE001
+            return True
 
     # ── Attribution brackets (client feedback: "which document created the
     # issue... and how to fix it") ────────────────────────────────────────────
@@ -1480,7 +1533,11 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         if key in confirmed_keys:
             continue  # resolved via the Data Consistency picker
         vals_raw = _raw(key)
-        if len(distinct_normalized(key, vals_raw)) > 1:
+        # A COMPONENT is not a competitor. Probe run B: the dec page printed the
+        # full street address and the certificate printed "Denver, Colorado" -
+        # one is inside the other, and this warning fired alongside the Data
+        # Consistency row for the same non-problem (client 2026-08-17 item 1).
+        if len(distinct_normalized(key, vals_raw)) > 1 and _still_differs(key, vals_raw):
             issues.append(
                 f"[warning] field={key} "
                 f"{_FIELD_LABELS[key]} differs across documents: {_show(vals_raw)}"
@@ -1517,17 +1574,60 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         ))
 
     _dates_explained = any(_has_date_explanation(d) for d in docs)
-    _date_prefix = "[warning]" if _dates_explained else "[hard_stop]"
+
+    # ── A multi-policy account has no single policy term (client 2026-08-17) ─
+    # "Multiple policy numbers or carriers on a multi-line account should only
+    # be treated as conflicting if Primble establishes that they belong to the
+    # same policy and coverage context." Dates are the same class and the more
+    # damaging one: measured on probe run C (PROBE2 package dec + PROBE4 auto
+    # dec, both correct, both with their OWN term), the mismatch fired TWO hard
+    # stops and capped a perfectly ordinary two-policy account at 60.
+    #
+    # This does NOT silence the difference - it DOWNGRADES it to the warning it
+    # actually is. The producer still sees it and the picker still resolves it;
+    # what stops is calling an ordinary multi-policy structure a blocking error.
+    # Gated on POSITIVE evidence of two or more contracts in the verified dec
+    # index; a single-contract package is untouched, and so is a package with no
+    # index at all.
+    _multi_contract = bool(_pkg_ctx and _pkg_ctx.is_multi_contract)
+    if _multi_contract and not _dates_explained:
+        logger.info(
+            "check_doc_consistency: %d contracts evidenced in this package - a "
+            "policy-date difference is downgraded from hard stop to warning "
+            "(each contract carries its own term)", len(_pkg_ctx.contracts))
+    _date_prefix = ("[warning]" if (_dates_explained or _multi_contract)
+                    else "[hard_stop]")
+    _date_multi_note = (
+        " This package evidences more than one policy, and each policy carries "
+        "its own term - confirm which term applies to the submission."
+        if _multi_contract and not _dates_explained else "")
+
+    def _dates_owned_separately(key: str) -> bool:
+        """PROOF that the differing dates belong to DIFFERENT contracts.
+
+        Only fires when the index positively attributes both printings to
+        disjoint owners; an unattributed value keeps the issue, which is the
+        safe direction.
+        """
+        if not _pkg_ctx:
+            return False
+        vals = [str(v) for v in _raw(key)]
+        return any(_pkg_ctx.different_owners(vals[i], vals[j])
+                   for i in range(len(vals)) for j in range(i + 1, len(vals)))
 
     # Dates are normalized to ISO before comparison so "07/15/25" and
     # "7/15/2025" do NOT trigger a false hard stop (Beta Report §5.2).
     eff_raw = _raw("effective_date")
     if "effective_date" in confirmed_keys:
         pass  # resolved via the Data Consistency picker
+    elif _dates_owned_separately("effective_date"):
+        pass  # PROVEN to be two contracts' own terms - not a disagreement
     elif len(distinct_normalized("effective_date", eff_raw)) > 1:
         issues.append(
             f"{_date_prefix} code=date_conflict "
-            "Policy date mismatch across documents. Score is capped at 60 unless the difference is explained."
+            "Policy date mismatch across documents." + (
+                _date_multi_note or
+                " Score is capped at 60 unless the difference is explained.")
             + _bracket("effective_date", _DATA_CONSISTENCY_FIX + " Or add an ACORD 101 explanation of the date difference.")
         )
     elif len(eff_raw) >= 2 and _raw_differ(eff_raw):
@@ -1536,10 +1636,14 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     exp_raw = _raw("expiration_date")
     if "expiration_date" in confirmed_keys:
         pass  # resolved via the Data Consistency picker
+    elif _dates_owned_separately("expiration_date"):
+        pass  # PROVEN to be two contracts' own terms - not a disagreement
     elif len(distinct_normalized("expiration_date", exp_raw)) > 1:
         issues.append(
             f"{_date_prefix} code=expiration_conflict "
-            "Policy expiration date mismatch across documents. Score is capped at 60 unless the difference is explained."
+            "Policy expiration date mismatch across documents." + (
+                _date_multi_note or
+                " Score is capped at 60 unless the difference is explained.")
             + _bracket("expiration_date", _DATA_CONSISTENCY_FIX + " Or add an ACORD 101 explanation of the date difference.")
         )
     elif len(exp_raw) >= 2 and _raw_differ(exp_raw):
@@ -1552,15 +1656,35 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     lob_norm_sets = []     # normalized tokens — used for comparison
     lob_raw_display = []   # raw tokens — used for display
     lob_doc_names = []     # filenames — used for the attribution bracket
+    # Canonicalise each line before comparing. "Commercial Auto" and "Business
+    # Auto" are ONE line of business printed two ways; comparing the raw
+    # normalized strings made probe run C report them as differing coverage.
+    # A line `_canon_line` cannot place keeps its own normalized text as its
+    # key, so an unrecognised line is never silently dropped from the compare.
+    try:
+        from services.extraction_service import _canon_line as _cl
+    except Exception:                                         # pragma: no cover
+        _cl = lambda _s: None                                 # noqa: E731
+
     for d in docs:
         lob = _fv(d["facts"], "lines_of_business")
         if lob and isinstance(lob, list) and lob:
-            norm = frozenset(n for x in lob if (n := normalize_general(x)))
+            norm = frozenset(
+                (_cl(x) or n) for x in lob if (n := normalize_general(x)))
             if norm:
                 lob_norm_sets.append(norm)
                 lob_raw_display.append(", ".join(str(x).strip() for x in lob if str(x).strip()))
                 lob_doc_names.append(d.get("filename") or "an uploaded document")
-    if len(lob_norm_sets) >= 2 and len(set(lob_norm_sets)) > 1:
+    # A SUBSET is not a disagreement (client 2026-08-17). A certificate or a
+    # single-line dec page names fewer lines than the package dec - probe run C
+    # produced "General Liability, Commercial Auto, Commercial Umbrella" vs
+    # "Business Auto" and called it a conflict. Only sets that each carry a line
+    # the other lacks genuinely disagree.
+    _lob_disagree = any(
+        (a - b) and (b - a)
+        for i, a in enumerate(lob_norm_sets) for b in lob_norm_sets[i + 1:]
+    )
+    if len(lob_norm_sets) >= 2 and len(set(lob_norm_sets)) > 1 and _lob_disagree:
         _lob_display = "; ".join(lob_raw_display)
         # Not a Data Consistency reconcilable field (no picker exists for it) -
         # the only real fix is checking the source documents directly.
@@ -1799,6 +1923,67 @@ def _recency_penalty(age_days: int) -> int:
         span = (age_days - 181) / (365 - 181)
         return int(round(15 + span * 5))
     return _LOSS_RECENCY_MAX_PEN                   # > 365: 25 cap
+
+
+# Which fact a loss-history recommendation actually needs, per message.
+#
+# WHY THIS EXISTS: every loss recommendation used to be stamped with one
+# hardcoded field, `loss_history_years`. So the card that asks the producer to
+# CONFIRM No Known Losses posted the answer into "how many years of loss runs do
+# you have". Measured on a live session 2026-08-17: the producer typed
+# "no losses", it was stored as a year count, `_to_int` read it as 0, the pillar
+# fell through to "No loss history provided" (25), the card came straight back
+# and the score never moved. The answer was correct; it was delivered to the
+# wrong field. `_attested_true("no losses")` is True - had it reached
+# `loss_history_no_prior_losses_indicator` the pillar would have gone 45 -> 60.
+#
+# First match wins, tested against the LOWERCASED message. `None` means no
+# single fact can answer it - the gap needs a document or a reconciliation - and
+# the UI already falls back to dismiss-with-reason when a rec carries no field
+# (`answerable = !!rec.field` in AcordModal), which is the honest affordance.
+#
+# Matched on the message TEMPLATE, the same identity `_loss_rec_id` already
+# derives, so a varying number ("372 days old") cannot fork a row. Keep this
+# table beside the messages it maps: `test_every_loss_message_maps_to_a_field`
+# harvests every string `calculate_p4_loss_history` can emit and fails the build
+# if one lands here unmapped.
+_LOSS_RECOMMENDATION_FIELDS: Tuple[Tuple[str, Optional[str]], ...] = (
+    # The attestation states. THIS is the pair the pillar actually reads.
+    ("no known losses (stated in narrative)",           "loss_history_no_prior_losses_indicator"),
+    ("no loss history provided",                        "loss_history_no_prior_losses_indicator"),
+    # Already attested - only a document can raise it further.
+    ("no known losses (attested by user)",              None),
+    # Identity of the runs: whose are they, and do the identifiers line up.
+    ("loss run insured name does not match",            "applicant_name"),
+    ("loss run ownership partially verified",           "fein"),
+    ("loss run ownership could not be fully verified",  "fein"),
+    # The carrier is a fact the producer knows off the top of their head.
+    ("prior carrier name missing",                      "prior_carrier"),
+    # Genuinely about a count of years - the original field, correctly used.
+    ("3 years of loss runs provided",                   "loss_history_years"),
+    ("loss history incomplete",                         "loss_history_years"),
+    ("loss runs uploaded",                              "loss_history_years"),
+    # Waiting on paper, or contradicted by it. No typed value closes these.
+    ("loss runs requested / pending",                   None),
+    ("loss runs appear stale",                          None),
+    ("loss run valuation date",                         None),   # not a writable canonical fact
+    ("loss history conflict",                           None),
+)
+
+
+def loss_recommendation_field(message: str) -> Optional[str]:
+    """The canonical fact that would actually answer this loss recommendation.
+
+    `None` = no single fact closes it (needs a document or a reconciliation).
+    Unknown messages also return None rather than guessing: offering a waiver on
+    a rec we cannot route is recoverable, silently writing an answer into the
+    wrong fact is the defect this function exists to fix.
+    """
+    m = (message or "").lower()
+    for phrase, field in _LOSS_RECOMMENDATION_FIELDS:
+        if phrase in m:
+            return field
+    return None
 
 
 def calculate_p4_loss_history(
@@ -4302,6 +4487,130 @@ def _loss_rec_id(message: str) -> str:
     return f"rec_loss_{slug[:60]}"
 
 
+# Bound on how many counterfactual scorer runs one form may make. Each is pure
+# Python with no I/O, but a schedule-heavy form can raise dozens of cards and an
+# unbounded loop is how a cheap correctness win becomes a latency complaint.
+# Distinct FIELDS are simulated, not cards, so several cards naming one field
+# cost one run. 40 covers every real form measured.
+_MAX_IMPACT_SIMULATIONS = 40
+
+# The value a field is filled with to ask "what if this were answered?".
+# Deliberately "Yes": it satisfies both a plain presence test (`bool(_fv(...))`,
+# which is what nearly every pillar check does) and `_attested_true`, which is
+# what the loss-history pillar needs. A field wanting a NUMBER will show no gain
+# from it - handled by falling back, never by inventing or deleting a number.
+_IMPACT_PROBE_VALUE = "Yes"
+
+
+def _pillar_headroom(component: str, breakdown: dict, weights: dict) -> float:
+    """The most this pillar can still add to the total score, in real points."""
+    current = (breakdown or {}).get(component)
+    weight  = (weights or {}).get(component)
+    if current is None or weight is None:
+        return 0.0
+    return max(0.0, (100.0 - float(current)) * float(weight))
+
+
+def _measure_recommendation_impacts(
+    recommendations: List[dict],
+    baseline: Optional[int],
+    breakdown: dict,
+    weights: dict,
+    rescore,
+    facts: dict,
+) -> dict:
+    """{id(rec): (points, is_exact)} - what each card is really worth.
+
+    MEASURED, NOT DECLARED. Every `score_impact` in this module is a literal a
+    developer typed, and the loss cards all share one (8) regardless of where the
+    pillar currently sits - so the same card is worth +2.25 from the
+    narrative-stated state and +5.25 from no-information and promised 8 in both.
+    The client reconciled that against the published formula on 2026-08-17 and
+    was right. The fix is not a better literal; it is to stop declaring and start
+    asking. This scorer is pure - no I/O, no DB - so it can answer its own
+    counterfactual, which keeps the number correct when a pillar's numbers change
+    and for cards that do not exist yet.
+
+    The delta is taken against the UNCAPPED baseline, because the owner's
+    standing rule is that a gain adds to the raw score and a cap limits only what
+    is DISPLAYED.
+
+    Three deliberate refusals:
+
+    * **Never delete a card's value.** A simulation showing no movement falls
+      back to the declared literal (bounded, below). The probe value cannot
+      satisfy a field that wants a number, and zeroing a real card because our
+      probe was the wrong shape would be worse than the imprecision being fixed.
+    * **Never promise more than exists.** Measured or fallback, the number is
+      capped at the pillar's remaining headroom, so no card can offer points the
+      pillar has already earned.
+    * **Never let this break scoring.** Every simulation is wrapped; a failure
+      leaves that card exactly as it is today.
+
+    `is_exact` tells the UI whether it may drop the "up to" hedge. True only when
+    the number came from a measurement.
+    """
+    out: dict = {}
+    if baseline is None:
+        return out
+
+    measured_by_field: dict = {}
+    simulations = 0
+
+    for rec in recommendations:
+        field     = rec.get("field")
+        component = rec.get("component")
+        declared  = rec.get("score_impact")
+
+        if not isinstance(declared, (int, float)) or isinstance(declared, bool):
+            continue
+
+        # A card with no single answerable field cannot be simulated - nothing to
+        # fill - but it must STILL be bounded. Measured on a live session
+        # 2026-08-17: once the producer attested, the follow-up card ("attach
+        # loss runs to fully confirm") kept its typed 8 while the pillar sat at
+        # 60 with only 6 points left to give. A card that needs a DOCUMENT is
+        # exactly the kind most likely to overstate itself, because the literal
+        # was written for the empty case.
+        if not field:
+            _hr = _pillar_headroom(component, breakdown, weights)
+            if declared > 0 and _hr > 0:
+                out[id(rec)] = (int(round(min(float(declared), _hr))), False)
+            elif declared > 0:
+                out[id(rec)] = (0, True)
+            continue
+
+        if field in measured_by_field:
+            gain = measured_by_field[field]
+        elif simulations >= _MAX_IMPACT_SIMULATIONS:
+            gain = None
+        else:
+            simulations += 1
+            try:
+                probed = dict(facts or {})
+                probed[field] = _IMPACT_PROBE_VALUE
+                after = rescore(probed)
+                gain  = None if after is None else float(after) - float(baseline)
+            except Exception as ex:                        # pragma: no cover
+                logger.debug("impact simulation failed for %s: %s", field, ex)
+                gain = None
+            measured_by_field[field] = gain
+
+        headroom = _pillar_headroom(component, breakdown, weights)
+
+        if gain is not None and gain > 0:
+            points = min(gain, headroom) if headroom > 0 else gain
+            out[id(rec)] = (int(round(points)), True)
+        elif declared > 0 and headroom > 0:
+            out[id(rec)] = (int(round(min(float(declared), headroom))), False)
+        elif declared > 0:
+            # The pillar is already full: this card cannot move the score, even
+            # though it is still worth asking for. Saying so is the honest answer.
+            out[id(rec)] = (0, True)
+
+    return out
+
+
 def calculate_sqs(
     facts: dict,
     flags: dict,
@@ -4325,6 +4634,11 @@ def calculate_sqs(
     cross_issues_full: Optional[List[dict]] = None,
     # §6.3: full narrative doc text for component scoring (default "" = no-op)
     narrative_doc_text: str = "",
+    # Internal. True only inside a counterfactual run started by
+    # _measure_recommendation_impacts, where it stops the scorer measuring
+    # impacts again - i.e. it is what makes the recursion terminate. Never set
+    # it from production code.
+    _simulate: bool = False,
 ) -> dict:
     """Per-form SQS calculation with full metadata and structured recommendations."""
     extraction_quality = facts.get("_extraction_quality", 1.0)
@@ -4374,25 +4688,30 @@ def calculate_sqs(
         struct = int(sum(chks) / len(chks) * 100)
 
     elif fid == "ACORD_125":
-        chks = [
-            bool(_fv(facts, "applicant_name")),
-            bool(_fv(facts, "mailing_address")),
-            bool(_fv(facts, "effective_date")),
-            bool(_fv(facts, "lines_of_business")),
-            bool(_fv(facts, "contact_name") or _fv(facts, "contact_phone") or _fv(facts, "contact_email")),
-            bool(_fv(facts, "producer_name")),
+        # `scored` mirrors check_tier1's dec-page exemption so the per-form and
+        # package scorers cannot disagree about what a submission owes (see
+        # producer_fields_exempt). An exempt check is still REPORTED as missing -
+        # we still want the detail - it just stops docking the pillar.
+        _prod_exempt = producer_fields_exempt(flags)
+        _checks = [
+            # (label, fact key for the card, present?, counts toward the score?)
+            ("applicant name",    "applicant_name",
+             bool(_fv(facts, "applicant_name")),    True),
+            ("mailing address",   "mailing_address",
+             bool(_fv(facts, "mailing_address")),   True),
+            ("effective date",    "effective_date",
+             bool(_fv(facts, "effective_date")),    True),
+            ("lines of business", "lines_of_business",
+             bool(_fv(facts, "lines_of_business")), True),
+            ("contact info",      "contact_name",
+             bool(_fv(facts, "contact_name") or _fv(facts, "contact_phone")
+                  or _fv(facts, "contact_email")), not _prod_exempt),
+            ("producer name",     "producer_name",
+             bool(_fv(facts, "producer_name")),     not _prod_exempt),
         ]
-        struct = int(sum(chks) / len(chks) * 100)
-        missing = [
-            (l, f) for l, ok, f in zip(
-                ["applicant name", "mailing address", "effective date",
-                 "lines of business", "contact info", "producer name"],
-                chks,
-                ["applicant_name", "mailing_address", "effective_date",
-                 "lines_of_business", "contact_name", "producer_name"]
-            )
-            if not ok
-        ]
+        chks = [ok for _l, _f, ok, scored in _checks if scored]
+        struct = int(sum(chks) / len(chks) * 100) if chks else 100
+        missing = [(l, f) for l, f, ok, _scored in _checks if not ok]
         for label, field_name in missing:
             recommendations.append({
                 "rec_id": f"rec_{field_name}",
@@ -5009,7 +5328,11 @@ def calculate_sqs(
     for rec_msg in loss_recs:
         recommendations.append({
             "rec_id": _loss_rec_id(rec_msg),
-            "field": "loss_history_years",
+            # Was hardcoded "loss_history_years" for EVERY loss message, so the
+            # "confirm No Known Losses" card wrote the attestation into a year
+            # count and the score could never move. See
+            # _LOSS_RECOMMENDATION_FIELDS.
+            "field": loss_recommendation_field(rec_msg),
             "component": "loss_history_alignment",
             "message": rec_msg,
             "type": "suggestion",
@@ -5137,6 +5460,40 @@ def calculate_sqs(
         "standard_review" if raw_score >= 50 else
         "hold"
     )
+
+    # ── What each recommendation is ACTUALLY worth ────────────────────────────
+    # Replaces the hand-typed score_impact literals with a measurement. See
+    # _measure_recommendation_impacts for why, and for the three things it
+    # refuses to do. Runs before the sort so the ordering uses the real numbers -
+    # the biggest genuine win leads, which the typed literals could not deliver.
+    if not _simulate:
+        _rec_impacts = _measure_recommendation_impacts(
+            recommendations, raw_uncapped, breakdown, weights,
+            lambda _probed_facts: calculate_sqs(
+                facts=_probed_facts, flags=flags, mapped_data=mapped_data,
+                form_schema=form_schema, selected_form_ids=selected_form_ids,
+                hard_stops=hard_stops, soft_stops=soft_stops,
+                tier2_score=tier2_score, form_id=form_id,
+                schema_size=schema_size, fields_mapped=fields_mapped,
+                confidence_dict=confidence_dict,
+                has_narrative_doc=has_narrative_doc,
+                has_loss_run_doc=has_loss_run_doc,
+                loss_run_match=loss_run_match,
+                cross_issues_full=cross_issues_full,
+                narrative_doc_text=narrative_doc_text,
+                _simulate=True,
+            ).get("raw_sqs_score"),
+            facts,
+        )
+        for _rec in recommendations:
+            _measured = _rec_impacts.get(id(_rec))
+            if _measured is None:
+                continue
+            _rec["score_impact"], _rec["impact_is_exact"] = _measured
+            # A ceiling means the points are EARNED but may not be DISPLAYED
+            # until the stop clears, so the card must keep hedging.
+            if cap_applied is not None:
+                _rec["impact_is_exact"] = False
 
     # Priority 1 = most urgent (hard stops, tier-1 gaps). Sort ASCENDING on
     # priority so critical items lead; within a priority, higher score_impact

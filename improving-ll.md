@@ -3193,3 +3193,70 @@ future-dated line NOT being flagged, the warning never appearing in `hard`, and 
 full classify+resolve round trip. `test_legacy_rules.py` (65 anti-rot guards) green -
 the new row is shadow-free and its code is namespaced. Suite **3102 passed / 2 failed**
 - the same two pre-existing, zero regressions.
+
+---
+
+## C63 - "Absence is not No": the risk-transfer booleans get a third state (2026-08-17)
+
+**Prompt change, LLM call 1 schema only. Cost impact: ~40 words added to the cached
+extraction prefix. No new call, no new pass, no change to call 2.**
+
+Client 2026-08-17 item 3: *"Absence of information should not become No... Primble
+needs to distinguish an affirmative No from information that simply was not stated or
+could not be determined."*
+
+**Measured before changing anything.** Dumping a live session's flags:
+
+```
+FLAGS (44)
+  TRUE  (11): ...
+  FALSE (29): ...
+  NULL  (0): -
+```
+
+**Zero of forty-four booleans could say "unknown".** Every text field in the schema is
+`string or null`; the booleans were bare `boolean`, so the model had no third option
+and answered `false`. Probe runs B and D then showed a dec page that never mentions
+additional-insured status fighting a certificate that requires it - three conflict
+cards about requirements nobody had asserted either way.
+
+**Only three keys changed**, and the distinction is deliberate:
+
+* `risk_transfer.additional_insured_required`, `.waiver_of_subrogation_required`,
+  `.primary_noncontributory_required` are now `boolean or null`. These assert something
+  about a CONTRACT REQUIREMENT, so `false` is a claim and needs to be earned.
+* The 40 `has_*` coverage flags are UNCHANGED. There `false` means "no such coverage
+  was detected in this document" - a finding, not a claim - and every consumer already
+  reads them that way.
+
+**Nothing downstream had to change to accept null**, verified rather than assumed: the
+three readers in `sqs_service` all test `is True`; `_merge_risk_transfer` skips a
+non-bool instead of OR-ing it; and an absent sub-key is skipped by
+`_structured_dict_field_conflicts`. So "not stated" simply stops manufacturing an
+answer.
+
+**A prompt is a request, so there is also a check.**
+`extraction_service._drop_unstated_risk_transfer` removes a `false` whose topic the
+uploaded text never mentions, using the legally-standard printings of each requirement
+("additional insured", "waiver of subrogation", "primary and non-contributory"). It
+runs PER DOCUMENT in `extraction_pipeline` against that document's own text - the
+cross-document detector compares per-doc facts, not the merge, so dropping only from
+the merged set would have left the cards exactly where they were. A `true` is never
+touched, and a `false` printed against real wording ("no waiver of subrogation is
+required") survives because the phrase is present.
+
+Tests: `backend/tests/test_absence_and_context_20260817.py` (27), including the probe
+runs' literal shape, an affirmative "No" surviving on all three keys, a real
+disagreement still conflicting, and an anti-rot guard that fails the build if any of
+the three loses `or null`.
+
+---
+
+## C56 - 2026-08-18 round 15: no prompt or call change
+
+Three deterministic fixes (package-header policy count, zero-padded quantity
+rejection, two evidence-gate quote rules). **No LLM call added, removed or
+re-batched; no prompt byte changed.** The two quote rules run post-fill and cost
+nothing. Field counts move down slightly - the 125 header and the two vehicle
+quantity boxes are owned blanks rather than questions. Logged so the registry
+can still prove no prompt moved.

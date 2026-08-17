@@ -708,21 +708,46 @@ def _check_crime_silent_exposure(
     if flags.get("has_crime") or _fv(facts, "crime_limit"):
         return issues
 
-    ops = (_fv(facts, "operations_description") or "").lower()
-    cash_keywords = ["cash", "retail", "restaurant", "bank", "financial",
-                     "jewelry", "money", "teller", "payroll service"]
-    has_cash_exposure = any(kw in ops for kw in cash_keywords)
-    num_emp = _to_int(_fv(facts, "num_employees")) or 0
+    # THE EVIDENCE IS CASH HANDLING, NOT HEADCOUNT (fixed 2026-08-17).
+    # The trigger was `has_cash_exposure or num_emp > 10`. Ten employees is
+    # below almost every commercial account, so this fired on practically every
+    # submission - it appeared on all four probe runs, including a ROOFING
+    # CONTRACTOR whose description mentions no cash, no retail and no money.
+    # Worse, the message then asserted that "the business description indicates
+    # potential employee dishonesty or cash-handling exposure", which was simply
+    # untrue: nothing in the description said so, only the headcount did.
+    #
+    # The spec is explicit - "If company has HIGH INTERNAL CASH HANDLING but no
+    # crime coverage" - and says nothing about headcount. The headcount clause
+    # was never spec'd and produced only noise, so it is gone.
+    #
+    # Detection is WIDENED to compensate: the narrative fields are read too, not
+    # just `operations_description`, so a genuine cash exposure described
+    # anywhere in the submission is still caught. And the message now NAMES the
+    # evidence, so a producer can check whether we read the document correctly.
+    _CASH_TERMS = ("cash", "retail", "restaurant", "bar ", "tavern", "bank",
+                   "financial", "jewelry", "jewellery", "money", "teller",
+                   "payroll service", "check cashing", "atm", "casino",
+                   "pawn", "currency", "armored", "vault")
+    haystacks = [
+        (_fv(facts, k) or "") for k in (
+            "operations_description", "account_description",
+            "certificate_description_of_operations", "contractor_type",
+        )
+    ]
+    ops = " ".join(str(h) for h in haystacks).lower()
+    matched = sorted({kw.strip() for kw in _CASH_TERMS if kw in ops})
 
-    if has_cash_exposure or num_emp > 10:
+    if matched:
         # Spec: silent crime exposure = SOFT WARNING (not advisory)
         issues.append(_issue(
             "soft_warning",
             "crime_silent_exposure",
             (
-                "The business description indicates potential employee dishonesty or "
-                "cash-handling exposure but no Crime coverage is included. "
-                "Consider adding crime coverage."
+                "The business description mentions "
+                f"{', '.join(repr(m) for m in matched[:3])}, which suggests "
+                "cash-handling or employee-dishonesty exposure, but no Crime "
+                "coverage is included. Consider adding crime coverage."
             ),
             [],
         ))

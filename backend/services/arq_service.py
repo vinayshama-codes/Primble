@@ -14,8 +14,12 @@ from config.settings import ENABLE_SCHEDULE_CAPTURE, FRONTEND_URL, LLM_MODEL
 from services import schedule_capture
 from services.question_classifier import (
     AUDIENCE_CLIENT,
+    AUDIENCE_INTERNAL,
+    AUDIENCE_PRODUCER,
     BUCKET_CLIENT,
+    BUCKET_UNDERWRITING,
     PRIORITY_IMPORTANT,
+    PRIORITY_SUPPRESSED,
     apply_default_selection,
     classify_question,
     decorate_questions,
@@ -370,7 +374,18 @@ _FIELD_QUESTION_MAP = {
     "num_claims":               "How many insurance claims has your business filed in the last 3 to 5 years?",
     "loss_history_years":       "How many years of past insurance claims history are you able to provide?",
     # §6.4: lets the client attest "no prior losses" so the loss-history score can move.
-    "loss_history_no_prior_losses_indicator": "To the best of your knowledge, has your business had NO insurance claims or losses in the past 5 years? (Answer 'Yes' to confirm No Known Losses - the industry term for an account with no reported claims.)",
+    # Client, 2026-08-17, verbatim: "For loss history, use an explicit
+    # confirmation such as: Have you had any insurance claims or losses in the
+    # past five years? Yes / No ... A blank response should not mean 'No
+    # losses.'" The old wording asked whether the business had had NO claims and
+    # wanted "Yes" to mean none - a double negative on the one question whose
+    # answer carries the most underwriting weight.
+    #
+    # It is asked in HIS direction with no data migration, because the answer is
+    # stored as the chosen OPTION TEXT and `_attested_true` already reads these
+    # exact phrasings correctly ("No - no claims..." attests, "Yes - we have
+    # had..." does not, blank stays blank). See _NO_LOSS_OPTIONS.
+    "loss_history_no_prior_losses_indicator": "Have you had any insurance claims or losses in the past five years?",
     "certificate_holder":       "Is there a company, landlord, or individual who needs written proof of your insurance? If yes, what is their name and address?",
     # Prior carrier / marketing context (Brent feedback: questionnaire more reliable than document extraction)
     "carrier_marketing_reason": "Why are you marketing this account at this time?",
@@ -451,7 +466,7 @@ _FIELD_HINT_MAP = {
     "vehicles_return_to_premises": "Tell us where your vehicles are parked overnight, e.g. 'All vehicles return to our main yard at 123 Industrial Rd' or 'Drivers take vehicles home'.",
     "num_claims":               "Enter the total number of insurance claims your business has filed in the past 3–5 years, e.g. '2'. Enter '0' if none.",
     "loss_history_years":       "Enter how many years of claims history you can provide documentation for, e.g. '5'.",
-    "loss_history_no_prior_losses_indicator": "Answer 'Yes' only if there have been no insurance claims or losses. If you have had any claims, answer 'No' and provide your loss runs or claim count instead.",
+    "loss_history_no_prior_losses_indicator": "Choose one. If you have had claims, we will ask for your loss runs or claim count next. Leaving this blank is not the same as answering 'No' - an unanswered question cannot be credited.",
     "certificate_holder":       "Enter the name and address of anyone who needs a certificate of insurance, e.g. 'ABC Property Management, 456 Oak Ave, Dallas TX 75201'.",
     "carrier_marketing_reason": "Select the primary reason for seeking coverage. This helps the underwriter understand the account background and is much more reliable than trying to extract this from documents.",
     "submission_urgency":       "Optional. Note any binding deadline, renewal date, or time-sensitivity, e.g. 'Need to bind by 07/01 for a new job'. Leave blank if none.",
@@ -985,7 +1000,7 @@ def _resolve_question(field_name: str) -> tuple[str, str | None]:
         return question, None
 
     readable = _field_name_to_readable(field_name)
-    question = f"Please provide your {readable}."
+    question = f"{_MACHINE_QUESTION_PREFIX}{readable}."
     question = _clean_duplicate_words(question)
     return question, None
 
@@ -1571,7 +1586,85 @@ def _maybe_inject_narrative_enrichment_questions(
 
 
 # §6.4: the curated "no prior losses" attestation field.
+# The wording used when nothing better is known: a raw ACORD field name with a
+# sentence wrapped round it ("Please provide your commercial vehicle line of
+# business kah code."). It is the LAST resort in _resolve_question - reached only
+# when the field matched no curated question, no prefix rule, and no humanized
+# rewrite. So the prefix is a reliable marker of "we could not tie this box to
+# anything a person would recognise", which is what `_hide_machine_worded_
+# questions` acts on. Defined once so the generator and the detector cannot drift.
+_MACHINE_QUESTION_PREFIX = "Please provide your "
+
 NO_LOSS_INDICATOR_FIELD = "loss_history_no_prior_losses_indicator"
+
+# The two answers to "Have you had any insurance claims or losses in the past
+# five years?". The stored fact means "no prior losses = true", so the client's
+# question runs in the OPPOSITE direction to the fact - and these strings are
+# what keep that from needing any inversion logic or data migration.
+#
+# The chosen option text IS the stored value, and `sqs_service._attested_true`
+# already reads it correctly: it attests on a phrase containing "no" plus
+# "loss"/"claim", which the first option has and the second does not. Verified,
+# not assumed - the pillar scores 60 / 25 / 25 for option one, option two and
+# blank. Old sessions holding a bare "Yes" still read as attested, so nothing
+# stored before today changes meaning.
+#
+# CHANGING THIS WORDING CHANGES WHAT IS STORED. If either option is ever
+# reworded, re-run test_the_client_wording_needs_no_inversion first.
+_NO_LOSS_OPTIONS = (
+    "No - no claims or losses in the past 5 years",
+    "Yes - we have had claims or losses",
+)
+
+
+def _hide_machine_worded_questions(questions: List[dict]) -> int:
+    """Keep raw schema prompts out of the client and producer workflows.
+
+    Client, 2026-08-17: "suppress clearly irrelevant conditional questions and
+    raw internal/schema prompts from the normal workflow ... the default
+    experience should contain relevant questions that a producer or client can
+    reasonably understand and answer."
+
+    A question still carrying `_MACHINE_QUESTION_PREFIX` reached the end of
+    `_resolve_question` unmatched: no curated wording, no prefix rule, no
+    humanized rewrite. It is a PDF box with a sentence wrapped round its name -
+    "Please provide your commercial vehicle line of business kah code." Nobody
+    can answer that, and asking costs the producer's credibility with their
+    client.
+
+    The signal is the WORDING, not the field name, and that is deliberate: it is
+    the one test that stays true for the next ACORD form added, because it asks
+    "did anything succeed in describing this?" rather than matching a list of
+    names. Two live gaps it closes at once - the humanization pass only ever ran
+    for client-audience questions, so producer questions were never rewritten
+    (10 of 13 on a real submission), and a client-audience question whose rewrite
+    silently failed fell through with the fallback intact.
+
+    Routed to internal, never DELETED: the producer can still open the internal
+    panel and answer one deliberately. Returns how many moved, so the change is
+    countable rather than a silent disappearance.
+    """
+    moved = 0
+    for q in questions:
+        if not str(q.get("question", "")).startswith(_MACHINE_QUESTION_PREFIX):
+            continue
+        if q.get("audience") not in (AUDIENCE_CLIENT, AUDIENCE_PRODUCER):
+            continue
+        q["audience"]          = AUDIENCE_INTERNAL
+        q["priority"]          = PRIORITY_SUPPRESSED
+        q["suppressed"]        = True
+        q["suppressed_reason"] = "raw_schema_prompt"
+        q["default_selected"]  = False
+        q["suggested"]         = False
+        # The 3-bucket producer UI reads `bucket`, not `audience` - leaving it on
+        # the Client or Agency bucket would keep the row on screen in the very
+        # panel this is clearing.
+        q["bucket"]            = BUCKET_UNDERWRITING
+        moved += 1
+    if moved:
+        logger.info("ARQ: %d machine-worded question(s) held back from the "
+                    "client/producer workflow", moved)
+    return moved
 
 
 def _maybe_inject_no_loss_question(questions: List[dict], facts: dict, flags: dict) -> None:
@@ -1594,12 +1687,36 @@ def _maybe_inject_no_loss_question(questions: List[dict], facts: dict, flags: di
         return
     if flags.get("no_prior_losses") or flags.get("narrative_states_no_losses"):
         return
-    _yrs = _val("loss_history_years")
-    _clm = _val("num_claims")
-    if _yrs not in (None, "", "0", 0) or _clm not in (None, "", "0", 0):
+    # "Quantified" means a real COUNT, not merely a non-empty value. The old test
+    # was `not in (None, "", "0", 0)`, so any text at all counted as an answer -
+    # and on a live session 2026-08-17 the string "no losses", misfiled into
+    # `loss_history_years` by the loss card's wrong-field bug, silently satisfied
+    # it. The attestation question was then never asked, on the very submission
+    # that most needed it, and the client reported it as "not pre-selected".
+    # Parse it: a value that is not a number quantifies nothing.
+    def _count(key):
+        v = _val(key)
+        if v in (None, ""):
+            return 0
+        try:
+            return int(float(str(v).strip().replace(",", "")))
+        except (TypeError, ValueError):
+            return 0
+
+    if _count("loss_history_years") > 0 or _count("num_claims") > 0:
         return
-    if any(q.get("field_name") == NO_LOSS_INDICATOR_FIELD for q in questions):
-        return
+    # UPGRADE, don't bail. Another path may already have produced this question
+    # as a plain text box - the scorer-seeded pass added 2026-08-17 does exactly
+    # that, and the early `return` here silently handed the client a free-text
+    # field for the one question that most needs an explicit Yes/No. Whoever
+    # created it, the curated control wins.
+    for _existing in questions:
+        if _existing.get("field_name") == NO_LOSS_INDICATOR_FIELD:
+            _existing["question"]   = _FIELD_QUESTION_MAP[NO_LOSS_INDICATOR_FIELD]
+            _existing["hint"]       = _FIELD_HINT_MAP.get(NO_LOSS_INDICATOR_FIELD, "")
+            _existing["field_type"] = "select"
+            _existing["options"]    = list(_NO_LOSS_OPTIONS)
+            return
 
     questions.append({
         "field_name":         NO_LOSS_INDICATOR_FIELD,
@@ -1607,7 +1724,14 @@ def _maybe_inject_no_loss_question(questions: List[dict], facts: dict, flags: di
         "hint":               _FIELD_HINT_MAP.get(NO_LOSS_INDICATOR_FIELD, ""),
         "forms":              "",
         "form_ids":           [],
-        "field_type":         "checkbox",
+        # A CHECKBOX cannot tell "No" apart from "not answered" - an untouched
+        # box and a deliberate No are the same byte. That is precisely the
+        # client's opening principle ("Absence of information should not become
+        # No") applied to the question he named. An explicit two-option control
+        # can be left blank, and blank scores as no information (25), not as an
+        # attestation and not as a denial.
+        "field_type":         "select",
+        "options":            list(_NO_LOSS_OPTIONS),
         "current_value":      "",
         "_group_label":       None,
         "_is_curated_client": True,
@@ -2091,6 +2215,52 @@ async def generate_arq_questions(
                 field_current_values[field_name] = current_val
             missing_fields[field_name].add(form_id)
 
+    # ── Seed from the scorer's own recommendations ───────────────────────────
+    # The loop above builds questions by walking BLANK FORM BOXES. That is a
+    # completeness view and it is kept - but it cannot see a fact that moves the
+    # score without owning a box we can resolve.
+    #
+    # Measured on a live session 2026-08-17: the No Known Losses attestation -
+    # worth ~5 SQS points - reached the client only as the raw ACORD field
+    # `LossHistory_NoPriorLossesIndicator_A`, worded "Please provide your loss
+    # history no prior losses indicator", classed internal and suppressed,
+    # because `_canonical_key` cannot resolve that name. The good question we had
+    # already written was never found, and an answer to it could not have been
+    # saved either. The client reported the symptom as "not pre-selected"; it was
+    # not present at all.
+    #
+    # So ALSO ask the scorer. Its recommendations already name the canonical fact
+    # that closes each gap (fixed 2026-08-17 - they used to carry one hardcoded
+    # key) and now carry a measured point value. Seeding by the CANONICAL name is
+    # what makes the curated question text and the writable answer path apply.
+    #
+    # Additive by construction: it can only introduce a fact the form scan
+    # missed, never remove or reword one it found. `_rec_points` rides along so
+    # apply_default_selection can pre-tick by value instead of by static tier.
+    _rec_points: dict = {}
+    for _fid, _fdata in (generated_forms or {}).items():
+        if not isinstance(_fdata, dict):
+            continue
+        for _rec in ((_fdata.get("sqs") or {}).get("recommendations") or []):
+            if not isinstance(_rec, dict):
+                continue
+            _rf = _rec.get("field")
+            # No field means no typed answer can close it (it needs a document),
+            # and a fact we already hold is not a gap.
+            if not _rf or not isinstance(_rf, str) or _rf.startswith("_"):
+                continue
+            if _canonical_key(_rf) != _rf:
+                continue                       # not a writable canonical fact
+            if facts.get(_rf):
+                continue
+            _pts = _rec.get("score_impact")
+            if isinstance(_pts, (int, float)) and not isinstance(_pts, bool):
+                _rec_points[_rf] = max(float(_pts), _rec_points.get(_rf, 0.0))
+            if _rf not in missing_fields:
+                missing_fields[_rf] = set()
+                field_current_values[_rf] = ""
+            missing_fields[_rf].add(_fid)
+
     has_non_acord125_forms = any(fid != "ACORD_125" for fid in generated_forms)
     if has_non_acord125_forms:
         tier1_fact_keys = ["applicant_name", "producer_name", "mailing_address", "effective_date",
@@ -2302,6 +2472,19 @@ async def generate_arq_questions(
     # Schedules own their taxonomy explicitly (see docstring): must run after
     # decoration and before the default-selection pass reads priority/suppressed.
     _finalize_schedule_taxonomy(questions)
+
+    # Stamp the measured SQS gain onto every question the scorer priced, from
+    # whichever of the three append sites produced it (form scan, coverage
+    # guarantee, or a curated injector). ONE pass rather than a copy at each
+    # site - three hand-maintained copies of one rule is the defect pattern this
+    # whole arc has been unwinding. apply_default_selection reads it to pre-tick
+    # by value instead of by static tier.
+    for _q in questions:
+        _key = _q.get("_canonical_key") or _q.get("field_name")
+        if _key in _rec_points:
+            _q["sqs_points"] = _rec_points[_key]
+
+    _hide_machine_worded_questions(questions)
     apply_default_selection(questions)
 
     # Engineering note (Figure 14): give the producer a rule-oriented label while
@@ -3940,7 +4123,23 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
             for _rec in (_sqs_item.get("recommendations") or []):
                 if isinstance(_rec, dict) and _rec.get("rec_id"):
                     active_rec_ids.add(_rec["rec_id"])
-        _open_recs = await get_open_recommendations(processing_session_id)
+        # include_acknowledged=True, and the reason is a live defect (2026-08-17).
+        # The default is `action IS NULL`, so the moment a producer clicks
+        # "Download Anyway" every acknowledged card is stamped
+        # action='downloaded_anyway' and disappears from this sweep FOREVER.
+        # After that the card can never be auto-resolved - and it is not in
+        # "Reviewed" either, which requires 'dismissed' or 'resolved'. So an
+        # answered recommendation sat stranded: the fact landed, the score moved
+        # (owner's run: package 68 -> 73), and the card still rendered as open
+        # with an empty box inviting a second answer.
+        #
+        # Safe because resolution is still decided by evidence, not by this
+        # flag: the loop below only marks a row resolved when its rec_id is
+        # ABSENT from the freshly recomputed recommendations. A gap that is
+        # still live stays live. "Download Anyway" acknowledges a gap; it must
+        # not make that gap permanently unfixable.
+        _open_recs = await get_open_recommendations(
+            processing_session_id, include_acknowledged=True)
         _score_at_resolve = (package_sqs or {}).get("package_sqs_score") or 0
         _auto_resolved = 0
         for _orec in _open_recs:

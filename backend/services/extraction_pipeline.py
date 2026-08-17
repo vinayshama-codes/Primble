@@ -278,6 +278,36 @@ async def run_extraction_pipeline(
         raw       = await extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
         extracted = _validate_extraction_output(raw, doc_type)
 
+        # Absence is not "No" (client 2026-08-17 item 3), applied PER DOCUMENT
+        # against that document's OWN text. The cross-document conflict detector
+        # compares each doc's facts, not the merged set, so dropping an
+        # unsupported "No" only from the merge would leave the conflict card
+        # exactly where it is - probe runs B and D showed the dec page's silent
+        # "No" fighting the certificate's real "Yes" on three requirements.
+        try:
+            from services.extraction_service import _drop_unstated_risk_transfer
+            _drop_unstated_risk_transfer(extracted.get("facts") or {}, text)
+        except Exception as _rtx:                             # noqa: BLE001
+            logger.warning("risk-transfer absence check failed for %s: %s",
+                           _display_name, _rtx)
+        # SAME REASON, SAME PLACE. An endorsement date must not become a policy
+        # date, and the conflict that exposes it is detected between PER-DOCUMENT
+        # facts. Probe run 2 (2026-08-17) still showed "Umbrella Effective Date
+        # 07/15/2025 vs 07/25/2025" AFTER the merge-level guard landed, because
+        # the certificate's own `umbrella_effective_date` never went through it -
+        # exactly the trap the risk-transfer check above had already fallen into
+        # once. Each document is judged against its OWN remarks and its OWN dec
+        # entries.
+        try:
+            from services.extraction_service import (
+                _drop_endorsement_dates_from_policy_facts,
+            )
+            _drop_endorsement_dates_from_policy_facts(
+                extracted.get("facts") or {}, [])
+        except Exception as _edx:                             # noqa: BLE001
+            logger.warning("endorsement-date check failed for %s: %s",
+                           _display_name, _edx)
+
         processed_docs.append({
             "doc_id":                uuid.uuid4().hex,
             "filename":              _display_name,
@@ -774,7 +804,18 @@ async def _finalize_pipeline(
                 )
                 _needs_flag = _relevance_flag.get(_key)
                 _relevant = (not _needs_flag) or bool(mflags.get(_needs_flag))
-                _blocking = _key in _blocking_keys and _relevant
+                # A contract-scoped difference on a multi-policy package is not
+                # blocking - the reconciler decides that once (see
+                # underwriting_consistency.CONTRACT_SCOPED_HARD_STOP_KEYS) and
+                # this honours it. Probe run C shipped a hard stop from HERE
+                # while check_doc_consistency had already downgraded its own
+                # copy to a warning: one difference, two engines, two verdicts,
+                # both on screen.
+                _downgraded = bool(f.get("blocking_downgraded"))
+                if _downgraded:
+                    _uw_msg += (" This package evidences more than one policy, "
+                                "and each policy carries its own term.")
+                _blocking = _key in _blocking_keys and _relevant and not _downgraded
                 if _blocking:
                     hard_stops = list(hard_stops) + [_uw_msg]
                 else:

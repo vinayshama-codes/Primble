@@ -488,6 +488,21 @@ HARD_STOP_RECONCILABLE_KEYS = frozenset({
     "applicant_name", "fein", "effective_date", "expiration_date",
 })
 
+# Of those, the ones that belong to a CONTRACT rather than to the APPLICANT.
+# A package has one insured and one FEIN however many policies it carries, so
+# a disagreement there is always worth blocking. It does NOT have one policy
+# term: three policies legitimately carry three terms, and calling that a
+# blocking error caps an ordinary account at 60 (probe run C, 2026-08-17).
+#
+# `check_doc_consistency` downgrades its OWN copy of this rule; this set is what
+# lets the reconciler's hard-stop escalation in extraction_pipeline reach the
+# same conclusion instead of keeping a second, divergent opinion. Two engines
+# with one rule each is how the first cut of this fix shipped a warning and a
+# hard stop for the same difference on the same screen.
+CONTRACT_SCOPED_HARD_STOP_KEYS = frozenset({
+    "effective_date", "expiration_date",
+})
+
 # Fields whose unresolved conflict must BLOCK form generation until the user
 # confirms the correct value (client Property Integrity directive: "Building Value
 # Duplication ... generate a warning and require review before forms are
@@ -508,6 +523,31 @@ GENERATION_BLOCKING_RECONCILABLE_KEYS = frozenset({
 CONFLICT_WITHHOLD_KEYS = frozenset({
     "umbrella_limit",
 })
+
+
+def is_withheld(facts: Optional[dict], fact_key: str) -> bool:
+    """True when this fact's value is UNRESOLVED and must not be published.
+
+    THE ONE GATE. Client 2026-08-17: *"Data Consistency shows $3M vs $1M as
+    unresolved ... Form Recommendation still references $3M ... an unresolved
+    fact must remain unresolved downstream rather than another part of Primble
+    independently selecting a value."*
+
+    The withhold list has existed since 2026-08-15 and worked - but only two
+    modules ever read it (``pdf_service._resolve_conflicted_fact_blank`` and
+    ``alias_stamper``), both on the STAMPING side. Every other surface that
+    renders a fact to a human read the merged value directly, so the form
+    correctly shipped a blank umbrella limit while the recommendation panel
+    printed "$3,000,000" on two forms. Reproduced in three lines on 2026-08-17.
+
+    Any surface that shows a fact to a human must consult this. It is
+    deliberately a plain read of the list the pipeline already computes - no new
+    state, no new plumbing, and confirming in the picker clears it on the next
+    pipeline run exactly as it does for stamping.
+    """
+    if not isinstance(facts, dict) or not fact_key:
+        return False
+    return fact_key in (facts.get("_uw_conflicted_keys") or ())
 
 
 def unresolved_withheld_keys(uw_result: Optional[dict],
@@ -694,7 +734,22 @@ def _value_completeness(fact_key: str, kind: str, value: Any) -> float:
     s = str(value or "").strip()
     if not s:
         return 0.0
-    if fact_key in ("mailing_address", "physical_address"):
+
+    # WHICH fields get which scoring is now DERIVED from the value's kind, not
+    # from a two-key list - an auto-discovered `premises_address` was getting
+    # raw-length scoring where a curated `mailing_address` got the real ZIP/
+    # state signal. Same rule for every address, however the key is spelled.
+    try:
+        from services.fact_equivalence import (
+            value_kind, KIND_ADDRESS, KIND_FEIN, KIND_NAME, KIND_TEXT,
+            KIND_NARRATIVE,
+        )
+        vk = value_kind(fact_key)
+    except Exception:                                     # pragma: no cover
+        vk = None
+        KIND_ADDRESS = KIND_FEIN = KIND_NAME = KIND_TEXT = KIND_NARRATIVE = None
+
+    if vk == KIND_ADDRESS or fact_key in ("mailing_address", "physical_address"):
         score = len(re.findall(r"\w+", s)) * 0.1          # mild fullness preference
         if re.search(r"\b\d{5}-\d{4}\b", s):
             score += 3.0                                  # ZIP+4 (most complete)
@@ -705,10 +760,23 @@ def _value_completeness(fact_key: str, kind: str, value: Any) -> float:
         if re.match(r"\s*\d+\b", s):
             score += 0.5                                  # leading street number
         return score
-    if fact_key == "fein":
+    if vk == KIND_FEIN or fact_key == "fein":
         return 1.0 if len(re.sub(r"\D", "", s)) == 9 else 0.0
-    if kind == "identity":
-        return len(s) * 0.01                              # generic: longer = more descriptive
+
+    # THE "SUGGESTED" DEFECT (probe run B, 2026-08-17). Raw length was applied
+    # to every auto-discovered field, so the longest string won - and the
+    # longest string is the one carrying an ANNOTATION or a mis-extraction.
+    # Measured: the badge recommended "BUSINESS AUTO COVERAGE FORM" over
+    # "Occurrence", "$2,000,000 (any one premises)" over "$2,000,000", and an
+    # EXCLUSIONS clause over the real operations description. A false conflict
+    # costs a click; a wrong recommendation puts a wrong value on a legal form.
+    #
+    # Length is only a completeness signal for genuinely descriptive text. A
+    # typed value (money, a code, a date, an identifier, a yes/no) has no
+    # "more complete" printing - those score 0.0 and ranking falls through to
+    # DOCUMENT AGREEMENT, which is real evidence.
+    if kind == "identity" and vk in (KIND_NAME, KIND_TEXT, KIND_NARRATIVE, None):
+        return len(s) * 0.01
     return 0.0
 
 
@@ -765,6 +833,18 @@ def _suggest_for_field(fact_key: str, kind: str, values: List[dict]) -> Optional
     if confidence == "high" and top_sources and all(s.get("source_method") == "text_scan" for s in top_sources):
         confidence = "medium"
 
+    # A GENUINE TIE GETS NO SUGGESTION (client-facing decision, 2026-08-17).
+    # "low" means nothing separates the candidates: equal completeness, equal
+    # document support. Probe run A showed every candidate appearing once at
+    # the same confidence, and the merge's own winner was the first value twice
+    # and the second value three times - no pattern, i.e. a coin flip. Badging
+    # a coin flip as "Suggested" on a legal value is worse than saying nothing,
+    # and C23 in improving-ll.md is the standing precedent: frequency ranking
+    # once picked an UMBRELLA limit as the GL limit. The row still renders and
+    # the producer still chooses - we just stop pretending we know.
+    if confidence == "low":
+        return None
+
     preselect = (confidence == "high") and (fact_key not in HARD_STOP_RECONCILABLE_KEYS)
     return {
         "value":      top.get("display"),
@@ -794,6 +874,72 @@ def _humanize(fact_key: str) -> str:
     """Readable label for an auto-discovered fact key
     ('gl_each_occurrence_limit' -> 'Gl Each Occurrence Limit')."""
     return fact_key.replace("_", " ").strip().title() or fact_key
+
+
+def _drop_foreign_line_values(fact_key: str, values: List[dict]) -> List[dict]:
+    """Remove candidates that name a DIFFERENT coverage line than this fact.
+
+    See ``fact_equivalence.names_a_foreign_line`` for the rule and its
+    positive-evidence guards. Fail-open, and never returns an empty list.
+    """
+    if len(values) < 2:
+        return values
+    try:
+        from services.fact_equivalence import names_a_foreign_line
+        kept = [g for g in values
+                if not names_a_foreign_line(fact_key, g.get("display"))]
+        if kept and len(kept) < len(values):
+            logger.info(
+                "underwriting: %s - dropped %d candidate(s) naming another "
+                "line of business; they are mis-extractions, not rival answers",
+                fact_key, len(values) - len(kept))
+            return kept
+        return values
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(
+            "underwriting: foreign-line filter failed for %s - %s", fact_key, exc)
+        return values
+
+
+def _merge_equivalent_value_groups(fact_key: str, values: List[dict],
+                                   context=None) -> List[dict]:
+    """Collapse value groups that are the SAME underlying fact.
+
+    Pure list-in / list-out around ``fact_equivalence.equivalent_index``. The
+    surviving group keeps every source from the groups folded into it, so
+    attribution ("from X, from Y") is never lost - only the QUESTION goes away.
+    The display value is chosen by the equivalence layer's own preference rule
+    (bare for an amount, fuller for an identifier), NOT by raw string length.
+
+    Fail-open: any problem returns the input untouched.
+    """
+    if len(values) < 2:
+        return values
+    try:
+        from services.fact_equivalence import equivalent_index
+        mapping = equivalent_index(
+            fact_key, [g.get("display") for g in values], context)
+        if not mapping:
+            return values
+        out: List[dict] = []
+        for i, g in enumerate(values):
+            if i in mapping:
+                continue
+            keeper = dict(g)
+            keeper["sources"] = list(g.get("sources") or [])
+            for j, k in mapping.items():
+                if k == i:
+                    keeper["sources"].extend(values[j].get("sources") or [])
+            out.append(keeper)
+        logger.info(
+            "underwriting: %s - %d value group(s) folded as the same fact "
+            "(%d remain); no question is asked about formatting",
+            fact_key, len(values) - len(out), len(out))
+        return out or values
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(
+            "underwriting: equivalence filter failed for %s - %s", fact_key, exc)
+        return values
 
 
 def _auto_scalar_keys(docs: List[dict], exclude: set) -> set:
@@ -884,6 +1030,31 @@ def assess_underwriting_consistency(
     fields_out: List[dict] = []
     conflict_count = 0
     assessed_keys: set = set()
+
+    # Package context for the equivalence filter, built ONCE from the verified
+    # dec index. It is what lets three policy numbers on a three-policy account
+    # stop being "a conflict" (client 2026-08-17 item 2: "...only be treated as
+    # conflicting if Primble establishes that they belong to the same policy and
+    # coverage context"). Positive evidence only - no index, no opinion, and the
+    # behaviour is exactly what it is today.
+    try:
+        from services.fact_equivalence import PackageContext
+        eq_context = PackageContext(merged_facts, docs)
+    except Exception as _cex:                                 # noqa: BLE001
+        logger.warning("underwriting: package context unavailable - %s", _cex)
+        eq_context = None
+
+    # Statements the submission's narrative fields make, mined ONCE. Read-only:
+    # they annotate conflict rows and never become facts (see narrative_facts).
+    try:
+        from services.narrative_facts import statements_for_facts
+        narrative_statements = statements_for_facts(merged_facts, eq_context, docs)
+        if narrative_statements:
+            logger.info("underwriting: %d statement(s) mined from the "
+                        "submission's remarks", len(narrative_statements))
+    except Exception as _nex:                                 # noqa: BLE001
+        logger.warning("underwriting: narrative mining unavailable - %s", _nex)
+        narrative_statements = []
 
     # Effective registry = the curated fields, plus (when full-field
     # reconciliation is enabled) every OTHER scalar fact present across the
@@ -1016,6 +1187,32 @@ def assess_underwriting_consistency(
                     fact_key, _pex)
 
         values = list(groups.values())
+
+        # ── Foreign-line candidates are not candidates (client item 2) ───────
+        # "GL Form Type: BUSINESS AUTO COVERAGE FORM vs Commercial General
+        # Liability - those are different lines of business, not competing GL
+        # values." A value naming somebody else's coverage line is a
+        # mis-extraction, and asking a producer to choose between a
+        # mis-extraction and the truth is worse than not asking. Never empties
+        # the field: if EVERY candidate is foreign we have no basis to prefer
+        # one, so all are kept and the row renders as it does today.
+        values = _drop_foreign_line_values(fact_key, values)
+
+        # ── Equivalence filter (client 2026-08-17) ───────────────────────────
+        # "Primble should escalate judgment, not formatting." The grouping above
+        # compares NORMALIZED TEXT, which cannot see that $2,000,000 and
+        # "$2,000,000 General Aggregate" are one amount, that "Denver, Colorado"
+        # is a COMPONENT of the full street address, that two remarks paragraphs
+        # are not rival answers, or that three policy numbers on a three-policy
+        # account are three contracts. Measured 2026-08-17: 24 of 42 realistic
+        # "same fact, two printings" pairs were escalated, across eight shape
+        # families - the client had reported two of them.
+        #
+        # It runs AFTER the grouping and only ever MERGES groups, so it cannot
+        # manufacture a conflict; a failure inside it leaves the grouping
+        # untouched (see services/fact_equivalence for the full argument).
+        values = _merge_equivalent_value_groups(fact_key, values, eq_context)
+
         distinct = len(values)
 
         if confirmed_value is not None:
@@ -1047,7 +1244,49 @@ def assess_underwriting_consistency(
         # non-hard-stop field (the frontend pre-checks that radio).
         suggestion = _suggest_for_field(fact_key, kind, values) if status == "conflict" else None
 
+        # ── What the submission's own remarks say about this disagreement ────
+        # Client 2026-08-17: "A paragraph containing policy numbers, dates,
+        # limits, premiums ... the individual facts within it need to be
+        # interpreted in their appropriate context." Their own example is the
+        # umbrella: the dec page says $3M, the COI says $1M, and the remarks
+        # explain that it was REDUCED from one to the other on a stated date.
+        #
+        # This EXPLAINS the conflict; it never resolves it. The same client
+        # required that "an unresolved fact remains unresolved downstream rather
+        # than another part of Primble independently selecting a value", so no
+        # value is chosen, pre-selected or written - the producer just gets the
+        # evidence next to the question instead of having to find it.
+        narrative_note = None
+        if status == "conflict":
+            try:
+                from services.narrative_facts import explain_conflict
+                narrative_note = explain_conflict(
+                    fact_key, [v.get("display") for v in values],
+                    narrative_statements)
+            except Exception as _nex:                         # noqa: BLE001
+                logger.warning("underwriting: narrative note failed for %s: %s",
+                               fact_key, _nex)
+
+        # A contract-scoped difference on a MULTI-POLICY package is not a
+        # blocking error - each policy carries its own term. Decided here, ONCE,
+        # so `extraction_pipeline`'s hard-stop escalation and
+        # `sqs_service.check_doc_consistency` cannot disagree; the first cut
+        # fixed only the latter and probe run C still showed a hard stop and a
+        # warning for the same two dates.
+        blocking_downgraded = bool(
+            status == "conflict"
+            and fact_key in CONTRACT_SCOPED_HARD_STOP_KEYS
+            and eq_context is not None and eq_context.is_multi_contract
+        )
+        if blocking_downgraded:
+            logger.info(
+                "underwriting: %s conflict downgraded from blocking - this "
+                "package evidences %d contracts and each carries its own term",
+                fact_key, len(eq_context.contracts))
+
         fields_out.append({
+            "narrative_note":  narrative_note,
+            "blocking_downgraded": blocking_downgraded,
             "fact_key":        fact_key,
             "label":           label,
             "kind":            kind,

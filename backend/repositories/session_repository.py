@@ -19,8 +19,25 @@ _FACTS_PREFIX = "enc:"
 logger = logging.getLogger(__name__)
 
 
+# Private marker carrying the ORIGINAL ciphertext of a facts blob we could not
+# decrypt. It exists so an unreadable blob is never overwritten - see the long
+# note on _decrypt_facts. Never leaves this module: stripped on the read path,
+# consumed on the write path.
+_FACTS_CIPHERTEXT_PRESERVED = "_facts_ciphertext_preserved"
+
+
 def _encrypt_facts(data: dict) -> dict:
     """Encrypt the facts dict inside session data before writing to DB."""
+    # An undecryptable blob is written back BYTE-FOR-BYTE. Without this the
+    # `if not facts` early return below left `facts` as the None that
+    # _decrypt_facts substituted, and the row was then written with facts=null -
+    # destroying recoverable ciphertext on the next write of ANY kind, including
+    # writes that never mentioned facts.
+    preserved = data.get(_FACTS_CIPHERTEXT_PRESERVED)
+    if preserved is not None:
+        data = {k: v for k, v in data.items() if k != _FACTS_CIPHERTEXT_PRESERVED}
+        data["facts"] = preserved
+        return data
     facts = data.get("facts")
     if not facts:
         return data
@@ -43,13 +60,26 @@ def _decrypt_facts(data: dict) -> dict:
             # Key mismatch (e.g. FIELD_ENCRYPTION_KEY rotated or differs between
             # environments).  Return session without facts rather than crashing —
             # the frontend shows an empty session and the user can re-upload.
+            #
+            # THE CIPHERTEXT IS KEPT. Returning facts=None is right for READERS
+            # and was catastrophic for WRITERS: `upd_processing_session`'s
+            # additive merge only engages when the existing facts is a dict, so
+            # None fell through to wholesale replace and the next save - any
+            # save - replaced the whole fact set with whatever it happened to
+            # carry. Measured 2026-08-17 on a live session: 71 facts became 1
+            # (`loss_history_years`, from a single ARQ answer) and the package
+            # score fell 81 -> 37. `_encrypt_facts` writes this value straight
+            # back, so the data survives and is recoverable the moment the key
+            # is corrected.
             logger.error(
                 "decrypt_facts: FIELD_ENCRYPTION_KEY mismatch for session %s — "
                 "facts cannot be decrypted. Verify FIELD_ENCRYPTION_KEY on Render "
-                "matches the key used when this data was written.",
+                "matches the key used when this data was written. The stored "
+                "ciphertext is PRESERVED and will not be overwritten.",
                 data.get("session_id", "?"),
             )
             data = dict(data)
+            data[_FACTS_CIPHERTEXT_PRESERVED] = facts_raw
             data["facts"] = None
             return data
         try:
@@ -59,6 +89,67 @@ def _decrypt_facts(data: dict) -> dict:
             # Legacy row stored facts as a plain JSON object string — leave as-is
             pass
     return data
+
+
+def resolve_facts_write(current: dict, incoming: dict,
+                        sid: str = "?") -> Optional[dict]:
+    """The new ``facts`` value for a session, or ``None`` to REFUSE the write.
+
+    Pure - no DB, no I/O. Extracted from ``upd_processing_session`` so the most
+    dangerous decision in this module can be unit-tested without a database
+    (the suite stubs out asyncpg and runs offline).
+
+    NEVER REPLACE FACTS WHOLESALE WHEN THERE IS SOMETHING TO LOSE. On 2026-08-17
+    a live session lost 70 of its 71 facts here: the stored blob could not be
+    decrypted, ``_decrypt_facts`` substituted ``None``, ``None`` is not a dict
+    so the additive branch was skipped, and the next write - a single ARQ answer
+    carrying one fact - became the entire fact set. The package score fell from
+    81 to 37 and the producer saw a POSITIVE answer destroy their submission.
+
+    Four cases, and only one of them may replace:
+
+    * existing facts is a dict          -> ADDITIVE merge (unchanged behaviour)
+    * the blob could not be decrypted   -> REFUSE; ``_encrypt_facts`` writes the
+                                           original ciphertext back untouched,
+                                           so the data stays recoverable
+    * existing facts is some other
+      non-empty value we cannot read    -> REFUSE; replacing it is silent loss
+    * nothing stored at all             -> accept (a new session's first write)
+    """
+    existing = current.get("facts")
+
+    if isinstance(existing, dict):
+        merged = dict(existing)
+        for fk, fv in incoming.items():
+            # Last-write-wins per key, but only when the new value is non-empty
+            # — never let an in-flight caller's blank value erase a
+            # previously-set value (the common ARQ-vs-extraction race).
+            if fv is None:
+                continue
+            if isinstance(fv, str) and not fv.strip():
+                continue
+            if isinstance(fv, (list, dict)) and not fv:
+                continue
+            merged[fk] = fv
+        return merged
+
+    if current.get(_FACTS_CIPHERTEXT_PRESERVED) is not None:
+        logger.error(
+            "resolve_facts_write: REFUSING to write facts for %s - the stored "
+            "blob could not be decrypted, so replacing it would destroy "
+            "recoverable data. The update's other keys are still applied.", sid,
+        )
+        return None
+
+    if existing:
+        logger.error(
+            "resolve_facts_write: REFUSING to write facts for %s - existing "
+            "facts is %s, not a dict; replacing it would be silent data loss.",
+            sid, type(existing).__name__,
+        )
+        return None
+
+    return dict(incoming)          # nothing stored yet - a new session
 
 
 def _strip_null_bytes(obj):
@@ -145,6 +236,10 @@ async def get_processing_session(sid: str, include_pdf: bool = False) -> dict:
         raise HTTPException(404, f"Processing session {sid} not found")
     data = dict(row["data"]) if isinstance(row["data"], dict) else json.loads(row["data"])
     data = _decrypt_facts(data)
+    # The preservation marker is a WRITE-PATH concern only (upd_processing_session
+    # reads the row itself, so it still sees it). Callers - and therefore API
+    # responses - must never see raw ciphertext on a session object.
+    data.pop(_FACTS_CIPHERTEXT_PRESERVED, None)
     if include_pdf:
         return await _session_from_db(data, sid)
     return data
@@ -232,21 +327,10 @@ async def upd_processing_session(
                                     merged.append(entry)
                                     seen.add(key)
                             current["sqs_history"] = merged
-                        elif k == "facts" and isinstance(v, dict) and isinstance(current.get("facts"), dict):
-                            merged_facts = dict(current.get("facts") or {})
-                            for fk, fv in v.items():
-                                # Last-write-wins per key, but only when the new
-                                # value is non-empty — never let an in-flight
-                                # caller's blank value erase a previously-set
-                                # value (the common ARQ-vs-extraction race).
-                                if fv is None:
-                                    continue
-                                if isinstance(fv, str) and not fv.strip():
-                                    continue
-                                if isinstance(fv, (list, dict)) and not fv:
-                                    continue
-                                merged_facts[fk] = fv
-                            current["facts"] = merged_facts
+                        elif k == "facts" and isinstance(v, dict):
+                            resolved = resolve_facts_write(current, v, sid)
+                            if resolved is not None:
+                                current["facts"] = resolved
                         else:
                             current[k] = v
 

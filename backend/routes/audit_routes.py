@@ -1,6 +1,7 @@
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -382,6 +383,53 @@ async def dismiss_recommendation(
     })
 
 
+def _registry_entry(field: str) -> Optional[dict]:
+    """FACT_REGISTRY entry for `field`, or None. Imported lazily and never fatal.
+
+    Tries the name as given, then its canonical form - a recommendation carries
+    the canonical key already, but a caller passing an alias should still get
+    the real validator rather than silently skipping the check.
+    """
+    try:
+        from services.fact_registry import FACT_REGISTRY
+    except Exception:
+        return None
+    entry = FACT_REGISTRY.get(field)
+    if entry is not None:
+        return entry
+    try:
+        from services.arq_service import _canonical_key
+        canon = _canonical_key(field)
+    except Exception:
+        return None
+    return FACT_REGISTRY.get(canon) if canon else None
+
+
+def _is_descriptive_money_answer(text: str, format_hint: str) -> bool:
+    """True when a non-numeric answer is a legitimate convention, not garbage.
+
+    Real ACORD money boxes print words: "Statutory" on an Employers Liability
+    limit, "Waived" on a deductible, "Not covered" on an excluded peril. The
+    monetary branch above already allows that for fields whose NAME looks
+    money-ish, but the name is a poor signal - `wc_el_each_accident` is a dollar
+    limit with none of those tokens in it, and would have been refused the
+    moment a declared validator started running against it.
+
+    The fact's own `format_hint` is the better signal and costs no second list:
+    "Dollar amount (e.g. $1,000,000)" is a money box, "Whole number of years
+    (e.g. 5)" is not. That is the line that matters - a count box has no
+    descriptive convention, which is exactly why "no losses" must not be
+    accepted into `loss_history_years`.
+
+    Only ever applies to an answer with NO digits at all. A value that contains
+    digits and still fails to parse is a botched number, not a convention.
+    """
+    if any(ch.isdigit() for ch in text):
+        return False
+    h = (format_hint or "").lower()
+    return "dollar" in h or "amount" in h or "percent" in h
+
+
 def _validate_producer_answer(field: str, answer: str) -> tuple:
     """Lightweight type validation for a producer-entered recommendation answer.
 
@@ -401,6 +449,21 @@ def _validate_producer_answer(field: str, answer: str) -> tuple:
     monetary-field answer with no digits at all is accepted as a legitimate
     descriptive value, and validate_monetary only gets to reject values that
     contain digits and still fail to parse - i.e. an actual malformed number.
+
+    Everything that reached the free-text fallback used to be accepted outright,
+    including counts. Measured on a live session 2026-08-17: a producer answered
+    the No Known Losses card with the words "no losses", the card was misrouted
+    to `loss_history_years` (fixed separately), and this function waved the text
+    into a field the scorer reads with `_to_int` - which silently returned 0. No
+    error, no stored answer worth anything, and a score that could never move.
+    Text in a number field must be REJECTED at the door, not discovered as a
+    zero three layers down.
+
+    FACT_REGISTRY is the source of that judgement (122 of 173 facts declare a
+    `validate` callable, and it is the same one the ARQ answer path uses) rather
+    than a second list of field names here - a local copy is exactly what drifts.
+    It runs only AFTER the three deliberate leniency branches above, so no
+    currently-accepted value starts being refused.
     """
     from utils.validators import (
         validate_monetary, validate_percent, validate_date_format,
@@ -425,6 +488,23 @@ def _validate_producer_answer(field: str, answer: str) -> tuple:
         if not any(ch.isdigit() for ch in text):
             return True, ""  # legitimate non-numeric convention, not garbage
         return False, msg
+
+    # Type check from the fact's own declared validator, when it has one.
+    entry = _registry_entry(field)
+    checker = (entry or {}).get("validate")
+    if callable(checker):
+        try:
+            ok = bool(checker(text))
+        except Exception:
+            ok = True          # a broken validator must never block a real answer
+        hint = ((entry.get("format_hint") or "") if entry else "").strip()
+        if not ok and _is_descriptive_money_answer(text, hint):
+            return True, ""    # "Statutory" / "Waived" / "Not covered"
+        if not ok:
+            return False, (
+                f"That does not look right for this field. Expected: {hint}"
+                if hint else "That value is not valid for this field."
+            )
     return True, ""
 
 

@@ -359,6 +359,38 @@ async def mark_recommendation_resolved(
     now = datetime.now(timezone.utc).isoformat()
     try:
         async with get_pool().acquire() as conn:
+            # UPDATE FIRST, and this ordering is the whole fix.
+            #
+            # The INSERT ... ON CONFLICT below reads as "update the row if it
+            # exists", but Postgres validates the PROPOSED row's NOT NULL
+            # constraints before it ever gets to conflict resolution. This
+            # function's only non-route caller - the auto-resolve pass in
+            # recalculate_session_scores - has no user_id to pass, and `user_id`
+            # is NOT NULL. So the statement raised, the except below swallowed
+            # it, and False came back.
+            #
+            # Measured 2026-08-17: auto-resolve had therefore NEVER resolved
+            # anything. A producer could answer a recommendation, watch the score
+            # rise correctly, and the card would sit in neither the open list nor
+            # Reviewed - it was the client's "even after answering it is still
+            # there" report. Every recommendation, every session, since the
+            # feature shipped.
+            #
+            # Updating an existing row needs none of the columns the insert path
+            # requires, so the common case can no longer be blocked by them. The
+            # INSERT stays as the fallback for a rec that was never presented.
+            updated = await conn.execute(
+                """
+                UPDATE sqs_recommendation_audit
+                   SET action='resolved', action_at=$3, sqs_score_at_action=$4
+                 WHERE session_id=$1 AND rec_id=$2
+                   AND (action IS NULL OR action = 'downloaded_anyway')
+                """,
+                session_id, rec_id, now, sqs_score_at_action,
+            )
+            if updated and updated.rsplit(" ", 1)[-1] != "0":
+                return True
+
             await conn.execute(
                 """
                 INSERT INTO sqs_recommendation_audit (

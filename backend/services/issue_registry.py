@@ -490,6 +490,10 @@ def _tier1_resolution(label: str) -> Optional[dict]:
 _PREFIX_RULES: List[tuple] = [
     ("doc_conflict_hard_", "Document identity & date conflicts", "required"),
     ("doc_conflict_warn_", "Document identity & date conflicts", "required"),
+    # NOTE: `underwriting_reconciliation_` is handled BEFORE this table by
+    # `_reconciliation_cluster` - the right bucket depends on what KIND of value
+    # the fact holds, not on the prefix. Kept here as the fallback for a fact
+    # whose kind cannot be resolved.
     ("underwriting_reconciliation_", "Financial figure conflicts", "required"),
     ("source_conflict_carrier_", "Carrier name conflicts", "required"),
     ("source_conflict_", "Cross-document data conflicts", "required"),
@@ -498,10 +502,61 @@ _PREFIX_RULES: List[tuple] = [
 ]
 
 
+# The Data Consistency picker emits one code per FACT
+# (`underwriting_reconciliation_<fact_key>`), and every one of them was landing
+# in "Financial figure conflicts". A policy DATE is not a financial figure, and
+# neither is a remarks paragraph - the owner's 2026-08-17 run showed
+# "Policy Effective Date: documents disagree" filed under money. The bucket
+# follows the value's KIND, which `fact_equivalence` already derives from the
+# tables we maintain, so this needs no list of its own and a new fact is
+# classified the day it is added.
+_KIND_CLUSTER = {
+    "money":      "Financial figure conflicts",
+    "count":      "Financial figure conflicts",
+    "percent":    "Financial figure conflicts",
+    "date":       "Document identity & date conflicts",
+    "name":       "Document identity & date conflicts",
+    "address":    "Document identity & date conflicts",
+    "identifier": "Document identity & date conflicts",
+    "fein":       "Document identity & date conflicts",
+    "state":      "Document identity & date conflicts",
+    "phone":      "Cross-document data conflicts",
+    "email":      "Cross-document data conflicts",
+    "url":        "Cross-document data conflicts",
+    "narrative":  "Cross-document data conflicts",
+    # Free text and the small closed-set kinds. Without these,
+    # `contractor_type` ("Commercial roofing contractor" vs "Contracting") fell
+    # through to the prefix rule and was filed as a financial figure too.
+    "text":       "Cross-document data conflicts",
+    "code":       "Cross-document data conflicts",
+    "yesno":      "Cross-document data conflicts",
+}
+_RECONCILIATION_PREFIX = "underwriting_reconciliation_"
+
+
+def _reconciliation_cluster(code: str) -> Optional[str]:
+    """Cluster for a Data Consistency code, chosen by the fact's value kind.
+
+    None when the code is not a reconciliation code, or when the kind cannot be
+    resolved - the caller then falls through to the prefix table, so behaviour
+    is unchanged for anything this cannot classify.
+    """
+    if not code.startswith(_RECONCILIATION_PREFIX):
+        return None
+    try:
+        from services.fact_equivalence import value_kind
+        return _KIND_CLUSTER.get(value_kind(code[len(_RECONCILIATION_PREFIX):]))
+    except Exception:                                         # pragma: no cover
+        return None
+
+
 def _lookup(code: str) -> tuple:
     """Return (cluster_label, default_tier) for a rule code."""
     if code in CLUSTER_MAP:
         return CLUSTER_MAP[code], TIER_MAP.get(code, DEFAULT_TIER)
+    _rc = _reconciliation_cluster(code)
+    if _rc:
+        return _rc, "required"
     for prefix, cluster, tier in _PREFIX_RULES:
         if code.startswith(prefix):
             return cluster, tier

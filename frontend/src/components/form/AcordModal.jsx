@@ -81,6 +81,19 @@ const EVIDENCE_LABEL_COLOR = {
   inferred:                { bg: "#f5f3ff", fg: "#6d28d9" },
 };
 
+// How a recommendation's point gain is worded. The backend now MEASURES what a
+// card is worth (it re-runs the scorer with that card's field filled) instead of
+// carrying a hand-typed number, so most cards can state the gain outright.
+// "up to" is kept only where it is still true: the number came from a fallback,
+// or a hard stop / warning is capping the DISPLAYED score, so the points are
+// earned but will not show until the stop clears. `impact_is_exact` is absent on
+// sessions scored before this shipped - those keep the old hedge.
+const pointsLabel = (rec) => {
+  const pts = typeof rec === "object" && rec !== null ? rec.score_impact : null;
+  if (!(pts > 0)) return null;
+  return rec.impact_is_exact === true ? `+${pts} pts` : `up to +${pts} pts`;
+};
+
 // ── Figure 10 score provenance ───────────────────────────────────────────────
 // Click a credited positive signal to see WHY it helped the score. Option (a):
 // Source + Confidence + Rule, no "how to strengthen" line. `sourceFact` (when set)
@@ -1647,7 +1660,7 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
       <div style={{ display: "flex", alignItems: "flex-start", gap: 7 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: st.color, fontWeight: 600, lineHeight: 1.4 }}>{msg}</div>
-          {impact > 0 && <div style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>up to +{impact} pts</div>}
+          {impact > 0 && <div style={{ fontSize: 10, color: "#000", fontWeight: 700, marginTop: 2 }}>{pointsLabel(rec)}</div>}
         </div>
         <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: "1px 7px", borderRadius: 10, whiteSpace: "nowrap", ...(result ? { background: "#dcfce7", color: "#166534", border: "1px solid #86efac" } : { background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }) }}>{result ? "Resolved" : "Open"}</span>
       </div>
@@ -1746,7 +1759,7 @@ function DownloadPreflightModal({ openRecs, narrative, overrideReason, onOverrid
             <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>Open Recommendations ({softRecs.length})</div>
               {softRecs.map((r, i) => (
-                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0" }}>• {r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> (up to +{r.score_impact} pts)</span> : ""}</div>
+                <div key={i} style={{ fontSize: 12, color: "#78350f", padding: "2px 0" }}>• {r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> ({pointsLabel(r)})</span> : ""}</div>
               ))}
             </div>
           )}
@@ -2442,6 +2455,12 @@ const AcordModal = forwardRef(function AcordModal({
   // rec_id -> the value the producer previously submitted, used to prefill a card
   // that has just been reopened so they can edit rather than retype it.
   const [reopenedRecValues, setReopenedRecValues] = useState({});
+  // Which recommendation is currently being reopened. Reopen is genuinely slow -
+  // it retracts the producer's fact, blanks it on every form, runs a FULL SQS
+  // recompute, replays the other dismiss credits and then recomputes the panel -
+  // and it had no busy state at all, so it looked frozen and could be clicked
+  // repeatedly (owner, 2026-08-17: "taking some time without spinner").
+  const [reopeningRecId, setReopeningRecId] = useState(null);
   const [showDownloadPreflight, setShowDownloadPreflight] = useState(false);
   const [preflightRecs, setPreflightRecs] = useState([]);
   const [preflightHardBlock, setPreflightHardBlock] = useState(false);
@@ -4061,7 +4080,8 @@ const AcordModal = forwardRef(function AcordModal({
   // satisfied by a combination of facts can stay closed, in which case the card
   // stays in Reviewed rather than becoming an open card with nothing behind it.
   const handleReopenRec = async (recId) => {
-    if (!recId || !sessionId) return;
+    if (!recId || !sessionId || reopeningRecId) return;   // one at a time
+    setReopeningRecId(recId);
     try {
       const res = await fetch(`${API_BASE}/api/audit/reopen-recommendation`, {
         method: "POST",
@@ -4122,6 +4142,7 @@ const AcordModal = forwardRef(function AcordModal({
         });
       }
     } catch { /* non-fatal */ }
+    finally { setReopeningRecId(null); }
   };
 
   // Producer resolves a Cross-Form Validation issue inline (SQS panel "Open" ->
@@ -5718,6 +5739,20 @@ const AcordModal = forwardRef(function AcordModal({
                           </div>
                         )}
 
+                        {/* What the submission's own remarks say about this
+                            disagreement. Client 2026-08-17: the dec page says $3M,
+                            the certificate says $1M, and the remarks explain the
+                            reduction and its date - the producer should not have to
+                            find that themselves. Explanation only: no value is
+                            selected here, because an unresolved fact must stay
+                            unresolved until they choose. */}
+                        {isConflict && f.narrative_note && (
+                          <div style={{ marginTop: 6, padding: "6px 9px", borderRadius: 6, background: "#fffbeb", border: "1px solid #fde68a", fontSize: 11.5, color: "#78350f", lineHeight: 1.45 }}>
+                            <span style={{ fontWeight: 700 }}>From the submission: </span>
+                            {f.narrative_note}
+                          </div>
+                        )}
+
                         {/* Figure 3 "apply to all": another field shows the exact same
                             disagreement from the exact same documents - confirming
                             here resolves it there too, so the producer only has to
@@ -6525,7 +6560,22 @@ const AcordModal = forwardRef(function AcordModal({
                         {/* Best Solutions (renamed from Top Recommendations) - numbered list */}
                         {packageSqs?.top_recommendations?.length > 0 && (
                           <div style={{ marginBottom: 8 }}>
-                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Best Solutions</div>
+                            {/* SAY WHICH SCORE THESE PERCENTAGES BELONG TO. They
+                                come from `packageSqs`, while the pillar bars just
+                                above them are THIS FORM's - and the two genuinely
+                                differ. Measured on a live session: ACORD 125 read
+                                structural_completeness 100 and exposure_consistency
+                                40 while the package read 65 and 77, so the panel
+                                showed "Structural Completeness 100%" and
+                                "Structural Completeness 65%" a few lines apart with
+                                nothing to tell them apart. Both numbers are right;
+                                only the labelling was wrong. Same class as the
+                                2026-08-12 fix where the narrative quoted a
+                                different score from the banner. */}
+                            <div style={{ fontSize: 10, fontWeight: 700, color: "#000", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Best Solutions</div>
+                            <div style={{ fontSize: 9.5, color: "#64748b", marginBottom: 6 }}>
+                              Percentages below are for the whole package, not this form.
+                            </div>
                             {packageSqs.top_recommendations.map((r, i) => {
                               if (!r) return null;
                               // Backend may return either dict (package) or string (legacy).
@@ -6747,13 +6797,21 @@ const AcordModal = forwardRef(function AcordModal({
                                 <div style={{ marginTop: 4, fontSize: 10, color: "#94a3b8" }}>Dismissed without reason</div>
                               )}
                               <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                {/* Reopen is slow by nature - it retracts the fact,
+                                    blanks it on every form and re-scores the whole
+                                    package - so it says so and refuses a second
+                                    click. The title also states the score effect
+                                    up front: reopening genuinely takes the points
+                                    back, which is the honest consequence and not
+                                    something a producer should discover after. */}
                                 <button
+                                  disabled={!!reopeningRecId}
                                   onMouseDown={e => { e.preventDefault(); handleReopenRec(rid); }}
                                   title={d.kind === "answered"
-                                    ? "Clear the value you entered and put this back on the list"
-                                    : "Put this back on the list so you can enter a value"}
-                                  style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #cbd5e1", background: "#fff", fontSize: 10, fontWeight: 600, color: "#475569", cursor: "pointer", whiteSpace: "nowrap" }}>
-                                  Reopen
+                                    ? "Clear the value you entered and put this back on the list. The score goes back down."
+                                    : "Put this back on the list so you can enter a value. Any points credited for dismissing it are reversed."}
+                                  style={{ padding: "3px 8px", borderRadius: 5, border: "1px solid #cbd5e1", background: "#fff", fontSize: 10, fontWeight: 600, color: "#475569", cursor: reopeningRecId ? "wait" : "pointer", opacity: reopeningRecId && reopeningRecId !== rid ? 0.5 : 1, whiteSpace: "nowrap" }}>
+                                  {reopeningRecId === rid ? "Reopening…" : "Reopen"}
                                 </button>
                                 {d.stillSatisfied && (
                                   <span style={{ fontSize: 9.5, color: "#94a3b8", fontStyle: "italic" }}>
@@ -7026,7 +7084,7 @@ const AcordModal = forwardRef(function AcordModal({
                       {softRecs.map((r, i) => (
                         <div key={`s${i}`} style={{ display: "flex", gap: 8, fontSize: 12.5, color: "#334155", padding: "4px 0", lineHeight: 1.5 }}>
                           <span style={{ color: "#94a3b8", fontWeight: 700 }}>☐</span>
-                          <span>{r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> (up to +{r.score_impact} pts)</span> : ""}</span>
+                          <span>{r.message}{r.score_impact > 0 ? <span style={{ color: "#d97706", fontWeight: 600 }}> ({pointsLabel(r)})</span> : ""}</span>
                         </div>
                       ))}
                       {nextAction && (

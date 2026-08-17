@@ -332,11 +332,32 @@ _EXTRACT_SCHEMA = (
     # those facts already have their own keys). Leave null when the document
     # contains no such wording clause, even if other risk_transfer sub-fields
     # are populated.
+    # ABSENCE IS NOT "NO" (client 2026-08-17 item 3). These three assert
+    # something about a CONTRACT REQUIREMENT, and every one of them was declared
+    # a bare `boolean` - so the model had no way to say "the document does not
+    # mention this" and answered false. A dec page that is simply silent about
+    # additional-insured status then fought a certificate that said Yes, and the
+    # producer got a conflict card about a requirement nobody had asserted
+    # either way (probe runs B and D, 2026-08-17).
+    #
+    # `null` is the third state. Nothing downstream has to change to accept it:
+    # the three readers in sqs_service all test `is True`, the chunk merge skips
+    # a null instead of OR-ing it, and an absent sub-key is skipped by the
+    # conflict detector - so "not stated" simply stops manufacturing an answer.
+    #
+    # The `has_*` coverage flags are deliberately NOT changed. There, false
+    # genuinely means "no such coverage was detected in this document", which is
+    # a finding rather than a claim about a contract.
     '  "risk_transfer": {\n'
-    '    "additional_insured_required": boolean,\n'
+    '    "additional_insured_required": boolean or null (true when the document '
+    'REQUIRES additional-insured status, false ONLY when it affirmatively says '
+    'it is not required; null when the document does not address it at all - '
+    'silence is not a "no"),\n'
     '    "additional_insured_names": [string],\n'
-    '    "primary_noncontributory_required": boolean,\n'
-    '    "waiver_of_subrogation_required": boolean,\n'
+    '    "primary_noncontributory_required": boolean or null (same rule: null '
+    'when the document does not address it),\n'
+    '    "waiver_of_subrogation_required": boolean or null (same rule: null '
+    'when the document does not address it),\n'
     '    "certificate_holder_name": string or null,\n'
     '    "loss_payee_name": string or null,\n'
     '    "mortgagee_name": string or null,\n'
@@ -6369,6 +6390,194 @@ def _repair_coverage_lines_from_entries(mf: dict) -> None:
 _CONFLICT_SENSITIVE_LIMITS: Tuple[str, ...] = ("umbrella_limit",)
 
 
+# The legally-standard printings of the three risk-transfer requirements. A
+# document that requires one of these says so in one of these ways - the wording
+# is contractual boilerplate, not free description, which is what makes a
+# presence test safe here.
+_RISK_TRANSFER_TOPIC_PHRASES: Dict[str, Tuple[str, ...]] = {
+    "additional_insured_required": (
+        "additional insured", "additional insureds", "add'l insured",
+        "addl insured", "as additional insured",
+    ),
+    "waiver_of_subrogation_required": (
+        "waiver of subrogation", "waive subrogation", "waiver of rights of "
+        "recovery", "transfer of rights of recovery", "subrogation waived",
+    ),
+    "primary_noncontributory_required": (
+        "primary and non-contributory", "primary and noncontributory",
+        "primary & non-contributory", "primary/noncontributory",
+        "non-contributory", "noncontributory",
+    ),
+}
+
+
+def _drop_unstated_risk_transfer(mf: dict, text: str) -> None:
+    """A `false` the document never actually says is NOT an answer.
+
+    BELT AND BRACES for the schema change above. The prompt now offers `null`
+    for "the document does not address this", but a prompt is a request; this is
+    the check. If the merged facts claim `false` and the uploaded text contains
+    no mention of the topic AT ALL, the claim has no basis and the sub-key is
+    removed - which the conflict detector reads as "not stated" and skips.
+
+    Only ever removes an UNSUPPORTED `false`. A `true` is untouched (something
+    asserted it), and a `false` printed against real wording ("waiver of
+    subrogation is not required") is untouched too, because the phrase is there.
+    Presence is safe to test here precisely because these three requirements are
+    contractual boilerplate with standard printings, not free description.
+    """
+    rt = mf.get("risk_transfer")
+    if not isinstance(rt, dict):
+        return
+    low = str(text or "").lower()
+    dropped = []
+    for key, phrases in _RISK_TRANSFER_TOPIC_PHRASES.items():
+        if rt.get(key) is not False:
+            continue                      # true, or already "not stated"
+        if not any(p in low for p in phrases):
+            rt.pop(key, None)
+            dropped.append(key)
+    if dropped:
+        logger.info(
+            "risk_transfer: dropped an unsupported 'No' on %s - the uploaded "
+            "text never mentions the requirement, so absence was being "
+            "reported as a refusal", ", ".join(dropped))
+
+
+# Policy-date facts. An AMENDMENT date ("...effective 07/25/2025") is not one
+# of these - it is the day a change took effect, while the policy still incepted
+# on its own date.
+_POLICY_DATE_KEYS: Tuple[str, ...] = (
+    "effective_date", "expiration_date",
+    "umbrella_effective_date", "umbrella_expiration_date",
+    "prior_effective_date", "prior_expiration_date",
+)
+
+
+def _dec_index_witnesses_date(mf: dict, value: str) -> bool:
+    """True when the verified dec index printed this date against a DATE label.
+
+    A date on a declarations page sits next to "Policy Effective Date"; a date
+    inside a sentence sits next to "effective". Only the first is a policy date.
+    """
+    from services.normalization import normalize_date
+    want = normalize_date(value)
+    if not want:
+        return False
+    for e in (mf.get("dec_page_entries") or []):
+        if not isinstance(e, dict):
+            continue
+        label = str(e.get("label") or "").lower()
+        if "date" not in label and "eff" not in label and "exp" not in label:
+            continue
+        if normalize_date(e.get("value")) == want:
+            return True
+    return False
+
+
+def _drop_endorsement_dates_from_policy_facts(mf: dict, docs: List[dict]) -> None:
+    """An endorsement date must not be stamped as the policy's own date.
+
+    PROBE RUN B, 2026-08-17. The certificate's remarks read "...the Commercial
+    Umbrella limit was reduced from $3,000,000 to $1,000,000 effective
+    07/25/2025", and `umbrella_effective_date` came back as 07/25/2025 - which
+    then fought the dec page's real inception date of 07/15/2025 and produced a
+    conflict card about two dates that were never describing the same thing.
+    The client's words: "The individual facts within it need to be interpreted
+    in their appropriate context."
+
+    POSITIVE EVIDENCE ON BOTH SIDES before anything is removed:
+      * the date must be the `as_of` of an AMENDMENT the narrative states, and
+      * the dec index must NOT independently witness it against a date label.
+    A policy whose term genuinely begins the day an endorsement takes effect
+    therefore keeps its date, because the dec page prints it.
+    """
+    # NO INDEX, NO OPINION. Without dec entries there is no way to ask whether a
+    # date is printed as a policy date, so every amendment date would look
+    # unwitnessed and be removed. That is not a theoretical worry: if an
+    # amendment happens to take effect on the policy's own inception date, this
+    # would delete `effective_date` - and `_route_renewal_dates` (Fix 2) then
+    # has nothing to route, so ACORD 125's PROPOSED EFF/EXP goes blank and
+    # Tier-1 demands a date the document already answers. That is Round 3's
+    # Fix 13 regression, reintroduced from a different direction.
+    if not (mf.get("dec_page_entries") or []):
+        return
+    try:
+        from services.narrative_facts import statements_for_facts
+    except Exception:                                        # pragma: no cover
+        return
+    amendment_dates = {
+        str(s.get("as_of")) for s in statements_for_facts(mf, None, docs)
+        if s.get("kind") == "amendment" and s.get("as_of")
+    }
+    if not amendment_dates:
+        return
+    from services.normalization import normalize_date
+    normed = {normalize_date(d) for d in amendment_dates}
+    normed.discard(None)
+    for key in _POLICY_DATE_KEYS:
+        val = _fv(mf, key)
+        if not val or normalize_date(val) not in normed:
+            continue
+        if _dec_index_witnesses_date(mf, str(val)):
+            continue                      # the dec page prints it - it is real
+        mf.pop(key, None)
+        logger.info(
+            "%s dropped: %r is the effective date of an amendment stated in the "
+            "remarks, and no declarations page prints it as a policy date. An "
+            "endorsement date is not an inception date.", key, str(val))
+
+
+# How far into a document "the top of the page" reaches, and how long a value
+# can be and still be a heading rather than a remark.
+_PAGE_FURNITURE_HEAD_CHARS = 200
+# A heading is a line, not a paragraph. 250 was tried and dropped a real
+# 142-character remark that happened to open its document; a form title runs to
+# roughly a hundred characters, so anything longer is content.
+_PAGE_FURNITURE_MAX_LEN = 120
+
+
+def _drop_page_furniture_remarks(mf: dict, docs: List[dict]) -> None:
+    """A document's own TITLE is not a remark about the risk.
+
+    PROBE RUN B, 2026-08-17: `additional_remarks_text` came back as
+    "PROBE 2 - COMMERCIAL PACKAGE DECLARATIONS Upload together with PROBE 3..."
+    - the PDF's title block. On a real submission the equivalent is the form
+    heading ("COMMERCIAL PACKAGE DECLARATIONS"), and it would be stamped into
+    ACORD 101's Additional Remarks rows as though the broker had written it.
+
+    THE DOCUMENT MUST BEGIN WITH IT. A first cut asked only whether the value
+    appeared within the first %d characters, and that dropped a REAL remark: an
+    ACORD 101 is mostly remarks, and they start right after a one-line form
+    header. "Near the top" is not the signal - "IS the top" is. A heading is
+    literally the first thing printed; a remark always has something above it.
+
+    Also requires the value to be short enough to be a heading (under %d
+    chars), so a long narrative that genuinely opens a document survives.
+
+    Fails toward keeping the remark: anything not clearly furniture stays,
+    because losing a real remark is worse than printing a heading once.
+    """ % (_PAGE_FURNITURE_HEAD_CHARS, _PAGE_FURNITURE_MAX_LEN)
+    from services.narrative_facts import NARRATIVE_FACT_KEYS
+    heads = [re.sub(r"\s+", " ", str(d.get("text") or "").strip().lower())
+             [:_PAGE_FURNITURE_HEAD_CHARS] for d in (docs or [])]
+    if not any(heads):
+        return
+    for key in NARRATIVE_FACT_KEYS:
+        val = _fv(mf, key)
+        if not isinstance(val, str) or len(val) > _PAGE_FURNITURE_MAX_LEN:
+            continue
+        probe = re.sub(r"\s+", " ", val.strip().lower())[:40]
+        if len(probe) < 12:
+            continue
+        if any(h.startswith(probe) for h in heads):
+            mf.pop(key, None)
+            logger.info(
+                "%s dropped: %r is what the document OPENS with, so it is the "
+                "page heading rather than a remark about the risk",
+                key, val[:60])
+
+
 def _flag_intra_document_limit_conflicts(mf: dict, rejected_by_field: Dict[str, List[str]]) -> None:
     """Add a limit fact to the stamped-value withhold list when the merge had to
     choose between two materially different amounts for it.
@@ -6715,6 +6924,27 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: intra-document conflict check failed: %s", exc)
     mf.pop("_merge_rejected", None)
+    # Absence must not read as a refusal (client 2026-08-17 item 3). Runs on the
+    # merged result with the full uploaded text, so a requirement stated in ANY
+    # document counts as stated for the package.
+    try:
+        _drop_unstated_risk_transfer(
+            mf, " ".join(str(_d.get("text") or "") for _d in docs))
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: risk-transfer absence check failed: %s", exc)
+    # A document's heading is not a remark. Runs BEFORE the endorsement-date
+    # check, which mines the remarks - there is no point mining a page title.
+    try:
+        _drop_page_furniture_remarks(mf, docs)
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: page-furniture check failed: %s", exc)
+    # An endorsement date is not an inception date. Runs AFTER the dec-entry
+    # work above, because it asks the verified index whether the date is really
+    # printed as a policy date.
+    try:
+        _drop_endorsement_dates_from_policy_facts(mf, docs)
+    except Exception as exc:  # noqa: BLE001 — never block the pipeline
+        logger.warning("merge_facts: endorsement-date check failed: %s", exc)
     try:
         _backfill_is_renewal(mf, " ".join(str(_d.get("text") or "") for _d in docs))
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
