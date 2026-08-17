@@ -260,7 +260,10 @@
       "Bash(py -m pytest -q tests/test_no_unsupported_values_20260818.py)",
       "Bash(cat \"C:/Users/lenovo/AppData/Local/Temp/claude/c--Users-lenovo-OneDrive-Desktop-Primble/45f339c2-2dd4-413d-8969-a3c960b6fc86/scratchpad/round15.md\")",
       "Bash(printf '%s\\\\n' \"\" \"---\" \"\" \"## C56 - 2026-08-18 round 15: no prompt or call change\" \"\" \"Three deterministic fixes \\(package-header policy count, zero-padded quantity\" \"rejection, two evidence-gate quote rules\\). **No LLM call added, removed or\" \"re-batched; no prompt byte changed.** The two quote rules run post-fill and cost\" \"nothing. Field counts move down slightly - the 125 header and the two vehicle\" \"quantity boxes are owned blanks rather than questions. Logged so the registry\" \"can still prove no prompt moved.\")",
-      "Bash(echo \"--- exit: $? \\(no output above = none\\) ---\")"
+      "Bash(echo \"--- exit: $? \\(no output above = none\\) ---\")",
+      "PowerShell(npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1)",
+      "PowerShell($env:VITE_API_BASE = \"https://api.primble.io\"; npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1 | Select-Object -Last 12)",
+      "PowerShell($env:VITE_API_BASE = \"https://api.primble.io\"; npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1 | Select-Object -Last 8)"
     ],
     "additionalDirectories": [
       "\\tmp",

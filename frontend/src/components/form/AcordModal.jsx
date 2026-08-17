@@ -23,6 +23,11 @@ const SQS_WEIGHTS = {
   umbrella_limit_adequacy: 10, narrative_quality: 10,
 };
 
+// TEMPORARILY HIDDEN (client request): the "Form Completion" + "Quality Fill Rate"
+// section in the SQS panel. The markup is intentionally kept intact below - flip this
+// back to true to re-introduce the section exactly as it was. Do not delete the block.
+const SHOW_COMPLETION_METRICS = false;
+
 const PACKAGE_PILLAR_LABELS = {
   // Spec-compliant pillar keys returned by calculate_package_sqs.
   structural_completeness: "Structural Completeness",
@@ -915,6 +920,14 @@ const isAgency = (q) => !isClientFacing(q) && !isNeverSend(q) && bucketOf(q) ===
 // suppressed client items (already answered / stated in narrative).
 const isUnderwriting = (q) => !isClientFacing(q) && !isNeverSend(q) && !isAgency(q);
 
+// TEMPORARILY HIDDEN (client request): the "Underwriting / Internal Review"
+// bucket in the Send-to-Client questionnaire. The bucket's markup is kept intact -
+// flip this back to true to re-introduce it exactly as it was. Do not delete it.
+// While it is false the bucket's questions also start DESELECTED (see the init
+// effect in ARQQuestionModal): the producer cannot untick what is not rendered,
+// and the no-taxonomy fallback selects everything by default.
+const SHOW_UNDERWRITING_REVIEW_BUCKET = false;
+
 function ScoreImpactBadges({ q }) {
   const si = q.score_impact || {};
   const badges = [];
@@ -1070,6 +1083,12 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
   useEffect(() => {
     const init = {};
     questions.forEach(q => {
+      // While the Underwriting / Internal Review bucket is hidden its rows are not
+      // rendered, so nobody can untick them - and the no-taxonomy branch below
+      // defaults every question to selected. Start them off so hidden internal
+      // flags can never ride along to the client. Restoring the flag restores the
+      // original behaviour verbatim.
+      if (!SHOW_UNDERWRITING_REVIEW_BUCKET && isUnderwriting(q)) { init[q.field_name] = false; return; }
       init[q.field_name] = hasTaxonomy ? !!q.default_selected : true;
     });
     setSelectedQuestions(init);
@@ -1339,8 +1358,11 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
             </div>
           )}
 
-          {/* ── Bucket 3: Underwriting / Internal Review (flags, not auto-sent) ── */}
-          {underwritingQuestions.length > 0 && (
+          {/* ── Bucket 3: Underwriting / Internal Review (flags, not auto-sent) ──
+              TEMPORARILY HIDDEN (client request) via SHOW_UNDERWRITING_REVIEW_BUCKET
+              at the top of this file. The markup below is deliberately left intact -
+              set that constant back to true to re-introduce this bucket. ── */}
+          {SHOW_UNDERWRITING_REVIEW_BUCKET && underwritingQuestions.length > 0 && (
             <div style={{ marginTop: 8, border: "1px dashed #bae6fd", borderRadius: 10, background: "#f0f9ff" }}>
               <button onClick={() => setShowUnderwriting(s => !s)}
                 style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "10px 14px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
@@ -6229,8 +6251,12 @@ const AcordModal = forwardRef(function AcordModal({
                     {/* ── Completion metrics: Form Completion + Quality Fill Rate share ONE
                         bordered section (two stacked rows separated by a hairline) instead
                         of two separate cards. Each row keeps its own null guard, so the
-                        section renders correctly when only one metric is available. ── */}
-                    {(activeSqs.match_score != null || activeSqs.confidence_fill_rate != null) && (
+                        section renders correctly when only one metric is available.
+
+                        TEMPORARILY HIDDEN (client request) via SHOW_COMPLETION_METRICS at
+                        the top of this file. The markup below is deliberately left intact -
+                        set that constant back to true to re-introduce this section. ── */}
+                    {SHOW_COMPLETION_METRICS && (activeSqs.match_score != null || activeSqs.confidence_fill_rate != null) && (
                       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 7, marginBottom: 10 }}>
 
                         {/* Form Completion (current-form; bold black %, right-justified) */}
