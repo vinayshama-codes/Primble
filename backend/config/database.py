@@ -382,6 +382,9 @@ async def init_db() -> None:
             # so re-confirmation can be forced when the legal text changes.
             # (users.acord_license_version is handled by the users column loop above.)
             "ALTER TABLE acord_audit_log ADD COLUMN IF NOT EXISTS license_version TEXT",
+            # V1 plan C1 F10: producer resolution keeps every competing value.
+            "ALTER TABLE underwriting_confirmation_audit ADD COLUMN IF NOT EXISTS candidates JSONB",
+            "ALTER TABLE underwriting_confirmation_audit ADD COLUMN IF NOT EXISTS reason TEXT",
             # retry_count: incremented each time a job is requeued due to semaphore-full or transient error
             "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0",
             # priority: lower number = higher priority. 1=urgent (paid/retries), 5=default, 9=background.

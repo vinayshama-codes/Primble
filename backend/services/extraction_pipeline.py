@@ -26,6 +26,7 @@ available_forms     : list[dict]
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 import os
 import re
 import uuid
@@ -38,7 +39,6 @@ from services.extraction_service import (
     extract_facts_long, classify_document, merge_facts, select_primary_truth,
     detect_source_conflicts, ALLOWED_DOC_TYPES, apply_declared_absent_downgrades,
 )
-from utils.table_extractor import extract_tables_from_pdf
 from services.form_service import (
     filter_available_forms, load_all_forms, match_forms, score_extra_forms,
     derive_account_profile,
@@ -193,17 +193,22 @@ def _format_tables_as_text(tables: list) -> str:
     This text is appended to the OCR output — the LLM sees both raw OCR
     and the structured table data and can reconcile them.
     """
-    if not tables:
-        return ""
-    lines = ["\n\n=== STRUCTURED TABLE DATA (extracted from PDF layout) ==="]
-    for idx, tbl in enumerate(tables, 1):
-        lines.append(f"\n--- Table {idx} (page {tbl.get('page', '?')}, source: {tbl.get('source', '?')}) ---")
-        for row in (tbl.get("rows") or []):
-            cells = [str(c).strip() if c is not None else "" for c in row]
-            if any(c for c in cells):  # skip fully-empty rows
-                lines.append(" | ".join(cells))
-    lines.append("\n=== END TABLE DATA ===")
-    return "\n".join(lines)
+    # Tables now reach the LLM INLINE with their page - emitted by
+    # ocr_service.extract_text_from_pdf (header-anchored detector in
+    # utils/page_layout.py, lines-mode pdfplumber as a per-page fallback). The
+    # end-of-document append that used to call this never fired on an insurance
+    # document (pdfplumber's default needs ruled lines; 0 of 4 on the test
+    # package), and when it would have it placed a page-1 schedule after page
+    # 271. Kept as a no-op for any external caller; see extraction_arch_change.md.
+    return ""
+
+
+# Document types whose whole point is a table. An upload of one of these that
+# yields no table block is far more likely an extraction miss than a genuinely
+# table-free document, and in a findings product a silent miss reads exactly
+# like "no issues". Log only: a dec page written as label: value lines end to
+# end is legitimate, so this must never block or flag the session.
+_TABLE_EXPECTED_DOC_TYPES = frozenset({"loss_run", "dec_page"})
 
 
 async def run_extraction_pipeline(
@@ -243,25 +248,9 @@ async def run_extraction_pipeline(
             continue
         all_low_conf += low_conf
 
-        # Append structured table data so the LLM sees schedule rows as proper
-        # row-by-row data rather than unstructured OCR noise.  Only attempted for
-        # PDFs; non-fatal if pdfplumber/camelot is unavailable.
-        if path.lower().endswith(".pdf"):
-            try:
-                # Run the sync pdfplumber/camelot table extraction in a thread so it
-                # does not freeze the asyncio event loop (would otherwise block
-                # health checks and other in-flight requests for the duration of
-                # table parsing on large PDFs).
-                _loop = asyncio.get_running_loop()
-                tables = await _loop.run_in_executor(None, extract_tables_from_pdf, path)
-                if tables:
-                    text = text + _format_tables_as_text(tables)
-                    logger.info(
-                        "table_extractor: %d table(s) appended for %s",
-                        len(tables), os.path.basename(path),
-                    )
-            except Exception as _tbl_err:
-                logger.warning("table_extractor: skipped %s — %s", os.path.basename(path), _tbl_err)
+        # Schedule rows reach the LLM as proper row-by-row tables, emitted INLINE
+        # with their page by extract_text() above (see extraction_arch_change.md).
+        # The end-of-document table append that lived here is gone.
 
         # OCR (and table parsing) complete for this file → advance its row to
         # "parsed" first (a real, distinct moment the overlay shows once, before
@@ -274,6 +263,12 @@ async def run_extraction_pipeline(
         # confidence/source/signals used (surfaced to the UI + audit).
         classification = classify_document(text, filename=_display_name)
         doc_type  = classification["doc_type"]
+        if doc_type in _TABLE_EXPECTED_DOC_TYPES and "[Table - page " not in text:
+            logger.warning(
+                "EXTRACTION_NO_TABLES doc_type=%s file=%s chars=%d - a %s with no "
+                "detected table; the LLM will see its rows as flat text only",
+                doc_type, _display_name, len(text), doc_type,
+            )
         await reporter.file_phase(i, "extracting", active=f"Extracting facts from {_display_name}…")
         raw       = await extract_facts_long(text, doc_type, low_confidence_tokens=low_conf)
         extracted = _validate_extraction_output(raw, doc_type)
@@ -353,6 +348,16 @@ async def _finalize_pipeline(
     # deliberately removing it from the extraction path.
     probe_umbrella: bool = False,
     progress_reporter: Any = None,
+    # V1 plan C1 F7: client questionnaire answers HELD for producer resolution
+    # (they disagreed with the documents). merge_facts rebuilds facts from the
+    # documents alone, so a re-run would otherwise drop them silently.
+    client_answer_conflicts: Optional[dict] = None,
+    # V1 plan C1-D (Q7): the session's PREVIOUS facts. merge_facts rebuilds
+    # everything from the documents, so a value a human supplied for a field the
+    # documents never mention was silently destroyed by every re-run (picker
+    # confirm, reclassify, integrity resolve). Principle 6. Pass the stored
+    # facts and human-provenance entries are carried across.
+    prior_facts: Optional[dict] = None,
 ) -> dict:
     """Run everything AFTER per-document extraction: merge facts, cross-doc
     consistency, Submission Integrity Validation, and — only when integrity
@@ -395,6 +400,53 @@ async def _finalize_pipeline(
     _primary_candidates  = [d for d in active_docs if not d.get("supporting_only")] or active_docs
     primary              = select_primary_truth(_primary_candidates)
     merged_facts, mflags = merge_facts(active_docs, primary)
+    _held_client = {
+        k: v for k, v in (client_answer_conflicts or {}).items()
+        if isinstance(v, dict) and k not in (confirmations or {})
+    }
+
+    # ── Human answers survive the re-merge (V1 C1-D, Q7) ────────────────────
+    # A re-run reads the SAME documents, so nothing new can contradict a human
+    # value - there is no winner to pick, the value was simply being dropped.
+    # Three outcomes, all spec-derived, none invented:
+    #   * the document value is still absent  -> restore the human fact;
+    #   * the document value agrees           -> restore it (keeps provenance);
+    #   * the document value now DISAGREES    -> client rule 1.5: hold it for the
+    #     producer rather than letting either side win silently.
+    # Confirmed keys are skipped: apply_confirmations owns those below.
+    try:
+        from services.fact_state import human_provenance_facts
+        from services.fact_comparison import verdict as _verdict, DIFFERENT as _DIFF
+        _restored, _newly_held = [], []
+        for _k, _env in human_provenance_facts(prior_facts).items():
+            if _k in (confirmations or {}) or _k in _held_client:
+                continue
+            _human_val = _env.get("value")
+            _doc_val = _fv(merged_facts, _k)
+            if _doc_val is None or not str(_doc_val).strip():
+                merged_facts[_k] = _env
+                _restored.append(_k)
+            elif _verdict(_k, _doc_val, _human_val) == _DIFF:
+                _held_client[_k] = {
+                    "client_value": str(_human_val),
+                    "source_value": str(_doc_val),
+                    "field_name": _k,
+                    "held_at": datetime.now(timezone.utc).isoformat(),
+                }
+                _newly_held.append(_k)
+            else:
+                merged_facts[_k] = _env
+                _restored.append(_k)
+        if _restored:
+            logger.info("human-provenance facts carried through the re-merge: %s", _restored)
+        if _newly_held:
+            logger.info("human answers now contradicted by the documents, held for "
+                        "the producer: %s", _newly_held)
+    except Exception as _hex:                                  # noqa: BLE001
+        logger.warning("human-fact preservation skipped: %s", _hex)
+
+    if _held_client:
+        merged_facts["_client_answer_conflicts"] = _held_client
     mflags["_doc_type"]  = primary.get("doc_type", "unknown")
     await reporter.package_phase("normalized", "Normalizing data across documents…")
 
@@ -724,6 +776,64 @@ async def _finalize_pipeline(
                 soft_stops = list(soft_stops) + [issue]
                 structured_issues.append(make_issue("doc_conflict_warn_unknown", "soft_warning", issue))
 
+    # ── An unrecognised coverage part reaches the producer (client 1.7) ─────
+    # *"If terminology is not covered by a known normalization rule, do not
+    # automatically assume equivalence. Leave it unmapped OR ROUTE IT FOR
+    # PRODUCER REVIEW WHEN MATERIAL."* Only the first half was ever built:
+    # `canon_line` returns None and every call site skips it, so a coverage
+    # part we cannot place was silently invisible - it could not be compared,
+    # scored, or asked about, and nobody was told.
+    #
+    # ADVISORY ON PURPOSE, and this is Principle 7 rather than timidity: we do
+    # not know what the line IS, so we cannot know what it should cost. *"Give
+    # it no new scoring effect until a rule is explicitly defined."* The issue
+    # is appended to `structured_issues` ONLY - it never enters hard_stops or
+    # soft_stops, so it renders on the review screen, moves no score and caps
+    # nothing. When Brent rules on a specific line, it graduates.
+    try:
+        from services.lob_canon import unmapped_material_lines
+        _unmapped = unmapped_material_lines(merged_facts.get("coverage_lines"))
+        if _unmapped:
+            _shown = ", ".join(_unmapped[:4])
+            if len(_unmapped) > 4:
+                _shown += f", +{len(_unmapped) - 4} more"
+            structured_issues.append(make_issue(
+                "unmapped_coverage_line", "advisory",
+                f"Coverage part not recognised: {_shown}. The documents show it "
+                "is carried, but Primble has no normalization rule for this "
+                "terminology, so it is not matched to a standard line of "
+                "business. Confirm which line it belongs to.",
+            ))
+            logger.info("lines_of_business: %d material line(s) could not be "
+                        "canonicalised - routed to the producer: %s",
+                        len(_unmapped), _unmapped)
+    except Exception as _ulex:                                # noqa: BLE001
+        logger.warning("unmapped-line review item skipped: %s", _ulex)
+
+    # ── Loss-history attestation conflict -> Data Consistency (client C2 2.6) ─
+    # "If a no-loss attestation is contradicted by actual claims in uploaded
+    # loss runs: create a Data Consistency conflict; route the issue to the
+    # producer; cap the Loss History pillar at 45 until resolved." The 45 cap
+    # is applied inside calculate_p4_loss_history (_LOSS_CONFLICT_CAP); this
+    # row is the producer-facing conflict itself. ADVISORY severity on purpose
+    # - the client caps the PILLAR, not the package, so a hard/soft stop here
+    # would wrongly ceiling the whole submission at 60/85 (same routing choice
+    # as unmapped_coverage_line above). Recomputed every pipeline run, so
+    # reconciling the data retires it with no extra wiring.
+    try:
+        from services.sqs_service import _loss_history_conflict
+        if _loss_history_conflict(merged_facts, mflags):
+            structured_issues.append(make_issue(
+                "loss_history_attestation_conflict", "advisory",
+                "Data consistency: a No Known Losses attestation conflicts "
+                "with claims found in the uploaded loss runs. Loss History is "
+                "held at 45 until the discrepancy is resolved - confirm with "
+                "the insured which is correct.",
+            ))
+            logger.info("loss-history attestation conflict routed to the producer")
+    except Exception as _lcex:                                # noqa: BLE001
+        logger.warning("loss-conflict review item skipped: %s", _lcex)
+
     # ── Core Underwriting Data Consistency (Beta Report §4.3) ───────────────
     # Normalization-aware reconciliation of Gross Sales (and similar fields):
     # groups each value by its normalized form, attributes it to the source
@@ -976,8 +1086,17 @@ async def _finalize_pipeline(
 
     await reporter.package_phase("scored", "Scoring the submission…")
 
+    # V1 plan C1 F5 (client 1.3 / 1.4): every envelope carries its value state
+    # and evidence state, derived from signals already on it. Additive.
+    try:
+        from services.fact_state import annotate_fact_states
+        annotate_fact_states(merged_facts, mflags)
+    except Exception as _sex:                                  # noqa: BLE001
+        logger.warning("fact_state annotation skipped: %s", _sex)
+
     session_payload = {
         "user_id":              user_id,
+        "client_answer_conflicts": dict(merged_facts.get("_client_answer_conflicts") or {}),
         "docs":                 processed_docs,
         "primary_doc":          primary["filename"],
         "submission_label":     session_label,
@@ -1078,6 +1197,8 @@ async def resolve_submission_integrity(
             remaining, user_id or session.get("user_id"),
             session_id=session_id, probe_umbrella=False,
             confirmations=session.get("underwriting_confirmations") or {},
+            client_answer_conflicts=session.get("client_answer_conflicts") or {},
+            prior_facts=session.get("facts") or {},
         )
 
     if action == "continue_anyway":
@@ -1090,6 +1211,8 @@ async def resolve_submission_integrity(
             docs, user_id or session.get("user_id"),
             session_id=session_id, integrity_override=override,
             confirmations=session.get("underwriting_confirmations") or {},
+            client_answer_conflicts=session.get("client_answer_conflicts") or {},
+            prior_facts=session.get("facts") or {},
         )
 
     if action == "create_separate_submissions":
@@ -1281,6 +1404,8 @@ async def reclassify_document(
         docs, user_id or session.get("user_id"),
         session_id=session_id, integrity_override=override,
         confirmations=session.get("underwriting_confirmations") or {},
+        client_answer_conflicts=session.get("client_answer_conflicts") or {},
+            prior_facts=session.get("facts") or {},
     )
     # Surface the before/after classification so the route can record an accurate
     # §4.2 audit row without re-deriving the previous type.
@@ -1331,9 +1456,23 @@ async def confirm_underwriting_value(
     # any failure here just skips the auto-apply, it never blocks the primary
     # confirmation below.
     linked_applied: List[str] = []
+    pre_candidates: Optional[list] = None
+    pre_reason: Optional[str] = None
     try:
         pre = assess_underwriting_consistency(active_docs, session.get("facts") or {}, confirmations)
         target = next((f for f in pre.get("fields") or [] if f["fact_key"] == fact_key), None)
+        if target:
+            # V1 plan C1 F10: what the producer was choosing BETWEEN, captured
+            # before the confirmation rewrites the merged fact.
+            pre_candidates = [
+                {"value": v.get("display"), "normalized": v.get("normalized"),
+                 "scope": v.get("scope"),
+                 "sources": [{"filename": s_.get("filename"), "doc_type": s_.get("doc_type"),
+                              "method": s_.get("source_method")}
+                             for s_ in (v.get("sources") or [])]}
+                for v in (target.get("values") or [])
+            ]
+            pre_reason = target.get("conflict_reason")
         for link in (target.get("linked_fields") if target else None) or []:
             lk = link["fact_key"]
             if lk in confirmations:
@@ -1356,11 +1495,16 @@ async def confirm_underwriting_value(
     prior_integrity = session.get("integrity") or {}
     override = prior_integrity.get("override") if prior_integrity.get("overridden") else None
 
-    return await _finalize_pipeline(
+    result = await _finalize_pipeline(
         docs, user_id or session.get("user_id"),
         session_id=session_id, integrity_override=override,
         confirmations=confirmations, probe_umbrella=False,
+        client_answer_conflicts=session.get("client_answer_conflicts") or {},
+            prior_facts=session.get("facts") or {},
     )
+    result["_pre_confirm_candidates"] = pre_candidates
+    result["_pre_confirm_reason"] = pre_reason
+    return result
 
 
 async def apply_marketing_reason(

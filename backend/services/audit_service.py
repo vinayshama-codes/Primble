@@ -1,6 +1,7 @@
 # audit_service.py — asyncpg implementation
 
 import hashlib
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -763,6 +764,14 @@ def _flatten_fact(key: str, raw) -> Optional[dict]:
         confidence = raw.get("confidence") or ""
     else:
         value, source, confidence = raw, "", ""
+    # V1 plan C1 F5: the two state axes (client 1.3 / 1.4) and the 125 doc's
+    # four-word projection, derived from the same envelope so the export can
+    # never disagree with the session.
+    try:
+        from services.fact_state import derive_states, display_state
+        _st = derive_states(key, raw)
+    except Exception:                                         # noqa: BLE001
+        _st = {}
 
     if value is None or value == "" or value == [] or value == {}:
         return None
@@ -776,12 +785,19 @@ def _flatten_fact(key: str, raw) -> Optional[dict]:
         if len(display) > _EXPORT_VALUE_MAX:
             display = display[:_EXPORT_VALUE_MAX] + "…(truncated)"
 
-    return {
+    row = {
         "fact": key,
         "value": display,
         "source": source,
         "confidence": confidence,
     }
+    if _st:
+        row["value_state"] = _st.get("value_state")
+        row["evidence_state"] = _st.get("evidence_state")
+        if _st.get("evidence_actor"):
+            row["evidence_actor"] = _st["evidence_actor"]
+        row["display_state"] = display_state(_st.get("value_state"), _st.get("evidence_state"))
+    return row
 
 
 # ASYNC-SAFE
@@ -1230,8 +1246,15 @@ async def log_underwriting_confirmation(
     label: str,
     confirmed_value: str,
     previous_value: Optional[str],
+    candidates: Optional[list] = None,
+    reason: Optional[str] = None,
 ) -> None:
     """Record a user-confirmed underwriting value (Beta Report §4.3 / §5.1).
+
+    ``candidates`` (V1 plan C1 F10): every competing value the picker showed,
+    with its sources and scope, captured BEFORE the confirmation rewrote the
+    merged fact - the client's "resolution must not delete the prior
+    evidence". ``reason`` is the comparator's reason for the conflict.
 
     Writes one row to ``underwriting_confirmation_audit`` so every "you chose X
     on date Y" event is permanently queryable — fact_key, the human label,
@@ -1245,8 +1268,9 @@ async def log_underwriting_confirmation(
                 """
                 INSERT INTO underwriting_confirmation_audit (
                     id, session_id, user_id, fact_key, label,
-                    confirmed_value, previous_value, confirmed_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    confirmed_value, previous_value, confirmed_at,
+                    candidates, reason
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
                 """,
                 f"uwc_{uuid.uuid4().hex}",
                 session_id,
@@ -1256,6 +1280,8 @@ async def log_underwriting_confirmation(
                 confirmed_value,
                 previous_value,
                 datetime.now(timezone.utc).isoformat(),
+                json.dumps(candidates) if candidates is not None else None,
+                reason,
             )
         logger.info(
             "Logged underwriting confirmation session=%s field=%s value=%r",

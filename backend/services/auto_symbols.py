@@ -270,8 +270,45 @@ _LIABILITY_KEYS = (LIABILITY, UNSPECIFIED)
 PHYSICAL_DAMAGE_KEYS = (COMPREHENSIVE, COLLISION, PHYSICAL_DAMAGE)
 
 
+def normalize_coverages(label) -> List[str]:
+    """EVERY canonical coverage a free-text label names, in table order.
+
+    A dec page routinely combines two coverages under one symbol:
+    "Comprehensive and Collision  Symbol 07", "Comp/Coll 7", "OTC & Collision".
+    :func:`normalize_coverage` returns only the FIRST match, so the second
+    coverage was silently dropped and its symbol lost - which fired
+    "no covered-auto symbol was found for: collision" on a policy that shows
+    Symbol 07 for both (live run 2026-08-21).
+
+    A broad label that also matches a narrower one is NOT double counted: a
+    match is only recorded when the needle is present, and the specific keys sit
+    ahead of the general ones in `_COVERAGE_PATTERNS`.
+    """
+    if label is None:
+        return [UNSPECIFIED]
+    s = str(label).strip().lower()
+    if not s:
+        return [UNSPECIFIED]
+    if s in COVERAGE_LABEL:
+        return [s]
+    found: List[str] = []
+    for key, needles in _COVERAGE_PATTERNS:
+        if any(n in s for n in needles) and key not in found:
+            found.append(key)
+    # "Physical Damage (Comprehensive and Collision)" names the two specific
+    # parts; keeping the umbrella term as well would make symbols_for count it
+    # twice under a third key that no ACORD box uses.
+    if PHYSICAL_DAMAGE in found and (COMPREHENSIVE in found or COLLISION in found):
+        found.remove(PHYSICAL_DAMAGE)
+    return found or [UNSPECIFIED]
+
+
 def normalize_coverage(label) -> str:
-    """Map any free-text coverage label onto a canonical coverage key."""
+    """Map any free-text coverage label onto a canonical coverage key.
+
+    Returns the FIRST coverage named. Callers that must not lose a second
+    coverage in a combined label use :func:`normalize_coverages`.
+    """
     if label is None:
         return UNSPECIFIED
     s = str(label).strip().lower()
@@ -358,14 +395,16 @@ def parse_symbols(raw) -> Dict[str, List[int]]:
     if isinstance(raw, (list, tuple)):
         for item in raw:
             if isinstance(item, dict):
-                cov = normalize_coverage(
-                    item.get("coverage") or item.get("cov") or item.get("line")
-                )
                 nums = _clean_numbers(
                     item.get("symbols") if item.get("symbols") is not None
                     else item.get("symbol")
                 )
-                _add(cov, nums)
+                # EVERY coverage the label names - "Comprehensive and Collision"
+                # assigns the symbol to both, which is what the dec page means.
+                for cov in normalize_coverages(
+                    item.get("coverage") or item.get("cov") or item.get("line")
+                ):
+                    _add(cov, nums)
             else:
                 _add(UNSPECIFIED, _clean_numbers(item))
         return out

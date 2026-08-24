@@ -21,6 +21,7 @@ from models.schemas import (
     BulkFormSelectionRequest, FormSelectionRequest, PDFUpdateRequest,
     SubmissionIntegrityResolveRequest, DocumentReclassifyRequest,
     UnderwritingConfirmRequest, MarketingReasonRequest,
+    ClientAnswerResolveRequest,
 )
 from repositories.session_repository import (
     get_processing_session, new_processing_session, upd_processing_session,
@@ -913,6 +914,11 @@ async def underwriting_confirm_value(
         label=_uw_label,
         confirmed_value=req.value,
         previous_value=_prev_str,
+        # V1 plan C1 F10: the competing values + sources + scope the producer
+        # chose between, and why they conflicted. The resolution never deletes
+        # the prior evidence.
+        candidates=result.get("_pre_confirm_candidates"),
+        reason=result.get("_pre_confirm_reason"),
     )
 
     integrity = result.get("integrity") or {}
@@ -946,6 +952,33 @@ async def underwriting_confirm_value(
         "integrity": integrity,
         "integrity_review_required": bool(integrity.get("review_required")),
     })
+
+
+@router.post("/api/client-answer/resolve")
+async def client_answer_resolve(
+    req: ClientAnswerResolveRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Resolve one held client questionnaire answer (V1 plan C1-D).
+
+    "use_client" applies the client's value as a producer-provenance fact and
+    patches the EXISTING generated forms in place - it deliberately does NOT go
+    through confirm_underwriting_value, which re-runs the pipeline and wipes
+    generated_forms. "keep_source" discards the held answer.
+    """
+    session = await get_processing_session(req.session_id)
+    if session.get("user_id") != str(current_user["id"]):
+        raise HTTPException(403, "Access denied")
+    from services.client_answer_review import resolve_client_answer
+    try:
+        result = await resolve_client_answer(
+            req.session_id, req.fact_key, (req.choice or "").strip(),
+            user_id=str(current_user["id"]),
+        )
+    except Exception as ex:
+        logger.error(f"client_answer_resolve error [trace={get_trace_id()}]: {ex}", exc_info=True)
+        raise HTTPException(500, "Could not apply your decision.")
+    return JSONResponse({"success": bool(result.get("ok")), **result})
 
 
 @router.post("/api/select-forms-bulk")
@@ -1942,7 +1975,14 @@ async def get_session(session_id: str, current_user: dict = Depends(get_current_
                         "sqs": r.get("sqs", {})} for fid, r in generated.items()}
 
     _cross = proc_session.get("cross_issues_last", []) or []
+    # V1 C1-D: client questionnaire answers that disagreed with the documents are
+    # HELD, not applied. This endpoint is what restores a session that already
+    # has generated forms - i.e. every session that can have had a questionnaire
+    # sent - so it is where the producer's decision list belongs. Empty list =
+    # the section stays hidden.
+    from services.client_answer_review import build_review_rows as _car_rows
     return JSONResponse({"session_id": session_id, "generated_forms": summary,
+                         "client_answer_review": _car_rows(proc_session),
                          "cross_issues": _cross,
                          "grouped_cross_issues": _grouped_cross_issues_or_none(_cross),
                          "package_sqs": proc_session.get("package_sqs"),

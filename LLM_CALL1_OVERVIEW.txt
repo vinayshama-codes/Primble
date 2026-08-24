@@ -1,0 +1,129 @@
+================================================================================
+LLM CALL 1 - WIRING, INPUT, AND WHERE EVERYTHING LIVES
+================================================================================
+Generated 2026-08-22 from the running code. Companion files:
+  LLM_CALL1_PROMPT_FACTS_FLAGS.txt   PROMPT A (facts + flags), verbatim
+  LLM_CALL1_PROMPT_DEC_INDEX.txt     PROMPT B (dec index for LLM call 2), verbatim
+
+
+1. DOES LLM CALL 1 RUN ON THE EXTRACTED DATA FROM THE UPLOADED DEC PAGE?
+--------------------------------------------------------------------------------
+Yes. It never sees the PDF - only OCR text. Exact path:
+
+  routes/form_routes.py            upload
+    -> extraction_pipeline.run_extraction_pipeline()        line 214
+       for each uploaded file:
+         ocr_service.extract_text(path)                     -> (text, low_conf)
+            Google Cloud Vision / pdfplumber, column-reflow repair, per-page
+            riffle repair, header-anchored tables emitted INLINE as
+            "[Table - page N]" blocks (utils/page_layout.py)
+         classify_document(text)                            -> doc_type
+         extraction_service.extract_facts_long(text, doc_type, low_conf)
+            -> _extract_any -> _run_extraction()            line 4416
+               _chunk_by_sections(text)   ~56,000 chars/chunk, 14,285-char
+                                          overlap tail carried into the next
+               _gather_chunks_async()     ONE PROMPT A CALL PER CHUNK
+               _harvest_dec_index(chunks) PROMPT B on declarations-dense chunks
+               _merge_list_fields()       merge all chunks into one fact set
+
+Per uploaded file, not per page. A 271-page package = one text blob -> N chunks
+-> N calls. Stage 1 runs ONCE per submission regardless of how many ACORD forms
+are later selected.
+
+
+2. FACTS, FLAGS AND THE EXTRA JSON - SAME FILE OR DIFFERENT?
+--------------------------------------------------------------------------------
+PROMPTS - same file.
+  Both prompts live in backend/services/extraction_service.py:
+    _EXTRACT_SCHEMA           line 142   (facts schema + flags schema, one string)
+    _EXTRACT_PROMPT_PREFIX    line 513   (rules 1-16, then embeds _EXTRACT_SCHEMA)
+    _EXTRACT_PROMPT_SUFFIX    line 2286  (built inline in extract_facts())
+    _DEC_INDEX_SYSTEM_PROMPT  line 4220  (the dedicated dec-index pass)
+  Nothing is loaded from an external prompt file. There is no prompts/ directory.
+
+RESPONSES - facts and flags come back in ONE JSON from ONE call.
+    {"facts": {...~170 keys...}, "flags": {...~45 booleans + narrative_components...}}
+  One request per chunk, one JSON per request. They are never split.
+
+THE "EXTRA JSON" (dec_page_entries) - one destination key, two producers.
+  * PROMPT A already asks for it as a key INSIDE "facts"
+    (extraction_service.py:437). Destination-driven capture.
+  * PROMPT B is a SEPARATE LLM call with its own system prompt that returns
+    {"dec_page_entries": [...]} on its own. Source-driven capture, run only on
+    chunks scoring >= 0.25 on declarations_authority().
+  * _run_extraction() line 4497 merges them ADDITIVELY into the same key:
+        result["dec_page_entries"] = main_pass_entries + dedicated_pass_entries
+  * merge_facts -> _verify_dec_entries() (extraction_service.py:~6952) then
+    verifies EVERY entry verbatim against the uploaded text and de-duplicates on
+    (label, value, section). A fabricated entry cannot survive.
+  * Final storage: facts["dec_page_entries"] in the session record. Same dict as
+    every other fact. No separate file, no separate table.
+
+
+3. HOW LLM CALL 2 CONSUMES IT
+--------------------------------------------------------------------------------
+  services/pdf_service.py
+    _GAP_FILL_FACTS_EXCLUDE  line 125  dec_page_entries is EXCLUDED from the
+                                       gap-fill FACTS BLOCK on purpose (it would
+                                       mislabel verified text as an "unverified
+                                       hint" and inflate the cached prefix ~80k)
+    _DEC_INDEX_HEADER        line 143  the section header the model reads
+    _render_dec_index()      line 166  renders the verified entries grouped by
+                                       [section | policy | coverage line]
+    _dec_index_chunks()      used at   line ~11453 - Stage A of combined_gap_fill:
+                                       the index is read FIRST; fields it does
+                                       not answer fall through to Stage B and
+                                       walk the raw document as before.
+  Kill switch: GAP_FILL_DEC_INDEX=0 restores pre-2026-08-13 behaviour.
+  The compliance (Yes/No) pass deliberately does NOT get the index - those
+  answers live in policy wording, which the recorder is told never to record.
+
+
+4. EVERY LLM CALL IN STAGE 1 (so nothing is missed)
+--------------------------------------------------------------------------------
+  A. FACTS + FLAGS          extraction_service.py:2299   per chunk, always.
+                            PROMPT A. max_tokens 32,000. User message only.
+  B. DEC INDEX              extraction_service.py:4374   per declarations-dense
+                            chunk. PROMPT B. system+user. max_tokens 16,000.
+                            DEC_INDEX_DEDICATED_PASS=0 disables.
+  C. JSON REPAIR            extraction_service.py:1837   only when a reply fails
+                            to parse. Prompt is one line: "Fix the malformed
+                            JSON. Return ONLY a valid JSON object..." + raw[:3000]
+  D. CONFLICT RECONCILER    extraction_service.py:3798   only when chunks
+                            disagree on an OCR-critical field AND deterministic
+                            rules cannot settle it. Sees candidate values only,
+                            never the document. The answer must be one of the
+                            candidates or it is rejected.
+  E. UMBRELLA PERIOD PROBE  pdf_service.py:17171 (_fetch_umbrella_period_sync),
+                            fired from extraction_pipeline.py:520. Only when
+                            has_umbrella is true AND the umbrella dates are
+                            still empty. Skipped on any re-run (C75).
+  Calls C, D and E are conditional repair/rescue paths, not part of the normal
+  extraction contract.
+
+
+5. VERSIONING - READ BEFORE EDITING EITHER PROMPT
+--------------------------------------------------------------------------------
+  PROMPT_VERSION / SCHEMA_VERSION (extraction_service.py:34) are both "v12" and
+  are part of the extraction cache key. Bump BOTH on any change to
+  _EXTRACT_PROMPT_PREFIX or _EXTRACT_SCHEMA, or stale cached extractions are
+  served forever.
+
+  PROMPT B has six phrases pinned by anti-rot tests and kept verbatim:
+    tests/test_dec_index_dedicated_pass.py     "VERBATIM", "BE EXHAUSTIVE",
+                                               "one entry PER printed cell",
+                                               "NEVER concatenate"
+    tests/test_run_20260814b_form_fixes.py     "labels must differ exactly as the
+                                               printed captions differ", "the
+                                               amount's LABEL, not a separate
+                                               entry", "never shorten, reorder or
+                                               reword"
+  Each records a real production incident. Run both files before anything else
+  if you reword it.
+
+  Any prompt edit must also update improving-ll.md in the same commit, and be
+  verified offline with:
+    py backend/scripts/inspect_gap_fill_prompts.py
+  never by diffing two live runs (the pipeline is non-deterministic).
+
+=== END ===

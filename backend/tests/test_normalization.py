@@ -138,7 +138,11 @@ def test_insurance_terms_equivalent():
         ("EPLI", "Employment Practices Liability Insurance"),
         ("HNOA", "Hired and Non-Owned Auto"),
         ("COPE", "Construction, Occupancy, Protection, Exposure"),
-        ("BI", "Building"),
+        # ("BI", "Building") was DELETED 2026-08-24 (v1-20AUG.md C1-R). In
+        # commercial lines "BI" is Bodily Injury or Business Interruption;
+        # folding it into Building is the over-mapping client 1.7 forbids and
+        # D9 requires product approval for. The code was right; the pair was
+        # wrong. Do not restore it and do not "fix" normalize_general for it.
     ]
     for abbrev, expanded in pairs:
         assert normalize_general(abbrev) == normalize_general(expanded), (abbrev, expanded)

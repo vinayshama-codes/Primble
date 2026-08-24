@@ -83,8 +83,18 @@ def test_formatting_differences_do_not_defeat_verification():
 
 
 def test_malformed_items_are_dropped_not_fatal():
+    """RESTORED 2026-08-23: a missing label is malformed again.
+
+    Everything here that records nothing is still dropped - a non-dict, an empty
+    value, an oversized value. But `{"label": "", "value": "$10,663"}` is a real
+    printed figure with no caption, and under the atomic index schema that is a
+    deliberate shape (`kind: "standalone"`), not junk. The case that forced the
+    change is the carrier name printed bare on a declarations masthead:
+    `_carriers_by_line` reads owner/value/line and never looks at the label, so
+    dropping captionless entries defeated the carrier rule outright.
+    """
     out = es._verify_dec_entries(
-        ["not a dict", {"label": "", "value": "$10,663"},
+        ["not a dict",
          {"label": "Total Policy Premium", "value": ""},
          {"label": "Total Policy Premium", "value": "x" * 400},
          None, 42], _DOC_TEXT)

@@ -72,6 +72,9 @@ def test_the_kill_switch_stops_the_pass(monkeypatch):
 
 def test_the_chunk_cap_bounds_the_cost(monkeypatch):
     """A pathological package cannot buy unbounded calls."""
+    # Off by default since 2026-08-23 (Round 8) - switched on explicitly here
+    # because this test exercises the machinery, not the product decision.
+    monkeypatch.setattr(es, "_DEC_INDEX_DEDICATED_PASS", True)
     seen = []
 
     async def _fake(model, messages, max_tokens=0):
@@ -107,7 +110,10 @@ def test_the_index_prompt_is_index_only():
 def test_no_coverage_is_recorded_as_data():
     """'Property - No Coverage' is the affirmative statement that ACORD 140 has
     nothing to fill. Dropping it is how phantom lines get ticked."""
-    assert "'No Coverage', 'Included', 'Waived'" in es._DEC_INDEX_SYSTEM_PROMPT
+    # Re-pinned 2026-08-23 to the v3 wording, which lists MORE dispositions
+    # between the same two anchors. Same guarantee, wider list.
+    assert ("'No Coverage', 'NOT COVERED', 'COVERED', 'Included', 'Waived'"
+            in es._DEC_INDEX_SYSTEM_PROMPT)
 
 
 def test_the_main_extraction_prompt_is_untouched():
@@ -290,6 +296,11 @@ def test_the_wrapped_reply_shape_is_read(monkeypatch):
     "harvested 0 raw entries from 8 chunk(s)". Up to 6,788 tokens of real
     output, paid for and thrown away by the reader.
     """
+    # The pass is OFF by default since 2026-08-23 (it lost its A/B - see
+    # LLMcall1-promptChange.md Round 8). These tests exercise the machinery
+    # itself, so they switch it on explicitly rather than depending on a
+    # default that is now a product decision.
+    monkeypatch.setattr(es, "_DEC_INDEX_DEDICATED_PASS", True)
     async def _bare(model, messages, max_tokens=0):
         return json.dumps({"dec_page_entries": [
             {"label": "Total Premium", "value": "$10,663.00",
@@ -302,6 +313,11 @@ def test_the_wrapped_reply_shape_is_read(monkeypatch):
 def test_the_already_wrapped_shape_also_works(monkeypatch):
     """Both shapes must read, so a future parser change cannot silently
     re-break this."""
+    # The pass is OFF by default since 2026-08-23 (it lost its A/B - see
+    # LLMcall1-promptChange.md Round 8). These tests exercise the machinery
+    # itself, so they switch it on explicitly rather than depending on a
+    # default that is now a product decision.
+    monkeypatch.setattr(es, "_DEC_INDEX_DEDICATED_PASS", True)
     async def _wrapped(model, messages, max_tokens=0):
         return json.dumps({"facts": {"dec_page_entries": [
             {"label": "Liability", "value": "$3,954.00"}]}, "flags": {}})
@@ -317,6 +333,11 @@ def test_every_dec_dense_chunk_is_indexed_by_default(monkeypatch):
     declarations spread across more chunks - a recall loss with no log line.
     The owner's requirement is FULL coverage: the authority gate is the cost
     boundary, not an arbitrary count."""
+    # The pass is OFF by default since 2026-08-23 (it lost its A/B - see
+    # LLMcall1-promptChange.md Round 8). These tests exercise the machinery
+    # itself, so they switch it on explicitly rather than depending on a
+    # default that is now a product decision.
+    monkeypatch.setattr(es, "_DEC_INDEX_DEDICATED_PASS", True)
     seen = []
 
     async def _fake(model, messages, max_tokens=0):
@@ -332,6 +353,11 @@ def test_every_dec_dense_chunk_is_indexed_by_default(monkeypatch):
 def test_an_env_cap_still_works_as_an_emergency_valve(monkeypatch):
     """DEC_INDEX_MAX_CHUNKS > 0 must keep capping (and the cap now warns -
     see _harvest_dec_index), so a pathological deployment has an off-ramp."""
+    # The pass is OFF by default since 2026-08-23 (it lost its A/B - see
+    # LLMcall1-promptChange.md Round 8). These tests exercise the machinery
+    # itself, so they switch it on explicitly rather than depending on a
+    # default that is now a product decision.
+    monkeypatch.setattr(es, "_DEC_INDEX_DEDICATED_PASS", True)
     seen = []
 
     async def _fake(model, messages, max_tokens=0):
@@ -424,7 +450,14 @@ def test_a_fabricated_multiword_label_still_fails():
 
 def test_the_prompt_asks_for_one_entry_per_cell():
     """Belt to the gate's braces: the fusion is also forbidden at the source,
-    in BOTH recording prompts (the dedicated pass and the main extraction)."""
-    assert "one entry PER printed cell" in es._DEC_INDEX_SYSTEM_PROMPT
-    assert "NEVER concatenate" in es._DEC_INDEX_SYSTEM_PROMPT
+    in BOTH recording prompts (the dedicated pass and the main extraction).
+
+    RESTORED 2026-08-23. The main extraction's `dec_page_entries` key was briefly
+    removed while the dedicated pass was the sole recorder; the pass lost its A/B
+    (see LLMcall1-promptChange.md Round 8) and the key is back, so both recorders
+    are checked again. The dedicated pass is off by default but its prompt is
+    still the one that runs if it is switched on.
+    """
+    assert "ONE ENTRY PER PRINTED CELL" in es._DEC_INDEX_SYSTEM_PROMPT
+    assert "NEVER weld" in es._DEC_INDEX_SYSTEM_PROMPT
     assert "one entry per CELL" in es._EXTRACT_SCHEMA

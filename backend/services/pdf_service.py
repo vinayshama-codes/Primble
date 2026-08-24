@@ -212,17 +212,23 @@ def _render_dec_index(entries: Any) -> str:
             continue
         label = str(item.get("label") or "").strip()
         value = str(item.get("value") or "").strip()
-        if not label or not value:
+        # A value with no caption is still data - a captionless carrier name on
+        # a masthead is the case that matters (2026-08-23). A value-less entry
+        # records nothing and is still skipped.
+        if not value:
             continue
         section = str(item.get("section") or "").strip() or _DEC_INDEX_NO_SECTION
         owner   = str(item.get("owner") or "").strip().lower()
         policy  = str(item.get("policy_number") or "").strip()
         line    = str(item.get("line_of_business") or "").strip()
+        row     = str(item.get("row") or "").strip()
         # De-dup on the full identity. Keying on (section, label, value) alone
         # would collapse the same label:value printed for TWO different policies
-        # into one entry and silently pick whichever appeared first.
+        # into one entry and silently pick whichever appeared first. `row` joined
+        # the key for the same reason one level down: two rows of one rating
+        # table can print the same value under the same column heading.
         key = (section.lower(), label.lower(), value.lower(),
-               policy.lower(), line.lower())
+               policy.lower(), line.lower(), row.lower())
         if key in seen:
             continue
         seen.add(key)
@@ -239,7 +245,15 @@ def _render_dec_index(entries: Any) -> str:
         # been mistaken for a driver and for the applicant. A deliberate "this
         # person is a third party" is exactly the signal worth printing.
         suffix = f"  [{owner}]" if owner else ""
-        groups.setdefault(heading, []).append(f"  {label}: {value}{suffix}")
+        # `row` prefixes the line ONLY when the entry has one, so every
+        # non-table line renders byte-identically to before. It is what lets the
+        # model join a bare "Rate: 3.4240" back to the class code it belongs to
+        # when four rows of one table each print a Rate.
+        prefix = f"({row}) " if row else ""
+        # A captionless value renders as a bare line rather than ": value",
+        # which would read as an entry whose caption went missing.
+        body = f"{label}: {value}" if label else value
+        groups.setdefault(heading, []).append(f"  {prefix}{body}{suffix}")
     if not groups:
         return ""
     body = "\n\n".join(
@@ -363,15 +377,81 @@ def _dec_index_chunks(entries: Any, budget: int) -> List[str]:
     body = text[len(_DEC_INDEX_HEADER):len(text) - len(_DEC_INDEX_FOOTER)]
     if len(body) <= inner_budget:
         return [text]
-    parts = _split_text_on_boundaries(body, inner_budget)
+
+    # ── IT FITS OR IT SPLITS BY LABEL - never by character (2026-08-23) ──────
+    # The old path here was `_split_text_on_boundaries`, a blind CHARACTER cut
+    # through the rendered text. It had no idea which entries needed to stay
+    # together, so it separated the umbrella's $3,000,000 from the GL's
+    # $1,000,000 by pure accident of position - the exact C23 defect Stage A
+    # exists to prevent. That made the split unsafe, which in turn forced a low
+    # `_DEC_ENTRY_MAX`, which DROPPED declarations data on a large package. Two
+    # bad outcomes from one dumb splitter.
+    #
+    # THE PROPERTY THAT MATTERS is narrow and nameable: two entries must share a
+    # call when they share a LABEL, because that is the only case where the
+    # model has to tell them apart ("Each Occurrence Limit" = $1,000,000 for the
+    # GL part and $3,000,000 for the umbrella). So group by normalised label and
+    # bin-pack whole groups. A label can then never straddle two pieces,
+    # whatever the index size.
+    #
+    # MEASURED, on the live 227-entry package: 148 distinct labels, 34 of them
+    # contested (same label, different value/policy/line) covering 105 entries -
+    # 46% of the index. That number killed the first design considered here,
+    # which was to repeat the contested entries in every piece; at 46% the
+    # duplication costs more than the split saves. Grouping costs nothing.
+    #
+    # THE NORMAL CASE IS UNTOUCHED. A fitting index returns above, byte-
+    # identical to before. This runs only on a package big enough to need it,
+    # and there it is safe rather than broken.
+    def _norm_label(e: Any) -> str:
+        if not isinstance(e, dict):
+            return ""
+        return re.sub(r"[^a-z0-9]+", " ", str(e.get("label") or "").lower()).strip()
+
+    order: List[str] = []
+    by_label: Dict[str, List[dict]] = {}
+    for e in entries if isinstance(entries, list) else []:
+        k = _norm_label(e)
+        if k not in by_label:
+            by_label[k] = []
+            order.append(k)
+        by_label[k].append(e)
+
+    parts: List[str] = []
+    bucket: List[dict] = []
+    bucket_len = 0
+    oversized = 0
+    for k in order:
+        grp = by_label[k]
+        # Measure the group as it will actually render, not by a proxy.
+        grp_len = len(_render_dec_index(grp))
+        if bucket and bucket_len + grp_len > inner_budget:
+            parts.append(_render_dec_index(bucket))
+            bucket, bucket_len = [], 0
+        if grp_len > inner_budget and not bucket:
+            # One label alone exceeds a whole call. Ship it as its own piece
+            # rather than loop forever - it is still whole, which is the
+            # property being protected.
+            oversized += 1
+            parts.append(_render_dec_index(grp))
+            continue
+        bucket.extend(grp)
+        bucket_len += grp_len
+    if bucket:
+        parts.append(_render_dec_index(bucket))
+    parts = [p for p in parts if p]
+    if not parts:                                    # pragma: no cover - defensive
+        return [text]
     logger.warning(
         "dec_index: %d chars exceeds the %d-char single-call budget and was split "
-        "into %d pieces. Values printed under different section headings are no "
-        "longer co-visible in one call (see this function's docstring). Fields the "
-        "index cannot answer still walk the full document in Stage B.",
+        "into %d piece(s) BY LABEL, so no label straddles two calls and values "
+        "sharing a caption stay co-visible%s. Fields the index cannot answer "
+        "still walk the full document in Stage B.",
         len(body), inner_budget, len(parts),
+        f"; {oversized} single label(s) exceeded a whole call on their own"
+        if oversized else "",
     )
-    return [_DEC_INDEX_HEADER + p + _DEC_INDEX_FOOTER for p in parts]
+    return parts
 
 # Per-row PII sub-keys stripped from schedule list facts (e.g. auto_drivers)
 # before they reach an LLM prompt, rather than excluding the whole list. DOB
@@ -4337,11 +4417,7 @@ def _underlying_rows_for_line(facts: dict, phrases) -> List[dict]:
     rows = _fv(facts, "underlying_policies")
     if not isinstance(rows, list) or not rows or not phrases:
         return []
-    try:
-        from services.extraction_service import _canon_line
-    except Exception:                                     # noqa: BLE001
-        def _canon_line(_s):                              # type: ignore
-            return None
+    from services.lob_canon import canon_line as _canon_line
     out: List[dict] = []
     for r in rows:
         if not isinstance(r, dict):
@@ -4877,10 +4953,7 @@ def _line_entry_evidences_policy(entry) -> bool:
 # every specialty liability line into general_liab, which made the first
 # leftover rule inert (audit 2026-08-15 round 9: "the code reads well and
 # cannot fire").
-_GL_GENERIC_TOKENS = frozenset({
-    "commercial", "general", "liability", "liab", "coverage", "policy",
-    "insurance", "line", "cgl",
-})
+from services.lob_canon import GL_GENERIC_TOKENS as _GL_GENERIC_TOKENS  # single source (V1 C1 F8)
 
 
 def _specialty_leftover_lines(lines, covered_canons) -> Tuple[list, bool]:
@@ -4892,10 +4965,7 @@ def _specialty_leftover_lines(lines, covered_canons) -> Tuple[list, bool]:
     a specialty liability name is a leftover even though it canonicalizes to
     general_liab. A canon the classifier cannot place at all is ambiguity.
     """
-    try:
-        from services.extraction_service import _canon_line
-    except Exception:                                     # noqa: BLE001
-        return [], True
+    from services.lob_canon import canon_line as _canon_line
     leftovers, unplaceable = [], False
     for e in lines:
         if not _line_entry_evidences_policy(e):
@@ -5637,11 +5707,7 @@ def _prior_rows_from_underlying_policies(facts: dict) -> List[dict]:
     exp = str(_fv(facts, "prior_expiration_date") or "").strip()
     if not eff or not exp:
         return []
-    try:
-        from services.extraction_service import _canon_line
-    except Exception:                                     # noqa: BLE001
-        def _canon_line(_s):                              # type: ignore
-            return None
+    from services.lob_canon import canon_line as _canon_line
     out: List[dict] = []
     for r in rows:
         if not isinstance(r, dict):

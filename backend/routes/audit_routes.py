@@ -587,8 +587,15 @@ async def answer_recommendation(
     # the sqs dict) so they always agree with _grade_from_score, exactly like the
     # dismiss path.
     updated_forms: dict = {}
+    _package_full = None
     try:
         sess = await get_processing_session(req.session_id)
+        # C2-C (2026-08-24 live run): an ANSWER changes FACTS, so pillar rows,
+        # loss-history state and recommendations change too - not just the
+        # headline. Ship the full recomputed payloads so the panel can replace
+        # them wholesale; patching only the score left the screen internally
+        # inconsistent (package 76 beside a pillar row still reading 25).
+        _package_full = sess.get("package_sqs")
         for fid, fdata in (sess.get("generated_forms") or {}).items():
             if not isinstance(fdata, dict):
                 continue
@@ -601,6 +608,7 @@ async def answer_recommendation(
                 "new_grade":      g,
                 "new_tier":       t,
                 "new_tier_color": c,
+                "new_sqs":        fdata.get("sqs"),
             }
     except Exception as _re:
         logger.error(f"answer_recommendation: score read-back failed: {_re}")
@@ -613,6 +621,7 @@ async def answer_recommendation(
         "updated_forms":         updated_forms,
         "new_package_sqs_score": impact.get("score_after"),
         "new_package_tier":      impact.get("tier"),
+        "package_sqs":           _package_full,
         "open_recommendations":  open_recs,
     })
 

@@ -191,6 +191,21 @@ def _doc_identity(doc: dict) -> dict:
             break
 
     return {
+        # RAW values + the document's ROLE, so the soft-divergence check can ask
+        # `services.fact_comparison` - the one door - instead of counting
+        # distinct normalised strings. See _soft_divergence_reasons.
+        "_raw": {
+            "dba_name":            _fv(facts, "dba_name"),
+            "entity_type":         _fv(facts, "entity_type"),
+            "mailing_address":     _fv(facts, "mailing_address"),
+            "physical_address":    _fv(facts, "physical_address"),
+            "operations_description": _fv(facts, "operations_description"),
+            "account_description": _fv(facts, "account_description"),
+            "policy_number":       raw_policy,
+            "effective_date":      _fv(facts, "effective_date"),
+            "carrier_name":        raw_carrier,
+        },
+        "_doc_type": doc.get("doc_type"),
         "raw_name":       str(raw_name) if raw_name else "",
         "name_key":       _normalize_name(raw_name),
         "dba":            _normalize_name(_fv(facts, "dba_name")),
@@ -374,7 +389,7 @@ def assess_submission_integrity(docs: List[dict]) -> dict:
         )
 
     # ── SOFTER divergence (names align) → MEDIUM (review recommended) ────────
-    soft_reasons = _soft_divergence_reasons(doc_sigs)
+    soft_reasons = _soft_divergence_reasons(doc_sigs, docs)
     if soft_reasons:
         return _verdict(
             status=STATUS_MEDIUM, confidence=0.7, clusters=insured_clusters or clusters,
@@ -387,41 +402,103 @@ def assess_submission_integrity(docs: List[dict]) -> dict:
     )
 
 
-def _soft_divergence_reasons(doc_sigs: List[dict]) -> List[str]:
+def _soft_divergence_reasons(doc_sigs: List[dict],
+                             docs: Optional[List[dict]] = None,
+                             merged_facts: Optional[dict] = None) -> List[str]:
     """Non-blocking signals: same/compatible names but other identity fields differ.
 
     INTENTIONAL DECISION (§4.1 action item 2): when the applicant names align, a
     difference in DBA / address / entity type / operations / policy number /
     effective date / carrier / account description downgrades the verdict to MEDIUM
-    (review recommended) but does NOT pause the workflow. These are normal for a
-    single insured - multiple locations, a renewal onto a new carrier, several
-    policies - so escalating them to a blocking LOW would generate false positives.
-    Only distinct insured NAMES or distinct FEINs drive a blocking pause; this is a
-    deliberate product choice, not a missing block.
+    (review recommended) but does NOT pause the workflow. Only distinct insured
+    NAMES or distinct FEINs drive a blocking pause.
+
+    EVERY COMPARISON GOES THROUGH `services.fact_comparison` (V1 plan C1c,
+    decision D3). This function used to count DISTINCT NORMALISED STRINGS, which
+    made it the SIXTH private comparison site - and on the 2026-08-21 live run it
+    produced three false review notes on a clean package:
+
+      * "Location address differs"  - `Denver, Colorado` is a COMPONENT of the
+        full street address, not a rival location.
+      * "Multiple distinct policy numbers found" - a 4-policy package has four
+        policy numbers. That is what a package IS.
+      * "Operations descriptions differ" - two documents describing the same
+        operations in different words. Prose is INCOMPARABLE, never a conflict.
+
+    The door answers all three, plus document-role scope (a loss run's policy
+    number describes its CLAIMS, not the submission) for free.
+
+    FAIL-OPEN: if the door is unavailable the legacy distinct-string count runs,
+    so behaviour degrades to exactly what it was.
     """
     reasons: List[str] = []
 
-    def _distinct(field: str) -> List[str]:
+    def _legacy_distinct(field: str) -> List[str]:
         vals = [s[field] for s in doc_sigs if s.get(field)]
         return sorted(set(vals))
 
-    if len(_distinct("dba")) > 1:
+    try:
+        from services.fact_comparison import (
+            build_context, conflict as _door_conflict,
+            carriers_same_family as _door_family,
+            document_witnesses as _door_witnesses,
+        )
+        ctx = build_context(merged_facts, docs)
+    except Exception:                                        # noqa: BLE001
+        ctx = None
+        _door_conflict = None
+        _door_family = None
+
+    def _differs(fact_key: str, sig_field: str) -> bool:
+        """True when the documents genuinely disagree about ``fact_key``."""
+        if _door_conflict is None:
+            return len(_legacy_distinct(sig_field)) > 1
+        raw = []
+        for sig in doc_sigs:
+            if not _door_witnesses(sig.get("_doc_type"), fact_key):
+                continue                      # role scope (client 1.2)
+            v = (sig.get("_raw") or {}).get(fact_key)
+            if v is not None and str(v).strip():
+                raw.append(v)
+        if len(raw) < 2:
+            return False
+        if fact_key == "carrier_name":
+            # CARRIER FAMILY, not carrier identity - and the difference is the
+            # whole point of this module. Submission integrity asks "do these
+            # documents belong to the same SUBMISSION?", which is a CLUSTERING
+            # question: EMC Property & Casualty and Employers Mutual Casualty
+            # are one carrier group, and a package where one writes the GL and
+            # the other writes the Auto is the Orbin ground truth, not a
+            # divergence. The CONFLICT picker asks a different question about
+            # the same two names and must keep answering "different entities"
+            # (Round 10 fix 46). Same split as loss_run_identity.
+            if _door_family is None:
+                return len(_legacy_distinct(sig_field)) > 1
+            return any(not _door_family(raw[i], raw[j])
+                       for i in range(len(raw)) for j in range(i + 1, len(raw)))
+        return _door_conflict(fact_key, raw, ctx)
+
+    if _differs("dba_name", "dba"):
         reasons.append("DBA / trade name differs across documents")
-    if len(_distinct("entity_type")) > 1:
+    if _differs("entity_type", "entity_type"):
         reasons.append("Entity type differs across documents")
-    if len(_distinct("mailing")) > 1:
+    if _differs("mailing_address", "mailing"):
         reasons.append("Mailing address differs across documents")
-    if len(_distinct("physical")) > 1:
+    if _differs("physical_address", "physical"):
         reasons.append("Location address differs across documents")
-    if len(_distinct("policy_number")) > 1:
-        reasons.append("Multiple distinct policy numbers found")
-    if len(_distinct("effective_date")) > 1:
+    # A package legitimately carries ONE policy number PER POLICY. The verified
+    # dec index is what proves that, so a multi-contract package is expected to
+    # show several - it is not a divergence signal (client 1.2).
+    if not (ctx is not None and getattr(ctx, "is_multi_contract", False)):
+        if _differs("policy_number", "policy_number"):
+            reasons.append("Multiple distinct policy numbers found")
+    if _differs("effective_date", "effective_date"):
         reasons.append("Effective dates differ across documents")
-    if len(_distinct("operations")) > 1:
+    if _differs("operations_description", "operations"):
         reasons.append("Operations descriptions differ across documents")
-    if len(_distinct("account_desc")) > 1:
+    if _differs("account_description", "account_desc"):
         reasons.append("Account descriptions differ across narrative documents")
-    if len(_distinct("carrier")) > 1:
+    if _differs("carrier_name", "carrier"):
         reasons.append("Multiple carriers referenced across documents")
     return reasons
 

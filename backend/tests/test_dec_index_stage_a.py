@@ -157,11 +157,25 @@ def test_one_label_value_printed_for_two_policies_stays_two_entries():
     assert out.count("Policy Period: 07/15/25 to 07/15/26") == 2
 
 
-def test_an_entry_missing_a_half_is_dropped_not_rendered_blank():
+def test_an_entry_missing_its_value_is_dropped_not_rendered_blank():
+    """CONTRACT NARROWED 2026-08-23, deliberately.
+
+    A missing VALUE still records nothing and is still dropped. A missing LABEL
+    is no longer treated the same way: under the atomic index schema
+    `label: null` is how a captionless value is marked, and the case that
+    matters is the carrier name printed bare on a declarations masthead -
+    `_carriers_by_line` reads owner/value/line and never looks at the label, so
+    dropping those entries defeated the carrier rule outright.
+
+    A captionless value renders as a BARE line, never as ": value", which would
+    read as an entry whose caption went missing.
+    """
     out = ps._render_dec_index([
         _entry("", "$1"), _entry("Label", ""), _entry("Good", "Value")])
     assert "Good: Value" in out
-    assert ": $1" not in out and "Label:" not in out
+    assert "Label:" not in out, "an entry with no value must not render"
+    assert ": $1" not in out, "a captionless value must not render as ': value'"
+    assert "$1" in out, "a captionless value is still data and must render bare"
 
 
 @pytest.mark.parametrize("junk", [None, [], "", 0, [1, 2, 3], [None], {}])
@@ -178,27 +192,71 @@ def test_the_kill_switch_produces_no_index(monkeypatch):
 
 # ── 2. The index must not split ──────────────────────────────────────────────
 
-def test_a_full_index_fits_in_one_call():
-    """ANTI-ROT, and the reason `_DEC_INDEX_BUDGET_MULT` is not a free knob.
+def test_a_realistic_index_still_fits_in_one_call():
+    """One call is still the DESIGN - splitting is the degradation path.
 
-    Splitting puts the umbrella's limit and the GL's limit back into separate
-    calls - it re-creates the exact defect Stage A exists to fix. The budget is
-    sized so a MAXIMUM index (`_DEC_ENTRY_MAX` entries at full label/value
-    length) still fits. Raising DEC_ENTRY_MAX without raising the multiplier
-    fails here rather than in production.
+    CONTRACT CHANGED 2026-08-23. This used to assert that a `_DEC_ENTRY_MAX`
+    index fits one call, which forced DEC_ENTRY_MAX to stay small enough to fit -
+    and a small ceiling DROPS declarations data on a large package. The ceiling
+    is now a runaway guard (50,000), and the split was made safe instead (see
+    the two tests below). So what is pinned here is the realistic case: an index
+    several times larger than any package measured must still arrive in ONE
+    call, because co-visibility is free when it fits.
+
+    The largest live package measured produced 227 verified entries. 3,000 is
+    over ten times that.
     """
     entries = [
         _entry(f"Label number {i} for a declarations line item", f"Value {i}",
                f"COVERAGE PART {i % 6} DECLARATIONS")
-        for i in range(es._DEC_ENTRY_MAX)
+        for i in range(3_000)
     ]
     budget = max(ps._MIN_RAW_CHUNK_CHARS,
                  ps._GAP_FILL_DOC_CHARS_PER_CALL * ps._DEC_INDEX_BUDGET_MULT)
     parts = ps._dec_index_chunks(entries, budget)
     assert len(parts) == 1, (
-        f"a maximum-size index split into {len(parts)} pieces: "
+        f"a 3,000-entry index split into {len(parts)} pieces: "
         f"{len(ps._render_dec_index(entries)):,} chars against a {budget:,} budget. "
-        "Raise GAP_FILL_DEC_INDEX_BUDGET_MULT or lower DEC_ENTRY_MAX.")
+        "Raise GAP_FILL_DEC_INDEX_BUDGET_MULT.")
+
+
+def test_a_split_never_separates_two_entries_sharing_a_label():
+    """THE C23 PROPERTY, now guaranteed at any index size.
+
+    The old splitter cut the rendered text by CHARACTER COUNT, so it separated
+    the umbrella's $3,000,000 from the GL's $1,000,000 by accident of position -
+    identical labels, different coverage parts, resolved by guesswork. The split
+    is by LABEL now, so a caption can never straddle two calls.
+    """
+    entries = []
+    for i in range(300):
+        entries.append(_entry("Each Occurrence Limit", f"$1,00{i:04d},000",
+                              f"COVERAGE PART {i % 9} DECLARATIONS"))
+        entries.append(_entry(f"Filler Label {i}", f"Filler Value {i}",
+                              f"COVERAGE PART {i % 9} DECLARATIONS"))
+    parts = ps._dec_index_chunks(entries, 4_000)
+    assert len(parts) > 1, "fixture no longer splits - raise the entry count"
+    carrying = [p for p in parts if "Each Occurrence Limit" in p]
+    assert len(carrying) == 1, (
+        f"'Each Occurrence Limit' was split across {len(carrying)} calls - "
+        "the C23 defect is back")
+
+
+def test_a_split_loses_no_entry_and_duplicates_none():
+    """The whole point of removing the entry ceiling is that no declarations
+    value is dropped. A splitter that loses or repeats one is worse than the
+    ceiling it replaced, so it is pinned here rather than assumed."""
+    # Zero-padded to a fixed width so no value is a substring of another -
+    # "Value 1" would otherwise match "Value 10" and count 111 false hits.
+    entries = [_entry(f"Label {i % 40}", f"Value {i:04d}", f"SECTION {i % 5}")
+               for i in range(500)]
+    parts = ps._dec_index_chunks(entries, 3_000)
+    assert len(parts) > 1, "fixture no longer splits"
+    joined = "\n".join(parts)
+    for i in range(500):
+        assert joined.count(f"Value {i:04d}") == 1, (
+            f"'Value {i:04d}' appears {joined.count(f'Value {i:04d}')} times "
+            f"across {len(parts)} pieces - expected exactly once")
 
 
 def test_an_oversized_index_splits_rather_than_building_one_unbounded_call():

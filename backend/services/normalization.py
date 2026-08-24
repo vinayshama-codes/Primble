@@ -414,6 +414,27 @@ def normalize_address(value: Any) -> str:
     for phrase, abbrev in _US_STATE_NAME_PHRASES:
         s = re.sub(rf"\b{re.escape(phrase)}\b", abbrev, s)
     s = re.sub(r"[^a-z0-9\s]+", " ", s)
+    # Compass directionals collapse to their abbreviation HERE, before the
+    # unit-join below - not in the token loop. The order is load-bearing and
+    # getting it wrong was a real bug (found 2026-08-21 probing C1-C): the join
+    # fired on "E 9 Mile Rd" -> "e9 mile rd" while "East 9 Mile Rd" stayed
+    # "e 9 mile rd", so two printings of ONE address became a conflict - the
+    # exact defect class this module exists to prevent. Normalising first makes
+    # both sides identical before anything can glue them.
+    s = re.sub(
+        r"\b(north|south|east|west|northeast|northwest|southeast|southwest)\b",
+        lambda m: _DIRECTIONALS[m.group(1)], s)
+    # A unit marker glued to its number ("Apt4", "Ste12") is the same unit as
+    # the spaced form; splitting it lets the marker be dropped like any other.
+    s = re.sub(r"\b(suites?|ste|units?|apt|apartment|rm|room|fl|floor|bldg)(\d)",
+               r"\1 \2", s)
+    # A unit designator printed as letter + separator + digits ("D-13", "D 13",
+    # "Suite B 5") is the same unit as "D13" / "B5": OCR and form layouts split
+    # it unpredictably (V1 plan C1-B FLAG 3 - the hyphen inside the unit was
+    # the one printing the picker could not fold). DIRECTIONAL letters are
+    # excluded: "E 9" is East 9th - a street name, not unit E9.
+    s = re.sub(r"\b(?!(?:n|s|e|w|ne|nw|se|sw)\b)([a-z])\s+(\d+[a-z]?)\b",
+               r"\1\2", s)
     tokens = s.split()
     out: List[str] = []
     for tok in tokens:
@@ -608,6 +629,32 @@ _STRICT_TOKEN_CANON: Dict[str, str] = {
     "cas": "casualty", "casualty": "casualty",
     "natl": "national", "national": "national",
     "grp": "group", "group": "group",
+    # ── Added 2026-08-23. The client's opening paragraph names ABBREVIATIONS
+    # as one of the differences that must not become a contradiction, and the
+    # table already expanded `cas`/`co`/`mut` but stopped short. Measured on the
+    # live package: `EMC Prop & Cas Co` and `EMC Property & Casualty Company`
+    # keyed as `emc prop casualty company` vs `emc property casualty company` -
+    # two "different entities" over one missing expansion. Same for
+    # `Travelers Prop Cas Co of Am` vs `...Company of America`.
+    #
+    # THESE CANNOT FOLD TWO REAL CARRIERS. Every entry expands a CORPORATE-FORM
+    # or GEOGRAPHIC word, never the distinguishing name: `EMC Property &
+    # Casualty` and `Employers Mutual Casualty` still differ on `emc` vs
+    # `employers mutual`, which is Round 10 fix 46 and is pinned by test.
+    "prop": "property", "property": "property",
+    "amer": "america", "am": "america", "america": "america",
+    "american": "america",          # the qualifier, not a distinguishing name
+    "intl": "international", "international": "international",
+    "gen": "general", "general": "general",
+    "assn": "association", "association": "association",
+    "fin": "financial", "financial": "financial",
+    "svc": "services", "svcs": "services", "serv": "services",
+    "services": "services", "service": "services",
+    "guar": "guaranty", "guaranty": "guaranty",
+    "exch": "exchange", "exchange": "exchange",
+    "reins": "reinsurance", "reinsurance": "reinsurance",
+    "agcy": "agency", "agency": "agency",
+    "underwrs": "underwriters", "underwriters": "underwriters",
 }
 _STRICT_NOISE_TOKENS = frozenset({"the", "of", "and", "a", "an"})
 

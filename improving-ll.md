@@ -3260,3 +3260,250 @@ re-batched; no prompt byte changed.** The two quote rules run post-fill and cost
 nothing. Field counts move down slightly - the 125 header and the two vehicle
 quantity boxes are owned blanks rather than questions. Logged so the registry
 can still prove no prompt moved.
+
+---
+
+## C76 - 2026-08-22 dec-index prompt: three recall rules, one guard the verifier cannot enforce
+
+**One prompt changed: `_DEC_INDEX_SYSTEM_PROMPT` (LLM call 1, dedicated dec-index
+pass). No call added, removed or re-batched. `_EXTRACT_PROMPT_PREFIX` /
+`_EXTRACT_SCHEMA` are byte-identical, so the facts/flags cached prefix is untouched
+and `PROMPT_VERSION` / `SCHEMA_VERSION` stay at v12** - the index pass has no cache
+(`_harvest_dec_index` does no `_cache_get`), so a prompt edit here can never serve a
+stale index and a version bump would only force a needless full re-extraction of
+every cached document.
+
+Cost: 4,627 -> 7,806 chars of system prompt (~+800 tokens) per INDEXED chunk only -
+the chunks clearing `DEC_INDEX_MIN_AUTHORITY`, not the whole document. It is a
+constant system message, so it caches.
+
+**ADDED**
+
+- **Rule 6b - tables of contents and form indexes.** The only new rule the
+  verification gate physically cannot enforce: in `SECTION III - LIMITS OF INSURANCE
+  = 10` both halves ARE printed, so `_verify_dec_entries` passes the entry and the
+  index then offers a bare `10` to anything looking for a limit. A TOC is the one
+  page shape whose label:value pairs are structurally real and semantically empty.
+- **Rule 9 - the unlabeled carrier.** The measured-upside rule. `_carriers_by_line`
+  pairs a carrier with its NAIC out of ONE entry (FIX_TRACKING_2026-08-15 RC1) and
+  starves when the carrier name was never recorded at all - the normal case, since a
+  dec page prints the company name as a captionless header. The label fallback chain
+  only ever names text the page prints, because `_verify_dec_entries` requires the
+  LABEL to be literally present: an invented `Carrier` caption would be dropped and
+  would take the carrier name with it.
+- **Rules 10 and 11** - an address is ONE value (never one line labelling the next),
+  and a forms-and-endorsements list gets the caption printed above it instead of each
+  form number labelling itself (rule 7's identical-text case, which records nothing
+  and spends `DEC_ENTRY_MAX` budget).
+- **Rule 6a** states the endorsement case: a schedule block filled in with this
+  insured's own values is declarations content wherever it is printed.
+- A closing four-question checklist, and one header line on the cost of a wrong key.
+
+**NOT ADDED - all three were measured or verified first, and all three were in the
+draft that prompted this work**
+
+- **A `page` key.** `_verify_dec_entries` rebuilds every kept entry from a fixed
+  six-key whitelist, so it would never reach a consumer. Output tokens for nobody.
+- **Page-scoped `policy_number`** ("only from the page it is printed on").
+  `[Document page N]` markers exist only when the document has >1 page AND the page
+  has content (`ocr_service._PAGE_MARKERS_ON`), and chunking cuts mid-page - so the
+  entries at the top of every chunk would be forced to null, starving
+  `_policy_numbers_by_line`, which is the evidence the 2026-08-15 section-identity
+  fix runs on. The borrowed-number defect it targets is already handled AFTER
+  verification by `_entry_self_attributes_its_own_identifier`, the ISO form-number
+  clear and the printed-as-a-policy-number invariant.
+- **A fixed `line_of_business` vocabulary.** That is deleted rule 9 (see the comment
+  above rule 8): measured taking off-vocabulary line values 2 -> 7. The code already
+  canonicalises after verification (`_canon_line` + `_DEC_LINE_DISPLAY`) and leaves
+  unknown wording as printed, so the ask buys nothing and costs every line outside
+  the list its attribution.
+- **"Split any value holding more than one number."** That is C60 - measured
+  byte-identical on run c655a44b, removed with an explicit do-not-retry note.
+
+**Numbering is load-bearing.** Rules 1-5, 7 and 8 are byte-identical and nothing was
+renumbered: rule 7 cites "rule 5 wins" by number and
+`tests/test_dec_entry_key_canonicalisation.py` pins that phrase. New rules are 9-11;
+the empty-list terminator moved 9 -> 12.
+
+Suite: **3698 passed / 2 failed** - the same two pre-existing unrelated failures
+(`test_arq_acord125_missing_only`, `test_normalization`), zero regressions. The three
+pinned files (`test_dec_index_dedicated_pass.py`,
+`test_dec_entry_key_canonicalisation.py`, `test_run_20260814b_form_fixes.py`) pass
+79/79.
+
+**Not yet measured live.** Prompt bytes cannot measure recall. The real verdict is one
+run on the client's package, before and after, comparing entry count, entries carrying
+`owner=carrier`, and whether any bare integer from an index page appears
+(`py scripts/dump_dec_index.py <session_id>`).
+
+---
+
+## C77 - 2026-08-22 dec-index prompt: OWNER EXPERIMENT, 19-rule structured schema
+
+**One prompt changed: `_DEC_INDEX_SYSTEM_PROMPT`, replaced wholesale with the owner's
+version (19 rules, `kind` / `row` / `page` keys, four worked examples, a block-by-block
+procedure and a line-by-line self-check). No other byte changed - not the verifier, not
+the canonicaliser, not the render, not the facts/flags prompt.** 7,806 -> 19,688 chars of
+constant system prompt per indexed chunk (~+3,000 tokens, cached).
+
+**Purpose: measurement.** Upload `test_data_v1_c1` (now five files -
+`5_complex_tables.pdf` carries a premium summary with NO COVERAGE rows, a table of
+contents, a 4-row schedule of hazards, a 3-vehicle schedule, a driver schedule and an
+umbrella schedule of underlying) and diff against session 555b8079 (79 verified entries,
+old prompt, old OCR shape).
+
+**What the unchanged code does to this prompt's output - read before judging:**
+- `_verify_dec_entries` rebuilds every kept entry from the ORIGINAL six-key whitelist, so
+  `kind`, `row` and `page` never reach the merged index or call 2.
+- It drops any entry with an empty label as malformed, so every `standalone`, `heading`,
+  `statement` and `footer` entry (label null by the prompt's own definition) is discarded
+  before the index. Expect `dropped_malformed` to jump in the `dec_entries VERIFIED` log.
+- The raw model output is intact in the per-document copies
+  (`documents[].facts.dec_page_entries`) - judge the PROMPT there, judge what call 2
+  SAW in the merged index.
+- Rule 10's fixed line_of_business list is the deleted rule 9 of 2026-08-16 (measured 2 -> 7
+  off-vocabulary). The code canonicaliser still runs after verification, so the merged
+  index will look canonical either way; compare the RAW per-doc values to measure it.
+
+**Tests: 1 failed / 3698 passed** - `test_rule_7_states_its_one_case_and_yields_to_rule_5`
+pins the literal `"rule 5 wins"`; the owner's text renumbers tables to rule 14 and reads
+`"rule 14 wins"`. Semantically identical; the pin is stale against this numbering. Left
+failing deliberately - the owner asked for no other change. The two pre-existing failures
+(`test_arq_acord125_missing_only`, `test_normalization`) are unchanged.
+
+History notes that used to sit inline in the constant (the C60 revert, the rule 7/8
+measurements, the deleted rules 8/9) are relocated verbatim to the comment block above it.
+
+---
+
+## C78 - 2026-08-22 dec-index prompt: OWNER EXPERIMENT v3, 21-rule atomic schema
+
+**Supersedes C77 in the code (same constant, replaced again). Nothing else changed.**
+19,688 -> 30,418 chars of constant system prompt per indexed chunk (~7.6k tokens,
+cached). Adds `id`, `path`, `col`, `value_type`, `qualifiers`; keeps `kind`, `row`,
+`page`; **drops `section`**.
+
+**Consequences of the unchanged code, in order of how much they distort a reading:**
+1. **Every merged entry now has `section = null`** - the verifier reads a key this prompt
+   never emits. `_render_dec_index` groups by section, so call 2 sees ONE flat group per
+   policy/line instead of per-page groups, and the verifier's dedup key
+   `(label, value, section)` loses its third term - the same label:value printed under two
+   headings collapses to one. `path` carries that information now but nothing reads it.
+2. Label-null kinds (`standalone`, `heading`, `statement`, `footer`, `index`) are dropped
+   as malformed before the index. Rule 16's captionless carrier entries are in this set.
+3. `id`/`page`/`kind`/`path`/`row`/`col`/`value_type`/`qualifiers` never reach the index.
+4. Output volume: fourteen keys per entry plus a `path` array roughly triples reply size
+   against v1. `DEC_INDEX_MAX_TOKENS` is still 16,000 - a dense chunk may truncate, which
+   `_safe_json_parse` reports as a parse failure for that chunk, not a partial result.
+5. In the owner's text, rule 2 and rule 8 cite "rule 15" for the postal-address rule; the
+   address rule is 17 in this numbering (15 is the resolution block). Left verbatim.
+
+**Tests: 9 failed / 3691 passed.** Two pre-existing. Seven are string pins on the old
+wording - every guarded behaviour is still stated, in different words:
+`'No Coverage', 'Included', 'Waived'` (now lists NOT COVERED/COVERED between them);
+`one entry PER printed cell` / `NEVER concatenate` (now upper-case / "NEVER weld");
+`SAME TEXT as its value` (now "label == value"); `the amount's LABEL` (now "that
+amount's LABEL"); `labels must differ exactly as the printed captions differ` (rule 5
+now says "NEVER label several different cells with only the shared row identifier");
+`never shorten, reorder or reword` (now capitalised). Left failing - owner asked for no
+other change. Re-pin to the new wording if v3 is kept.
+
+Judge the prompt from `documents[].facts.dec_page_entries`; judge call 2 from the merged
+index. Baseline: session 555b8079 (79 verified, old prompt).
+
+---
+
+## C79 - 2026-08-23 THE NET RESULT of C76-C78. Read this before believing them.
+
+**C76, C77 and C78 describe prompt changes that were REVERTED the same day.** They
+are kept because their measurements are real and worth not repeating, but the
+prompt they describe is not what runs. This entry is the state of the code.
+
+### What runs now
+
+| | state |
+|---|---|
+| facts/flags prompt (`_EXTRACT_PROMPT_PREFIX` + `_EXTRACT_SCHEMA`) | **byte-identical to pre-2026-08-23**, verified against git |
+| `dec_page_entries` in the facts schema | **restored** - ~250 entries, no extra call |
+| dedicated index pass (`_harvest_dec_index`) | **OFF** (`DEC_INDEX_DEDICATED_PASS` defaults to 0) |
+| `_DEC_INDEX_SYSTEM_PROMPT` | still in the file (30,418 chars, the owner's v3) but nothing calls it |
+| `_verify_dec_entries` | **reverted to the original**, verified against git |
+| `PROMPT_VERSION` / `SCHEMA_VERSION` | **v14** (v12 schema, forward-moving version - v13 replies are in the cache) |
+
+**Net LLM-call change for a run: ZERO.** Extraction is 14 calls producing facts,
+flags and the dec index together, exactly as before this work started.
+
+### Why the dedicated pass was switched off - the A/B
+
+It ran end to end for the first time on 2026-08-22 (a key-path bug had been
+discarding 100% of its output since the day it shipped - see below). Measured on
+the client's 271-page package:
+
+```
+facts + flags (whole extraction) : 14 calls, ~30,000 output tokens
+the dedicated index pass         : 39 calls, ~593,000 output tokens
+```
+
+~20x the cost of the rest of extraction, +18-20 minutes per cold upload. The
+owner regenerated the ACORD forms and reported them **"almost the same"**. It
+does not earn its cost.
+
+The reason it could not help is measurable: the index rendered to **619,451
+chars against a 699,844-char document - 89%**, and split across **8** Stage A
+calls. `_render_dec_index`'s design target is ~3% in ONE call. At 89% it is the
+policy rewritten as JSON, so LLM call 2 gained nothing over walking the raw
+document, and co-visibility - the entire point - was spread over eight calls.
+
+### THE BUG THAT WAS WORTH THE WHOLE EXERCISE
+
+`_run_extraction` merged the dedicated pass's output into
+`result["dec_page_entries"]`. `_merge_list_fields` returns
+`{"facts": {...}, "flags": {...}}` - the entries belong at
+`result["facts"]["dec_page_entries"]`. The key was one level too high, so
+`_validate_extraction_output` forwarded it as an unrecognised extra and
+`extraction_pipeline` (which stores only `extracted["facts"]`) dropped it.
+
+**Every entry the dedicated pass ever produced was discarded at that line.** It
+was invisible while the main extraction also recorded entries - the index looked
+populated and the pass's contribution silently evaporated beside it. Fixed; the
+fix is KEPT even though the pass is off, because a future experiment needs it.
+
+### Also KEPT (independent of the pass)
+
+- **`_retry_wait_seconds` in `config/settings.py`.** The backoff was
+  `2 ** attempt` for every retryable status - 1/2/4/8s, ~15 seconds total - against
+  a tokens-per-minute limit that clears on a **60-second** window. Now `Retry-After`
+  is read and obeyed (capped at `LLM_RETRY_AFTER_MAX`, 90s), and a 429 backs off
+  5/15/30/60. Every other status keeps 1/2/4/8 exactly. **This helps every caller
+  in the codebase, not just the index pass.**
+- **Label-aware Stage A splitting** in `_dec_index_chunks`. The old path cut the
+  rendered index by CHARACTER COUNT, which could separate the umbrella's
+  $3,000,000 from the GL's $1,000,000 - C23 by accident of position. It now packs
+  whole label groups, so a caption can never straddle two calls. Dormant at ~250
+  entries; strictly safer if an index ever grows.
+- `DEC_ENTRY_MAX` 1,200 -> 50,000 (runaway guard only; the prompt's own
+  "at most 150 entries" per chunk is what binds).
+
+### Measurements worth not repeating
+
+- One index call, timed: **7,907 chars in -> 21,672 output tokens in 89.2s**
+  (~243 tok/s, ~2.05 output tokens per input char).
+- `declarations_authority` **does not discriminate** on a real package: 39 of 39
+  pieces cleared the 0.25 bar, 33 of them at ~0.5. Its `brevity` half measures
+  mean LINE LENGTH, and a column-laid-out policy PDF has short lines on every
+  page, handing every piece a free 0.5. Raising the bar to 0.60 would cut 39
+  calls to 5 - **not done**, on the owner's instruction that the whole uploaded
+  document matters.
+- By character count, **93% of a v3 index is `value_type: "text"`** - definitions,
+  exclusions, WHO IS AN INSURED. Rule 9a of that prompt forbids recording it and
+  the model does it anyway.
+
+### If anyone re-opens this
+
+The one configuration never tried on a real form is the **filtered** index: keep
+fillable `value_type`s plus anything on a declarations/schedule page ->
+**1,341 entries, 17% of the document, ONE Stage A call**, with every key value
+surviving (class codes and their classification wording, both occurrence limits,
+all four policy numbers, both carriers, the applicant, the package premium). That
+filter was built, measured and then removed with the revert. Rebuild it from
+LLMcall1-promptChange.md §40 rather than from scratch.

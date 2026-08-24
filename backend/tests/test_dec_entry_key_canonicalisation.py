@@ -130,7 +130,10 @@ def test_rule_7_states_its_one_case_and_yields_to_rule_5():
     """
     from services import extraction_service as es
     p = es._DEC_INDEX_SYSTEM_PROMPT
-    assert "SAME TEXT as its value" in p, "rule 7 lost its scope"
+    # Re-pinned 2026-08-23: v3 states the same scope as "label == value"
+    # (its rule 10) and still yields to the tables rule, which is rule 5 again
+    # in that numbering. Both conditions intact, different words.
+    assert "label == value" in p, "rule 7 lost its scope"
     assert "rule 5 wins" in p, "rule 7 no longer yields on table cells"
     # The unscoped general instruction must not return.
     assert "Give the value the caption printed above or beside it" not in p
@@ -142,7 +145,9 @@ def test_rule_5_still_carries_the_wording_that_preserves_both_cells():
     basis. The original wording is imperfect but keeps both values."""
     from services import extraction_service as es
     p = es._DEC_INDEX_SYSTEM_PROMPT
-    assert "the amount's LABEL, not a separate entry" in p
+    # Re-pinned 2026-08-23: v3 reads "is that amount's LABEL" (the sentence
+    # wraps before "not a separate entry"). Same clause, same guarantee.
+    assert "is that amount's LABEL" in p
     assert "never split one printed fact into two entries" not in p
 
 
@@ -203,5 +208,5 @@ def test_rule_5_does_not_try_to_split_captionless_rating_rows():
     """
     from services import extraction_service as es
     p = es._DEC_INDEX_SYSTEM_PROMPT
-    assert "'Payroll $39,300') is the amount's LABEL" in p
+    assert "'Payroll $39,300') is that amount's LABEL" in p
     assert "several figures with no caption between them" not in p

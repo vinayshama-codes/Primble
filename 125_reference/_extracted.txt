@@ -1,0 +1,394 @@
+
+A correct ACORD 125 has every applicable field completed, every underwriting question answered, and non-applicable/unsupported fields left blank rather than guessed.
+I found something especially useful for what you are trying to establish: Vertafore publishes an actual completed field-mapping example of the ACORD 125 (2025/03) showing the current form, field by field, across all four application pages. Vertafore identifies ACORD 125 2025/03 as the newer edition, replacing the prior 2016/03 edition in its current commercial-lines forms implementation. (VertaFore Help)
+The four pages of the current form look like this structurally:
+Page 1 — Producer/policy / applicantProducer and agency information → Carrier/NAIC → Transaction status → Lines of business → Attachments → Proposed policy dates/billing → First Named Insured → legal entity → address → FEIN → SIC/NAICS/GL code → phone/website → other named insureds.
+Page 2 — Contacts/premises / operationsInspection and accounting contacts → every premises/location → owner/tenant → employees → revenue → square footage → description of operations → nature of business → date business started → detailed primary operations → installation/service percentages where applicable → other named insured operations → additional interests.
+Page 3 — General underwriting informationQuestions 1–15 → subsidiaries/parents → safety program → hazardous materials → other insurance → cancellations/non-renewals → abuse/negligent hiring claims → fraud/arson → code violations → bankruptcy → judgments/liens → trusts → foreign exposure → uncovered ventures → drones → prior carrier information.
+Page 4 — Losses and signaturesPrior carrier continuation when required → loss history → years of history → paid/reserved/open/subrogation information → total losses → producer signature/name/license/NPN → applicant signature/date and applicable fraud notices.
+ACORD 125 test case. The company below is intentionally a synthetic example, so we can control the source evidence and know exactly which fields Primble should and should not populate.
+Page 1 — What an accurate submission should contain
+ACORD field
+ | Example
+ | 
+Date
+ | 08/18/2026
+ | 
+Producer
+ | Summit Commercial Insurance
+ | 
+Producer address
+ | 1800 Market Street, Suite 400, Denver, CO 80202
+ | 
+Contact Name
+ | Michelle Smith
+ | 
+Phone
+ | 303-555-0100
+ | 
+Email
+ | mproducer@example.com
+ | 
+Agency Code/Subcode
+ | Populate only if verified from agency/AMS
+ | 
+Agency Customer ID
+ | FREC-001
+ | 
+Carrier
+ | Example carrier receiving submission
+ | 
+NAIC Code
+ | Only populate if carrier/NAIC is verified
+ | 
+Underwriter
+ | Named underwriter if submission is directed to one
+ | 
+Underwriter Office
+ | Corresponding office if known
+ | 
+Status
+ | ☒ QUOTE
+ | 
+Policy Number
+ | Blank for new-business quote unless an existing/current policy number applies
+ | 
+Commercial General Liability
+ | ☒
+ | 
+Commercial Property
+ | ☒
+ | 
+Business Auto
+ | ☒
+ | 
+Umbrella
+ | ☒
+ | 
+Other LOB boxes
+ | Blank
+ | 
+Proposed Effective Date
+ | 10/01/2026
+ | 
+Proposed Expiration Date
+ | 10/01/2027
+ | 
+Billing Plan
+ | Direct, if known
+ | 
+Payment Plan
+ | Annual, if requested/known
+ | 
+Policy Premium
+ | Blank at submission stage unless known
+ | 
+First Named Insured
+ | Front Range Electrical Contractors LLC
+ | 
+Mailing Address
+ | 8000 Commerce Way, Denver, CO 80216
+ | 
+Legal Entity
+ | ☒ LLC
+ | 
+FEIN
+ | 12-3456789 (synthetic)
+ | 
+NAICS
+ | 238210
+ | 
+SIC
+ | 1731
+ | 
+GL Code
+ | Populate only from verified classification/rating source
+ | 
+Business Phone
+ | 303-555-0175
+ | 
+Website
+ | www.example-electrical.com
+ | 
+Other Named Insured
+ | Blank — no other named insured supported by source
+ | 
+The distinction above is important. The 125 itself does not justify Primble inventing an NAIC code, GL class, payment plan, premium or policy number simply because a box exists. FirstConnect similarly stresses that legal name/FEIN accuracy and avoiding unsupported or over-selected lines of business are critical to underwriting quality. (First Connect Insurance)
+
+Page 2 — Premises and operations
+ACORD field
+ | Example
+ | 
+Contact Type
+ | Inspection
+ | 
+Contact Name
+ | John Smith
+ | 
+Primary Phone
+ | 303-555-0188
+ | 
+Primary Email
+ | john@example-electrical.com
+ | 
+Second contact
+ | Accounting
+ | 
+Contact Name
+ | Sarah Jones
+ | 
+Phone
+ | 303-555-0190
+ | 
+Email
+ | accounting@example-electrical.com
+ | 
+Location #
+ | 1
+ | 
+Building #
+ | 1
+ | 
+Street
+ | 8000 Commerce Way
+ | 
+City
+ | Denver
+ | 
+County
+ | Denver
+ | 
+State
+ | CO
+ | 
+ZIP
+ | 80216
+ | 
+City Limits
+ | ☒ Inside
+ | 
+Interest
+ | ☒ Tenant
+ | 
+Full-time Employees
+ | 18
+ | 
+Part-time Employees
+ | 2
+ | 
+Annual Revenues
+ | $4,250,000
+ | 
+Occupied Area
+ | 5,000 sq. ft.
+ | 
+Open to Public Area
+ | 500 sq. ft.
+ | 
+Total Building Area
+ | 15,000 sq. ft.
+ | 
+Area Leased to Others
+ | N
+ | 
+Description of Operations
+ | Administrative office, electrical contracting warehouse and material storage. Crews perform commercial and residential electrical installation, wiring, panel upgrades, troubleshooting and service work at customer locations.
+ | 
+Nature of Business
+ | ☒ Contractor
+ | 
+Date Business Started
+ | 06/15/2014
+ | 
+Description of Primary Operations
+ | Licensed electrical contractor performing commercial and residential electrical installation, repair and service. Work includes new wiring, service upgrades, panel replacement, lighting and electrical troubleshooting. No utility-line construction or electrical generation operations.
+ | 
+Retail/service %
+ | 0% retail
+ | 
+Installation/service/repair
+ | 100%
+ | 
+Off-premises installation/service/repair
+ | 90%
+ | 
+Other Named Insured Operations
+ | Blank
+ | 
+Additional Interest
+ | Fill only if mortgagee, loss payee, landlord, lienholder, etc. is actually documented
+ | 
+Notice what the form itself says in the Additional Interest section: not all fields apply to all scenarios; provide only the necessary data. That is exactly the principle Primble should follow throughout the entire application.
+Page 3 — Every underwriting question should be resolved
+For this controlled example, it should read:
+#
+ | Question
+ | Accurate entry
+ | 
+1a
+ | Subsidiary of another entity?
+ | N
+ | 
+1b
+ | Any subsidiaries?
+ | N
+ | 
+2
+ | Formal safety program?
+ | Y — written safety manual; designated safety manager; monthly meetings
+ | 
+3
+ | Exposure to flammables/explosives/chemicals?
+ | Y — limited quantities of common jobsite adhesives/solvents stored in approved containers
+ | 
+4
+ | Other insurance with this company?
+ | N
+ | 
+5
+ | Declined/cancelled/non-renewed in prior 3 years?
+ | N
+ | 
+6
+ | Sexual abuse/molestation/discrimination/negligent hiring losses?
+ | N
+ | 
+7
+ | Fraud/bribery/arson conviction?
+ | N
+ | 
+8
+ | Uncorrected fire/safety code violations?
+ | N
+ | 
+9
+ | Foreclosure/repossession/bankruptcy within 5 years?
+ | N
+ | 
+10
+ | Judgment or lien within 5 years?
+ | N
+ | 
+11
+ | Business placed in a trust?
+ | N
+ | 
+12
+ | Foreign operations/products?
+ | N
+ | 
+13
+ | Other ventures not requesting coverage?
+ | N
+ | 
+14
+ | Own/lease/operate drones?
+ | N
+ | 
+15
+ | Hire others to operate drones?
+ | N
+ | 
+And this is where I think Primble needs a very clear rule:
+Blank ≠ No.
+If the source material does not establish the answer to Question 9, Primble cannot check N merely because it found no bankruptcy reference in the declarations.
+The correct output should instead be:
+Question 9: Unverified — insured confirmation required.
+Then the client questionnaire resolves it before Primble produces the submission-ready 125.
+That difference is fundamental.
+Page 3 — Prior carrier information
+For an established account, I would expect something like:
+Year
+ | LOB
+ | Carrier
+ | Policy #
+ | Premium
+ | Effective
+ | Expiration
+ | 
+2025–26
+ | GL
+ | Current Carrier
+ | GL-123456
+ | $18,450
+ | 10/01/2025
+ | 10/01/2026
+ | 
+2025–26
+ | Auto
+ | Current Carrier
+ | BA-456789
+ | $14,200
+ | 10/01/2025
+ | 10/01/2026
+ | 
+2025–26
+ | Property
+ | Current Carrier
+ | CP-567890
+ | $8,750
+ | 10/01/2025
+ | 10/01/2026
+ | 
+2025–26
+ | Umbrella
+ | Current Carrier
+ | CU-678901
+ | $4,100
+ | 10/01/2025
+ | 10/01/2026
+ | 
+Then prior years continue as supported by the source material.
+If Primble has only the most recent declarations, it should populate only the year it can substantiate and request the missing prior-period information. It should not manufacture three or five years of carrier history.
+Page 4 — Loss history
+If verified loss runs establish one claim:
+Field
+ | Example
+ | 
+Loss history period
+ | Last 5 years
+ | 
+Check if none
+ | ☐
+ | 
+Date of occurrence
+ | 03/28/2024
+ | 
+Line
+ | Business Auto
+ | 
+Description
+ | Insured vehicle rear-ended third party at traffic light
+ | 
+Date of claim
+ | 03/28/2024
+ | 
+Amount paid
+ | $4,850
+ | 
+Amount reserved
+ | $0
+ | 
+Subrogation
+ | N
+ | 
+Claim open
+ | N
+ | 
+Total losses
+ | $4,850
+ | 
+If verified loss runs instead show no losses, check “none” and show the applicable years.
+Primble should not convert a narrative phrase such as “no known losses” into a verified five-year loss history. Underwriters commonly seek current loss runs or other supporting loss evidence; the ACORD 125 summary does not replace that supporting documentation. (First Connect Insurance)
+Finally:
+Producer signature: completed where required.Producer printed name: completed.State producer license: completed where applicable.NPN: completed.Applicant signature/date: obtained at the appropriate point in the quote/bind process. Carrier requirements vary, and some may quote before signature while requiring it prior to bind. (First Connect Insurance)
+
+The important conclusion for Primble
+I would build the scoring against four states for every material ACORD field, not “filled versus blank”:
+VERIFIED — source supports the value exactly.CONFIRMED — insured answered it through Primble.NOT APPLICABLE — intentionally blank.UNRESOLVED — information is needed before submission.
+What you do not want is a fifth state:
+ASSUMED.
+That is where your hallucination/data-transfer problem starts.
+And there is another important finding from this research: ACORD 125 (2025/03) is now the newer form edition. Vertafore's current commercial-lines documentation specifically lists 2025/03 separately from the older 2016/03 edition. (VertaFore Help) If Primble is currently producing ACORD 125 (2016/03), I would put form-version validation on India's immediate development list.
+Confidence: CERTAIN on the current 2025/03 form structure and edition because I verified it against current Vertafore documentation and the actual 2025/03 mapping form. LIKELY on individual carrier submission preferences because signature, loss-run age, supplemental forms and required supporting documents can vary by carrier and program.
+For the work you are doing with Primble, this should become the master 125 test case: source packet → correct 125 → expected unresolved fields → expected recommendations. That gives Brent and India an objective answer key instead of trying to judge whether an AI-generated form merely “looks complete.”

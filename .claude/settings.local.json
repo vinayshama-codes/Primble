@@ -264,12 +264,31 @@
       "PowerShell(npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1)",
       "PowerShell($env:VITE_API_BASE = \"https://api.primble.io\"; npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1 | Select-Object -Last 12)",
       "PowerShell($env:VITE_API_BASE = \"https://api.primble.io\"; npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1 | Select-Object -Last 8)",
-      "PowerShell($env:VITE_API_BASE = \"https://api.primble.io\"; npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1 | Select-Object -Last 6)"
+      "PowerShell($env:VITE_API_BASE = \"https://api.primble.io\"; npm run build --prefix \"c:\\\\Users\\\\lenovo\\\\OneDrive\\\\Desktop\\\\Primble\\\\frontend\" 2>&1 | Select-Object -Last 6)",
+      "Bash(cd backend *)",
+      "Bash(sed -i 's/ENV = lambda d={}: {\"filled_values\": dict\\(d\\),/ENV = lambda d=None: {\"filled_values\": dict\\(d or {}\\),/' \"C:/Users/lenovo/AppData/Local/Temp/claude/c--Users-lenovo-OneDrive-Desktop-Primble/45f339c2-2dd4-413d-8969-a3c960b6fc86/scratchpad/repro_screenshot.py\")",
+      "Bash(py \"C:/Users/lenovo/AppData/Local/Temp/claude/c--Users-lenovo-OneDrive-Desktop-Primble/45f339c2-2dd4-413d-8969-a3c960b6fc86/scratchpad/repro_screenshot.py\")",
+      "Bash(awk 'NR<=535 && /^@router\\\\.\\(get|post\\)/ {l=NR\": \"$0} END{}' routes/form_routes.py)",
+      "Bash(awk -F: '$1<535')",
+      "Bash(awk -F: '$1>1700 && $1<1960')",
+      "Bash(py \"C:/Users/lenovo/AppData/Local/Temp/claude/c--Users-lenovo-OneDrive-Desktop-Primble/96801d32-90b3-4c33-8b47-77e33b6d6b9c/scratchpad/patch_d.py\")",
+      "Bash(py -m pytest tests/test_dec_index_dedicated_pass.py tests/test_dec_entry_key_canonicalisation.py tests/test_run_20260814b_form_fixes.py -q)",
+      "Bash(py /c/Users/lenovo/AppData/Local/Temp/claude/c--Users-lenovo-OneDrive-Desktop-Primble/5eef125a-5830-4fbd-a7bb-9179eb3e7389/scratchpad/dump_prompts.py)",
+      "Bash(py /c/Users/lenovo/AppData/Local/Temp/claude/c--Users-lenovo-OneDrive-Desktop-Primble/5eef125a-5830-4fbd-a7bb-9179eb3e7389/scratchpad/build_files.py)",
+      "Bash(rm -f _p_prefix.txt _p_suffix.txt _p_dec.txt)",
+      "Bash(py '__TRACKED_VAR__\\\\splice_prompt_v3.py')",
+      "Bash(OPENAI_API_KEY=sk-offline py -c ' *)",
+      "Bash(cat >> *)",
+      "Bash(awk 'NR>=4300 && NR<=4330' services/extraction_service.py)",
+      "Bash(awk -F: '$1>4300 && $1<4820')",
+      "Bash(awk 'NR>=4800 && NR<=4875' services/extraction_service.py)"
     ],
     "additionalDirectories": [
       "\\tmp",
       "c:\\Users\\lenovo\\.claude\\projects\\c--Users-lenovo-OneDrive-Desktop-Primble\\memory",
-      "c:\\Users\\lenovo\\OneDrive\\Desktop\\Primble"
+      "c:\\Users\\lenovo\\OneDrive\\Desktop\\Primble",
+      "C:\\Users\\lenovo\\AppData\\Local\\Temp\\claude\\c--Users-lenovo-OneDrive-Desktop-Primble\\96801d32-90b3-4c33-8b47-77e33b6d6b9c\\scratchpad",
+      "C:\\Users\\lenovo\\OneDrive\\Desktop\\Primble"
     ]
   }
 }

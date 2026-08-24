@@ -39,9 +39,10 @@ def test_the_no_known_losses_card_targets_the_attestation_not_a_year_count():
 
 
 def test_confirming_no_known_losses_actually_moves_the_pillar():
-    """45 -> 60, via the field the card now targets. This is the whole point."""
+    """40 -> 60, via the field the card now targets. This is the whole point.
+    (Narrative-only is 40 since C2 2.5; it was 45 before 2026-08-24.)"""
     before, _ = calculate_p4_loss_history({}, {"narrative_states_no_losses": True})
-    assert before == 45
+    assert before == 40
 
     field = loss_recommendation_field(
         "No Known Losses (stated in narrative) - confirm with the insured, or "
@@ -61,13 +62,17 @@ def test_the_old_field_still_moves_nothing_which_is_why_it_was_wrong():
         {"loss_history_years": {"value": "no losses", "source": "producer"}},
         {"narrative_states_no_losses": True},
     )
-    assert after == 45, "writing the attestation into a year count changes nothing"
+    assert after == 40, "writing the attestation into a year count changes nothing"
 
 
 def test_no_loss_history_at_all_is_answerable_by_attesting():
     _, recs = calculate_p4_loss_history({}, {})
-    assert recs == ["No loss history provided - required for carrier submission"]
+    assert recs[0] == "No loss history provided - required for carrier submission"
     assert loss_recommendation_field(recs[0]) == "loss_history_no_prior_losses_indicator"
+    # C2 2.2: the nothing-provided state also offers the producer the New
+    # Venture confirmation, routed to the fact that drives the N/A.
+    _nv = [r for r in recs if "new venture" in r.lower()]
+    assert _nv and loss_recommendation_field(_nv[0]) == "new_venture_indicator"
 
 
 # ── Routing correctness for the rest of the vocabulary ────────────────────────

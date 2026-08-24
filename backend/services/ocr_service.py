@@ -19,6 +19,12 @@ from circuitbreaker import CircuitBreaker
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 from config.settings import UPLOAD_DIR, SUPPORTED_IMG, OCR_PROVIDER
 from utils.text_cleaner import clean_text
+# Reading-order repair + header-anchored tables for one page. Every page's text
+# goes through page_text() (byte-identical to page.extract_text() unless a line
+# was riffled - see extraction_arch_change.md) and its tables are emitted inline.
+from utils.page_layout import (
+    page_words, page_text, detect_tables, render_tables, vision_words,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +241,16 @@ _VISION_NATIVE_IMAGE_EXTS = {"jpeg", "jpg", "png", "gif", "bmp", "webp", "tiff",
 # survives and leaves clean_text's behaviour on existing documents unchanged.
 _EMBEDDED_IMAGE_MARKER = "[Embedded image text - page {page}]"
 
+# Page boundary marker, multi-page documents only (a single page stays byte-
+# identical to the pre-2026-08-22 output). Same single-newline discipline as the
+# image marker. The wording is deliberate: utils.text_cleaner.clean_text strips
+# any "Page N of M" pattern as page furniture, so that form would be deleted on
+# its way to the model. Emitted only for a page that has content (text, a table
+# or an image block) - a blank multi-page scan must still read as empty to the
+# `len(text) < 30` guards in the pipeline. OCR_PAGE_MARKERS=0 disables.
+_PAGE_MARKER = "[Document page {page}]"
+_PAGE_MARKERS_ON = os.getenv("OCR_PAGE_MARKERS", "1").strip().lower() not in ("0", "false", "no", "off")
+
 
 def _normalize_token(token: str) -> str:
     return token.translate(_OCR_CONFUSION_MAP)
@@ -332,11 +348,18 @@ def _use_rest_api() -> bool:
 
 @dataclass
 class _OcrResult:
-    """One image's OCR outcome. `ok` distinguishes 'read nothing' from 'failed'."""
+    """One image's OCR outcome. `ok` distinguishes 'read nothing' from 'failed'.
+
+    `words` carries Vision's per-word boxes ({x0, x1, top, bottom, text}, pixels)
+    so a scanned page can run the same header-anchored table detector as a native
+    one. Always optional: an empty list means "geometry unavailable", never an
+    error, and every existing caller that builds _OcrResult by keyword is unchanged.
+    """
     text: str = ""
     low_conf: List[str] = field(default_factory=list)
     total_tokens: int = 0
     ok: bool = True
+    words: List[dict] = field(default_factory=list)
 
 
 def _extract_low_conf_from_annotation(annotation: dict) -> Tuple[str, List[str], int]:
@@ -446,10 +469,10 @@ def _vision_rest_batch(payloads: Sequence[bytes]) -> List[_OcrResult]:
             logger.warning("ocr_service: Vision per-image error [%d]: %s", idx, message)
             out.append(_OcrResult(ok=False))
             continue
-        text, low_conf, total = _extract_low_conf_from_annotation(
-            item.get("fullTextAnnotation") or {}
-        )
-        out.append(_OcrResult(text=text, low_conf=low_conf, total_tokens=total))
+        annotation = item.get("fullTextAnnotation") or {}
+        text, low_conf, total = _extract_low_conf_from_annotation(annotation)
+        out.append(_OcrResult(text=text, low_conf=low_conf, total_tokens=total,
+                              words=vision_words(annotation)))
     return out
 
 
@@ -488,7 +511,8 @@ def _vision_grpc_batch(payloads: Sequence[bytes]) -> List[_OcrResult]:
             out.append(_OcrResult(ok=False))
             continue
         text, low_conf, total = _extract_low_conf_from_proto(item.full_text_annotation)
-        out.append(_OcrResult(text=text, low_conf=low_conf, total_tokens=total))
+        out.append(_OcrResult(text=text, low_conf=low_conf, total_tokens=total,
+                              words=vision_words(item.full_text_annotation)))
     return out
 
 
@@ -748,15 +772,28 @@ def _reflow_two_column_words(words: list) -> Optional[str]:
     return "\n".join(out)
 
 
-def _extract_page_text_smart(page) -> str:
+def _extract_page_text_smart(page, pw=None) -> str:
     """Default extraction, unless the page shows the bare-label scramble
     fingerprint - then attempt a scoped column-reflow recovery and use it
     only if that recovery actually reduces the fingerprint. See module
-    comment above for the full rationale."""
-    default = page.extract_text() or ""
+    comment above for the full rationale.
+
+    "Default" is page_layout.page_text: byte-identical to page.extract_text()
+    on every page without a riffled line (pinned by test), and the riffle
+    repair on the ones that have one. The same clean words feed the reflow,
+    so a zone that is BOTH riffled and column-scrambled is repaired on both
+    axes instead of the zone re-extraction reintroducing the riffle.
+    `pw` is an optional precomputed page_words() result (the table pass needs
+    the same words; computing them once per page keeps the cost flat)."""
+    if pw is None:
+        try:
+            pw = page_words(page)
+        except Exception:
+            pw = None
+    default = page_text(page, pw)[0] if pw is not None else (page.extract_text() or "")
 
     try:
-        words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
+        words = pw[0] if pw is not None else page.extract_words(use_text_flow=False, keep_blank_chars=False)
     except Exception:
         return default
     if not words:
@@ -793,8 +830,9 @@ def _extract_page_text_smart(page) -> str:
 
     try:
         zone = page.within_bbox((0, zone_top, page.width, zone_bottom))
-        zone_words = zone.extract_words(use_text_flow=False, keep_blank_chars=False)
-        zone_default = zone.extract_text() or ""
+        zone_pw = page_words(zone)
+        zone_words = zone_pw[0]
+        zone_default = page_text(zone, zone_pw)[0]
     except Exception:
         return default
 
@@ -808,8 +846,8 @@ def _extract_page_text_smart(page) -> str:
         return default  # reflow didn't actually help here - don't ship a guess
 
     try:
-        before_text = (page.within_bbox((0, 0, page.width, zone_top)).extract_text() or "")
-        after_text  = (page.within_bbox((0, zone_bottom, page.width, page.height)).extract_text() or "")
+        before_text = page_text(page.within_bbox((0, 0, page.width, zone_top)))[0]
+        after_text  = page_text(page.within_bbox((0, zone_bottom, page.width, page.height)))[0]
     except Exception:
         return default
 
@@ -817,24 +855,74 @@ def _extract_page_text_smart(page) -> str:
     return "\n".join(parts)
 
 
-def _pdfplumber_extract_pages(pdf_path: str) -> List[str]:
-    """Per-page native text, each page passed through the column-reflow
-    recovery. Empty string for a page with no extractable native text."""
-    pages: List[str] = []
+# Lines-mode pdfplumber tables (ruled grids) are kept as a per-page FALLBACK for
+# pages where the header-anchored detector found nothing. They are the only thing
+# the old end-of-document table append ever produced, and on every insurance page
+# in the corpus it produced nothing - but a carrier form with a real ruled grid
+# still deserves it. Capped because page.extract_tables() is O(objects) and was
+# observed blocking on long packages; the header-anchored pass is O(words) and
+# already has the words, so it runs on every page.
+_RULED_TABLE_PAGE_LIMIT = int(os.getenv("TABLE_EXTRACT_PAGE_LIMIT", "40"))
+
+
+def _ruled_tables(page) -> List[dict]:
+    """pdfplumber lines-mode tables in page_layout's table shape (first row = header)."""
+    out: List[dict] = []
+    try:
+        for tbl in page.extract_tables() or []:
+            rows = [[(str(c).strip() if c is not None else "") for c in row] for row in tbl]
+            rows = [r for r in rows if any(r)]
+            if len(rows) >= 2 and len(rows[0]) >= 2:
+                out.append({"section": None, "header": rows[0], "rows": rows[1:],
+                            "top": 0.0, "bottom": 0.0})
+    except Exception as ex:                                  # noqa: BLE001
+        logger.debug("ocr_service: ruled-table fallback failed: %s", ex)
+    return out
+
+
+def _pdfplumber_extract_pages_structured(pdf_path: str) -> List[Tuple[str, str]]:
+    """Per page: (native text through the reflow recovery, rendered table block).
+
+    One pdfplumber pass computes the page's clean words once and feeds BOTH the
+    text (via _extract_page_text_smart) and the table detector. Empty strings for
+    a page with no extractable native text / no table. A table failure never
+    costs the page its text."""
+    pages: List[Tuple[str, str]] = []
     try:
         with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
+            for idx, page in enumerate(pdf.pages):
+                text, tables_block = "", ""
+                pw = None
                 try:
-                    pages.append(_extract_page_text_smart(page) or "")
+                    pw = page_words(page)
+                except Exception as ex:                      # noqa: BLE001
+                    logger.debug("ocr_service: page_words failed on page %d: %s", idx + 1, ex)
+                try:
+                    text = _extract_page_text_smart(page, pw) or ""
                 except Exception as page_ex:
                     # One malformed page must not cost the whole document.
                     logger.warning(
-                        "pdfplumber: page %d failed on %s: %s", len(pages), pdf_path, page_ex
+                        "pdfplumber: page %d failed on %s: %s", idx, pdf_path, page_ex
                     )
-                    pages.append("")
+                try:
+                    tables = detect_tables(pw[0]) if pw else []
+                    if not tables and idx < _RULED_TABLE_PAGE_LIMIT:
+                        tables = _ruled_tables(page)
+                    if tables:
+                        tables_block = render_tables(tables, idx + 1)
+                except Exception as ex:                      # noqa: BLE001
+                    logger.warning("ocr_service: table pass failed on page %d of %s: %s",
+                                   idx + 1, pdf_path, ex)
+                pages.append((text, tables_block))
     except Exception as ex:
         logger.error(f"pdfplumber error on {pdf_path}: {ex}")
     return pages
+
+
+def _pdfplumber_extract_pages(pdf_path: str) -> List[str]:
+    """Per-page native text, each page passed through the column-reflow
+    recovery. Empty string for a page with no extractable native text."""
+    return [text for text, _ in _pdfplumber_extract_pages_structured(pdf_path)]
 
 
 def _pdfplumber_extract(pdf_path: str) -> str:
@@ -1481,7 +1569,11 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
     not grow with document length.
     """
     loop = asyncio.get_running_loop()
-    page_texts = await loop.run_in_executor(_OCR_EXECUTOR, _pdfplumber_extract_pages, pdf_path)
+    structured = await loop.run_in_executor(
+        _OCR_EXECUTOR, _pdfplumber_extract_pages_structured, pdf_path
+    )
+    page_texts: List[str] = [t for t, _ in structured]
+    page_tables: List[str] = [tb for _, tb in structured]
     fitz_pages = await loop.run_in_executor(_OCR_EXECUTOR, _pdf_page_count, pdf_path)
 
     if not page_texts:
@@ -1493,6 +1585,7 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
             pdf_path, fitz_pages,
         )
         page_texts = [""] * fitz_pages
+        page_tables = [""] * fitz_pages
     elif fitz_pages > len(page_texts):
         # Defensive: the two parsers disagree on page count. Trust the larger
         # so the extra pages still get OCR'd instead of being dropped.
@@ -1500,11 +1593,13 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
             "ocr_service: page-count mismatch on %s (pdfplumber=%d, pymupdf=%d) — padding",
             pdf_path, len(page_texts), fitz_pages,
         )
+        page_tables = list(page_tables) + [""] * (fitz_pages - len(page_texts))
         page_texts = list(page_texts) + [""] * (fitz_pages - len(page_texts))
 
     total_pages = len(page_texts)
     budget = _DocBudget()
     page_ocr_text: Dict[int, str] = {}
+    ocr_tables: Dict[int, str] = {}          # scanned pages: tables from Vision word boxes
     image_blocks: Dict[int, List[str]] = {}
     low_conf: List[str] = []
     ocr_pages = 0
@@ -1522,6 +1617,17 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
                 ocr_pages += 1
                 if res.text.strip():
                     page_ocr_text[job.page_idx] = res.text
+                    if res.words:
+                        # Same detector as a native page, on Vision's pixel boxes.
+                        # Geometry is a bonus: any failure here leaves the OCR text
+                        # exactly as it was.
+                        try:
+                            _t = detect_tables(res.words)
+                            if _t:
+                                ocr_tables[job.page_idx] = render_tables(_t, job.page_idx + 1)
+                        except Exception as _tex:              # noqa: BLE001
+                            logger.debug("ocr_service: scanned-page table pass failed on "
+                                         "page %d: %s", job.page_idx + 1, _tex)
                 low_conf.extend(res.low_conf)
                 # A near-empty full-page OCR means a page we could not read.
                 if _flag_for_manual_review(
@@ -1548,6 +1654,20 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
                     image_blocks.setdefault(job.page_idx, []).append(
                         _format_image_block(job.page_idx, res.text)
                     )
+                    # A pasted-in scan of a dec page or schedule is the case this
+                    # whole Path A exists for; its rows deserve the same table
+                    # treatment as a native page. Emitted right after its own
+                    # image block, so the table stays with the text it came from.
+                    if res.words:
+                        try:
+                            _t = detect_tables(res.words)
+                            if _t:
+                                image_blocks[job.page_idx].append(
+                                    render_tables(_t, job.page_idx + 1)
+                                )
+                        except Exception as _tex:              # noqa: BLE001
+                            logger.debug("ocr_service: embedded-image table pass failed "
+                                         "on page %d: %s", job.page_idx + 1, _tex)
                 low_conf.extend(res.low_conf)
                 # An EMPTY-but-successful read is deliberately NOT flagged: a
                 # logo legitimately carries little or no text, and flagging it
@@ -1623,14 +1743,35 @@ async def extract_text_from_pdf(pdf_path: str) -> Tuple[str, List[str]]:
     # single newlines, exactly matching the previous output shape. This keeps
     # clean_text's paragraph boundaries (and therefore its MD5 de-duplication)
     # identical to before for every document that has no embedded images.
+    # Per page, in order: [Document page N] marker (multi-page only, and only
+    # when the page has something under it) -> page text -> that page's table
+    # block (native detector, or Vision-box detector on a scanned page) ->
+    # embedded-image OCR blocks. Tables sit WITH their page; the old end-of-
+    # document append (extraction_pipeline, removed 2026-08-22) put a page-1
+    # schedule 270 pages away from page 1.
     parts: List[str] = []
+    markers = _PAGE_MARKERS_ON and total_pages > 1
+    tables_emitted = 0
     for idx in range(total_pages):
         native = page_texts[idx]
         chosen = page_ocr_text.get(idx) or native
+        if idx in page_ocr_text:
+            table_block = ocr_tables.get(idx, "")
+        else:
+            table_block = page_tables[idx] if idx < len(page_tables) else ""
+        blocks = image_blocks.get(idx, [])
+        if markers and (chosen.strip() or table_block or blocks):
+            parts.append(_PAGE_MARKER.format(page=idx + 1))
         if chosen.strip():
             parts.append(chosen)
-        for block in image_blocks.get(idx, []):
+        if table_block:
+            parts.append(table_block)
+            tables_emitted += table_block.count("[Table - page ")
+        for block in blocks:
             parts.append(block)
+    if tables_emitted:
+        logger.info("ocr_service: %s - %d table(s) emitted inline across %d page(s)",
+                    os.path.basename(pdf_path), tables_emitted, total_pages)
 
     text = "".join(p + "\n" for p in parts)
 

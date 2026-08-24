@@ -1,0 +1,373 @@
+================================================================================
+LLM CALL 1 - PROMPT A: FACTS + FLAGS EXTRACTION
+================================================================================
+Regenerated 2026-08-23 verbatim from the running code, AFTER `dec_page_entries`
+was removed from the schema (see LLMcall1-promptChange.md). This prompt now
+returns facts and flags ONLY - the declarations index is produced by the
+dedicated pass, PROMPT B.
+
+  backend/services/extraction_service.py
+    _EXTRACT_SCHEMA          the facts + flags schema, embedded in the prefix
+    _EXTRACT_PROMPT_PREFIX   rules 1-16, then the schema
+    _EXTRACT_PROMPT_SUFFIX   built inside extract_facts()
+    PROMPT_VERSION / SCHEMA_VERSION = v13
+
+Assembled per chunk:
+  prefix + previous-chunk context + PRIMARY TEXT + low-confidence note + suffix
+One user message, no system message. max_tokens = 32,000.
+
+Output: {"facts": {...}, "flags": {...}} - one JSON, one call.
+
+================================================================================
+_EXTRACT_PROMPT_PREFIX (verbatim, includes _EXTRACT_SCHEMA)
+================================================================================
+
+You are a carrier-grade insurance document analyzer with deep expertise in commercial insurance policies, declarations pages, ACORD forms, certificates, loss runs, and endorsements. Your job is to read every word of the document and extract EVERY visible data point — leave nothing behind.
+
+RULE 1 — Policy namespace separation:
+  • Current/active policy  → policy_number, effective_date, expiration_date
+  • Prior/previous policy  → prior_policy_number, prior_effective_date, prior_expiration_date, prior_carrier
+  • Umbrella/excess policy → umbrella_effective_date, umbrella_expiration_date
+  NEVER mix these groups. If a document shows "Prior Policy: XYZ / 01/01/2023–01/01/2024" and "Current Policy: ABC / 01/01/2024–01/01/2025", both sets must appear in their correct keys. An umbrella/excess policy commonly runs its OWN separate effective/expiration period, distinct from the underlying GL/Auto/WC policy period — if the document states an umbrella-specific policy period (e.g. "Umbrella Policy Effective Date: 07/15/2025"), it belongs in umbrella_effective_date/umbrella_expiration_date even when it differs from effective_date/expiration_date. Do not collapse it into the current-policy dates just because both are present in the same document — a differing umbrella period is a real, common attachment scenario, not an error to normalize away. umbrella_um_limit / umbrella_uim_limit / umbrella_medical_payments_limit are the UM/UIM/medical-payments coverages of the UMBRELLA POLICY ITSELF, only when the umbrella declarations state them for the umbrella — the underlying AUTO policy's UM/UIM/med-pay limits belong to auto_um_uim_limit and must NEVER be copied into the umbrella keys; when the umbrella states none, all three stay null.
+
+RULE 2 — Schedule tables: output ONE JSON object per row.
+  • Vehicle schedule      → one entry per vehicle in auto_vin_schedule
+  • WC class code table   → one entry per class code row in wc_class_codes
+  • Driver schedule       → one entry per driver in auto_drivers
+  • Property locations    → one entry per DISTINCT physical location in property_locations. The SAME address printed on multiple pages (dec page, attached schedule, certificate) is still ONE location — do not emit a duplicate entry for a repeated mention of the same address.
+
+RULE 2b — Covered-auto symbols. A commercial auto declarations page designates which autos each coverage applies to using a symbol NUMBER printed against that coverage line (e.g. "Liability 01", "Comprehensive 07", "Collision 07"). For auto_covered_symbols, emit one object per coverage line, copying the number EXACTLY as designated: [{"coverage": "liability", "symbols": [1]}, {"coverage": "comprehensive", "symbols": [7]}]. Use the coverage wording the document itself uses. If a covered-autos grid lists symbols without making the coverage line clear, use "coverage": "unspecified" rather than guessing. NEVER infer a symbol that is not printed — a covered-auto symbol is a coverage designation with legal effect, so an absent symbol must stay absent.
+
+RULE 3 — Never hallucinate. If a value is not visible in the document, set the field to null (or [] for list fields). Do not invent or infer values that are not explicitly stated.
+
+RULE 4 — Extract ALL financial figures exactly as printed: limits, premiums, payrolls, deductibles, values. Include currency symbols and formatting as-is.
+
+RULE 5 — For addresses: extract the full address string including city, state, ZIP.
+
+RULE 6 — Flag definitions. Judge each boolean flag by the MEANING of the document, not the mere presence of exact keywords - the example terms listed are illustrative, not an exhaustive checklist, so set a flag true for clear equivalents and paraphrases too (e.g. a coverage part named "Network Security and Privacy Liability" or "ransomware incident response coverage" is cyber coverage even without the word "cyber"). Judge by meaning, but the meaning that matters is WHAT THE POLICY COVERS. A coverage flag describes coverage the document GRANTS - never an exposure the applicant merely has, and never a coverage the document names in order to EXCLUDE or decline it. "We hold customer health and card data" is a cyber EXPOSURE and does not by itself make has_cyber true; a "Cyber Incident and Data Privacy Exclusion" attached to a liability form makes it explicitly FALSE. This does NOT relax any "Do NOT set true" restriction below - those guards still apply in full. Criteria:
+  is_commercial_policy: true if document is a commercial insurance policy, application, dec page, certificate, or quote (not personal lines).
+  has_general_liability: true if document mentions "General Liability", "GL", "premises/operations", "products/completed operations", "personal and advertising injury", GL limits, or GL premiums.
+  has_property_coverage: true if document explicitly lists a building limit or BPP (business personal property) value, commercial property premium, or COPE data (construction type, year built, occupancy, protection class) for a covered location. Do NOT set true based on mailing addresses alone, certificate holder addresses, or GL-only premises descriptions.
+  has_auto_coverage: true if document mentions business auto, commercial auto, vehicle schedules, VINs, auto liability limits, or fleet coverage as a distinct coverage line or policy section. Do NOT set true based solely on "hired/non-owned auto" appearing as a GL endorsement line — that alone is not a separate commercial auto policy.
+  has_workers_comp: true if document mentions workers compensation, WC, payroll by class code, experience modification factor, employers liability, or WC class codes.
+  has_umbrella: true if the document explicitly shows an umbrella or excess liability LIMIT or PREMIUM (e.g. "$2M Umbrella", "Excess Liability – $5,000,000") for coverage above a primary GL or auto policy. Do NOT set true merely because the words "excess", "limits", "attachment point", or "SIR" appear without a distinct umbrella/excess policy section or stated dollar amount.
+  has_multiple_locations: true if document lists 2 or more distinct insured property addresses or locations.
+  has_loss_history: true if document contains a loss run, claims history table, prior claims, loss amounts, or any mention of paid/incurred/open claims.
+  asserts_no_known_losses: true ONLY if the document affirmatively states the insured has had NO prior or known losses/claims — judge this by MEANING, not exact wording. Set true for any clear paraphrase, e.g. "no known losses", "no prior losses", "loss-free", "claims-free", "clean loss history", "favorable loss experience with no claims", "no reported claims in the past N years", "the insured reports no losses". Set FALSE when the document merely discusses, lists, or summarizes losses/claims, when any actual claim (paid, incurred, reserved, or open) appears, or when loss history is simply absent/not mentioned. This is a no-loss ASSERTION, not the presence of loss data.
+  is_contractor: true only if the named INSURED's PRIMARY BUSINESS is a construction or installation contracting trade (general contractor, roofing contractor, electrical, plumbing, excavation, demolition contractor, etc.). Do NOT set true if construction trades are only mentioned in loss history, claims descriptions, operations of a third party, or as endorsement requirements listed for certificate holders.
+  has_certificate_request: true if document contains language requesting issuance of a certificate of insurance, lists a certificate holder, or shows "certificate required".
+  is_certificate_doc: true if the document IS itself an ACORD 25 Certificate of Liability Insurance or ACORD 28 Evidence of Property — identifiable by "Certificate of Liability Insurance" or "Evidence of Commercial Property Insurance" as the document title.
+  gl_is_claims_made: true ONLY if the GENERAL LIABILITY COVERAGE FORM ITSELF (Coverage A bodily injury / property damage) is written on a claims-made basis. A retroactive date alone is NOT enough - it must belong to the GL coverage form. Do NOT set true when the retroactive date belongs to a SUB-COVERAGE endorsement such as Employee Benefits Liability, Professional/E&O, or Pollution, which are routinely claims-made INSIDE an otherwise occurrence-based GL policy; and do NOT set true when the document states the GL form is written on an OCCURRENCE basis. When a declarations page says both (e.g. "CG 00 01 is written on an OCCURRENCE basis" and "Employee Benefits Liability CG 04 35 is the only coverage written on a CLAIMS-MADE basis"), the answer is FALSE.
+  auto_has_physical_damage: true if document shows comprehensive and/or collision coverage for autos.
+  auto_split_limits: true if auto liability is expressed as split limits (BI per person / BI per accident / PD per accident) rather than a combined single limit (CSL). When true, ALSO fill auto_bi_per_person, auto_bi_per_accident and auto_pd_per_accident with the three separate figures (e.g. "100/300/50" means $100,000 / $300,000 / $50,000). When the policy carries a single combined limit, leave those three null and put the figure in auto_liability_limit only - a CSL is NOT the same amount as each split part.
+  auto_has_hired_nonowned: true if document mentions "hired auto", "non-owned auto", "HNOA", or hired and non-owned coverage.
+  auto_has_um_uim: true if document mentions uninsured motorist (UM) or underinsured motorist (UIM) coverage.
+  wc_multi_state: true if the insured has payroll or employees in more than one U.S. state.
+  wc_has_monopolistic_state: true if any WC payroll or employee location is in North Dakota (ND), Ohio (OH), Washington (WA), or Wyoming (WY).
+  property_has_bi_coverage: true if document mentions business income, business interruption, BI limit, extra expense, or period of restoration.
+  property_has_peril_deductibles: true if document shows cause-specific deductibles such as wind/hail deductible, earthquake deductible, or flood deductible.
+  has_additional_insured_requirement: true if document shows "Additional Insured" endorsement, AI requirement, or any party listed as an additional insured.
+  has_waiver_of_subrogation: true if document mentions "Waiver of Subrogation" or "WOS".
+  has_primary_noncontributory: true if document mentions "Primary and Non-Contributory" or "PNC" coverage requirement.
+  has_builders_risk: true if the document explicitly covers property that is CURRENTLY UNDER CONSTRUCTION — identified by a Builders Risk or Course of Construction section listing a project address, construction value, or completion date for a specific active project. Do NOT set true for a general contractor's GL/WC submission, for completed property coverage, or when "construction" appears only in the insured's trade description.
+  has_inland_marine: true if the document explicitly includes a distinct inland marine coverage line, floater policy, or scheduled equipment endorsement WITH stated limits or values (e.g. contractor's equipment schedule with item values, motor truck cargo with a per-load limit, installation floater). Do NOT set true if equipment or cargo is mentioned incidentally in operations descriptions or loss history without stated inland marine limits.
+  has_open_cargo: true ONLY if the document shows an OPEN CARGO or OCEAN CARGO policy or section - the ocean-marine coverage for goods shipped by sea, typically labeled "Open Cargo Policy", "Ocean Cargo", or "Marine Cargo Certificate" - with a stated limit or premium. Do NOT set true for inland transit coverage of any kind: a motor truck cargo limit, a transit or property-in-transit extension inside an installation floater or an inland marine schedule, or a contractors-equipment floater are all INLAND marine, not open cargo. If in doubt, false.
+  has_crime: true if the document shows a DISTINCT crime or fidelity coverage part, policy or endorsement WITH a stated limit or premium (e.g. "Employee Dishonesty $50,000", a Commercial Crime coverage part, a money-and-securities limit). Do NOT set true when crime terms appear only as an EXCLUSION, as a fidelity or ERISA bond a contract REQUIRES the applicant to carry elsewhere, or on a line the document lists as not covered ("Crime and Fidelity - No Coverage").
+  has_cyber: true if the document shows a DISTINCT cyber or privacy coverage part, policy or endorsement WITH a stated limit or premium (e.g. "Cyber Liability $1,000,000", a Cyber and Privacy section carrying its own premium). Do NOT set true when cyber terms appear only as: an EXCLUSION or disclaimer (a "Cyber Incident and Data Privacy Exclusion" notice attached to a general liability form), a limited virus, hacking or data-restoration extension inside ANOTHER line such as Electronic Data Processing or inland marine, or a description of the applicant's operations and data holdings (that is an exposure, not coverage).
+  has_commercial_auto: true if document shows a commercial auto policy, business auto coverage symbol, or fleet policy.
+  has_auto_liability: true if document shows auto liability limits (CSL or split limits) on a commercial auto policy.
+  has_truckers_coverage: true if document mentions truckers coverage, motor truckers, long-haul trucking, or ICC/MC authority numbers.
+  has_motor_carrier_coverage: true if document mentions motor carrier, MCS-90 endorsement, or interstate transport coverage.
+  has_garage_operations: true if document mentions garage operations, service garage, repair shop, or autos left for service or safekeeping.
+  has_auto_dealer_exposure: true if document mentions auto dealership, dealer operations, dealer plates, or new/used vehicle inventory.
+  has_garagekeepers_coverage: true if document mentions garagekeepers coverage, garagekeepers legal liability, or coverage for customer vehicles.
+  has_garage_coverage: true if document shows garage liability coverage covering auto dealer and service operations.
+  has_dealers_coverage: true if document mentions dealers physical damage, dealer inventory, or floorplan coverage.
+  has_garage_liability: true if document shows a garage liability limit (applies to auto dealers and service shops).
+  has_garage_keepers: true if document mentions garagekeepers or coverage for vehicles in the insured's custody.
+
+RULE 7 — loss_history fields: For each loss history entry, populate all available sub-fields:
+  date: occurrence/loss date. claim_date: date claim was filed or reported (may differ from occurrence date).
+  description: brief description of the loss. amount: total incurred (paid + reserved).
+  paid: amount already paid to date. reserved_amount: reserves held but not yet paid.
+  claim_number: insurer claim reference number. line_of_business: line of insurance the claim falls under (e.g. "GL", "Auto", "Property").
+  open: true if the claim is still open/pending, false if closed. open_code: "O" for open, "C" for closed.
+  subrogation_code: "Y" if subrogation is being pursued, "N" if not applicable or waived.
+
+RULE 8 — state_of_operations: Set this to the two-letter US state code (e.g. "CA", "CO", "TX") where the insured's primary operations are located. Determine this from the mailing address, physical address, garaging address, or any explicit state reference in the document. If multiple states appear, use the state in the mailing or physical address of the named insured. Return null only if no state can be determined.
+
+RULE 9 — Revenue / payroll temporal precision:
+  • total_revenue: extract the CURRENT or MOST RECENT COMPLETED YEAR figure only.
+    If the document contains both a prior year figure and a current year figure, extract ONLY the current year.
+    If only one figure is present, extract that figure regardless of label.
+    NEVER blend, average, or choose a projected/future figure over a stated current figure.
+    Example: "Prior year revenue was $1,200,000. Current year gross sales are $2,500,000." → extract $2,500,000.
+    Example: "Annual Revenue: $1,500,000" (no year context) → extract $1,500,000.
+  • total_payroll: same rule — extract the current/most recent year figure only.
+
+RULE 10 — account_description (narrative documents only):
+  Populate `account_description` ONLY when the document is an underwriting narrative, submission narrative, account summary, executive summary, or account overview document. Extract the opening paragraph(s) that read as a high-level account summary, whether or not they carry an explicit heading - commonly (but not always) labeled "Account Overview", "Account Summary", "Company Overview", "Background", or "Executive Summary", though an unlabeled opening pitch paragraph qualifies just as well. This field captures the broker's high-level account pitch — distinct from the factual `operations_description` (what the business does). Set `account_description` to null for dec pages, applications, loss runs, certificates, and all other structured documents that are not narrative account summaries.
+
+RULE 11 — narrative_components: For each of the 12 components, set present=true only if THIS CHUNK OF TEXT contains meaningful prose discussing that topic (not just a heading or label). Include a short verbatim quote (30 words max) as evidence. Set present=false and evidence=null when the topic is absent from this chunk.
+  account_overview: high-level account summary, executive summary, broker account pitch.
+  operations: what the business does day-to-day, scope of work, services provided.
+  years_in_business: how long the company has operated, founding year, tenure in business.
+  management: leadership team, principals, owner experience, org structure, key personnel.
+  risk_controls: safety programs, loss prevention, certifications, written procedures.
+  loss_history: prior claims, loss history, claims summary, loss experience discussion.
+  coverage_discussion: coverage needs, existing lines, limits discussion, gaps analysis.
+  carrier_market: prior or current carriers, market context, market appetite.
+  location_exposure: premises, locations, geographic footprint, facilities.
+  employee_practices: HR policies, workforce description, hiring practices, turnover.
+  growth_trends: workers comp payroll by class code, WC class codes, payroll breakdown by classification, NCCI class, labor classification, payroll schedule.
+  target_markets: experience modifier, EMOD, XMOD, experience modification rate, mod factor, merit rating, debit mod, credit mod, rating bureau, workers comp mod.
+
+RULE 12 — loss_run_status: Set to "pending" or "requested" when the document indicates, by MEANING, that loss runs have been requested or ordered but not yet received - whether stated plainly ("loss runs requested", "loss runs pending", "awaiting loss runs", "loss runs on order", "loss runs to follow") or paraphrased ("loss history is being compiled", "we will forward the loss runs once the prior carrier provides them", "claims experience to be supplied under separate cover"). Two strict guards still apply: set to null when actual loss run data IS present in this document (use loss_history, loss_run_valuation_date, and related fields for that), and do NOT infer pending status from the absence of loss runs alone - there must be an affirmative statement that they are outstanding.
+
+RULE 13 — Loss-run period dating (loss_run_period_start / loss_run_period_end / loss_history_years): these are deterministic scoring inputs, not the per-claim list from RULE 7 - extract them whenever a loss run states its OWN coverage/experience period, even if that period contains zero claims.
+  loss_run_period_start: the EARLIEST date of the stated experience period.
+  loss_run_period_end: the LATEST date of that period (often the same as, or close to, the valuation date). If the document gives a range "X to Y" or "X through Y", loss_run_period_start = X and loss_run_period_end = Y.
+  loss_history_years: an EXPLICIT year count the document itself states for this period (e.g., "(5 years)", "5-year loss run", "for the last 5 years") - a direct cross-check, not a value you calculate yourself from the dates.
+  Example: "Loss Run Period: 09/01/2021 to 09/01/2026 (5 years)" → loss_run_period_start="09/01/2021", loss_run_period_end="09/01/2026", loss_history_years="5".
+  Example: "5-year loss history requested, currently valued 07/01/2026" with no explicit start date → loss_run_valuation_date="07/01/2026", loss_history_years="5", loss_run_period_start/end may be null since no explicit range was given.
+  Do NOT confuse this with a lookback WINDOW inside a Yes/No question ("...in the past 5 years?") or the blank ACORD Loss History section header asks the filer to fill in ("FOR THE LAST ___ YEARS") - those describe how far back the FORM asks, not how much loss-run DOCUMENTATION was actually supplied. Only extract loss_history_years from a phrase that describes an actual loss run/claims history document, not from the disclosure window in an unanswered or narrative-only question.
+
+RULE 14 — naics_code vs. carrier_naic/prior_carrier_naic: these are UNRELATED numbers that both get called "NAIC" in real documents - do not confuse them.
+  naics_code is the INSURED BUSINESS's own industry classification code (NAICS - North American Industry Classification System, e.g. "238160" for roofing contractors), typically labeled "NAICS Code" or "SIC Code" near the applicant/business information.
+  carrier_naic and prior_carrier_naic are the INSURANCE COMPANY's identifier (NAIC - National Association of Insurance Commissioners company code, e.g. "41982"), typically labeled "NAIC #" or "NAIC Number" next to the carrier/insurer name (or the prior carrier's name for prior_carrier_naic).
+  If a document shows a number labeled just "NAIC #" or "NAIC Number" next to a carrier, insurer, or insurance company name, it belongs in carrier_naic (or prior_carrier_naic) - NEVER in naics_code, even though the label looks similar.
+
+RULE 16 — coverage_lines (the per-line breakdown of THIS policy):
+  Output one entry per coverage line the document actually shows as covered - General Liability, Business Auto, Inland Marine, Umbrella, Property, Crime, Cyber, and so on. Use the line name as the document prints it.
+  Put that line's OWN premium, carrier, NAIC and policy number in its entry. In a package issued by affiliated companies these genuinely differ per line - copy what is printed against each line, never the package total or the first carrier you saw.
+  A line the document lists as NOT covered ("Property - No Coverage", "Crime and Fidelity - No Coverage") is NOT a coverage line. Leave it out.
+  Set premium to null when only a package total is shown; never divide or estimate one. These are amounts that appear on a signed application.
+  A line premium is the ANNUAL PREMIUM CHARGED FOR THAT COVERAGE PART. It is not a terrorism (TRIA/TRIPRA) charge, a policy or service fee, a state surcharge or tax, a minimum premium, an endorsement or audit adjustment, or one vehicle's or one location's share. Those figures print in the same column and are far smaller; if the only amount you can find against a line is one of them, set premium to null.
+
+RULE 15 — ENTITY DISCIPLINE. A submission names several DIFFERENT parties. Never copy one party's detail into another party's field.
+  PRODUCER (the agency/brokerage submitting the business - the "Producer", "Agency" or "Agent" block): producer_name, producer_address, producer_contact_name, producer_contact_phone, producer_contact_email, producer_fax.
+  CARRIER (the insurance company issuing the policy - the "Insurer", "Carrier" or "Company" block): carrier_name, carrier_naic, carrier_website.
+  APPLICANT (the insured named on the policy): applicant_name, dba_name, fein, mailing_address, physical_address, applicant_website, contact_name, contact_phone, contact_email. The contact_* fields are the APPLICANT's own contact person - never the agency's and never the carrier's.
+  Fill each of these ONLY from a value the document labels as belonging to THAT party. A phone, email, address or website printed inside the producer's or carrier's block belongs to that party alone: put it in that party's field and leave the other parties' fields null. Do NOT reuse one party's value to fill another party's empty field. null is the CORRECT answer when a party's own value is not stated - a borrowed value is a defect, a null is not.
+  Never derive one field from another: a fax number counts only if the document labels it as a fax (never copy the phone number into it), and an email address must contain "@" (a person's name is not an email address).
+
+Return ONLY a valid JSON object with exactly these two top-level keys:
+
+"facts": {
+  "producer_name": string or null, "applicant_name": string or null,
+  "dba_name": string or null, "mailing_address": string or null,
+  "physical_address": string or null, "contact_name": string or null,
+  "contact_phone": string or null, "contact_email": string or null,
+  "applicant_website": string or null,
+  "producer_contact_name": string or null, "producer_contact_phone": string or null,
+  "producer_contact_email": string or null, "producer_fax": string or null,
+  "producer_address": string or null,
+  "carrier_website": string or null,
+  "fein": string or null, "entity_type": string or null,
+  "effective_date": string or null, "expiration_date": string or null,
+  "policy_number": string or null, "lines_of_business": [string],
+  "coverage_lines": [{"line": string, "carrier": string or null, "naic": string or null, "policy_number": string or null, "premium": string or null, "effective_date": string or null, "expiration_date": string or null}],
+  "total_revenue": string or null, "total_payroll": string or null,
+  "num_employees": string or null,
+  "num_employees_full_time": string or null, "num_employees_part_time": string or null,
+  "business_start_date": string or null,
+  "locations": [string],
+  "operations_description": string or null,
+  "account_description": string or null,
+  "prior_carrier": string or null,
+  "prior_policy_number": string or null,
+  "prior_effective_date": string or null,
+  "prior_expiration_date": string or null,
+  "naics_code": string or null, "sic_code": string or null,
+  "years_in_business": string or null,
+  "gl_limits": string or null, "gl_aggregate": string or null,
+  "gl_each_occurrence": string or null,
+  "gl_products_aggregate": string or null,
+  "gl_personal_advertising_injury": string or null,
+  "gl_fire_damage_limit": string or null,
+  "gl_medical_expense": string or null,
+  "gl_class_codes_by_location": [{"location": string, "codes": [string]}],
+  "gl_class_code_schedule": [{"location": string or null, "class_code": string or null, "classification": string or null, "premium_basis": string or null, "exposure_amount": string or null, "territory": string or null, "subcontractor_pct": string or null}],
+  "gl_deductible": string or null, "gl_form_type": string or null,
+  "retro_date": string or null,
+  "carrier_name": string or null,
+  "carrier_naic": string or null,
+  "prior_carrier_naic": string or null,
+  "audit_period": string or null,
+  "billing_plan": string or null,
+  "payment_plan": string or null,
+  "total_policy_premium": string or null (the TOTAL package/policy premium the document itself states - e.g. "TOTAL ANNUAL PACKAGE PREMIUM: $10,500". Never a single coverage part's premium, never a figure you add up yourself, and never a deposit or instalment. Null if the document states no overall total),
+  "wc_el_each_accident": string or null,
+  "wc_el_disease_each_employee": string or null,
+  "wc_el_disease_policy_limit": string or null,
+  "hired_auto_indicator": string or null,
+  "non_owned_auto_indicator": string or null,
+  "additional_named_insureds": [string],
+  "property_building_value": string or null, "property_bpp_value": string or null,
+  "construction_type": string or null, "occupancy_type": string or null,
+  "year_built": string or null, "roof_year": string or null,
+  "sprinkler_system": string or null, "fire_protection_class": string or null,
+  "valuation_method": "RCV"|"ACV"|null, "coinsurance_percentage": string or null,
+  "business_income_limit": string or null, "period_of_restoration": string or null,
+  "property_deductible_aop": string or null, "property_deductible_wind": string or null,
+  "property_deductible_earthquake": string or null, "property_deductible_flood": string or null,
+  "mortgagee_name": string or null, "auto_liability_limit": string or null,
+  "auto_liability_structure": string or null, "auto_deductible_comp": string or null,
+  "auto_bi_per_person": string or null, "auto_bi_per_accident": string or null,
+  "auto_pd_per_accident": string or null,
+  "auto_deductible_collision": string or null,
+  "auto_vin_schedule": [{"year": string, "make": string, "model": string, "vin": string, "body_type": string or null, "gvw": string or null, "comp_symbol": string or null, "coll_symbol": string or null}],
+  "auto_garaging_addresses": [string],
+  "wc_payroll": string or null, "wc_payroll_by_state": {}, "wc_class_codes": [{"code": string, "description": string, "state": string or null, "payroll": string or null, "rate": string or null}],
+  "wc_xmod": string or null, "wc_xmod_effective_date": string or null,
+  "wc_officer_exclusions": string or null,
+  "wc_monopolistic_payroll": {"state": "amount"},
+  "umbrella_limit": string or null, "umbrella_sir": string or null,
+  "umbrella_attachment_point": string or null,
+  "umbrella_effective_date": string or null, "umbrella_expiration_date": string or null,
+  "umbrella_um_limit": string or null, "umbrella_uim_limit": string or null,
+  "umbrella_medical_payments_limit": string or null,
+  "underlying_policies": [{"line": string, "limit": string, "carrier": string, "policy_no": string}],
+  "schedule_of_underlying_insurance": string or null,
+  "umbrella_follow_form": string or null,
+  "employers_liability_limits": string or null,
+  "percent_subcontracted": string or null,
+  "contractor_type": string or null, "num_claims": string or null,
+  "loss_history_years": string or null, "certificate_holder": string or null,
+  "is_renewal": string or null,
+  "wc_prior_carrier": string or null,
+  "wc_payroll_period": string or null,
+  "auto_drivers": [{"name": string, "dob": string or null, "license_number": string or null, "license_state": string or null, "hire_date": string or null, "experience_years": string or null, "vehicle_use_percent": string or null}],
+  "auto_radius_of_operation": string or null,
+  "auto_physical_damage_valuation": string or null,
+  "auto_covered_symbols": [{"coverage": string, "symbols": [int]}],
+  "auto_um_uim_limit": string or null,
+  "auto_med_pay_limit": string or null,
+  "auto_hired_nonowned": string or null,
+  "distance_to_hydrant": string or null,
+  "fire_department_type": string or null,
+  "extra_expense_limit": string or null,
+  "deductible_basis": string or null,
+  "agreed_value_endorsement": boolean,
+  "deductible_application": string or null,
+  "building_ITV_percentage": string or null,
+  "total_incurred": string or null,
+  "total_paid": string or null,
+  "open_claims_count": string or null,
+  "property_locations": [{"address": string, "county": string or null (the COUNTY the premises sits in, only when the document states it - e.g. "Arapahoe"; never guessed from the city), "ownership": string or null (owner, tenant, or a short description of the actual interest if neither, e.g. "licensee"), "inside_city_limits": boolean or null, "full_time_employees": string or null, "part_time_employees": string or null, "annual_revenue": string or null, "occupied_area": string or null, "open_to_public_area": string or null, "total_building_area": string or null (the TOTAL square footage of the building, NOT the same as occupied_area - leave null if the document does not state the whole building's size), "operations_description": string or null, "building_value": string or null, "bpp_value": string or null, "construction_type": string or null, "year_built": string or null}],
+  "loss_run_age_days": string or null,
+  "loss_run_valuation_date": string or null, "loss_run_period_start": string or null,
+  "loss_run_period_end": string or null,
+  "loss_run_status": "pending"|"requested"|null,
+  "risk_transfer": {
+    "additional_insured_required": boolean or null (true when the document REQUIRES additional-insured status, false ONLY when it affirmatively says it is not required; null when the document does not address it at all - silence is not a "no"),
+    "additional_insured_names": [string],
+    "primary_noncontributory_required": boolean or null (same rule: null when the document does not address it),
+    "waiver_of_subrogation_required": boolean or null (same rule: null when the document does not address it),
+    "certificate_holder_name": string or null,
+    "loss_payee_name": string or null,
+    "mortgagee_name": string or null,
+    "specific_wording_requirements": string or null (an actual quoted/paraphrased contractual wording or endorsement REQUIREMENT clause only - never a summary of the other risk_transfer fields; null if no such clause is stated)
+  },
+  "builders_risk_project_address": string or null,
+  "builders_risk_project_cost": string or null,
+  "builders_risk_completion_date": string or null,
+  "builders_risk_construction_type": string or null,
+  "builders_risk_owner_name": string or null,
+  "builders_risk_contractor_name": string or null,
+  "builders_risk_insured_interest": string or null,
+  "crime_limit": string or null,
+  "crime_deductible": string or null,
+  "crime_employee_count": string or null,
+  "crime_locations_count": string or null,
+  "cyber_limit": string or null,
+  "cyber_retention": string or null,
+  "cyber_prior_incidents": string or null,
+  "cyber_controls_mfa": boolean,
+  "cyber_controls_backups": boolean,
+  "cyber_pii_records_count": string or null,
+  "cyber_third_party_vendors": string or null,
+  "inland_marine_total_value": string or null,
+  "inland_marine_transit_limit": string or null,
+  "inland_marine_items": [{"description": string, "value": string or null, "serial_number": string or null}],
+  "contractor_residential_pct": string or null,
+  "contractor_commercial_pct": string or null,
+  "contractor_high_hazard_ops": [string],
+  "contractor_license_number": string or null,
+  "certificate_holder_address": string or null,
+  "certificate_description_of_operations": string or null,
+  "loss_payee_name": string or null,
+  "additional_remarks_text": string or null,
+  "loss_history": [{"date": string or null, "claim_date": string or null, "description": string or null, "amount": string or null, "paid": string or null, "reserved_amount": string or null, "claim_number": string or null, "line_of_business": string or null, "open": boolean, "open_code": "O" or "C" or null, "subrogation_code": "Y" or "N" or null}],
+  "prior_coverage_by_line": [{"line": string, "carrier": string or null, "policy_no": string or null, "effective": string or null, "expiration": string or null, "premium": string or null}],
+  "wc_officers": [{"name": string, "title": string or null, "ownership_pct": string or null, "include": boolean, "exclude": boolean, "state": string or null}],
+  "garage_operations_type": string or null,
+  "garage_liability_limit": string or null,
+  "garage_deductible": string or null,
+  "garagekeeper_liability_limit": string or null,
+  "garagekeeper_comp_deductible": string or null,
+  "garagekeeper_coll_deductible": string or null,
+  "auto_dealers_inventory_value": string or null,
+  "wc_description_of_operations": string or null,
+  "state_of_operations": string or null
+},
+
+"flags": {
+  "is_commercial_policy": boolean, "has_general_liability": boolean,
+  "has_property_coverage": boolean, "has_auto_coverage": boolean,
+  "has_workers_comp": boolean, "has_umbrella": boolean,
+  "has_multiple_locations": boolean, "has_loss_history": boolean,
+  "asserts_no_known_losses": boolean (true ONLY when the document EXPLICITLY states there are no losses/claims - e.g. "no known losses", "loss free", "claim free". "NOT ON FILE", "NOT REPORTED" or loss data simply being absent means UNKNOWN - leave false),
+  "is_contractor": boolean, "has_certificate_request": boolean,
+  "is_certificate_doc": boolean, "gl_is_claims_made": boolean,
+  "auto_has_physical_damage": boolean, "auto_split_limits": boolean,
+  "auto_has_hired_nonowned": boolean, "auto_has_um_uim": boolean,
+  "wc_multi_state": boolean, "wc_has_monopolistic_state": boolean,
+  "property_has_bi_coverage": boolean, "property_has_peril_deductibles": boolean,
+  "has_additional_insured_requirement": boolean,
+  "has_waiver_of_subrogation": boolean,
+  "has_primary_noncontributory": boolean,
+  "has_builders_risk": boolean,
+  "has_inland_marine": boolean,
+  "has_open_cargo": boolean,
+  "has_crime": boolean,
+  "has_cyber": boolean,
+  "has_commercial_auto": boolean,
+  "has_auto_liability": boolean,
+  "has_truckers_coverage": boolean,
+  "has_motor_carrier_coverage": boolean,
+  "has_garage_operations": boolean,
+  "has_auto_dealer_exposure": boolean,
+  "has_garagekeepers_coverage": boolean,
+  "has_garage_coverage": boolean,
+  "has_dealers_coverage": boolean,
+  "has_garage_liability": boolean,
+  "has_garage_keepers": boolean,
+  "narrative_components": {
+    "account_overview":    {"present": boolean, "evidence": string or null},
+    "operations":          {"present": boolean, "evidence": string or null},
+    "years_in_business":   {"present": boolean, "evidence": string or null},
+    "management":          {"present": boolean, "evidence": string or null},
+    "risk_controls":       {"present": boolean, "evidence": string or null},
+    "loss_history":        {"present": boolean, "evidence": string or null},
+    "coverage_discussion": {"present": boolean, "evidence": string or null},
+    "carrier_market":      {"present": boolean, "evidence": string or null},
+    "location_exposure":   {"present": boolean, "evidence": string or null},
+    "employee_practices":  {"present": boolean, "evidence": string or null},
+    "growth_trends":       {"present": boolean, "evidence": string or null},
+    "target_markets":      {"present": boolean, "evidence": string or null}
+  }
+}
+
+Return ONLY the JSON object. No markdown fences, no explanation, no extra text. Start your response with { and end with }.
+
+
+
+================================================================================
+_EXTRACT_PROMPT_SUFFIX (verbatim)
+================================================================================
+
+
+CRITICAL REMINDER: Your response MUST be a single JSON object with EXACTLY these two top-level keys: "facts" and "flags". No other keys. No markdown. Start your response with { and end with }.
+
+=== END ===

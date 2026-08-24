@@ -425,8 +425,10 @@ def test_apply_arq_answers_actually_stamps_a_canonical_only_question_end_to_end(
     }
     saved_payload = {}
 
-    async def _fake_upd(_session_id, payload):
+    async def _fake_upd(_session_id, payload, delete_facts=None):
         saved_payload.update(payload)
+        for _k in (delete_facts or []):
+            (saved_payload.get("facts") or {}).pop(_k, None)
 
     with patch.object(arq_service, "get_arq_by_id", AsyncMock(return_value=arq_row)), \
          patch("repositories.session_repository.get_processing_session",

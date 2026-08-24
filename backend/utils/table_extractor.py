@@ -1,3 +1,13 @@
+"""DEPRECATED for the extraction pipeline (2026-08-22).
+
+Tables now reach the LLM inline with their page, from utils/page_layout.py's
+header-anchored detector with pdfplumber lines-mode as a per-page fallback - both
+wired inside services/ocr_service.extract_text_from_pdf. This module's only
+pipeline caller (extraction_pipeline's end-of-document append) was removed: on
+every insurance page in the corpus it produced nothing, because pdfplumber's
+default needs ruled lines and insurance schedules are whitespace-aligned.
+Kept importable for any external script; see extraction_arch_change.md.
+"""
 import logging
 import os
 from typing import List, Dict, Any

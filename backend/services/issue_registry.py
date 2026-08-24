@@ -23,6 +23,7 @@ Warnings/advisories are tiered required / recommended / binder_followup.
 """
 
 import hashlib
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 DEFAULT_CLUSTER = "Other validations"
@@ -840,6 +841,49 @@ _LEGACY_SUPERSEDED_BY_CODE: Dict[str, str] = {
 }
 
 
+# ── WHICH CANONICAL FACT AN ISSUE CODE IS ABOUT ─────────────────────────────
+# Both cross-document engines emit an issue per fact, under different code
+# shapes. Resolving both to the same fact key is what lets build_grouped_view
+# hide the weaker duplicate (see the supersession block there).
+#
+# `check_doc_consistency` tags most of its issues `field=<fact_key>`, which
+# needs no remap. Four predate that convention and carry a rule name instead;
+# they are listed here and NOWHERE else. `tests/test_doc_conflict_supersession.py`
+# harvests every token that function can actually emit and fails the build when
+# one has no mapping - the same anti-rot device as `_LEGACY_MESSAGE_RULES`, and
+# the reason a fifth token cannot be added without a decision about its fact.
+_DOC_CONFLICT_CODE_TO_FACT: Dict[str, str] = {
+    "name_conflict":       "applicant_name",
+    "fein_conflict":       "fein",
+    "date_conflict":       "effective_date",
+    "expiration_conflict": "expiration_date",
+}
+
+_DOC_CONFLICT_CODE_RE = re.compile(r"^doc_conflict_(?:hard|warn)_(.+)$")
+_PICKER_CODE_RE = re.compile(r"^underwriting_reconciliation_(.+)$")
+
+
+def doc_conflict_fact_key(code: Any) -> Optional[str]:
+    """The canonical fact a ``doc_conflict_(hard|warn)_*`` issue is about.
+
+    None for any other code, so a caller can test every issue without first
+    filtering. An UNMAPPED token falls through as itself, which is correct for
+    the `field=<fact_key>` majority and harmless for anything else - the worst
+    case is that no duplicate is found.
+    """
+    m = _DOC_CONFLICT_CODE_RE.match(str(code or ""))
+    if not m:
+        return None
+    token = m.group(1)
+    return _DOC_CONFLICT_CODE_TO_FACT.get(token, token)
+
+
+def picker_fact_key(code: Any) -> Optional[str]:
+    """The canonical fact an ``underwriting_reconciliation_*`` issue is about."""
+    m = _PICKER_CODE_RE.match(str(code or ""))
+    return m.group(1) if m else None
+
+
 def classify_legacy(message: str, severity: str) -> tuple:
     """(code, cluster, tier) for a plain-string message from evaluate_stops()/
     run_field_validations() (these predate cross_form_validator.py and carry no
@@ -1053,6 +1097,71 @@ def build_grouped_view(
         # covered by its own structured issue.
         hard_stops = [m for m in hard_stops if not any(p in m for p in _suppress_phrases)]
         soft_stops = [m for m in soft_stops if not any(p in m for p in _suppress_phrases)]
+
+    # ── THE PICKER SUPERSEDES check_doc_consistency's COPY (2026-08-23) ──────
+    # Two engines compare the same eight identity/date fields, and both render.
+    # LIVE RUN B: "DBA / trade name differs across documents: Orbin Roofing,
+    # Orbin Electrical Services" sat directly above "DBA / Trade Name: documents
+    # disagree (Orbin Roofing, Orbin Electrical Services)" in ONE cluster. Same
+    # for Mailing Address - and the legacy copy printed all THREE address
+    # spellings including the two the picker had correctly folded, so the older
+    # row read exactly like the bug the folding fixed.
+    #
+    # The picker's row is strictly better: folded value groups, per-document
+    # attribution, a conflict reason, a suggestion, and a control that actually
+    # resolves it. So when it is present, its legacy twin is hidden.
+    #
+    # SAME CONTRACT AS THE BLOCK ABOVE: display only, gated on the superseding
+    # issue actually being present, and the CALLER's hard_stops / soft_stops
+    # lists are never mutated (only the local copies, so the "uncovered" safety
+    # net below does not re-add a row we just hid). SQS caps, dismiss credit and
+    # issue_id hashing all key off those arrays and are untouched.
+    #
+    # AND A BLOCKER CAN NEVER BE HIDDEN: a hard-stop twin is suppressed only
+    # when the surviving picker issue is ALSO a hard stop. Today the two sets
+    # agree exactly (underwriting_consistency.HARD_STOP_RECONCILABLE_KEYS is
+    # {applicant_name, fein, effective_date, expiration_date}, which is precisely
+    # the four fields check_doc_consistency hard-stops on), and both engines
+    # downgrade the two date rules on a multi-contract package. This guard means
+    # that if they ever drift, the failure is a duplicate row - not a 60 cap with
+    # nothing on screen explaining it.
+    _picker_severity: Dict[str, str] = {}
+    for _i in list(structured_issues or []) + list(cross_issues or []):
+        _fk = picker_fact_key(_i.get("code"))
+        if _fk:
+            _sev = _i.get("severity") or _i.get("type") or "soft_warning"
+            # hard_stop wins if the same fact somehow carries two rows
+            if _picker_severity.get(_fk) != "hard_stop":
+                _picker_severity[_fk] = _sev
+    if _picker_severity:
+        def _superseded_by_picker(issue: dict) -> bool:
+            fk = doc_conflict_fact_key(issue.get("code"))
+            if not fk or fk not in _picker_severity:
+                return False
+            own = issue.get("severity") or issue.get("type") or "soft_warning"
+            if own == "hard_stop" and _picker_severity[fk] != "hard_stop":
+                return False          # never hide a blocker behind a warning
+            return True
+
+        _dup_msgs = {
+            (i.get("message") or "").strip()
+            for i in (structured_issues or []) if _superseded_by_picker(i)
+        }
+        # Never trim a string a SURVIVING issue also carries. The two engines
+        # word their messages differently, so this cannot bite today - but if
+        # they ever coincided, removing the shared string from the stop arrays
+        # would make the survivor fail the `_present_in` severity lookup below
+        # and silently downgrade a hard stop to a warning.
+        _dup_msgs -= {
+            (i.get("message") or "").strip()
+            for i in (structured_issues or []) if not _superseded_by_picker(i)
+        }
+        if _dup_msgs:
+            structured_issues = [
+                i for i in (structured_issues or []) if not _superseded_by_picker(i)
+            ]
+            hard_stops = [m for m in hard_stops if m.strip() not in _dup_msgs]
+            soft_stops = [m for m in soft_stops if m.strip() not in _dup_msgs]
 
     def _present_in(message: str, final_list: List[str]) -> bool:
         # Exact match covers the common case. Prefix match covers callers that

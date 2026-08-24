@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Tuple, Dict, Any
 
 from config.settings import groq_chat, LLM_MODEL, LLM_PROVIDER
+from services.lob_canon import canon_line as _lob_canon_line
 from services.normalization import normalize_date
 
 # ASYNC-SAFE: shared executor for CPU-bound blocking work (tiktoken, sync helpers)
@@ -30,8 +31,14 @@ logger = logging.getLogger(__name__)
 # from carrier_naic/prior_carrier_naic (insurer's NAIC company number) - both are
 # called "NAIC" in real documents and the prompt previously gave the model no
 # description at all for naics_code to tell them apart.
-PROMPT_VERSION = "v12"
-SCHEMA_VERSION = "v12"
+# v14 (2026-08-23): `dec_page_entries` was removed from _EXTRACT_SCHEMA earlier
+# the same day (v13) and is now RESTORED, after the dedicated index pass lost its
+# A/B - see the note above `_DEC_INDEX_DEDICATED_PASS`. The schema is byte-
+# identical to v12 again, but the version must still move FORWARD rather than
+# back: v13 replies (facts and flags with no dec entries) are sitting in the
+# cache, and reusing "v12" would serve them as if they were current.
+PROMPT_VERSION = "v14"
+SCHEMA_VERSION = "v14"
 
 # ── Extraction chunk sizing ───────────────────────────────────────────────────
 # This used to be one hand-typed literal:
@@ -418,6 +425,13 @@ _EXTRACT_SCHEMA = (
     '  "auto_dealers_inventory_value": string or null,\n'
     # ── WC Application (ACORD 130) ────────────────────────────────────────
     '  "wc_description_of_operations": string or null,\n'
+    # RESTORED 2026-08-23 after a live A/B. The dedicated index pass was
+    # measured against this key and did not earn its cost: ~593,000 output
+    # tokens and 18-20 minutes per run against ~30,000 for the whole of
+    # facts+flags, and the owner's regenerated forms came back 'almost the
+    # same'. This key produces ~250 entries as a passenger on a call that is
+    # already happening, which is what every deterministic consumer has run
+    # on for months. See LLMcall1-promptChange.md Round 8.
     # ── Declarations-page recording (source-driven, form-agnostic) ────────
     # WHY THIS EXISTS (2026-08-12): the ~170 keys above are DESTINATION-driven -
     # they capture what the forms are known to ask for, and anything else a dec
@@ -466,6 +480,10 @@ _EXTRACT_SCHEMA = (
     'EXPLICITLY states there are no losses/claims - e.g. "no known losses", '
     '"loss free", "claim free". "NOT ON FILE", "NOT REPORTED" or loss data '
     'simply being absent means UNKNOWN - leave false),\n'
+    '  "asserts_no_subcontractors": boolean (true ONLY when the document '
+    'EXPLICITLY states the insured does not use subcontractors - e.g. '
+    '"no subcontractors", "all work performed by insured\'s own employees". '
+    'Subcontracting simply not being mentioned means UNKNOWN - leave false),\n'
     '  "is_contractor": boolean, "has_certificate_request": boolean,\n'
     '  "is_certificate_doc": boolean, "gl_is_claims_made": boolean,\n'
     '  "auto_has_physical_damage": boolean, "auto_split_limits": boolean,\n'
@@ -507,6 +525,96 @@ _EXTRACT_SCHEMA = (
     '  }\n'
     '}'
 )
+
+# ── Facts whose extraction contract is TRI-STATE (client 1.3) ───────────────
+# `boolean or null` in the schema above means the model is told to answer null
+# when the document does not address the subject, so a `false` from a document
+# is the document SAYING NO - the client's "Explicit No / Absent".
+#
+# Every OTHER boolean in the schema is a bare `boolean`, where `false` is
+# indistinguishable from "never mentioned". That is defect B8 - a COI that
+# simply never discussed subcontractors produced `false`, which manufactured a
+# cross-document conflict and an 85 cap - and `fact_state` correctly reads those
+# as `not_stated`.
+#
+# DERIVED FROM THE SCHEMA STRING, never hand-listed: a new `boolean or null`
+# field becomes an Explicit No automatically, and a field demoted to a bare
+# boolean stops being one, with no second list to remember.
+TRISTATE_BOOLEAN_FACTS: frozenset = frozenset(
+    re.findall(r'"([a-z_][a-z0-9_]*)":\s*boolean or null', _EXTRACT_SCHEMA)
+)
+
+# The set of flags the schema ASKS the model to answer as an affirmative
+# absence assertion. Auto-discovered by NAMING CONVENTION - `asserts_no_*` -
+# from the schema string itself, the same way `TRISTATE_BOOLEAN_FACTS` is
+# discovered from the `boolean or null` shape. A new flag added to the schema
+# under this convention is found automatically; `test_every_assertion_flag_is_
+# registered` fails the build until someone decides what it is an Explicit No
+# ABOUT, which is the one piece of domain knowledge no regex can supply.
+ASSERTION_FLAG_NAMES: frozenset = frozenset(
+    re.findall(r'"(asserts_no_[a-z0-9_]*)":\s*boolean', _EXTRACT_SCHEMA)
+)
+
+# Which fact(s) each assertion flag is an Explicit No ABOUT. This one mapping
+# cannot be derived - "no known losses" is about `loss_history` and its
+# siblings by domain knowledge, not by string shape - so it stays a table, but
+# ONE centralised, self-verifying table rather than a special case built fresh
+# per fact. `asserts_no_known_losses` is the client's own first example ("No
+# prior losses"); `asserts_no_subcontractors` is the second ("No subcontracting")
+# - both positive evidence of absence, which is exactly what `explicit_no`
+# means. `test_every_assertion_flag_is_registered` / `test_every_registered_
+# flag_still_exists_in_the_schema` keep this table and the schema from drifting
+# in either direction; adding the THIRD example ("No Property coverage") is
+# deliberately not done here - it already resolves to `not_applicable` via a
+# declared-absent coverage line, and the client's own vocabulary places it
+# under Explicit No, so which box is correct is a product decision, not an
+# engineering one (see v1-20AUG.md).
+ABSENCE_ASSERTION_FLAGS: Dict[str, Tuple[str, ...]] = {
+    "asserts_no_known_losses":   ("loss_history", "num_claims", "total_incurred",
+                                  "loss_history_years"),
+    "asserts_no_subcontractors": ("percent_subcontracted",),
+}
+
+# ── Class/rating SCHEDULES whose per-row amount is not a package total ──────
+# A class-code schedule row states the RATING BASIS for one classification -
+# `$285,000` payroll for GL class 91580 - never the account's total payroll.
+# `underwriting_consistency._drop_class_exposure_candidates` reads this to keep
+# those rows out of a package TOTAL's candidate list.
+#
+# DERIVED FROM THE SCHEMA, but not blindly: a naive "any list field with a
+# money-shaped column" scan also matched `dec_page_entries.value` (the
+# PRIMARY EVIDENCE source other facts are backfilled FROM - excluding it would
+# have been actively destructive), `coverage_lines.premium` (owned by its own
+# dedicated line-premium-vs-package-total logic, `is_component_of`),
+# `property_locations.building_value` and `inland_marine_items.value`
+# (per-ITEM values, which belong to C1b's item-scope axis, not this filter) -
+# each a real false positive, found by running the scan and inspecting it
+# before trusting it. The selector that survives is FIELD NAME contains
+# "class" (both today's class-code schedules are named for exactly that) plus
+# whichever of ITS OWN columns are money-shaped
+# (`services.fact_equivalence._MONEY_TOKENS`, reused rather than re-invented).
+# A future `auto_class_schedule` or `cyber_class_codes` with a money column is
+# picked up automatically; nothing outside a class schedule ever is.
+def _discover_class_schedule_money_columns() -> Dict[str, Tuple[str, ...]]:
+    try:
+        from services.fact_equivalence import _MONEY_TOKENS
+        out: Dict[str, Tuple[str, ...]] = {}
+        for m in re.finditer(r'"(\w+)":\s*\[\{([^}]*)\}\]', _EXTRACT_SCHEMA):
+            field, body = m.group(1), m.group(2)
+            if "class" not in field.lower():
+                continue
+            cols = re.findall(r'"(\w+)":', body)
+            money_cols = tuple(
+                c for c in cols if set(c.lower().split("_")) & _MONEY_TOKENS)
+            if money_cols:
+                out[field] = money_cols
+        return out
+    except Exception:                                         # noqa: BLE001
+        return {}
+
+
+_CLASS_EXPOSURE_COLUMNS: Dict[str, Tuple[str, ...]] = (
+    _discover_class_schedule_money_columns())
 
 # Full verbose prompt — used for Claude / OpenAI paths where token budget is ample.
 _EXTRACT_PROMPT_PREFIX = (
@@ -562,6 +670,7 @@ _EXTRACT_PROMPT_PREFIX = (
     '  has_multiple_locations: true if document lists 2 or more distinct insured property addresses or locations.\n'
     '  has_loss_history: true if document contains a loss run, claims history table, prior claims, loss amounts, or any mention of paid/incurred/open claims.\n'
     '  asserts_no_known_losses: true ONLY if the document affirmatively states the insured has had NO prior or known losses/claims — judge this by MEANING, not exact wording. Set true for any clear paraphrase, e.g. "no known losses", "no prior losses", "loss-free", "claims-free", "clean loss history", "favorable loss experience with no claims", "no reported claims in the past N years", "the insured reports no losses". Set FALSE when the document merely discusses, lists, or summarizes losses/claims, when any actual claim (paid, incurred, reserved, or open) appears, or when loss history is simply absent/not mentioned. This is a no-loss ASSERTION, not the presence of loss data.\n'
+    '  asserts_no_subcontractors: true ONLY if the document affirmatively states the insured does NOT use subcontractors — judge this by MEANING, not exact wording. Set true for any clear paraphrase, e.g. "no subcontractors are used", "all work is performed by the insured\'s own employees", "the applicant does not subcontract any portion of its operations", "0% subcontracted". Set FALSE when the document merely discusses subcontractor insurance requirements (e.g. "subcontractors are required to carry their own coverage"), when a nonzero subcontracted percentage or cost appears, or when subcontracting is simply not mentioned. This is a no-subcontracting ASSERTION, not the absence of subcontractor cost data.\n'
     '  is_contractor: true only if the named INSURED\'s PRIMARY BUSINESS is a construction or installation contracting trade (general contractor, roofing contractor, electrical, plumbing, excavation, demolition contractor, etc.). Do NOT set true if construction trades are only mentioned in loss history, claims descriptions, operations of a third party, or as endorsement requirements listed for certificate holders.\n'
     '  has_certificate_request: true if document contains language requesting issuance of a certificate of insurance, lists a certificate holder, or shows "certificate required".\n'
     '  is_certificate_doc: true if the document IS itself an ACORD 25 Certificate of Liability Insurance or ACORD 28 Evidence of Property — identifiable by "Certificate of Liability Insurance" or "Evidence of Commercial Property Insurance" as the document title.\n'
@@ -2489,7 +2598,12 @@ def _reconcile_total_premium(merged_facts: dict, candidates: Dict[str, dict]) ->
         str(chosen_val)[:40], f"{largest:,}", best["display"][:40],
         "matches the sum of the lines" if exact else "best-scored valid candidate",
     )
-    merged_facts["total_policy_premium"] = best["record"]
+    _rec = best["record"]
+    if isinstance(_rec, dict) and "value" in _rec:
+        # V1 plan C1 F11 (client 1.4 "Derived"): chosen by arithmetic over
+        # the granted lines, not read off one label - say so on the envelope.
+        _rec = dict(_rec, evidence_state="derived")
+    merged_facts["total_policy_premium"] = _rec
 
 
 def _score_composite_candidate(cand_text: str, child_candidates: Dict[str, dict]) -> tuple:
@@ -2886,11 +3000,56 @@ def _natural_id_keys(item: dict) -> List[str]:
     return keys
 
 
+def _coverage_line_dedup_keys(item: dict) -> List[str]:
+    """Identity of ONE coverage-line row: the LINE plus the CONTRACT covering it.
+
+    Needed because `_natural_id_keys` finds nothing on these rows (no VIN, no
+    licence number), so every printing of the same coverage part would survive
+    the union as its own row - the GL part alone is printed on the dec page, the
+    certificate, the second dec page and the loss run.
+
+    NEITHER HALF WORKS ALONE, and both failures are recorded above:
+      * policy number alone - the comment on `_NATURAL_ID_SUBKEYS` measured
+        `BBC7263-26` legitimately carrying both Commercial General Liability AND
+        Employee Benefits Liability. Keying on the number would fold two real
+        coverage parts into one.
+      * line alone - that is the D-1 defect (2026-08-23). EMC's GL
+        `BBC7263-26` and Travelers' GL `GL-4471102-26` are two different
+        policies on the same line, and collapsing them is precisely what hid a
+        real conflict from the producer.
+
+    So identity is the PAIR. Same line + same contract = one row printed twice.
+    Same line + different contract = two policies, both kept, which is what
+    lets the scope logic say "two policies on the same coverage line".
+
+    No policy number falls back to the line + the carrier's strict key: a
+    certificate row often omits the number, and (GL, EMC) is still enough to
+    recognise it as the dec page's GL row rather than a second policy. A row
+    with no canonical line at all gets NO key and is never merged - the same
+    positive-evidence rule the rest of this module follows.
+    """
+    line = _canon_line(item.get("line") or item.get("line_of_business"))
+    if not line:
+        return []
+    pol = re.sub(r"[^0-9A-Za-z]", "", str(item.get("policy_number") or "")).upper()
+    if len(pol) >= _NATURAL_ID_MIN_CHARS:
+        return [f"coverage_line:{line}:{pol}"]
+    try:
+        from services.normalization import strict_entity_key
+        car = strict_entity_key(item.get("carrier") or item.get("carrier_name") or "")
+    except Exception:                                     # noqa: BLE001
+        car = ""
+    if car:
+        return [f"coverage_line:{line}:carrier:{car}"]
+    return []
+
+
 # Bespoke key functions, for schedules needing MORE than the generic identifier
 # scan (auto_drivers also matches on name+dob so a row missing its licence
 # number still merges). Every other schedule uses _natural_id_keys.
 _SCHEDULE_DEDUP_KEYS: Dict[str, Any] = {
     "auto_drivers": _driver_dedup_keys,
+    "coverage_lines": _coverage_line_dedup_keys,
 }
 
 
@@ -4152,8 +4311,32 @@ def _count_claims_from_text(text: str) -> int:
 #
 # Set DEC_INDEX_DEDICATED_PASS=0 to disable and fall back to whatever the main
 # extraction happened to record.
+#
+# ── OFF BY DEFAULT SINCE 2026-08-23, ON MEASUREMENT NOT OPINION ──────────────
+# The pass ran end to end for the first time that day (a key-path bug had been
+# discarding its output since the day it shipped - see LLMcall1-promptChange.md
+# §31). With it finally working, the A/B was decisive and it lost:
+#
+#   cost   ~593,000 output tokens across 39 calls, against ~30,000 for the
+#          WHOLE of facts+flags. Roughly 20x the rest of extraction combined.
+#   time   18-20 minutes added to every cold upload.
+#   gain   the owner regenerated the ACORD forms and reported them "almost the
+#          same" as the ones the ~250-entry main-pass index had produced.
+#
+# The main extraction's own `dec_page_entries` key is restored and does the job
+# as a passenger on a call that is already happening, at no extra cost - which
+# is what every deterministic consumer (`_backfill_empty_facts_from_entries`,
+# `_carriers_by_line`, `_resolve_section_policy_identity`, the payroll flag, the
+# text-selection rescue) has actually run on for months.
+#
+# DISABLED RATHER THAN DELETED, deliberately. The machinery is measured and
+# correct - bounded concurrency, split-on-truncation, label-aware Stage A
+# packing - and the one configuration never tried on a form is the FILTERED
+# index (1,341 entries, 17% of the document, one Stage A call). Deleting it
+# would throw that away along with its tests. `DEC_INDEX_DEDICATED_PASS=1`
+# turns it back on for an experiment; nothing calls it otherwise.
 _DEC_INDEX_DEDICATED_PASS = os.getenv(
-    "DEC_INDEX_DEDICATED_PASS", "1").strip().lower() not in ("0", "false", "no")
+    "DEC_INDEX_DEDICATED_PASS", "0").strip().lower() not in ("0", "false", "no")
 _DEC_INDEX_MIN_AUTHORITY = float(os.getenv("DEC_INDEX_MIN_AUTHORITY", "0.25"))
 # EVERY chunk that clears the authority bar is indexed - the owner's stated
 # requirement (2026-08-14) is FULL declarations coverage, the authority gate is
@@ -4163,9 +4346,76 @@ _DEC_INDEX_MIN_AUTHORITY = float(os.getenv("DEC_INDEX_MIN_AUTHORITY", "0.25"))
 # >0 restores a hard cap as an emergency valve; when it trims, it WARNS with
 # what it cost, so it can never be silent again.
 _DEC_INDEX_MAX_CHUNKS = int(os.getenv("DEC_INDEX_MAX_CHUNKS", "0"))
-# One job, so the whole reply budget is the index. A dense dec page can
-# carry 40+ entries at ~35 tokens each; 16,000 holds several such pages.
-_DEC_INDEX_MAX_TOKENS = int(os.getenv("DEC_INDEX_MAX_TOKENS", "16000"))
+# ── Output cap: a RUNAWAY GUARD, never the mechanism (2026-08-23) ────────────
+# RAISED 16,000 -> 50,000 on measurement. The 13-key atomic schema costs ~86
+# output tokens per entry against ~51 for the old 6-key one, and a 7,835-char
+# fixture hit the 16,000 cap EXACTLY and was still cut off mid-object
+# (`out=16000` in LLM_SPEND, 187 entries salvaged from a reply that wanted
+# more). Every real chunk was therefore being truncated on every call.
+#
+# RAISING THIS DOES NOT RAISE THE BILL: output is billed on what the model
+# actually writes, so the cap only decides where the text is severed. The model
+# allows 128,000, so 50,000 keeps 2.5x headroom and still stops a looping model
+# from writing forever and hanging the request. Do not remove it.
+#
+# It is NOT what guarantees a complete reply - `_DEC_INDEX_CHUNK_CHARS` is.
+_DEC_INDEX_MAX_TOKENS = int(os.getenv("DEC_INDEX_MAX_TOKENS", "50000"))
+
+# ── THE MECHANISM: bound the INPUT so the output is predictable ──────────────
+# Measured on the 5_complex_tables fixture: 7,835 chars of declarations text
+# produced >16,000 output tokens - over 2 output tokens per input character.
+# The extraction chunk the router hands us is ~56,000 chars, which projects to
+# ~114,000 output tokens: 89% of the model's ABSOLUTE 128,000 output ceiling,
+# with no margin. That is unshippable, and no cap value fixes it - the reply
+# simply cannot fit.
+#
+# The context WINDOW (400,000 tokens) is not the constraint here; the OUTPUT
+# ceiling is, and it is a different and much smaller number. Input size is the
+# only lever that moves output size, so the index pass re-splits its chunks:
+# 15,000 chars projects to ~31,000 output tokens, comfortably inside the cap.
+#
+# Cost of splitting is small and worth naming: the total OUTPUT is unchanged
+# (same document, same entries, just divided differently) and output is the
+# expensive half. The extra cost is re-sending the instruction prefix, which
+# runs at a measured 94% cache hit. More calls, same answer, no truncation.
+#
+# SIZED FROM A TIMED CALL, not from the cap alone (2026-08-23). One measured
+# call: 7,907 chars in -> 21,672 output tokens in 89.2s = 243 tokens/sec. So a
+# piece projects to ~2.05 output tokens per input char, and the two ceilings a
+# piece must clear are the 50,000-token cap AND the 300s request timeout:
+#     22,000 chars -> ~45,000 tokens -> ~185s   both cleared, with margin
+#     15,000 chars -> ~31,000 tokens -> ~128s   safe but needlessly small
+# 15,000 was the first cut and it was over-cautious: it turned a 13-chunk
+# package into 47 calls and, at the pool size then in force, roughly half an
+# hour of wall clock. 22,000 is the largest piece that still clears both
+# ceilings, and it cuts the call count by a third.
+_DEC_INDEX_CHUNK_CHARS = int(os.getenv("DEC_INDEX_CHUNK_CHARS", "22000"))
+
+# ── Concurrency: THE bug that made this pass look broken ─────────────────────
+# The pass used to fire every eligible chunk at once through a bare
+# `asyncio.gather`, with no pacing of its own - unlike the main extraction,
+# which has always used an adaptive semaphore. With the v3 prompt every call
+# runs to the output cap, so 14 maximal calls launched together put roughly
+# half a million tokens into one burst against a 200k TPM ceiling. The 429s
+# exhausted all five retry attempts (~15s of backoff), every call raised, every
+# error was swallowed into [], and the index came back built entirely by the
+# main pass. That is the "my prompt did nothing" report.
+#
+# 3, AND MEASURED THIS TIME. It was briefly raised to 6 to claw back the wave
+# count, which was a second blind tune - the TPM arithmetic says 6 does not fit:
+#   one real call, measured: in=13,798  out=9,820  in 41s
+#   = 23,618 tokens / 41s = ~35,000 tokens per minute PER CALL
+#   pool 6 -> ~210,000 TPM, over the 200,000 ceiling before anything else runs
+#   pool 3 -> ~105,000 TPM, with room for the main extraction beside it
+# Wave count is the wrong thing to optimise while the pass is still indexing the
+# WHOLE document; the fix for that is the authority gate, not more parallelism
+# (see LLMcall1-promptChange.md §22).
+_DEC_INDEX_POOL = max(1, int(os.getenv("DEC_INDEX_POOL", "3")))
+
+# How many times a truncated reply may be split in half and retried before the
+# salvage fallback takes over. 3 turns one 15,000-char piece into eight ~1,900-
+# char pieces, which no realistic declarations page can overflow.
+_DEC_INDEX_SPLIT_RETRIES = int(os.getenv("DEC_INDEX_SPLIT_RETRIES", "3"))
 
 # PURPOSE FIRST, RULES SECOND (2026-08-16). The previous version opened with
 # "you have exactly one job: list every label:value pair" and then governed
@@ -4211,53 +4461,18 @@ _DEC_INDEX_MAX_TOKENS = int(os.getenv("DEC_INDEX_MAX_TOKENS", "16000"))
 # a dozen inland-marine sub-limits labelled with the same row id collapsed 80
 # entries into 26, and a paraphrased heading cost 17 entries their section. If
 # you reword this prompt, run those two files before anything else.
-_DEC_INDEX_SYSTEM_PROMPT = (
-    "WHAT YOU ARE BUILDING AND WHY\n"
-    "This index is the evidence base for automatically filling ACORD insurance "
-    "forms. Downstream code never re-reads the document: it reads your entries, "
-    "joins them on their keys, and stamps the values into named boxes.\n\n"
-    "WHAT MUST SURVIVE INTO EVERY ENTRY\n"
-    "  * a value stays attached to its own policy and coverage part\n"
-    "  * a carrier stays attached to its own policy, never another's\n"
-    "  * an amount stays attached to what it MEASURES\n"
-    "  * a figure stays attached to the party it is about\n"
-    "If you cannot establish one of these, say so with null. A null key is "
-    "recoverable; a confident wrong key is not.\n\n"
-    "Return JSON: {\"dec_page_entries\": [{\"label\": string, \"value\": string, "
-    "\"section\": string or null, \"owner\": "
-    "\"applicant\"|\"producer\"|\"carrier\"|\"policy\"|\"other\", "
-    "\"policy_number\": string or null, \"line_of_business\": string or null}]}\n\n"
-    "THE FIELDS ARE TWO DIFFERENT JOBS.\n"
-    "  * label, value, section are EVIDENCE - copied verbatim. A later step "
-    "discards any entry whose text is not literally in the document, so cleaning "
-    "up a value destroys it.\n"
-    "  * owner, policy_number, line_of_business are KEYS - what the joins run "
-    "on. They say which party, which contract and which coverage part an entry "
-    "belongs to. Keep them consistent across entries that share them.\n\n"
-    "RULES\n"
-    "1. RECORD EVERYTHING - BE EXHAUSTIVE. This is not a judgment call and never "
-    "becomes one. Every premium, limit, deductible, date, code, identifier, "
-    "address, phone, name, percentage, valuation and coverage line - including "
-    "EVERY numeric column of every row in a rating or class table (rate, factor, "
-    "exposure, cost new, per-row premium), not just the identity columns. A page "
-    "with forty printed values must return forty entries. You do not know which "
-    "forms will be selected, so never skip a value because you cannot see a box "
-    "for it. Under-reporting is the failure mode this pass exists to fix; your "
-    "judgment applies to how an entry is ATTRIBUTED, never to whether it is "
-    "worth recording.\n"
-    "2. COPY label and value VERBATIM as printed. Do not normalise, expand an "
-    "abbreviation, reformat a number or fix a typo. An entry that is not "
-    "literally in the text is discarded, so a paraphrase is a wasted entry. The "
-    "label NAMES the value and is never part of it.\n"
-    "3. 'No Coverage', 'Included', 'Waived', 'Not Applicable' are VALUES. "
-    "Record them - a line the policy declines to cover is data.\n"
-    "4. section = the heading printed at the top of the page the entry appears "
-    "on, copied verbatim (e.g. 'COMMERCIAL UMBRELLA DECLARATIONS'). Copy the "
-    "heading EXACTLY as printed - never shorten, reorder or reword it (write "
-    "'COMMERCIAL LIABILITY UMBRELLA DECLARATIONS' if that is what the page "
-    "prints, not your own paraphrase - a reworded heading is discarded). This "
-    "is the only thing that says which coverage part a figure belongs to: two "
-    "parts print the identical label with different amounts.\n"
+# EXPERIMENT 2026-08-22 (owner): the prompt below replaces the 12-rule version
+# wholesale to measure a structured-entry schema (kind / row / page, worked
+# examples, block-by-block procedure). NOTHING ELSE CHANGED in this commit -
+# `_verify_dec_entries` still whitelists the original six keys and still drops
+# any entry whose label is empty, so `kind`/`row`/`page` and every
+# label-null entry are visible ONLY in the per-document raw copies
+# (documents[].facts.dec_page_entries), not in the merged index. Read the
+# per-doc copies to judge the experiment; read the merged index to judge what
+# call 2 saw. The history notes that used to sit inline in the old constant
+# are preserved verbatim below; every measurement they record still stands.
+#
+# ---- history notes relocated from the previous constant ----
     # REVERTED to the pre-2026-08-16 wording, measured. The rewrite added
     # "never split one printed fact into two entries" immediately before the
     # 'Payroll $39,300' example, and the model read "do not split" as "collapse
@@ -4267,16 +4482,6 @@ _DEC_INDEX_SYSTEM_PROMPT = (
     # gone from the index. The original text below is imperfect (the model still
     # emits basis and amount as two entries) but it PRESERVES BOTH VALUES, and a
     # recorded pair beats a tidy single entry with the number missing.
-    "5. TABLES: one entry PER printed cell. label = the caption printed for "
-    "THAT value - the column heading and/or the row's own name (the coverage "
-    "name, class code or location number), as printed. NEVER label several "
-    "different cells with only a shared row identifier (their labels must "
-    "differ exactly as the printed captions differ - 'CATASTROPHE LIMIT' and "
-    "'JOBSITE LIMIT' are two labels, not one row id twice), and NEVER "
-    "concatenate two cells into one value: a class code and its "
-    "classification wording are TWO entries, and a basis word printed beside "
-    "an amount ('Payroll $39,300') is the amount's LABEL, not a separate "
-    "entry. A joined value is not literally printed anywhere and is "
     # REVERTED 2026-08-16 (C60). An example was appended here asking the model
     # to split a captionless run of figures - `COVERED AUTOS LIABILITY:
     # '01 $ 1,000,000 .$ 1,496.00'` - into symbol / limit / premium. Run
@@ -4289,11 +4494,15 @@ _DEC_INDEX_SYSTEM_PROMPT = (
     # limits have their own facts. Cost is a little Stage A retrieval quality on
     # those boxes; no value and no relationship is lost. Do not retry this in the
     # prompt - splitting a rating row positionally is C46's phantom-row pattern.
-    "discarded.\n"
-    "6. Record NOTHING from policy wording, endorsement legal text, exclusions, "
-    "definitions or hypothetical examples. Declarations and schedules only - "
-    "that text describes what coverage WOULD mean, not what this policy "
-    "grants.\n"
+    # 6b ADDED 2026-08-22, and it is the one new rule the VERIFIER CANNOT
+    # ENFORCE. In "SECTION III - LIMITS OF INSURANCE = 10" both halves are
+    # literally printed, so `_verify_dec_entries` passes the entry, and the
+    # index then offers a bare 10 to anything looking for a limit. A table of
+    # contents is the one page shape whose label:value pairs are structurally
+    # real and semantically empty, so the prompt is the only layer that can
+    # refuse it. 6a is the pre-existing rule, unchanged in meaning, with the
+    # endorsement case stated: a schedule block filled in with this insured's
+    # own values is declarations content wherever it is printed.
     # SCOPED 2026-08-16 after a measured regression. The first wording was the
     # general instruction "Give the value the caption printed above or beside
     # it", which is a second, competing theory of what a label IS - and on a
@@ -4306,12 +4515,6 @@ _DEC_INDEX_SYSTEM_PROMPT = (
     # in all seven before. Rule 5 was byte-identical across that change and was
     # wrongly blamed first. Now rule 7 states its one case and yields explicitly,
     # so the two can no longer disagree about the same cell.
-    "7. If an entry's label would be the SAME TEXT as its value, it records "
-    "nothing - give it the caption printed above or beside that value, or omit "
-    "it. That identical-text case is the ONLY thing this rule covers. In a "
-    "rating or class table, rule 5 already decides which cell is the label and "
-    "rule 5 wins: a basis word beside an amount labels THAT AMOUNT, and the "
-    "amount must still be recorded.\n"
     # RULES 8 AND 9 WERE HERE AND ARE DELETED, on measurement, not opinion.
     # They asked the model to emit ONE canonical policy number per contract and
     # to map line names onto a fixed vocabulary. Re-running the same package:
@@ -4323,14 +4526,519 @@ _DEC_INDEX_SYSTEM_PROMPT = (
     # made both metrics WORSE. Canonicalising a join key is deterministic work
     # and now happens in `_canonicalise_dec_entry_keys` after verification,
     # where it can be proven. Do not reinstate them here.
-    "8. owner - who the value is ABOUT, not who printed it, and the same for "
-    "every page that item appears on. applicant = the insured. producer = the "
-    "agency or broker. carrier = the insurance company (including its "
-    "claim-reporting and servicing numbers). policy = the contract itself - "
-    "numbers, terms, limits, deductibles, premiums, coverages, schedules. "
-    "other = a third party such as a mortgagee or loss payee.\n"
-    "9. If this text contains no declarations content, return an empty list."
-)
+    # RULES 9-11 ADDED 2026-08-22, NUMBERED AFTER 8 SO NOTHING ABOVE MOVES.
+    # Rule 7 cites "rule 5 wins" by number and
+    # tests/test_dec_entry_key_canonicalisation.py pins that phrase - renumber
+    # the rules above and the citation points at the wrong rule.
+    #
+    # 9 IS THE ONE WITH MEASURED UPSIDE. `_carriers_by_line` pairs a carrier
+    # with its NAIC out of ONE entry (FIX_TRACKING_2026-08-15, RC1) and starves
+    # when the carrier name was never recorded at all - the normal case, because
+    # a dec page prints the company name as a captionless header above the
+    # section heading. The LABEL FALLBACK CHAIN is written this way on purpose:
+    # `_verify_dec_entries` requires the LABEL to be literally present in the
+    # document, so a made-up 'Carrier' caption would be dropped and would take
+    # the carrier name down with it. Every step of the chain is text the page
+    # actually prints.
+    #
+    # 10 and 11 close two label/value inversions seen on real packages: an
+    # address line arriving as the caption of the next address line, and a
+    # forms-and-endorsements list where each form number labelled itself
+    # (rule 14's identical-text case, one level up - those entries record
+    # nothing and crowd out the DEC_ENTRY_MAX budget).
+    #
+    # DELIBERATELY NOT ADDED, all three measured or verified first:
+    #   - a `page` key: `_verify_dec_entries` rebuilds every kept entry from a
+    #     fixed six-key whitelist, so it would never reach a consumer.
+    #   - page-scoped policy_number ("only from the same page"): the
+    #     [Document page N] markers exist only when the document has >1 page and
+    #     the page has content (ocr_service `_PAGE_MARKERS_ON`), and chunking
+    #     cuts mid-page, so the entries at the top of every chunk would be
+    #     forced to null - starving `_policy_numbers_by_line`, which is what the
+    #     2026-08-15 section-identity fix runs on. The borrowed-number defect it
+    #     targets is already handled after verification by
+    #     `_entry_self_attributes_its_own_identifier`, the ISO form-number clear
+    #     and the printed-as-a-policy-number invariant.
+    #   - a fixed line_of_business vocabulary: that is deleted rule 9. See the
+    #     comment above rule 8 - it was measured making both metrics worse.
+_DEC_INDEX_SYSTEM_PROMPT = """WHAT YOU ARE BUILDING AND WHY
+You are building a structured index of every printed datum in an insurance document. It is the evidence base for automatically filling insurance forms. Downstream code never re-reads the document: it reads your entries, joins them on their keys, and stamps the values into named boxes.
+
+You do NOT know which form will be selected. Different forms ask for different things under different names, at different depths. A form field name is a PATH - 'PriorCoverage / GeneralLiability / TotalPremiumAmount / instance A' - not a flat name. So you never decide what matters and you never guess a form's vocabulary. You record every printed datum as its own ATOMIC entry, wrapped in the printed hierarchy it sits inside, so that any form's path can find it later.
+
+Two failures end this pass:
+  * A printed value you did not record. Nothing downstream can tell it is missing.
+  * A value welded to its neighbour, or filed under a heading instead of its own caption. It is present but unfindable.
+Both are worse than a null key. A null key is repairable.
+
+YOUR INPUT
+A page-ordered text extract. Two markers structure it:
+  [Document page N]                      every line after this is printed on page N
+  [Table - page N ...] ... [End table]   a reconstructed table; cells separated by |
+
+================================================================================
+OUTPUT SCHEMA
+================================================================================
+Return exactly:
+
+{"dec_page_entries": [{
+  "id":               integer,
+  "page":             integer,
+  "kind":             "kv" | "standalone" | "heading" | "statement" | "footer" | "index",
+  "path":             [string],
+  "row":              string | null,
+  "col":              string | null,
+  "label":            string | null,
+  "value":            string,
+  "value_type":       "money" | "date" | "percent" | "number" | "code" | "phone" | "address" | "name" | "status" | "text",
+  "qualifiers":       [string],
+  "owner":            "applicant" | "producer" | "carrier" | "policy" | "other",
+  "policy_number":    string | null,
+  "line_of_business": string | null
+}]}
+
+EVERY field appears on EVERY entry. Use null or [] - never omit a key.
+id is sequential from 1, in printed order.
+
+THE FIELDS DO FOUR DIFFERENT JOBS.
+
+  EVIDENCE - label, value. Copied verbatim, and ATOMIC. A later step discards any entry
+  whose text is not literally in the document, so tidying a value destroys it.
+
+  LOCATION - path, row, col. The printed hierarchy this value sits inside. Together with
+  label they form the address a form field is matched against. This is what lets a form
+  you have never seen find its answer.
+
+  STRUCTURE - id, page, kind, value_type, qualifiers. What shape the printed thing is,
+  where it sits, what type of datum it is, and what narrows it.
+
+  KEYS - owner, policy_number, line_of_business. Which party, which contract, which
+  coverage part. The joins run on these. Keep them identical across entries that share
+  them; one spelling variant means the two never join.
+
+SOME FIELDS ARE OPEN, SOME ARE CLOSED. This matters.
+  OPEN   - path, label, row, col, qualifiers. No fixed vocabulary. YOU decide the words,
+           taken from what the page actually prints. Depth is yours to choose. Use them.
+  CLOSED - kind, value_type, owner, line_of_business. Fixed lists below. Never invent a
+           new member, never abbreviate one.
+
+================================================================================
+RULES
+================================================================================
+
+1. RECORD EVERYTHING. BE EXHAUSTIVE.
+   This is not a judgment call and never becomes one. Every premium, limit, deductible,
+   date, code, identifier, address, phone, name, percentage, valuation, coverage line,
+   status word - including EVERY numeric column of EVERY row in a rating or class table
+   (rate, factor, exposure, cost new, per-row premium), not just the identity columns.
+   A page printing forty values returns forty entries.
+   Never skip a value because you cannot see a box for it. You do not know the form.
+   Your judgment applies to how an entry is DECOMPOSED and ATTRIBUTED - never to whether
+   it is worth recording.
+
+2. ONE ENTRY = ONE ATOMIC DATUM. THE SPLIT TEST.
+   A value is ONE thing: one amount, one date, one code, one name, one phrase, one status.
+   Before writing a value, ask: can I draw a line inside this text where one side NAMES
+   and the other side MEASURES? If yes, the naming side is the label, the measuring side
+   is the value.
+       WRONG   label:"SUPPLEMENTAL COVERAGES"  value:"POLLUTANT CLEANUP AND REMOVAL $ 25,000"
+       RIGHT   path:["SUPPLEMENTAL COVERAGES"] label:"POLLUTANT CLEANUP AND REMOVAL" value:"$ 25,000"
+   If the text holds TWO measured amounts, it is TWO entries:
+       WRONG   value:"Virus and Hacking Limit any one occurrence $ 5,000 Limit each separate 12 month period $ 10,000"
+       RIGHT   label:"Virus and Hacking Limit any one occurrence"  value:"$ 5,000"
+               label:"Virus and Hacking Limit each separate 12 month period" value:"$ 10,000"
+   A code and its wording are two entries: "91585 Contrctrs-sub work..." is a Code No.
+   entry AND a Classification entry, never one.
+   The ONLY value permitted to span multiple printed lines is a postal address (rule 15).
+   A welded value is not literally printed as a unit, so it is discarded downstream.
+   Splitting is not optional.
+
+3. A HEADING IS NEVER A LABEL. IT IS A PATH SEGMENT.
+   This is the most common and most damaging failure.
+   When a heading stands above a list, block or column of items - 'LIMITS',
+   'SUPPLEMENTAL COVERAGES', 'COVERAGE EXTENSIONS', 'DEDUCTIBLES', 'COVERAGES PROVIDED',
+   'SCHEDULE OF UNDERLYING INSURANCE' - that heading goes in `path`. It NEVER goes in
+   `label`. Each item printed under it carries its own caption. THAT is the label.
+
+   path = the chain of headings enclosing this entry, OUTERMOST first, each verbatim.
+       ["COMMERCIAL INLAND MARINE SCHEDULE", "SUPPLEMENTAL COVERAGES"]
+       ["ITEM TWO: SCHEDULE OF COVERAGES AND COVERED AUTOS"]
+       ["General Liability Declarations", "Limits of Insurance"]
+   Depth is whatever the page prints - one level, three levels, or none ([] on a page
+   with no heading at all). Do not pad it and do not flatten it.
+   Copy each segment EXACTLY as printed. Never shorten, reorder or reword. A reworded
+   heading joins to nothing.
+   Record every heading ONCE as its own entry with kind "heading", then keep recording
+   the block beneath it with that heading appended to path.
+
+   DETECTION: if more than three entries on one page share a label, you have used a
+   heading as a label. Go back and read each item's own caption.
+
+4. COPY label AND value VERBATIM.
+   Do not normalise, expand an abbreviation, reformat a number, strip a currency symbol,
+   pad a date or fix a typo. Downstream code normalises; you do not.
+   The label NAMES the value and is never part of it.
+
+5. TABLES: ONE ENTRY PER PRINTED CELL, CARRYING row AND col.
+   row = the printed identifier of the row, verbatim - class code, vehicle number, driver
+   number, location number, item number, claim date, coverage name, whichever the table
+   prints as that row's own name. If a row prints no identifier of its own, use the text
+   of its first printed cell. Every cell of one row carries the SAME row string, spelled
+   identically.
+   col = the column header printed above that cell, verbatim. Every cell down one column
+   carries the same col.
+   label = the caption for THAT cell. Normally identical to col; where a row-level caption
+   is what names it, use that instead.
+   NEVER label several different cells with only the shared row identifier.
+   NEVER weld two cells into one value.
+   A basis word printed beside an amount ('Payroll $39,300') is that amount's LABEL, not
+   a separate entry - and the amount must still be recorded.
+   row + col is what lets a RATE be joined back to its class code when four rows each
+   print a RATE. Without both, four entries labelled 'Rate' are indistinguishable, and two
+   rows printing the same rate collapse into one.
+   An entry not inside a table carries row null and col null.
+
+6. qualifiers - WHAT NARROWS THIS VALUE. OPEN VOCABULARY. THINK HERE.
+   Insurance values are almost never bare: the same caption carries different amounts
+   depending on a peril, a basis, a location, a period, a trigger, a sub-limit tier. Those
+   narrowing words are printed on the page, and if you leave them inside `value` the value
+   is unusable, but if you drop them the entries become indistinguishable.
+   Put each narrowing term in `qualifiers`, verbatim, one per element.
+       'EARTHQUAKE "AGGREGATE" LIMIT $15,000'
+           label:"LIMIT" value:"$ 15,000" qualifiers:["EARTHQUAKE","AGGREGATE"]
+       'DEDUCTIBLE - "FLOOD"  NOT COVERED'
+           label:"DEDUCTIBLE" value:"NOT COVERED" qualifiers:["FLOOD"]
+       'Each Occurrence Limit $1,000,000'
+           label:"Each Occurrence Limit" value:"$1,000,000" qualifiers:["Each Occurrence"]
+   Typical qualifiers: a peril (EARTHQUAKE, FLOOD, SEWER BACKUP, WIND), a trigger
+   (per occurrence, aggregate, catastrophe, jobsite, any one item), a basis (Payroll,
+   Total Cost, Gross Sales), a period (12 month period, annual), a scope (per location,
+   per vehicle, scheduled, unscheduled, blanket), a condition (ACV, Replacement Cost,
+   80% coinsurance, waiting period).
+   You are not choosing from a list. Take the words the page prints. Empty list is fine
+   when nothing narrows the value.
+   qualifiers NEVER replace the label and never replace path. The label still names the
+   thing; qualifiers say which flavour of it this is.
+
+7. kind - EVERY PRINTED LINE ENDS UP IN EXACTLY ONE.
+   "kv"          a caption and its atomic value.  'Each Occurrence Limit' / '$1,000,000'
+   "standalone"  a printed value with NO caption anywhere near it. label null.
+                 'DIRECT BILL' printed alone in a declarations block. A carrier name
+                 printed above the masthead with no caption.
+   "heading"     a heading or sub-heading naming the block beneath it. label null,
+                 value = the heading text. A column header row inside a table is also
+                 "heading". Record it AND keep recording the block under it.
+   "statement"   a sentence stating something about THIS policy. label null.
+                 'See attached schedule for location of all premises owned, rented or
+                 occupied.' It is not policy wording - it states a fact about this
+                 contract and tells a later step that a premises schedule exists.
+   "footer"      the form line at the foot of a page, carrying form number, edition date,
+                 effective date and policy number on one line. label null, value = whole
+                 line as printed.
+   "index"       a line from a table of contents, quick reference or form index (rule 9b).
+                 label null.
+   NEVER drop a printed line because it does not look like a caption and a value.
+
+8. value_type - CLOSED LIST. Pick the shape of the value as printed.
+   money    an amount of currency, however printed: '$ 25,000', '1,496.00', '$0'
+   date     a date or a date range: '07/15/2025', '07/15/26-07/15/27', '08-99'
+   percent  '80%', '30%'
+   number   a bare number that is not currency: a rate '3.4240', a count, a factor, hours
+   code     an identifier: class code '91585', form number 'CG 00 01 04 13', policy number,
+            VIN, NAIC, SIC, account number, location number
+   phone    a telephone or fax number
+   address  a postal address (rule 15)
+   name     a person's or company's name
+   status   a coverage disposition: 'No Coverage', 'NOT COVERED', 'COVERED', 'Included',
+            'Excluded', 'Waived', 'Not Applicable', 'None', 'Closed', 'Open', 'DIRECT BILL'
+   text     anything else - a classification wording, a description, a sentence, a heading
+
+9. SCOPE.
+   a. OUT OF SCOPE - record nothing. Policy wording, coverage forms, endorsement legal
+      text, exclusions, definitions, conditions and hypothetical examples. That text
+      describes what coverage WOULD mean, not what this policy grants.
+      An endorsement page is in scope ONLY where it prints a schedule block filled in with
+      this insured's own values: record that block and nothing else on the page.
+      This is the ONLY thing you drop. A certificate's coverages table, an application's
+      answers, a quote's or binder's terms, and a loss run's claim rows are all this
+      insured's own values and are all IN SCOPE.
+   b. TAGGED, NOT DROPPED. Tables of contents, quick-reference pages and form indexes.
+      A page listing section or coverage names against small integers is an index, and
+      those integers are page numbers, not values - stamping '10' into a limits box is a
+      real danger. Record its lines with kind "index", label null, value = the line as
+      printed, so downstream can filter them. NEVER turn an index line into a kv pair.
+
+10. NEVER EMIT label == value.
+    If the only text you have is the value itself, it is not a kv. Give it kind
+    "standalone" (or "index" per rule 9b) with label null.
+    An entry reading 'CG 00 01 04 13' = 'CG 00 01 04 13' records nothing and is discarded.
+    This rule covers the identical-text case only. Where rule 5 has already decided which
+    cell is the label, rule 5 wins.
+
+11. page = the number from the [Document page N] marker the entry appears under.
+    Never guess it, never carry it forward. Every entry has one.
+
+12. owner - WHO THE VALUE IS ABOUT, not who printed it. Same for every page it appears on.
+    applicant  the insured
+    producer   the agency or broker
+    carrier    the insurance company, including its claim-reporting and servicing numbers
+    policy     the contract itself - numbers, terms, limits, deductibles, premiums,
+               coverages, schedules
+    other      any third party
+    WHEN owner IS "other", THE LABEL MUST NAME WHICH KIND, copied from the page:
+    Mortgagee, Loss Payee, Lienholder, Trustee, Co-Owner, Registrant, Additional Insured,
+    Certificate Holder, Leaseback Owner, Employee As Lessor, Lender's Loss Payable,
+    Breach Of Warranty, Owner.
+    'other' with no kind named cannot be joined to any form box and is a wasted entry. If
+    the page prints the party but names no interest type, use kind "standalone" and let
+    path carry the printed heading - do not guess the type.
+
+13. line_of_business - CLOSED LIST, spelled exactly:
+       General Liability | Commercial Auto | Commercial Umbrella | Inland Marine
+       Property | Crime | Workers Compensation | Professional Liability
+       Cyber | Employment Practices Liability | Commercial Package
+    If the document names a coverage part not on this list, use the full name exactly as
+    the page prints it - never an abbreviation, never your own shortening. 'GL' one time
+    and 'General Liability' the next means the two never join.
+    Use null when the entry is not specific to one coverage part: an account number, the
+    insured's name, the producer's phone, a package-wide total.
+    This is the key the forms are filled from. It matters more than any other.
+
+14. A ROW'S OWN KEYS BEAT THE PAGE HEADER.
+    A page header's policy number belongs only to entries of that policy's own line.
+    When a table row names its own coverage line - a loss run's LINE column, an
+    underlying-insurance schedule's TYPE OF POLICY column, a premium summary's COVERAGE
+    PART column - that row's line_of_business is the ROW'S, and its policy_number is the
+    number printed FOR that line: on the row itself, or in a carrier-by-coverage-part
+    block. If the only number in sight is the header's and the header's line differs from
+    the row's, policy_number is null.
+    A common or package declarations page printing an account number and no policy number
+    describes the whole package: its entries carry policy_number null.
+
+15. A RESOLUTION BLOCK IS THE ANSWER KEY - NEVER SKIP IT.
+    Some pages print a block stating which carrier and which policy number belong to which
+    coverage part, headed 'CARRIER BY COVERAGE PART', 'SCHEDULE OF COVERAGE PARTS',
+    'SCHEDULE OF UNDERLYING INSURANCE' or similar. That block is the most valuable thing
+    on the page: it is what lets every other entry be keyed correctly. Record every line
+    of it as its own entry, and use it to fill policy_number and line_of_business on
+    entries elsewhere that would otherwise be null.
+
+16. THE CARRIER IS OFTEN PRINTED WITHOUT A LABEL, AND IS THE MOST-MISSED REQUIRED VALUE.
+    On most declarations pages the insurance company name is the first line on the page,
+    printed above the section heading, or set inside the box holding the policy number. It
+    carries no caption, so it is easily missed - and a coverage part whose carrier was
+    never recorded cannot be filled onto any form.
+    EVERY coverage part in this document must end with at least one entry whose owner is
+    "carrier" and whose value is a COMPANY NAME, value_type "name". A claim-reporting or
+    servicing PHONE NUMBER is not a carrier name and does not satisfy this.
+    Record it: value = the company name as printed, owner "carrier", line_of_business =
+    the coverage part of the page it appears on, policy_number = the number printed on
+    that same page. Caption printed beside it -> kind "kv" with that label. No caption
+    anywhere near it -> kind "standalone", label null.
+    A package may be written by several member companies of the same group. Two coverage
+    parts naming two different companies is normal and both must be recorded against their
+    own coverage part. Never assume one carrier writes the whole package.
+
+17. AN ADDRESS IS ONE VALUE, AND A NAME IS NOT PART OF IT.
+    A postal address printed across several lines is a single value: join the lines with a
+    single space, in printed order, value_type "address". Downstream code splits it into
+    street, city, state and postal code - you do not.
+    A party's NAME and their ADDRESS are two entries: the name takes the printed caption
+    ('Named Insured', 'PRODUCER'), the address takes that caption plus 'Address'.
+    NEVER make one line of an address the label of another line - a street line is not the
+    caption of a city line. Never fold a name into an address block.
+
+18. A LIST OF FORM NUMBERS IS NOT A LIST OF label:value PAIRS.
+    Applicable-forms lists are worth recording, and are often printed as comma-separated
+    runs across several lines rather than as a table - record those too.
+    label = the caption printed above the list ('Forms Applicable', 'FORMS AND
+    ENDORSEMENTS', 'EDITION'), value = ONE form number per entry, with its edition date if
+    printed alongside.
+    Where a forms schedule prints a form number, a form date and a description across one
+    row, those are three entries sharing one row (rule 5) - never a FORM DATE entry
+    orphaned from the form number it belongs to.
+
+19. STATUS WORDS ARE VALUES.
+    'No Coverage', 'NOT COVERED', 'COVERED', 'Included', 'Waived', 'Not Applicable',
+    'None', 'Excluded' - record them, value_type "status". A line the policy declines to
+    cover is data, and it is often the finding a reviewer most needs.
+
+20. NEVER OMIT THESE, EVER.
+    A page's own premium, limit, deductible, policy number, carrier name, effective and
+    expiration date, class code, exposure, rate, claim amount, and every line marked
+    'No Coverage' must always produce an entry. If a keying rule makes one ambiguous,
+    record the entry and set the ambiguous KEY to null. Never resolve ambiguity by staying
+    silent.
+
+21. If this text contains nothing that states this insured's own values - no declarations,
+    schedule, certificate, application, quote, binder or loss-run content - return an
+    empty list.
+
+================================================================================
+WORKED EXAMPLES
+================================================================================
+
+A. A BLOCK UNDER A HEADING. The heading is PATH, never label. Printed on page 14, under
+   the page heading 'COMMERCIAL INLAND MARINE SCHEDULE':
+
+      SUPPLEMENTAL COVERAGES
+      POLLUTANT CLEANUP AND REMOVAL                     $ 25,000
+      RENTAL REIMBURSEMENT LIMIT                        $ 7,500
+      WAITING PERIOD                                    72 HRS
+      Virus and Hacking  Limit any one occurrence $ 5,000  Limit each separate 12 month period $ 10,000
+
+   SIX entries:
+   {id:41, page:14, kind:"heading", path:["COMMERCIAL INLAND MARINE SCHEDULE"],
+    label:null, value:"SUPPLEMENTAL COVERAGES", value_type:"text", qualifiers:[]}
+   {id:42, page:14, kind:"kv", path:["COMMERCIAL INLAND MARINE SCHEDULE","SUPPLEMENTAL COVERAGES"],
+    label:"POLLUTANT CLEANUP AND REMOVAL", value:"$ 25,000", value_type:"money", qualifiers:[]}
+   {id:43, ... label:"RENTAL REIMBURSEMENT LIMIT", value:"$ 7,500", value_type:"money", qualifiers:[]}
+   {id:44, ... label:"WAITING PERIOD", value:"72 HRS", value_type:"number", qualifiers:[]}
+   {id:45, ... label:"Virus and Hacking Limit", value:"$ 5,000",  value_type:"money", qualifiers:["any one occurrence"]}
+   {id:46, ... label:"Virus and Hacking Limit", value:"$ 10,000", value_type:"money", qualifiers:["each separate 12 month period"]}
+
+   NOT four entries all labelled "SUPPLEMENTAL COVERAGES" with the real caption buried
+   inside the value. That is the failure this rule exists to stop.
+
+B. A DEDUCTIBLE AND LIMIT BLOCK. Amount printed FIRST; the caption still names it, and the
+   peril is a qualifier. Printed under heading 'LIMITS':
+
+      $ 500        DEDUCTIBLE - EARTHQUAKE AND VOLCANIC ERUPTION
+      NOT COVERED  DEDUCTIBLE - "FLOOD"
+      $ 15,000     EARTHQUAKE "AGGREGATE" LIMIT
+      $ 15,000     EARTHQUAKE "OCCURRENCE" LIMIT
+      $ 15,000     EARTHQUAKE "CATASTROPHE" LIMIT
+
+   FIVE entries, all path [...,"LIMITS"], all label "DEDUCTIBLE" or "LIMIT", separated by
+   qualifiers - NOT five entries labelled "LIMITS":
+   {label:"DEDUCTIBLE", value:"$ 500",       value_type:"money",  qualifiers:["EARTHQUAKE AND VOLCANIC ERUPTION"]}
+   {label:"DEDUCTIBLE", value:"NOT COVERED", value_type:"status", qualifiers:["FLOOD"]}
+   {label:"LIMIT",      value:"$ 15,000",    value_type:"money",  qualifiers:["EARTHQUAKE","AGGREGATE"]}
+   {label:"LIMIT",      value:"$ 15,000",    value_type:"money",  qualifiers:["EARTHQUAKE","OCCURRENCE"]}
+   {label:"LIMIT",      value:"$ 15,000",    value_type:"money",  qualifiers:["EARTHQUAKE","CATASTROPHE"]}
+   Three identical amounts stay three distinguishable entries. Without qualifiers they
+   collapse into one.
+
+C. A CLASS-CODE RATING ROW. row = the class code, NOT the location. Printed:
+
+      Location 001 | 91585 | Contrctrs-sub work in connection w/construction | Payroll | $350,000 | 3.4240 | $1,198
+
+   SEVEN entries, every one carrying row "91585":
+   {row:"91585", col:"Location",       label:"Location",       value:"Location 001", value_type:"code"}
+   {row:"91585", col:"Code No.",       label:"Code No.",       value:"91585",        value_type:"code"}
+   {row:"91585", col:"Classification", label:"Classification", value:"Contrctrs-sub work in connection w/construction", value_type:"text"}
+   {row:"91585", col:"Prem Basis",     label:"Prem Basis",     value:"Payroll",      value_type:"text"}
+   {row:"91585", col:"Exposure",       label:"Exposure",       value:"$350,000",     value_type:"money", qualifiers:["Payroll"]}
+   {row:"91585", col:"Rate",           label:"Rate",           value:"3.4240",       value_type:"number"}
+   {row:"91585", col:"Advance Prem",   label:"Advance Prem",   value:"$1,198",       value_type:"money"}
+   The next row's Rate carries row "91580". Without row + col the two rates are
+   indistinguishable and the joins are guesswork.
+
+D. A CERTIFICATE COVERAGES ROW. Printed:
+
+      General Liability | BBC7263-26 | 07/15/26-07/15/27 | Each Occurrence $1,000,000
+                                                           General Aggregate $2,000,000
+
+   FOUR entries, every one row "General Liability", line_of_business "General Liability":
+   {row:"General Liability", col:"POLICY NUMBER", label:"POLICY NUMBER", value:"BBC7263-26",        value_type:"code"}
+   {row:"General Liability", col:"POLICY PERIOD", label:"POLICY PERIOD", value:"07/15/26-07/15/27", value_type:"date"}
+   {row:"General Liability", col:"LIMITS", label:"Each Occurrence",   value:"$1,000,000", value_type:"money", qualifiers:["Each Occurrence"]}
+   {row:"General Liability", col:"LIMITS", label:"General Aggregate", value:"$2,000,000", value_type:"money", qualifiers:["General Aggregate"]}
+
+E. A LOSS RUN CLAIM ROW, on a loss run headed 'Policy Number: 6E7 40 02 26'. Printed:
+
+      11/02/2022 | General Liability | Water damage to customer premises | $12,300 | $0 | Closed
+
+   FIVE entries, row "11/02/2022", line_of_business "General Liability" from the row's own
+   LINE column - and policy_number NULL, because 6E7 40 02 26 is the automobile policy and
+   this row names a different line (rule 14):
+   {row:"11/02/2022", col:"LINE",        label:"LINE",        value:"General Liability",  value_type:"text",   policy_number:null}
+   {row:"11/02/2022", col:"DESCRIPTION", label:"DESCRIPTION", value:"Water damage to customer premises", value_type:"text", policy_number:null}
+   {row:"11/02/2022", col:"PAID",        label:"PAID",        value:"$12,300",            value_type:"money",  policy_number:null}
+   {row:"11/02/2022", col:"RESERVED",    label:"RESERVED",    value:"$0",                 value_type:"money",  policy_number:null}
+   {row:"11/02/2022", col:"STATUS",      label:"STATUS",      value:"Closed",             value_type:"status", policy_number:null}
+
+F. A DECLARATIONS MASTHEAD. Not everything is a caption and a value. Printed:
+
+      EMC Property & Casualty Company
+      General Liability Declarations
+      DIRECT BILL
+      See attached schedule for location of all premises owned, rented or occupied.
+      Form CG7000A Ed. 08-99 07/15/2025 BBC7263 2601
+
+   The heading line becomes the first path segment for the page. Nothing is dropped:
+   {kind:"standalone", path:[], label:null, value:"EMC Property & Casualty Company",
+    value_type:"name", owner:"carrier", line_of_business:"General Liability"}
+   {kind:"heading",    path:[], label:null, value:"General Liability Declarations", value_type:"text"}
+   {kind:"standalone", path:["General Liability Declarations"], label:null,
+    value:"DIRECT BILL", value_type:"status", owner:"policy"}
+   {kind:"statement",  path:["General Liability Declarations"], label:null,
+    value:"See attached schedule for location of all premises owned, rented or occupied.", value_type:"text"}
+   {kind:"footer",     path:["General Liability Declarations"], label:null,
+    value:"Form CG7000A Ed. 08-99 07/15/2025 BBC7263 2601", value_type:"text"}
+
+G. A QUICK-REFERENCE / INDEX PAGE. Tagged, never turned into fake kv pairs. Printed:
+
+      COMMERCIAL GENERAL LIABILITY QUICK REFERENCE
+      CG 00 01 04 13
+      CG 21 06 12 23
+
+   {kind:"heading", label:null, value:"COMMERCIAL GENERAL LIABILITY QUICK REFERENCE", value_type:"text"}
+   {kind:"index",   path:["COMMERCIAL GENERAL LIABILITY QUICK REFERENCE"], label:null, value:"CG 00 01 04 13", value_type:"code"}
+   {kind:"index",   path:["COMMERCIAL GENERAL LIABILITY QUICK REFERENCE"], label:null, value:"CG 21 06 12 23", value_type:"code"}
+   NEVER {label:"CG 00 01 04 13", value:"CG 00 01 04 13"}.
+
+================================================================================
+HOW TO WORK
+================================================================================
+Go BLOCK BY BLOCK down each page, in printed order. A declarations page is a stack of
+blocks - a masthead, a party block, a limits block, a premium block, a forms block, a
+footer.
+
+For each block:
+  1. Read its heading. Push it onto `path`. Record it once as kind "heading".
+  2. Walk the items beneath it ONE AT A TIME.
+  3. For each item: find its OWN caption (label), split off the narrowing words
+     (qualifiers), take the bare datum (value), assign its type.
+  4. Finish the block completely before starting the next. Pop the heading off `path`.
+
+Do not scan a page for things that look important. A block you skim is a block you lose.
+
+================================================================================
+BEFORE YOU RETURN - RUN THESE CHECKS
+================================================================================
+1. COLLAPSE CHECK. Group your entries by label, per page. Does any label appear more than
+   three times? If yes you used a heading as a label (rule 3). Move it into `path` and
+   re-read each item's own caption.
+
+2. SPLIT CHECK. Does any value contain BOTH a word of four or more letters AND an amount,
+   date or percentage? If yes it is two entries (rule 2). Split it. Addresses and full
+   sentences recorded as kind "statement" or "footer" are the only exceptions.
+
+3. QUALIFIER CHECK. Do two entries share a label AND a value AND a row? If yes, either
+   they are one entry duplicated, or you dropped the qualifier that distinguishes them.
+
+4. IDENTITY CHECK. Does any entry have label == value? Fix it to "standalone" or "index"
+   (rule 10).
+
+5. CARRIER CHECK. List every line_of_business you emitted. Does each have at least one
+   owner "carrier" entry whose value is a COMPANY NAME? A phone number does not count
+   (rule 16).
+
+6. ROW CHECK. Does every table cell carry both row and col, spelled identically across the
+   row and down the column? Does any label repeat within a single row?
+
+7. COVERAGE CHECK. Read each page again, line by line. Does EVERY printed line appear in
+   at least one entry - as a value, a label, a qualifier or a path segment? Name the ones
+   that do not. If rule 9a does not exclude it, it needs an entry.
+
+8. KEY CHECK. Is a page header's policy number sitting on a row that names a different
+   line? Is every line_of_business one of the listed spellings or a full printed name? Is
+   every kind, value_type and owner a member of its closed list? Does every entry carry
+   its page and a sequential id?
+
+9. SOURCE CHECK. Is this an application, certificate, quote, binder or loss run you
+   returned nothing for? It states the insured's own values and is in scope."""
 
 
 async def _harvest_dec_index(chunks: List[ChunkTuple]) -> List[dict]:
@@ -4363,14 +5071,114 @@ async def _harvest_dec_index(chunks: List[ChunkTuple]) -> List[dict]:
             len(picked), len(chunks), _DEC_INDEX_MIN_AUTHORITY,
         )
 
-        async def _one(idx: int, text: str) -> List[dict]:
-            try:
+        # ── Sub-split: the index pass reads SMALLER pieces than extraction ───
+        # See `_DEC_INDEX_CHUNK_CHARS`. Splitting on line boundaries keeps a
+        # printed row whole; a single line longer than the budget is passed
+        # through rather than cut mid-value, because a severed line is exactly
+        # the welded/half value the verbatim gate would discard anyway.
+        def _sub_split(text: str, budget: int) -> List[str]:
+            if len(text) <= budget:
+                return [text]
+            out, cur = [], ""
+            for line in text.splitlines(keepends=True):
+                if cur and len(cur) + len(line) > budget:
+                    out.append(cur)
+                    cur = line
+                else:
+                    cur += line
+            if cur:
+                out.append(cur)
+            return out or [text]
+
+        # ── THE GATE RUNS AGAIN, ON EACH PIECE (2026-08-23) ─────────────────
+        # `declarations_authority` is the MAXIMUM over page-sized windows, which
+        # is right for ROUTING a chunk (a real dec page occupying 14% of a
+        # 56,000-char chunk must not be averaged away) but wrong for BILLING
+        # one: a chunk containing a single dec page among fifty pages of policy
+        # wording clears the gate, and the whole 56,000 chars were then indexed.
+        # On the client's 271-page package - ~30 declarations pages out of 271 -
+        # that sent roughly 240 pages of wording to the model for nothing, and
+        # cost a measured 3x on the time to recommend forms.
+        #
+        # Splitting first and re-scoring each piece keeps the sensitive routing
+        # (nothing declarations-dense is skipped, because a piece is close to
+        # page-sized and the max is taken over it) while dropping the wording
+        # that merely travelled with it. Strictly more accurate AND cheaper.
+        # A chunk whose pieces ALL fall below the bar keeps its single best
+        # piece rather than contributing nothing - the chunk did clear the bar,
+        # so something in it is declarations content.
+        pieces: List[Tuple[int, str]] = []
+        _dropped_pieces = 0
+        for _i, _txt in picked:
+            _subs = [p for p in _sub_split(_txt, _DEC_INDEX_CHUNK_CHARS) if p.strip()]
+            if len(_subs) <= 1:
+                pieces.extend((_i, p) for p in _subs)
+                continue
+            _scored = [(declarations_authority(p), p) for p in _subs]
+            _keep = [(s, p) for s, p in _scored if s >= _DEC_INDEX_MIN_AUTHORITY]
+            if not _keep:
+                _keep = [max(_scored, key=lambda t: t[0])]
+            _dropped_pieces += len(_subs) - len(_keep)
+            pieces.extend((_i, p) for _, p in _keep)
+        if len(pieces) != len(picked) or _dropped_pieces:
+            logger.info(
+                "dec_index_pass: %d declarations chunk(s) -> %d piece(s) of <=%d "
+                "chars (%d piece(s) dropped as not declarations-dense). Smaller "
+                "pieces keep every reply inside the output cap; re-scoring keeps "
+                "policy wording that merely shared a chunk out of the bill.",
+                len(picked), len(pieces), _DEC_INDEX_CHUNK_CHARS, _dropped_pieces,
+            )
+
+        # Bounded concurrency. The unbounded gather that used to live here is
+        # what killed this pass under load - see `_DEC_INDEX_POOL`.
+        _gate = asyncio.Semaphore(_DEC_INDEX_POOL)
+        _truncated = 0
+
+        async def _ask(idx: int, text: str, depth: int) -> List[dict]:
+            """One call. On a truncated reply, split in half and retry both
+            halves rather than accepting the salvaged remainder."""
+            nonlocal _truncated
+            async with _gate:
                 raw = await groq_chat(
                     LLM_MODEL,
                     [{"role": "system", "content": _DEC_INDEX_SYSTEM_PROMPT},
                      {"role": "user", "content": text}],
                     max_tokens=_DEC_INDEX_MAX_TOKENS,
                 )
+            # A complete JSON reply parses on its own. One that does not is
+            # almost always severed at the output cap - and `_safe_json_parse`
+            # would silently hand back only the completed portion, which is the
+            # invisible data loss this retry exists to stop.
+            _body = (raw or "").strip()
+            if _body.startswith("```"):
+                _body = re.sub(r"^```[a-z]*\n?", "", _body, flags=re.I).rstrip("`").strip()
+            _s, _e = _body.find("{"), _body.rfind("}")
+            _whole = None
+            if _s != -1 and _e != -1:
+                try:
+                    _whole = json.loads(_body[_s:_e + 1])
+                except (json.JSONDecodeError, ValueError):
+                    _whole = None
+            if _whole is None and depth < _DEC_INDEX_SPLIT_RETRIES and len(text) > 400:
+                _truncated += 1
+                _mid = text.rfind("\n", 0, len(text) // 2 + 1) + 1 or len(text) // 2
+                logger.warning(
+                    "dec_index_pass: chunk %d reply did not parse (truncated at the "
+                    "%d-token cap) - splitting %d chars in two and retrying "
+                    "(depth %d) instead of keeping a partial index",
+                    idx, _DEC_INDEX_MAX_TOKENS, len(text), depth + 1,
+                )
+                _halves = await asyncio.gather(
+                    _ask(idx, text[:_mid], depth + 1),
+                    _ask(idx, text[_mid:], depth + 1),
+                )
+                return [e for h in _halves for e in h]
+            if _whole is not None:
+                parsed = _whole if ("facts" in _whole or "flags" in _whole) \
+                    else {"facts": _whole, "flags": {}}
+            else:
+                # Out of retries: fall back to the deterministic salvage so a
+                # stubborn piece still contributes what the model did write.
                 parsed = await _safe_json_parse(raw, context=f"dec_index[{idx}]")
                 # `_safe_json_parse` normalises a bare reply into
                 # {"facts": {...}, "flags": {}} - which is exactly what this
@@ -4381,27 +5189,48 @@ async def _harvest_dec_index(chunks: List[ChunkTuple]) -> List[dict]:
                 # and then "harvested 0 raw entries from 8 chunk(s)". The
                 # output was there - up to 6,788 tokens of it - and this
                 # function could not see it.
-                out = None
-                for level in (parsed, (parsed or {}).get("facts")):
-                    if isinstance(level, dict) and isinstance(
-                            level.get("dec_page_entries"), list):
-                        out = level["dec_page_entries"]
-                        break
-                if out is None:
-                    logger.warning(
-                        "dec_index_pass: chunk %d returned no usable "
-                        "dec_page_entries (top-level keys: %s)", idx,
-                        sorted(parsed)[:6] if isinstance(parsed, dict) else type(parsed),
-                    )
-                return out or []
+            out = None
+            for level in (parsed, (parsed or {}).get("facts")):
+                if isinstance(level, dict) and isinstance(
+                        level.get("dec_page_entries"), list):
+                    out = level["dec_page_entries"]
+                    break
+            if out is None:
+                logger.warning(
+                    "dec_index_pass: chunk %d returned no usable "
+                    "dec_page_entries (top-level keys: %s)", idx,
+                    sorted(parsed)[:6] if isinstance(parsed, dict) else type(parsed),
+                )
+            return out or []
+
+        async def _one(idx: int, text: str) -> List[dict]:
+            try:
+                return await _ask(idx, text, 0)
             except Exception as ex:                        # noqa: BLE001
                 logger.warning("dec_index_pass: chunk %d failed - %s", idx, ex)
                 return []
 
-        results = await asyncio.gather(*[_one(i, t) for i, t in picked])
+        results = await asyncio.gather(*[_one(i, t) for i, t in pieces])
         entries = [e for r in results for e in r if isinstance(e, dict)]
-        logger.info("dec_index_pass: harvested %d raw entries from %d chunk(s)",
-                    len(entries), len(picked))
+        # LOUD ON ZERO. This pass is now the ONLY producer of the index (the
+        # main extraction schema no longer asks for it), so "nothing harvested
+        # from chunks that ARE declarations" is a broken run, not a quiet
+        # nothing. It stayed silent for two full runs and cost days.
+        if not entries:
+            logger.error(
+                "dec_index_pass: harvested ZERO entries from %d declarations-dense "
+                "piece(s) - the declarations index will be EMPTY for this document. "
+                "Check the per-chunk warnings above (429/timeout/parse).",
+                len(pieces),
+            )
+        else:
+            logger.info(
+                "dec_index_pass: harvested %d raw entries from %d piece(s) across "
+                "%d chunk(s)%s",
+                len(entries), len(pieces), len(picked),
+                f" ({_truncated} truncated reply/replies split and retried)"
+                if _truncated else "",
+            )
         return entries
     except Exception as ex:                                # noqa: BLE001
         logger.warning("dec_index_pass skipped: %s", ex)
@@ -4489,13 +5318,36 @@ async def _run_extraction(
     try:
         _extra = await _harvest_dec_index(chunks)
         if _extra:
-            _base = result.get("dec_page_entries")
+            # ── THE KEY PATH, and it was wrong from the day this pass shipped ──
+            # `_merge_list_fields` returns {"facts": {...}, "flags": {...}} - the
+            # entries live at result["facts"]["dec_page_entries"], NOT at the top
+            # level. This block used to read and write `result["dec_page_entries"]`,
+            # so `_base` was always None and every entry the dedicated pass
+            # produced was filed one level too high, where nothing reads it:
+            # `_validate_extraction_output` forwards it as an unrecognised extra
+            # and `extraction_pipeline` stores only `extracted["facts"]`.
+            #
+            # It was invisible for as long as the MAIN extraction also recorded
+            # dec entries - those went into facts correctly, the index looked
+            # populated, and the dedicated pass's contribution silently
+            # evaporated. Removing that key from the main schema (2026-08-23,
+            # §3.1) took the last producer away and exposed it: three live runs
+            # in a row logged successful index calls - `out=7921`, `out=14110`,
+            # HTTP 200, no 429 - and still stored ZERO entries.
+            #
+            # Diagnosed the long way round: rate limiting was the leading theory
+            # for two rounds and was wrong. The calls were never failing.
+            _facts = result.get("facts")
+            if not isinstance(_facts, dict):
+                _facts = {}
+                result["facts"] = _facts
+            _base = _facts.get("dec_page_entries")
             _base = _base if isinstance(_base, list) else []
-            result["dec_page_entries"] = _base + _extra
+            _facts["dec_page_entries"] = _base + _extra
             logger.info(
                 "dec_index_pass: %d entries from the main extraction + %d from "
                 "the dedicated pass -> %d before verification",
-                len(_base), len(_extra), len(result["dec_page_entries"]),
+                len(_base), len(_extra), len(_facts["dec_page_entries"]),
             )
     except Exception as _dx:                               # noqa: BLE001
         logger.warning("dec_index_pass merge skipped: %s", _dx)
@@ -4688,10 +5540,10 @@ _FIELD_CONFIDENCE_SOURCES: Dict[str, Tuple[str, ...]] = {
 # SILENCE NEVER DOWNGRADES ANYTHING. Absence of a mention leaves the flag alone.
 _ABSENT_PROXIMITY = 40
 
-_COVERAGE_DENIAL_RE = re.compile(
-    r"no\s+coverage|not\s+covered|coverage\s+not\s+provided|no\s+coverage\s+provided",
-    re.I,
-)
+# ONE definition, owned by the line-of-business leaf. Re-bound here because
+# `pdf_service` imports the name from this module and the Y-gate reasoning in
+# that file refers to it by this name.
+from services.lob_canon import COVERAGE_DENIAL_RE as _COVERAGE_DENIAL_RE
 
 # flag -> the words a document uses to name that line. Kept to unambiguous line
 # names; a word that also appears in unrelated prose is not eligible.
@@ -4788,6 +5640,29 @@ def _line_entry_grants_coverage(entry: dict) -> bool:
             return False                    # the detail denies the line outright
         return True
     return False
+
+
+def _line_entry_denies_coverage(entry: dict) -> bool:
+    """True when a `coverage_lines` entry EXPLICITLY says the line is not covered.
+
+    THE TWIN OF `_line_entry_grants_coverage`, AND NOT ITS NEGATION. That
+    distinction is the whole reason this function exists (V1 plan C1-K):
+
+        grants  -> "premium or limit present"      = positive proof of coverage
+        denies  -> "a detail literally says NO"    = positive proof of absence
+        neither -> the document is SILENT
+
+    A certificate of insurance never prints premiums, so most COI rows are
+    `grants=False`. Reading that as a DENIAL is Principle 3's forbidden move -
+    absence of evidence turned into evidence - and it manufactured a false
+    "lines of business differ" warning on the 2026-08-21 live package, inside
+    the very fix meant to enforce Principle 3.
+
+    Only ever returns True on an explicit denial phrase, so silence can never
+    become a denial.
+    """
+    from services.lob_canon import denies_coverage
+    return denies_coverage(entry)
 
 
 def _line_name_is_a_carrier(name: str) -> bool:
@@ -5057,6 +5932,15 @@ def detect_source_conflicts(
             continue
 
         values_by_doc: List[Tuple[str, object]] = []
+        # V1 plan C1 F5 / defect B8 (Principle 3): a boolean False from
+        # extraction cannot be told apart from "this document never mentioned
+        # it" - nothing in the prompt distinguishes the two. Comparing
+        # True-vs-False across documents therefore manufactured a conflict
+        # (and an 85 cap) from SILENCE. Booleans are value-state NOT_STATED
+        # unless a human supplied them, and NOT_STATED never enters a
+        # comparison, so they are excluded here outright.
+        if any(isinstance(_fv(d.get("facts", {}), field), bool) for d in docs):
+            continue
         for d in docs:
             # Unwrap the {value, confidence, source} envelope before comparison so
             # normalization runs on the actual value, not the dict repr. Without
@@ -5351,6 +6235,10 @@ def _consolidate_property_locations(facts: dict) -> None:
     _geo_only_re = re.compile(
         r"^\s*([A-Za-z][A-Za-z .'-]*?)[\s,]+([A-Za-z]{2})\.?[\s,]+(\d{5}(?:-\d{4})?)\s*$"
     )
+    # "City, State" with NO zip - a 2-letter code or a full state name.
+    _geo_city_state_re = re.compile(
+        r"^\s*([A-Za-z][A-Za-z .'-]*?)[\s,]+([A-Za-z]{2}|[A-Za-z]+(?: [A-Za-z]+)?)\.?\s*$"
+    )
     # A comma-free mention's city/state/zip tail, leaked into line1 by
     # _parse_address (which only splits on commas).
     _state_zip_tail_re = re.compile(r"[\s,]+([A-Za-z]{2})\.?[\s,]+(\d{5}(?:-\d{4})?)\s*$")
@@ -5370,8 +6258,18 @@ def _consolidate_property_locations(facts: dict) -> None:
             a_c, b_c = a_key.replace(" ", ""), b_key.replace(" ", "")
             return (b_key.startswith(a_key + " ") or a_key.startswith(b_key + " ")
                     or a_c == b_c or b_c.startswith(a_c) or a_c.startswith(b_c))
-        b_toks = set(b_key.split())
-        return bool(a_num and b_toks and b_toks <= set(a_key.split()))
+        # A geo fragment ("Denver, Colorado") folds into the ONE street group
+        # whose FULL address contains it. V1 plan C1 F9 (defect B7): the old
+        # rule compared the fragment's line1-only key ("denver") against the
+        # host's line1-only key ("4800 dahlia st d13") - neither side carried
+        # the city - so the client's literal third string became a second
+        # premises row on ACORD 125. Both sides now use the same normaliser
+        # the picker uses, over the whole address string.
+        b_full = normalize_address(str(groups.get(b_key, {}).get("address") or b_key))
+        a_full = normalize_address(str(groups.get(a_key, {}).get("address") or a_key))
+        b_toks = set(b_full.split()) or set(b_key.split())
+        a_toks = set(a_full.split()) | set(a_key.split())
+        return bool(a_num and b_toks and b_toks <= a_toks)
 
     def _same_premises(x: str, y: str) -> bool:
         return _street_claims(x, y) or _street_claims(y, x)
@@ -5431,6 +6329,14 @@ def _consolidate_property_locations(facts: dict) -> None:
                     merged.setdefault("address_city", gm.group(1).strip())
                     merged.setdefault("address_state", gm.group(2).upper())
                     merged.setdefault("address_zip", gm.group(3))
+                    continue
+                # "Denver, Colorado" / "Denver, CO" - city + state, no ZIP (F9).
+                gm2 = _geo_city_state_re.match(str(src.get("address") or ""))
+                if gm2 and _street_num(normalize_address(str(src.get("address") or ""))) == "":
+                    st = _coerce_state(gm2.group(2))
+                    if st:
+                        merged.setdefault("address_city", gm2.group(1).strip())
+                        merged.setdefault("address_state", st)
             logger.info(
                 "consolidate_locations: folded parse-variant group %r into %r "
                 "- one premises mentioned in different shapes, not two premises",
@@ -5595,13 +6501,38 @@ def _consolidate_property_locations(facts: dict) -> None:
 # global 500 was throwing away a third of the index it now feeds, and the old
 # per-chunk 80 x 13 chunks capped the candidates before dedup. 1200 holds that
 # package with headroom and renders to ~2 index chunks, against 13 raw ones.
-_DEC_ENTRY_MAX = int(os.getenv("DEC_ENTRY_MAX", "1200"))
+# ── A RUNAWAY GUARD, NOT A DATA CEILING (raised 1,200 -> 50,000, 2026-08-23) ─
+# 1,200 was sized for the old 6-key shape where one printed row became one
+# entry. The atomic schema splits that same row into one entry PER CELL - a
+# seven-column rating row is seven entries - so the old ceiling truncated a
+# large package's declarations data long before any token cap fired, and the
+# drop was a log line nobody reads. Declarations data is exactly what must not
+# be dropped: we cannot know which value a form will ask for.
+#
+# WHY IT COULD BE RAISED. It could not, until `_dec_index_chunks` was taught to
+# split BY LABEL. Before that a big index was cut blindly through the rendered
+# text, which separated the umbrella's $3,000,000 from the GL's $1,000,000 and
+# re-created C23 - so a low ceiling was the lesser evil. Now a label can never
+# straddle two Stage A calls however large the index grows, so the ceiling is
+# free to stop being a ceiling. 3,000 was an intermediate step for exactly one
+# commit and is recorded here so nobody reinstates it as a considered value.
+#
+# WHY IT IS NOT REMOVED. Entries land in the session row in Postgres. An
+# unbounded list lets a looping or adversarial reply write unbounded data. At
+# 50,000 it cannot fire on any real document - roughly forty times the largest
+# package measured - so if it EVER fires that is a signal to chase, and the
+# warning it logs says so.
+_DEC_ENTRY_MAX = int(os.getenv("DEC_ENTRY_MAX", "50000"))
 _DEC_ENTRY_VALUE_MAX_CHARS = 300
 _DEC_ENTRY_LABEL_MAX_CHARS = 120
 _DEC_ENTRY_SECTION_MAX_CHARS = 80
 _DEC_ENTRY_OWNERS = frozenset({"applicant", "producer", "carrier", "policy", "other"})
-
-
+# The index prompt's two other CLOSED vocabularies. Anything outside them is
+# dropped rather than stored, so a model inventing a member cannot put an
+# unknown token into the session row - the same discipline `owner` has always
+# had. Both keys are additive and nothing reads them yet.
+_DEC_ENTRY_KINDS = frozenset({"kv", "standalone", "heading", "statement",
+                              "footer", "index"})
 def _dec_norm(text: Any) -> str:
     """Case/punctuation-insensitive form - mirrors text_selection._norm and
     pdf_service._normalize_for_search so 'verbatim' means the same thing in
@@ -6161,7 +7092,8 @@ def _backfill_empty_facts_from_entries(facts: dict, entries: List[dict]) -> None
             continue                       # condition 5: exactly one value
         entry = next(iter(by_value.values()))
         facts[key] = {"value": entry["value"], "confidence": "ai_low",
-                      "source": "dec_entry"}
+                      "source": "dec_entry", "evidence_state": "source_verified",
+                      "verified_in_text": True}
         filled += 1
         logger.info(
             "dec_entries BACKFILL fact=%s value=%r from label=%r owner=%s - "
@@ -6212,40 +7144,19 @@ _BILLING_VOCAB = (
 # by phrase LENGTH and therefore read "Commercial Liability Umbrella" as General
 # Liability, which is the very defect this function exists to repair (caught by
 # test_auto_beats_bare_liability_in_line_canonicalisation, not in production).
-_LOB_CANON_SPECIFIC: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("workers_comp",  ("workers compensation", "workers comp", "employers liability")),
-    ("umbrella",      ("umbrella", "excess")),
-    ("inland_marine", ("inland marine", "installation", "contractors equipment")),
-    ("auto",          ("auto", "automobile", "vehicle", "trucker", "motor carrier",
-                       "garage")),
-    ("property",      ("property", "building")),
-    ("crime",         ("crime", "fidelity")),
-    ("cyber",         ("cyber",)),
-)
-# Only consulted when nothing specific matched.
-_LOB_CANON_GENERIC: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("general_liab", ("general liability", "cgl", "liability", "premises")),
-)
-
-
 def _canon_line(text: Any) -> Optional[str]:
     """Which standard line of business a free-text line name denotes.
 
-    Specific coverage names win over the generic word "liability", and the
-    order within the specific table is deliberate - "Employers Liability" is
-    Workers Comp, so it must be tested before "auto"/"umbrella" can claim it.
-    Returns None when the text names no line we recognise, so callers can tell
-    "not this line" from "cannot tell" and blank rather than guess.
+    Delegates to the leaf module ``services.lob_canon`` (V1 plan C1, F8): the
+    tables used to live here, inside a 7,000-line module that three other
+    modules imported lazily behind ``except: lambda _s: None`` fallbacks - a
+    circular-import blip silently disabled canonicalisation. The name is kept
+    so every internal caller and test reads unchanged; the rules live in one
+    importable place. Returns None when the text names no line we recognise,
+    so callers can tell "not this line" from "cannot tell" and blank rather
+    than guess.
     """
-    s = re.sub(r"[^a-z ]", " ", str(text or "").lower())
-    s = re.sub(r"\s+", " ", s).strip()
-    if not s:
-        return None
-    for table in (_LOB_CANON_SPECIFIC, _LOB_CANON_GENERIC):
-        for key, phrases in table:
-            if any(p in s for p in phrases):
-                return key
-    return None
+    return _lob_canon_line(text)
 
 
 def _looks_like_a_policy_number(value: Any) -> bool:
@@ -6522,6 +7433,9 @@ def _drop_endorsement_dates_from_policy_facts(mf: dict, docs: List[dict]) -> Non
         if _dec_index_witnesses_date(mf, str(val)):
             continue                      # the dec page prints it - it is real
         mf.pop(key, None)
+        _record_fact_rejection(
+            mf, key, "the only date found is an endorsement's effective date, "
+                     "not a policy inception date")
         logger.info(
             "%s dropped: %r is the effective date of an amendment stated in the "
             "remarks, and no declarations page prints it as a policy date. An "
@@ -6572,10 +7486,49 @@ def _drop_page_furniture_remarks(mf: dict, docs: List[dict]) -> None:
             continue
         if any(h.startswith(probe) for h in heads):
             mf.pop(key, None)
+            _record_fact_rejection(
+                mf, key, "the only text found is the document's page heading, "
+                         "not a remark about the risk")
             logger.info(
                 "%s dropped: %r is what the document OPENS with, so it is the "
                 "page heading rather than a remark about the risk",
                 key, val[:60])
+
+
+# ── THE REJECTION LEDGER (client 1.3 "Unable to Determine") ─────────────────
+# *"Primble has relevant source material but cannot reliably determine the
+# answer. This is different from simply not finding the information."*
+#
+# Several components already find a value, judge it unusable and DISCARD it -
+# an endorsement date that is not an inception date, a page heading mistaken
+# for a remark. Each logged its reasoning and then dropped the fact, which made
+# the result indistinguishable from a document that never mentioned the subject
+# at all. That is the exact distinction the client asked us to keep.
+#
+# The ledger only RECORDS a judgement already made. It never makes one, never
+# resurrects a value, and never changes what any existing consumer reads: the
+# fact is still absent, `_fv` still returns None, scoring is untouched. The
+# only new thing is that `fact_state` can now say WHY it is absent.
+REJECTED_FACTS_KEY = "_rejected_facts"
+
+
+def _record_fact_rejection(mf: dict, key: str, reason: str) -> None:
+    """Note that a value for ``key`` was found and deliberately discarded.
+
+    Idempotent, never raises, and a no-op once the fact carries a real value
+    again - a later document supplying a good value must not leave the fact
+    reading "unable to determine".
+    """
+    try:
+        if not isinstance(mf, dict) or not key:
+            return
+        ledger = mf.get(REJECTED_FACTS_KEY)
+        if not isinstance(ledger, dict):
+            ledger = {}
+            mf[REJECTED_FACTS_KEY] = ledger
+        ledger[key] = str(reason or "")[:200]
+    except Exception:                                         # noqa: BLE001
+        pass                                                  # bookkeeping only
 
 
 def _flag_intra_document_limit_conflicts(mf: dict, rejected_by_field: Dict[str, List[str]]) -> None:
@@ -6760,6 +7713,129 @@ def _backfill_billing_plan(facts: dict, full_text: str) -> None:
     )
 
 
+SCOPED_FACTS_KEY = "_scoped"
+
+# Which `coverage_lines` column states each line-scoped fact. Mirrors
+# `underwriting_consistency._LINE_SCOPED_FACT_COLUMN`; kept here because the
+# store is BUILT here and read there, and a cross-check test pins the two.
+_SCOPED_FACT_COLUMNS: Dict[str, str] = {
+    "policy_number":   "policy_number",
+    "carrier_name":    "carrier",
+    "carrier_naic":    "naic",
+    "effective_date":  "effective_date",
+    "expiration_date": "expiration_date",
+}
+
+
+def _build_scoped_fact_store(mf: dict) -> None:
+    """Write ``facts["_scoped"]`` - each line-scoped fact WITH its scope.
+
+    C1b / D19, owner-directed 2026-08-21: *"we should carry relationship, we
+    should store it somehow, not just this but for every other important
+    fact"*. Client 1.1 puts Scope/Association BEFORE Reconciliation; until now
+    scope was re-derived inside the comparator from the value's own characters,
+    which is how a spelling variant lost its scope and produced a false
+    conflict (the reverted "Pass 1b" attempt, C1-Q).
+
+    SHAPE - additive, and `mf[key]` is untouched, so all existing fact reads
+    stay valid::
+
+        facts["_scoped"]["carrier_name"] = [
+            {"value": "EMC Prop & Cas Co",
+             "scope": {"line": "general_liab", "line_printed": "Commercial
+                       General Liability", "policy_number": "BBC7263-26"}},
+            ...
+        ]
+
+    ONE ENTRY PER (fact, coverage line). A line with no canonical family is
+    skipped - unmapped terminology gets no opinion (client 1.7 / D9) - and a
+    fact with no value on that line contributes nothing. Never raises: the
+    store is an enrichment, and its absence returns every consumer to the
+    behaviour it had before C1b.
+    """
+    try:
+        lines = mf.get("coverage_lines")
+        if not isinstance(lines, list) or not lines:
+            mf.pop(SCOPED_FACTS_KEY, None)
+            return
+        store: Dict[str, List[dict]] = {}
+        for entry in lines:
+            if not isinstance(entry, dict):
+                continue
+            printed = str(entry.get("line") or "").strip()
+            canon = _canon_line(printed)
+            if not canon:
+                continue
+            pol = str(entry.get("policy_number") or "").strip() or None
+            scope = {"line": canon, "line_printed": printed, "policy_number": pol}
+            for fact_key, column in _SCOPED_FACT_COLUMNS.items():
+                raw = entry.get(column)
+                val = str(raw).strip() if raw is not None else ""
+                if not val:
+                    continue
+                store.setdefault(fact_key, []).append(
+                    {"value": val, "scope": dict(scope)})
+        if store:
+            mf[SCOPED_FACTS_KEY] = store
+            logger.info(
+                "scoped fact store: %s",
+                {k: len(v) for k, v in sorted(store.items())})
+        else:
+            mf.pop(SCOPED_FACTS_KEY, None)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("merge_facts: scoped fact store failed: %s", exc)
+        mf.pop(SCOPED_FACTS_KEY, None)
+
+
+def _union_list_fact(list_key: str, primary_rows: list, merged_rows: list) -> list:
+    """The primary document's rows PLUS everything the companions add.
+
+    Order is primary-first on purpose: every consumer that takes "the first
+    matching row" keeps the answer it gives today, and a companion document can
+    only ever ADD a row. De-duplication is the schedule de-duplicator the
+    chunk-level merge already uses, so "is this the same vehicle / driver /
+    coverage part?" has ONE definition rather than a second one here.
+
+    A list of plain strings (`lines_of_business`) has no schedule identity, so
+    it de-duplicates on its own normalised text. Never raises: any failure
+    returns the primary's rows, which is exactly today's behaviour.
+    """
+    try:
+        combined = list(primary_rows) + list(merged_rows)
+        if not any(isinstance(r, dict) for r in combined):
+            # `lines_of_business` de-duplicates by COVERAGE FAMILY, not by text.
+            # Five documents name one GL part five ways ("Commercial General
+            # Liability", "General Liability", ...) and a text-only union kept
+            # all five, which is the very "different terminology read as
+            # different things" the client's 1.7 is about. The first printing
+            # wins, so the primary document's wording is what shows.
+            # Unmappable terminology has no family and falls back to its own
+            # text - it is never folded into anything (1.7, D9).
+            _by_family = (list_key == "lines_of_business")
+            seen: set = set()
+            out: list = []
+            for r in combined:
+                text = re.sub(r"\s+", " ", str(r if r is not None else "")).strip()
+                if not text:
+                    continue
+                key = (_canon_line(text) if _by_family else None) or text.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(r)
+            return out
+        deduped = _dedupe_schedule_rows(list_key, combined)
+        if len(deduped) != len(primary_rows):
+            logger.info(
+                "merge list_union field=%r primary=%d companions=%d -> %d rows",
+                list_key, len(primary_rows), len(merged_rows), len(deduped),
+            )
+        return deduped
+    except Exception as exc:                              # noqa: BLE001
+        logger.warning("merge_facts: list union failed for %s - %s", list_key, exc)
+        return list(primary_rows)
+
+
 def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     """
     Multi-document merge with field-level source confidence.
@@ -6775,10 +7851,28 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     non_primary = [d for d in docs if d["filename"] != primary["filename"]]
 
     if non_primary:
-        pseudo_partials = [
-            {"facts": d.get("facts", {}), "flags": d.get("flags", {}), "_chunk_idx": i}
-            for i, d in enumerate(non_primary)
-        ]
+        # ROLE SCOPE ON THE LIST UNION (D23, client 1.2). A document only
+        # contributes list facts its ROLE covers. One definition, shared with
+        # every cross-document comparison - see fact_comparison._ROLE_BLIND_FACTS
+        # for the measured reason `coverage_lines` is on it for a loss run.
+        # Fail-open: an unknown doc_type contributes everything, so this can
+        # only ever REMOVE a row, never invent one.
+        try:
+            from services.fact_comparison import document_witnesses as _witnesses
+        except Exception:                                 # noqa: BLE001
+            _witnesses = lambda _t, _k: True              # noqa: E731
+        pseudo_partials = []
+        for i, d in enumerate(non_primary):
+            _f = d.get("facts", {}) or {}
+            _dt = d.get("doc_type")
+            _kept = {k: v for k, v in _f.items()
+                     if k not in _LIST_FIELDS or _witnesses(_dt, k)}
+            if len(_kept) != len(_f):
+                logger.info("merge: %s contributes no %s (document role)",
+                            d.get("filename"),
+                            sorted(set(_f) - set(_kept)))
+            pseudo_partials.append(
+                {"facts": _kept, "flags": d.get("flags", {}), "_chunk_idx": i})
         np_merged = _merge_list_fields(pseudo_partials, list_keys=_LONG_DOC_LIST_KEYS)
         mf: dict = np_merged.get("facts", {})
         mg: dict = np_merged.get("flags", {})
@@ -6786,9 +7880,35 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
         mf = {}
         mg = {}
 
-    # Apply primary doc as legacy fallback for unmapped fields
+    # Apply primary doc as legacy fallback for unmapped fields.
+    #
+    # A LIST FIELD IS UNIONED, NEVER REPLACED (D-1, 2026-08-23). This loop used
+    # to write `mf[k] = v` for every key, so the primary document's list wiped
+    # the companions' - measured on the live Run B session: `coverage_lines`
+    # came out as `1_dec_page.pdf`'s four rows byte-for-byte, and Travelers'
+    # General Liability, Travelers' Commercial Property and Hartford's
+    # Professional Liability were simply gone. The Data Consistency picker was
+    # then blamed for missing a carrier conflict it was never shown.
+    #
+    # The defect was already KNOWN and fixed twice, one key at a time: the
+    # `dec_page_entries` block below says it in as many words - "deliberately
+    # NOT routed through the primary-wins loop above: that loop would let the
+    # primary doc's list REPLACE the others'" - and `risk_transfer` has its own
+    # copy of the same workaround. Three list fields never got one
+    # (`coverage_lines`, `lines_of_business`, `auto_covered_symbols`). Fixing
+    # the loop instead of adding a fourth bespoke block is gate 1 of the change
+    # quality bar: the class, not the reported case.
+    #
+    # The primary's rows go FIRST so anything reading "the first matching row"
+    # keeps today's answer; the companions can only ADD.
     for k, v in primary.get("facts", {}).items():
-        if not _is_empty(v):
+        if _is_empty(v):
+            continue
+        _pv = v.get("value") if isinstance(v, dict) and "value" in v else v
+        _mv = mf.get(k)
+        if k in _LIST_FIELDS and isinstance(_pv, list) and isinstance(_mv, list) and _mv:
+            mf[k] = _union_list_fact(k, _pv, _mv)
+        else:
             mf[k] = v
 
     # Override with field-level authoritative sources when a better doc exists
@@ -6953,8 +8073,69 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
         _route_renewal_dates(mf)
     except Exception as exc:  # noqa: BLE001 — never block the pipeline
         logger.warning("merge_facts: renewal date routing failed: %s", exc)
+    # Client 1.4 "Derived": compute what the documents already answer, so the
+    # questionnaire never asks for it. Runs AFTER renewal routing so it reads
+    # the settled dates.
+    _derive_years_in_business(mf)
+
+    # C1b / D19 (owner-directed): scope is STORED on the fact, not re-derived
+    # at each point of use. Runs LAST, so it reads the settled `coverage_lines`
+    # - after the union, after the entry repair, after renewal routing.
+    _build_scoped_fact_store(mf)
 
     return mf, mg
+
+
+def _derive_years_in_business(mf: dict) -> None:
+    """Compute `years_in_business` from `business_start_date` when it is absent.
+
+    CLIENT 1.4 "Derived": *"the value was deterministically calculated from
+    supported facts using a known rule."* Live run 2026-08-21: the dec page
+    printed "Date Business Started: 06/15/2014" and the questionnaire still
+    asked the insured "How many years has your business been open?" - a
+    question the documents already answer. Brent's own point: if the paperwork
+    says it, do not ask.
+
+    POSITIVE EVIDENCE ONLY, and never overwrites:
+      * skipped entirely when years_in_business already has a value;
+      * the start date must parse AND be in the past (a future date is a
+        mis-extraction - the policy inception date landing in this box is a
+        known defect, see the business_start_date registry note);
+      * the result is floored whole years and must be sane (<= 500), the same
+        bound the registry validator applies.
+
+    Labelled `evidence_state: derived` so the E&O record shows it was computed,
+    not read - a derived value must never read as source-verified.
+    """
+    try:
+        if _fv(mf, "years_in_business"):
+            return
+        raw = _fv(mf, "business_start_date")
+        if not raw:
+            return
+        iso = normalize_date(raw)
+        if not iso:
+            return
+        from datetime import datetime as _dt
+        start = _dt.strptime(iso, "%Y-%m-%d")
+        now = _dt.now()
+        if start > now:
+            return                      # future date - a mis-extraction
+        years = int((now - start).days // 365.25)
+        if years < 0 or years > 500:
+            return
+        mf["years_in_business"] = {
+            "value": str(years),
+            "confidence": "deterministic",
+            "source": "derived",
+            "evidence_state": "derived",
+        }
+        logger.info(
+            "derived years_in_business=%s from business_start_date=%r - the "
+            "documents answer this, so the questionnaire will not ask it",
+            years, str(raw)[:40])
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("years_in_business derivation skipped: %s", exc)
 
 
 def _route_renewal_dates(mf: dict) -> None:
@@ -7039,6 +8220,10 @@ def _route_renewal_dates(mf: dict) -> None:
                                  "confidence": "low_confidence", "source": "derived"}
     else:
         mf.pop("expiration_date", None)
+        _record_fact_rejection(
+            mf, "expiration_date",
+            "this is a renewal and the expiring term was found, but the "
+            "proposed term length is not stated anywhere")
     # ── THE PER-LINE TERMS ARE EXPIRING TOO, AND NOTHING SAID SO ─────────────
     # Client session 2026-08-16: after the false "Umbrella and GL policy
     # periods misaligned" hard stop was removed, the review screen went SILENT

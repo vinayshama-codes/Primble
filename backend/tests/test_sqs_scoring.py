@@ -221,20 +221,21 @@ def test_loss_year_tiers():
         {"loss_history_years": "5", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {},
         has_loss_run_doc=True)
     assert full == 100
-    # 3-4 years base = 80 (client table). Prior carrier MISSING applies -10 → 70.
+    # C2 2.3: 3-4 years base = 85. Prior carrier MISSING applies -10 → 75.
     partial, _ = sq.calculate_p4_loss_history(
         {"loss_history_years": "3", "loss_run_age_days": "30"}, {}, has_loss_run_doc=True)
-    assert partial == 70
-    # 3-4 years WITH prior carrier: +10 → 90 (client: prior carrier present +10).
+    assert partial == 75
+    # 3-4 years WITH prior carrier: present = 0 (C2: the +10 bonus is removed) → 85.
     partial_with_carrier, _ = sq.calculate_p4_loss_history(
         {"loss_history_years": "3", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {},
         has_loss_run_doc=True)
-    assert partial_with_carrier == 90
-    # 1-2 years base = 40; prior carrier missing -10 → 30.
+    assert partial_with_carrier == 85
+    # C2 2.3: 1-2 years base = 70 (was 40 - too punitive for real evidence);
+    # prior carrier missing -10 → 60.
     thin, _ = sq.calculate_p4_loss_history(
         {"loss_history_years": "2", "loss_run_age_days": "30"}, {}, has_loss_run_doc=True)
-    assert thin == 30
-    # No loss info: 25 (client V1) — carrier adjustment does not apply on this path.
+    assert thin == 60
+    # No loss info: 25 — carrier adjustment does not apply on this path.
     none, _ = sq.calculate_p4_loss_history({}, {})
     assert none == 25
 
@@ -257,13 +258,13 @@ def test_loss_year_tiers_require_doc():
 
 
 def test_loss_prior_carrier_delta():
-    # Client: prior carrier present +10, missing -10 on the same base tier.
+    # C2 2.3: prior carrier present = 0 (no bonus), missing when applicable = -10.
     with_c, _ = sq.calculate_p4_loss_history(
         {"loss_history_years": "3", "loss_run_age_days": "30", "prior_carrier": "Travelers"}, {},
         has_loss_run_doc=True)
     without_c, _ = sq.calculate_p4_loss_history(
         {"loss_history_years": "3", "loss_run_age_days": "30"}, {}, has_loss_run_doc=True)
-    assert with_c - without_c == 20  # (+10) - (-10)
+    assert with_c - without_c == 10  # (0) - (-10)
 
 
 def test_loss_run_moderate_match_name_plus_address():
@@ -298,16 +299,16 @@ def test_loss_attestation_credit_and_safety():
 
 
 def test_loss_run_doc_match_tiers():
-    # Loss runs uploaded WITH a prior carrier (the realistic case - loss runs name
-    # the carrier): match credit (50/35/15) + prior-carrier +10. Fresh (age 30) so
-    # the recency penalty doesn't apply.
+    # Loss runs uploaded WITH a prior carrier (the realistic case - loss runs
+    # name the carrier). C2 2.4: carrier presence earns NO bonus, so the tier
+    # bases stand as-is. Fresh (age 30) so no recency penalty applies.
     fresh = {"loss_run_age_days": "30", "prior_carrier": "Travelers"}
     strong, _ = sq.calculate_p4_loss_history(fresh, {}, has_loss_run_doc=True, loss_run_match="strong")
     possible, _ = sq.calculate_p4_loss_history(fresh, {}, has_loss_run_doc=True, loss_run_match="possible")
     nomatch, _ = sq.calculate_p4_loss_history(fresh, {}, has_loss_run_doc=True, loss_run_match="no_match")
-    assert strong == 60     # 50 + 10 prior carrier
-    assert possible == 45   # 35 + 10
-    assert nomatch == 25    # 15 + 10
+    assert strong == 60     # pinned (client 2.4)
+    assert possible == 35   # tier base, no bonus
+    assert nomatch == 15    # tier base, below the 25 no-match cap
 
 
 def test_loss_run_doc_carrier_adjustment():
@@ -320,14 +321,14 @@ def test_loss_run_doc_carrier_adjustment():
         fresh, {}, has_loss_run_doc=True, loss_run_match="strong")
     assert strong_with_c == 60      # pinned
     assert strong_without_c == 60   # pinned - carrier adjustment skipped for this state
-    # The prior-carrier +10 / -10 still applies to the non-pinned match tiers
-    # ("commonly found on loss runs and prior policy documents").
+    # C2 2.4: the non-pinned tiers keep only the missing-carrier -10 (when
+    # applicable); the +10 presence bonus is removed everywhere.
     poss_with_c, _ = sq.calculate_p4_loss_history(
         {**fresh, "prior_carrier": "Travelers"}, {}, has_loss_run_doc=True, loss_run_match="possible")
     poss_without_c, _ = sq.calculate_p4_loss_history(
         fresh, {}, has_loss_run_doc=True, loss_run_match="possible")
-    assert poss_with_c == 45        # 35 + 10
-    assert poss_without_c == 25     # 35 - 10
+    assert poss_with_c == 35        # 35 + 0 (no bonus)
+    assert poss_without_c == 25     # 35 - 10 (missing, applicable)
 
 
 def test_no_match_loss_runs_capped_even_with_full_years():
@@ -449,9 +450,9 @@ def test_moderate_match_earns_more_than_possible():
     fresh = {"loss_run_age_days": "30", "prior_carrier": "Travelers"}
     moderate, _ = sq.calculate_p4_loss_history(fresh, {}, has_loss_run_doc=True, loss_run_match="moderate")
     possible, _ = sq.calculate_p4_loss_history(fresh, {}, has_loss_run_doc=True, loss_run_match="possible")
-    assert moderate > possible   # 52 > 45
-    assert moderate == 52        # match_credit[moderate]=42 + carrier+10
-    assert possible == 45        # match_credit[possible]=35 + carrier+10
+    assert moderate > possible   # 42 > 35
+    assert moderate == 42        # match_credit[moderate]=42 (C2: no carrier bonus)
+    assert possible == 35        # match_credit[possible]=35
 
 
 def test_moderate_match_maps_to_pending_validation():
@@ -466,13 +467,13 @@ def test_moderate_match_maps_to_pending_validation():
 
 
 def test_no_loss_evidence_quality_scoring():
-    # §6.4 (client clarification): the two no-loss evidence sources score differently -
-    # a user attestation is an affirmative statement (60); a passing mention in the
-    # narrative is weaker (45). Both sit above no-information (25).
+    # C2 2.5: the two no-loss evidence sources score differently - a user
+    # attestation is an affirmative statement (60); a passing mention in the
+    # narrative is weaker (40, revised from 45). Both sit above no-info (25).
     user, _ = sq.calculate_p4_loss_history({}, {"no_prior_losses": True})
     narrative, _ = sq.calculate_p4_loss_history({}, {"narrative_states_no_losses": True})
     assert user == 60
-    assert narrative == 45
+    assert narrative == 40
 
 
 # ── Narrative quality (§6.3 tuple + components) ───────────────────────────────
@@ -955,15 +956,27 @@ def test_umbrella_no_penalty_without_auto_exposure():
 # ── L6: recency on doc-only loss credit path ──────────────────────────────────
 
 def test_loss_run_doc_stale_gets_recency_penalty():
-    # L6 fix: doc-only credit path must apply recency. Compare explicitly fresh
-    # (age=30) vs stale (age=400) so both sides are determinate.
-    fresh, _ = sq.calculate_p4_loss_history(
+    # C2 2.4 (2026-08-24) REVERSES the old expectation for the STRONG tier: it
+    # is pinned at 60 and recency never moves it (the 60 already prices in the
+    # unreadable details - deducting again charged one problem twice). Recency
+    # on the doc-only path now applies to the NON-PINNED tiers only, and only
+    # when a valuation date exists. Both halves asserted.
+    fresh_strong, _ = sq.calculate_p4_loss_history(
         {"loss_run_age_days": "30"}, {}, has_loss_run_doc=True, loss_run_match="strong"
     )
-    stale, recs = sq.calculate_p4_loss_history(
+    stale_strong, _ = sq.calculate_p4_loss_history(
         {"loss_run_age_days": "400"}, {}, has_loss_run_doc=True, loss_run_match="strong"
     )
-    assert stale < fresh, f"Stale doc-only path should score below fresh: stale={stale}, fresh={fresh}"
+    assert fresh_strong == stale_strong == 60, "the strong tier is pinned (client 2.4)"
+    fresh_mod, _ = sq.calculate_p4_loss_history(
+        {"loss_run_age_days": "30", "prior_carrier": "X"}, {},
+        has_loss_run_doc=True, loss_run_match="moderate"
+    )
+    stale_mod, recs = sq.calculate_p4_loss_history(
+        {"loss_run_age_days": "400", "prior_carrier": "X"}, {},
+        has_loss_run_doc=True, loss_run_match="moderate"
+    )
+    assert stale_mod < fresh_mod, f"stale={stale_mod}, fresh={fresh_mod}"
     assert any("day" in r.lower() for r in recs)
 
 

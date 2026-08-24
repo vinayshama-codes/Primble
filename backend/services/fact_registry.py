@@ -464,6 +464,32 @@ FACT_REGISTRY: dict[str, dict] = {
         "validate":    _is_positive_int,
         "format_hint": "Whole number (e.g. 1)",
     },
+    # ── Loss-history workflow states (client C2 2.9/2.10, 2026-08-24) ───────
+    "new_venture_indicator": {
+        # Producer confirmation (client 2.2: "if the producer confirms") - it
+        # is answered from the Loss History card, never asked to the client,
+        # and is not stamped onto any ACORD box. Parsed by
+        # services.loss_history_state.new_venture_answer.
+        "forms":       set(),
+        "question":    None,
+        "tier": None, "required": False,
+        "validate":    lambda v: (v.strip().lower().startswith(("yes", "no"))
+                                  or "new venture" in v.lower()
+                                  or "prior operations" in v.lower()),
+        "format_hint": "Yes or No (is this a new venture with no prior operations?)",
+    },
+    "loss_run_status": {
+        # Client 2.10 (Prior Claims Exist): whether loss runs have been
+        # requested / are available. Extraction also writes "pending" /
+        # "requested" here (RULE 12); the questionnaire select stores its
+        # option text and services.loss_history_state.parse_loss_run_status
+        # reads both shapes with one rule.
+        "forms":       set(),
+        "question":    "Have loss runs been requested, or are any available to upload?",
+        "tier": None, "required": False,
+        "validate":    lambda v: bool(v.strip()),
+        "format_hint": "e.g. 'Requested - pending' or 'No loss runs are available'",
+    },
     "producer_name": {
         "forms":       {"ACORD_125"},
         "question":    "What is the name of your insurance producer or agency?",

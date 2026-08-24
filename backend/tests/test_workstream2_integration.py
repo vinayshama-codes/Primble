@@ -141,12 +141,40 @@ def test_lines_of_business_terminology_equivalent_no_warning():
     assert not any("lines_of_business" in i for i in check_doc_consistency(docs))
 
 
-def test_lines_of_business_genuinely_different_warns():
+def test_lines_of_business_different_lists_alone_do_NOT_warn():
+    """SUPERSEDED BY CLIENT 1.7 (v1-20AUG D24, live run 2026-08-21).
+
+    This asserted that two disjoint coverage lists warn. The client's acceptance
+    criteria say a LOB conflict needs sources that "materially disagree about
+    WHETHER COVERAGE EXISTS" - and two positive lists can never establish that.
+    A COI certifies selected coverages; an application may name a line placed
+    with another carrier. Silence is not denial (Principle 3).
+
+    On the live package this exact shape - an application naming Professional
+    Liability against a dec listing GL/Auto/Umbrella/IM - called the whole
+    submission inconsistent and capped SQS at 85.
+
+    The real contradiction is still covered by the test below."""
     docs = [
         doc({"lines_of_business": env(["General Liability"])}),
         doc({"lines_of_business": env(["Property"])}, "application"),
     ]
-    assert any("lines_of_business" in i for i in check_doc_consistency(docs))
+    assert not any("lines_of_business" in i and i.startswith("[warning]")
+                   for i in check_doc_consistency(docs))
+
+
+def test_a_DENIED_line_listed_as_active_elsewhere_still_warns():
+    """The conflict the rule above must not lose: one document says the line is
+    NOT covered, another lists it as active. Positive evidence on both sides."""
+    docs = [
+        doc({"lines_of_business": env(["General Liability"]),
+             "coverage_lines": env([{"line": "Commercial Property",
+                                     "premium": "NO COVERAGE"}])}),
+        doc({"lines_of_business": env(["General Liability", "Commercial Property"])},
+            "application"),
+    ]
+    assert any("lines_of_business" in i and i.startswith("[warning]")
+               for i in check_doc_consistency(docs))
 
 
 # ── §5.2 — CSL == Combined Single Limit on a generic field (enveloped) ─────────

@@ -1,0 +1,2705 @@
+{
+  "session_id": "40cd587d-fb0c-4e4e-8ea5-9c08caf7db9a",
+  "merged_facts": {
+    "gl_limits": {
+      "value": "$1,000,000 Each Occurrence / $2,000,000 General Aggregate / $2,000,000 Products/Completed Ops Aggregate",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "agreed_value_endorsement": {
+      "value": "False",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "explicit_no",
+      "evidence_state": "suggested"
+    },
+    "applicant_name": {
+      "value": "ORBIN CONTRACTING LLC",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "auto_liability_limit": {
+      "value": "$1,000,000",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "auto_liability_structure": {
+      "value": "Combined Single Limit",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "business_start_date": {
+      "value": "06/15/2014",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "carrier_name": {
+      "value": "EMC Property & Casualty Company",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "contractor_type": {
+      "value": "Roofing Contractor",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "cyber_controls_backups": {
+      "value": "False",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "explicit_no",
+      "evidence_state": "suggested"
+    },
+    "cyber_controls_mfa": {
+      "value": "False",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "explicit_no",
+      "evidence_state": "suggested"
+    },
+    "effective_date": {
+      "value": "07/15/2026",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "expiration_date": {
+      "value": "07/15/2027",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "fein": {
+      "value": "84-2210987",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "gl_aggregate": {
+      "value": "$2,000,000",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "gl_each_occurrence": {
+      "value": "$1,000,000",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "loss_history_years": {
+      "value": "5",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "loss_run_period_end": {
+      "value": "08/01/2026",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "loss_run_period_start": {
+      "value": "07/15/2021",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "loss_run_valuation_date": {
+      "value": "08/01/2026",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "mailing_address": {
+      "value": "4800 Dahlia St # D13, Denver, CO 80216-3121",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "num_claims": {
+      "value": "2",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "num_employees": {
+      "value": "18",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "operations_description": {
+      "value": "Licensed electrical and roofing contractor. Commercial and residential installation, repair and service work performed at customer locations.",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "physical_address": {
+      "value": "4800 Dahlia Street D13, Denver, CO 80216",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "policy_number": {
+      "value": "BBC7263-26",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "producer_address": {
+      "value": "1800 Market Street, Denver, CO 80202",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "producer_name": {
+      "value": "Summit Commercial Insurance",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "state_of_operations": {
+      "value": "CO",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "total_incurred": {
+      "value": "$17,150",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "total_revenue": {
+      "value": "$4,250,000",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "umbrella_effective_date": {
+      "value": "07/15/2026",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "umbrella_expiration_date": {
+      "value": "07/15/2027",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "umbrella_limit": {
+      "value": "$3,000,000",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "lines_of_business": [
+      "Commercial General Liability",
+      "Commercial Automobile Liability",
+      "Commercial Liability Umbrella",
+      "Commercial Inland Marine"
+    ],
+    "locations": [
+      "4800 Dahlia Street D13, Denver, CO 80216"
+    ],
+    "loss_history": [
+      {
+        "date": "03/28/2024",
+        "claim_date": null,
+        "description": "Business Auto Insured vehicle rear-ended third party",
+        "amount": "$4,850",
+        "paid": "$4,850",
+        "reserved_amount": "$0",
+        "claim_number": null,
+        "line_of_business": "Business Auto",
+        "open": false,
+        "open_code": "C",
+        "subrogation_code": "N"
+      },
+      {
+        "date": "11/02/2022",
+        "claim_date": null,
+        "description": "General Liability Water damage to customer premises",
+        "amount": "$12,300",
+        "paid": "$12,300",
+        "reserved_amount": "$0",
+        "claim_number": null,
+        "line_of_business": "General Liability",
+        "open": false,
+        "open_code": "C",
+        "subrogation_code": "N"
+      }
+    ],
+    "coverage_lines": [
+      {
+        "line": "Commercial General Liability",
+        "carrier": "EMC Property & Casualty Company",
+        "naic": null,
+        "policy_number": "7263-26",
+        "premium": "$6,720",
+        "effective_date": "07/15/26",
+        "expiration_date": "07/15/27"
+      },
+      {
+        "line": "Commercial Automobile Liability",
+        "carrier": "Employers Mutual Casualty Company",
+        "naic": null,
+        "policy_number": "6E7-40-02---26",
+        "premium": "$2,991",
+        "effective_date": "07/15/26",
+        "expiration_date": "07/15/27"
+      },
+      {
+        "line": "Commercial Liability Umbrella",
+        "carrier": "Employers Mutual Casualty Company",
+        "naic": null,
+        "policy_number": "6J7-40-02---26",
+        "premium": "$4,100",
+        "effective_date": "07/15/26",
+        "expiration_date": "07/15/27"
+      },
+      {
+        "line": "Commercial Inland Marine",
+        "carrier": "Employers Mutual Casualty Company",
+        "naic": null,
+        "policy_number": "IM-5540-26",
+        "premium": "$1,150",
+        "effective_date": "07/15/26",
+        "expiration_date": "07/15/27"
+      }
+    ],
+    "dec_page_entries": [
+      {
+        "label": "Policy Period",
+        "value": "07/15/2026 to 07/15/2027",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Named Insured",
+        "value": "ORBIN CONTRACTING LLC",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "DBA",
+        "value": "Orbin Roofing",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Mailing Address",
+        "value": "4800 Dahlia St # D13, Denver, CO 80216-3121",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "FEIN",
+        "value": "84-2210987",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Entity Type",
+        "value": "Limited Liability Company",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Business Phone",
+        "value": "303-555-0175",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Annual Revenue",
+        "value": "$4,250,000",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Total Payroll",
+        "value": "$1,880,000",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Number of Employees",
+        "value": "18",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Commercial Automobile LiabilitEymployers Mutual Casualty Co6mEp7a-4n0y-02---26 $2,991 07/15/26-07/15/27",
+        "value": "Commercial Automobile LiabilitEymployers Mutual Casualty Co6mEp7a-4n0y-02---26 $2,991 07/15/26-07/15/27",
+        "section": "SCHEDULE OF COVERAGE PARTS",
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": "Commercial Auto"
+      },
+      {
+        "label": "Commercial Liability UmbrellaEmployers Mutual Casualty Co6mJ7p-a4n0y-02---26 $4,100 07/15/26-07/15/27",
+        "value": "Commercial Liability UmbrellaEmployers Mutual Casualty Co6mJ7p-a4n0y-02---26 $4,100 07/15/26-07/15/27",
+        "section": "SCHEDULE OF COVERAGE PARTS",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "Commercial Umbrella"
+      },
+      {
+        "label": "Total Policy Premium",
+        "value": "$14,961",
+        "section": "COMMERCIAL PACKAGE DECLARATIONS",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Each Occurrence",
+        "value": "$1,000,000",
+        "section": "GENERAL LIABILITY LIMITS",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "General Liability"
+      },
+      {
+        "label": "General Aggregate",
+        "value": "$2,000,000",
+        "section": "GENERAL LIABILITY LIMITS",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "General Liability"
+      },
+      {
+        "label": "Products/Completed Ops Aggregate",
+        "value": "$2,000,000",
+        "section": "GENERAL LIABILITY LIMITS",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "General Liability"
+      },
+      {
+        "label": "Each Occurrence Limit",
+        "value": "$3,000,000",
+        "section": "COMMERCIAL LIABILITY UMBRELLA",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "Commercial Umbrella"
+      },
+      {
+        "label": "Aggregate Limit",
+        "value": "$3,000,000",
+        "section": "COMMERCIAL LIABILITY UMBRELLA",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "Commercial Umbrella"
+      },
+      {
+        "label": "Self-Insured Retention",
+        "value": "$0",
+        "section": "COMMERCIAL LIABILITY UMBRELLA",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "Commercial Umbrella"
+      },
+      {
+        "label": "Covered Autos Liability",
+        "value": "Symbol 01 - Any Auto",
+        "section": "COMMERCIAL AUTOMOBILE",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "Commercial Auto"
+      },
+      {
+        "label": "Comprehensive / Collision",
+        "value": "Symbol 07 Deductible $1,000",
+        "section": "COMMERCIAL AUTOMOBILE",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "Commercial Auto"
+      },
+      {
+        "label": "Issue Date",
+        "value": "08/01/2026",
+        "section": "CERTIFICATE OF LIABILITY INSURANCE",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Insured",
+        "value": "Orbin Contracting, LLC",
+        "section": "CERTIFICATE OF LIABILITY INSURANCE",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Address",
+        "value": "4800 Dahlia Street D13, Denver, CO 80216",
+        "section": "CERTIFICATE OF LIABILITY INSURANCE",
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Producer",
+        "value": "Summit Commercial Insurance, 1800 Market Street, Denver, CO 80202",
+        "section": "CERTIFICATE OF LIABILITY INSURANCE",
+        "owner": "producer",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Insurer A",
+        "value": "EMC Property & Casualty Company",
+        "section": "CERTIFICATE OF LIABILITY INSURANCE",
+        "owner": "carrier",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Insurer B",
+        "value": "Employers Mutual Casualty Company",
+        "section": "CERTIFICATE OF LIABILITY INSURANCE",
+        "owner": "carrier",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "TYPE OF INSURANCE",
+        "value": "POLICY NUMBER POLICY PERIOD LIMITS",
+        "section": "COVERAGES",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "General Liability",
+        "value": "BBC7263-26 07/15/26-07/15/27 Each Occurrence $1,000,000",
+        "section": "COVERAGES",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "General Liability"
+      },
+      {
+        "label": "General Aggregate",
+        "value": "$2,000,000",
+        "section": "COVERAGES",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "General Liability"
+      },
+      {
+        "label": "Automobile Liability",
+        "value": "6E7-40-02---26 07/15/26-07/15/27 Combined Single Limit $1,000,000",
+        "section": "COVERAGES",
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": "Commercial Auto"
+      },
+      {
+        "label": "Umbrella Liability",
+        "value": "6J7-40-02---26 07/15/26-07/15/27 Each Occurrence $1,000,000",
+        "section": "COVERAGES",
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": "Commercial Umbrella"
+      },
+      {
+        "label": "DESCRIPTION OF OPERATIONS",
+        "value": "Licensed electrical and roofing contractor. Commercial and residential installation, repair and service work performed at customer locations.",
+        "section": "DESCRIPTION OF OPERATIONS",
+        "owner": "other",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "LOSS RUN REPORT",
+        "value": "LOSS RUN REPORT",
+        "section": null,
+        "owner": "other",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Prepared by",
+        "value": "EMC Insurance Companies",
+        "section": null,
+        "owner": "carrier",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Valuation Date",
+        "value": "08/01/2026",
+        "section": null,
+        "owner": "policy",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Insured",
+        "value": "Orbin Contracting, LLC",
+        "section": null,
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "FEIN",
+        "value": "842210987",
+        "section": null,
+        "owner": "applicant",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Policy Number",
+        "value": "6E7 40 02 26",
+        "section": null,
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": null
+      },
+      {
+        "label": "Carrier",
+        "value": "EMC Insurance Companies",
+        "section": null,
+        "owner": "carrier",
+        "policy_number": null,
+        "line_of_business": null
+      },
+      {
+        "label": "Period Covered",
+        "value": "07/15/2021 to 08/01/2026 (5 years)",
+        "section": null,
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": null
+      },
+      {
+        "label": "DATE OF LOSS",
+        "value": "03/28/2024",
+        "section": "CLAIM DETAIL",
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": "Commercial Auto"
+      },
+      {
+        "label": "LINE",
+        "value": "Business Auto",
+        "section": "CLAIM DETAIL",
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": "Commercial Auto"
+      },
+      {
+        "label": "RESERVED",
+        "value": "$0",
+        "section": "CLAIM DETAIL",
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": "Commercial Auto"
+      },
+      {
+        "label": "STATUS",
+        "value": "Closed",
+        "section": "CLAIM DETAIL",
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": "Commercial Auto"
+      },
+      {
+        "label": "DATE OF LOSS",
+        "value": "11/02/2022",
+        "section": "CLAIM DETAIL",
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": "General Liability"
+      },
+      {
+        "label": "LINE",
+        "value": "General Liability",
+        "section": "CLAIM DETAIL",
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": "General Liability"
+      },
+      {
+        "label": "Total Incurred",
+        "value": "$17,150",
+        "section": null,
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": null
+      },
+      {
+        "label": "Number of Claims",
+        "value": "2",
+        "section": null,
+        "owner": "policy",
+        "policy_number": "6E7-40-02---26",
+        "line_of_business": null
+      }
+    ],
+    "risk_transfer": {
+      "additional_insured_required": null,
+      "additional_insured_names": [],
+      "primary_noncontributory_required": null,
+      "waiver_of_subrogation_required": null,
+      "certificate_holder_name": null,
+      "loss_payee_name": null,
+      "mortgagee_name": null,
+      "specific_wording_requirements": null
+    },
+    "dba_name": {
+      "value": "Orbin Roofing",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "contact_phone": {
+      "value": "303-555-0175",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "entity_type": {
+      "value": "Limited Liability Company",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "total_payroll": {
+      "value": "$1,880,000",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "gl_products_aggregate": {
+      "value": "$2,000,000",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "total_policy_premium": {
+      "value": "$14,961",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "auto_deductible_comp": {
+      "value": "$1,000",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "auto_deductible_collision": {
+      "value": "$1,000",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "umbrella_sir": {
+      "value": "$0",
+      "confidence": "ai_high",
+      "source": "ai",
+      "value_state": "present",
+      "evidence_state": "suggested"
+    },
+    "auto_covered_symbols": [
+      {
+        "coverage": "Covered Autos Liability",
+        "symbols": [
+          1
+        ]
+      },
+      {
+        "coverage": "Comprehensive / Collision",
+        "symbols": [
+          7
+        ]
+      }
+    ],
+    "dec_states_payroll_basis": true,
+    "property_locations": [
+      {
+        "address": "4800 Dahlia Street D13, Denver, CO 80216",
+        "address_line1": "4800 Dahlia Street D13",
+        "address_city": "Denver",
+        "address_state": "CO",
+        "address_zip": "80216",
+        "location_id": "L1",
+        "location_number": "1",
+        "address_line2": null,
+        "address_county": null,
+        "is_owner": null,
+        "is_tenant": null,
+        "is_other_interest": null,
+        "other_interest_description": null,
+        "is_inside_city_limits": null,
+        "is_outside_city_limits": null
+      }
+    ],
+    "is_renewal": {
+      "value": "yes",
+      "confidence": "filled",
+      "source": "dec_entry",
+      "value_state": "present",
+      "evidence_state": "source_verified"
+    },
+    "years_in_business": {
+      "value": "12",
+      "confidence": "deterministic",
+      "source": "derived",
+      "evidence_state": "derived",
+      "value_state": "present"
+    }
+  },
+  "flags": {
+    "_doc_type": "dec_page",
+    "has_crime": false,
+    "has_cyber": false,
+    "has_umbrella": true,
+    "is_contractor": true,
+    "has_open_cargo": false,
+    "wc_multi_state": false,
+    "auto_has_um_uim": false,
+    "has_loss_history": true,
+    "has_workers_comp": false,
+    "auto_split_limits": false,
+    "gl_is_claims_made": false,
+    "has_auto_coverage": true,
+    "has_builders_risk": false,
+    "has_inland_marine": true,
+    "narrative_profile": {
+      "operations": {
+        "present": true,
+        "evidence": "Licensed electrical and roofing contractor. Commercial and residential installation, repair and service work"
+      },
+      "loss_history": {
+        "present": true,
+        "evidence": "\"CLAIM DETAIL\" and \"Total Incurred: $17,150\""
+      },
+      "carrier_market": {
+        "present": true,
+        "evidence": "OTHER COVERAGE CARRIED Professional Liability: Carrier: Hartford Fire Insurance Company"
+      },
+      "location_exposure": {
+        "present": true,
+        "evidence": "performed at customer locations."
+      },
+      "coverage_discussion": {
+        "present": true,
+        "evidence": "Professional Liability is a separate line - it is NOT General Liability."
+      }
+    },
+    "has_auto_liability": true,
+    "has_garage_keepers": false,
+    "is_certificate_doc": true,
+    "has_commercial_auto": true,
+    "has_garage_coverage": false,
+    "_narrative_fact_keys": [
+      "loss_history_no_prior_losses_indicator",
+      "operations_description",
+      "prior_carrier"
+    ],
+    "has_dealers_coverage": false,
+    "has_garage_liability": false,
+    "is_commercial_policy": true,
+    "narrative_components": {
+      "operations": {
+        "present": true,
+        "evidence": "Licensed electrical and roofing contractor. Commercial and residential installation, repair and service work"
+      },
+      "loss_history": {
+        "present": true,
+        "evidence": "\"CLAIM DETAIL\" and \"Total Incurred: $17,150\""
+      },
+      "carrier_market": {
+        "present": true,
+        "evidence": "OTHER COVERAGE CARRIED Professional Liability: Carrier: Hartford Fire Insurance Company"
+      },
+      "location_exposure": {
+        "present": true,
+        "evidence": "performed at customer locations."
+      },
+      "coverage_discussion": {
+        "present": true,
+        "evidence": "Professional Liability is a separate line - it is NOT General Liability."
+      }
+    },
+    "has_garage_operations": false,
+    "has_general_liability": true,
+    "has_property_coverage": false,
+    "has_truckers_coverage": false,
+    "has_multiple_locations": false,
+    "asserts_no_known_losses": false,
+    "auto_has_hired_nonowned": false,
+    "has_certificate_request": false,
+    "auto_has_physical_damage": true,
+    "has_auto_dealer_exposure": false,
+    "property_has_bi_coverage": false,
+    "has_waiver_of_subrogation": false,
+    "wc_has_monopolistic_state": false,
+    "has_garagekeepers_coverage": false,
+    "has_motor_carrier_coverage": false,
+    "has_primary_noncontributory": false,
+    "property_has_peril_deductibles": false,
+    "has_additional_insured_requirement": false
+  },
+  "documents": [
+    {
+      "doc_id": "6a0b0f632a2e4059a9ccd19740869b0d",
+      "filename": "1_dec_page.pdf",
+      "doc_type": "dec_page",
+      "facts": {
+        "fein": {
+          "value": "84-2210987",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "wc_xmod": null,
+        "dba_name": {
+          "value": "Orbin Roofing",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "sic_code": null,
+        "gl_limits": {
+          "value": "$1,000,000 Each Occurrence / $2,000,000 General Aggregate / $2,000,000 Products/Completed Ops Aggregate",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "locations": [],
+        "roof_year": null,
+        "is_renewal": null,
+        "naics_code": null,
+        "num_claims": null,
+        "retro_date": null,
+        "total_paid": null,
+        "wc_payroll": null,
+        "year_built": null,
+        "crime_limit": null,
+        "cyber_limit": null,
+        "entity_type": {
+          "value": "Limited Liability Company",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "wc_officers": [],
+        "audit_period": null,
+        "auto_drivers": [],
+        "billing_plan": null,
+        "carrier_naic": null,
+        "carrier_name": null,
+        "contact_name": null,
+        "gl_aggregate": {
+          "value": "$2,000,000",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "gl_form_type": null,
+        "loss_history": [],
+        "payment_plan": null,
+        "producer_fax": null,
+        "umbrella_sir": {
+          "value": "$0",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "contact_email": null,
+        "contact_phone": {
+          "value": "303-555-0175",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "gl_deductible": null,
+        "num_employees": {
+          "value": "18",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "policy_number": null,
+        "prior_carrier": null,
+        "producer_name": null,
+        "risk_transfer": {
+          "mortgagee_name": null,
+          "loss_payee_name": null,
+          "certificate_holder_name": null,
+          "additional_insured_names": [],
+          "additional_insured_required": null,
+          "specific_wording_requirements": null,
+          "waiver_of_subrogation_required": null,
+          "primary_noncontributory_required": null
+        },
+        "total_payroll": {
+          "value": "$1,880,000",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "total_revenue": {
+          "value": "$4,250,000",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "applicant_name": {
+          "value": "ORBIN CONTRACTING LLC",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "coverage_lines": [
+          {
+            "line": "Commercial General Liability",
+            "naic": null,
+            "carrier": "EMC Property & Casualty Company",
+            "premium": "$6,720",
+            "policy_number": "7263-26",
+            "effective_date": "07/15/26",
+            "expiration_date": "07/15/27"
+          },
+          {
+            "line": "Commercial Automobile Liability",
+            "naic": null,
+            "carrier": "Employers Mutual Casualty Company",
+            "premium": "$2,991",
+            "policy_number": "6E7-40-02---26",
+            "effective_date": "07/15/26",
+            "expiration_date": "07/15/27"
+          },
+          {
+            "line": "Commercial Liability Umbrella",
+            "naic": null,
+            "carrier": "Employers Mutual Casualty Company",
+            "premium": "$4,100",
+            "policy_number": "6J7-40-02---26",
+            "effective_date": "07/15/26",
+            "expiration_date": "07/15/27"
+          },
+          {
+            "line": "Commercial Inland Marine",
+            "naic": null,
+            "carrier": "Employers Mutual Casualty Company",
+            "premium": "$1,150",
+            "policy_number": "IM-5540-26",
+            "effective_date": "07/15/26",
+            "expiration_date": "07/15/27"
+          }
+        ],
+        "effective_date": {
+          "value": "07/15/2026",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "mortgagee_name": null,
+        "occupancy_type": null,
+        "total_incurred": null,
+        "umbrella_limit": {
+          "value": "$3,000,000",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "wc_class_codes": [],
+        "carrier_website": null,
+        "contractor_type": {
+          "value": "Roofing Contractor",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "cyber_retention": null,
+        "expiration_date": {
+          "value": "07/15/2027",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "loss_payee_name": null,
+        "loss_run_status": null,
+        "mailing_address": {
+          "value": "4800 Dahlia St # D13, Denver, CO 80216-3121",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "crime_deductible": null,
+        "dec_page_entries": [
+          {
+            "label": "Policy Period",
+            "owner": "policy",
+            "value": "07/15/2026 to 07/15/2027",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Named Insured",
+            "owner": "applicant",
+            "value": "ORBIN CONTRACTING LLC",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "DBA",
+            "owner": "applicant",
+            "value": "Orbin Roofing",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Mailing Address",
+            "owner": "applicant",
+            "value": "4800 Dahlia St # D13, Denver, CO 80216-3121",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "FEIN",
+            "owner": "applicant",
+            "value": "84-2210987",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Entity Type",
+            "owner": "applicant",
+            "value": "Limited Liability Company",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Business Phone",
+            "owner": "applicant",
+            "value": "303-555-0175",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Annual Revenue",
+            "owner": "applicant",
+            "value": "$4,250,000",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Total Payroll",
+            "owner": "applicant",
+            "value": "$1,880,000",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Number of Employees",
+            "owner": "applicant",
+            "value": "18",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Commercial General Liability",
+            "owner": "policy",
+            "value": "EMC Property & Casualty Company ComBpBaCny7263-26 $6,720 07/15/26-07/15/27",
+            "section": "SCHEDULE OF COVERAGE PARTS",
+            "policy_number": "7263-26",
+            "line_of_business": "Commercial General Liability"
+          },
+          {
+            "label": "Commercial Automobile LiabilitEymployers Mutual Casualty Co6mEp7a-4n0y-02---26 $2,991 07/15/26-07/15/27",
+            "owner": "policy",
+            "value": "Commercial Automobile LiabilitEymployers Mutual Casualty Co6mEp7a-4n0y-02---26 $2,991 07/15/26-07/15/27",
+            "section": "SCHEDULE OF COVERAGE PARTS",
+            "policy_number": "6E7-40-02---26",
+            "line_of_business": "Commercial Automobile Liability"
+          },
+          {
+            "label": "Commercial Liability UmbrellaEmployers Mutual Casualty Co6mJ7p-a4n0y-02---26 $4,100 07/15/26-07/15/27",
+            "owner": "policy",
+            "value": "Commercial Liability UmbrellaEmployers Mutual Casualty Co6mJ7p-a4n0y-02---26 $4,100 07/15/26-07/15/27",
+            "section": "SCHEDULE OF COVERAGE PARTS",
+            "policy_number": "6J7-40-02---26",
+            "line_of_business": "Commercial Liability Umbrella"
+          },
+          {
+            "label": "Commercial Inland Marine Employers Mutual Casualty CoImMp-5a5n4y0-26 $1,150 07/15/26-07/15/27",
+            "owner": "policy",
+            "value": "Commercial Inland Marine Employers Mutual Casualty CoImMp-5a5n0-26 $1,150 07/15/26-07/15/27",
+            "section": "SCHEDULE OF COVERAGE PARTS",
+            "policy_number": "IM-5540-26",
+            "line_of_business": "Commercial Inland Marine"
+          },
+          {
+            "label": "Total Policy Premium",
+            "owner": "policy",
+            "value": "$14,961",
+            "section": "COMMERCIAL PACKAGE DECLARATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Each Occurrence",
+            "owner": "policy",
+            "value": "$1,000,000",
+            "section": "GENERAL LIABILITY LIMITS",
+            "policy_number": null,
+            "line_of_business": "Commercial General Liability"
+          },
+          {
+            "label": "General Aggregate",
+            "owner": "policy",
+            "value": "$2,000,000",
+            "section": "GENERAL LIABILITY LIMITS",
+            "policy_number": null,
+            "line_of_business": "Commercial General Liability"
+          },
+          {
+            "label": "Products/Completed Ops Aggregate",
+            "owner": "policy",
+            "value": "$2,000,000",
+            "section": "GENERAL LIABILITY LIMITS",
+            "policy_number": null,
+            "line_of_business": "Commercial General Liability"
+          },
+          {
+            "label": "Each Occurrence Limit",
+            "owner": "policy",
+            "value": "$3,000,000",
+            "section": "COMMERCIAL LIABILITY UMBRELLA",
+            "policy_number": null,
+            "line_of_business": "Commercial Liability Umbrella"
+          },
+          {
+            "label": "Aggregate Limit",
+            "owner": "policy",
+            "value": "$3,000,000",
+            "section": "COMMERCIAL LIABILITY UMBRELLA",
+            "policy_number": null,
+            "line_of_business": "Commercial Liability Umbrella"
+          },
+          {
+            "label": "Self-Insured Retention",
+            "owner": "policy",
+            "value": "$0",
+            "section": "COMMERCIAL LIABILITY UMBRELLA",
+            "policy_number": null,
+            "line_of_business": "Commercial Liability Umbrella"
+          },
+          {
+            "label": "Covered Autos Liability",
+            "owner": "policy",
+            "value": "Symbol 01 - Any Auto",
+            "section": "COMMERCIAL AUTOMOBILE",
+            "policy_number": null,
+            "line_of_business": "Commercial Automobile Liability"
+          },
+          {
+            "label": "Comprehensive / Collision",
+            "owner": "policy",
+            "value": "Symbol 07 Deductible $1,000",
+            "section": "COMMERCIAL AUTOMOBILE",
+            "policy_number": null,
+            "line_of_business": "Commercial Automobile Liability"
+          }
+        ],
+        "deductible_basis": null,
+        "physical_address": null,
+        "producer_address": null,
+        "sprinkler_system": null,
+        "valuation_method": null,
+        "wc_prior_carrier": null,
+        "applicant_website": null,
+        "auto_um_uim_limit": null,
+        "auto_vin_schedule": [],
+        "construction_type": null,
+        "garage_deductible": null,
+        "lines_of_business": [
+          "Commercial General Liability",
+          "Commercial Automobile Liability",
+          "Commercial Liability Umbrella",
+          "Commercial Inland Marine"
+        ],
+        "loss_run_age_days": null,
+        "open_claims_count": null,
+        "umbrella_um_limit": null,
+        "wc_payroll_period": null,
+        "years_in_business": null,
+        "auto_bi_per_person": null,
+        "auto_med_pay_limit": null,
+        "certificate_holder": null,
+        "cyber_controls_mfa": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "explicit_no",
+          "evidence_state": "suggested"
+        },
+        "gl_each_occurrence": {
+          "value": "$1,000,000",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "gl_medical_expense": null,
+        "loss_history_years": null,
+        "prior_carrier_naic": null,
+        "property_bpp_value": null,
+        "property_locations": [],
+        "umbrella_uim_limit": null,
+        "account_description": null,
+        "auto_hired_nonowned": null,
+        "business_start_date": null,
+        "distance_to_hydrant": null,
+        "extra_expense_limit": null,
+        "inland_marine_items": [],
+        "loss_run_period_end": null,
+        "prior_policy_number": null,
+        "state_of_operations": {
+          "value": "CO",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "underlying_policies": [],
+        "wc_el_each_accident": null,
+        "wc_payroll_by_state": {},
+        "auto_bi_per_accident": null,
+        "auto_covered_symbols": [
+          {
+            "symbols": [
+              1
+            ],
+            "coverage": "Covered Autos Liability"
+          },
+          {
+            "symbols": [
+              7
+            ],
+            "coverage": "Comprehensive / Collision"
+          }
+        ],
+        "auto_deductible_comp": {
+          "value": "$1,000",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "auto_liability_limit": null,
+        "auto_pd_per_accident": null,
+        "crime_employee_count": null,
+        "fire_department_type": null,
+        "gl_fire_damage_limit": null,
+        "hired_auto_indicator": null,
+        "prior_effective_date": null,
+        "total_policy_premium": {
+          "value": "$14,961",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "umbrella_follow_form": null,
+        "business_income_limit": null,
+        "crime_locations_count": null,
+        "cyber_prior_incidents": null,
+        "fire_protection_class": null,
+        "gl_products_aggregate": {
+          "value": "$2,000,000",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "loss_run_period_start": null,
+        "percent_subcontracted": null,
+        "period_of_restoration": null,
+        "prior_expiration_date": null,
+        "producer_contact_name": null,
+        "wc_officer_exclusions": null,
+        "coinsurance_percentage": null,
+        "cyber_controls_backups": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "explicit_no",
+          "evidence_state": "suggested"
+        },
+        "deductible_application": null,
+        "garage_liability_limit": null,
+        "garage_operations_type": null,
+        "gl_class_code_schedule": [],
+        "operations_description": null,
+        "prior_coverage_by_line": [],
+        "producer_contact_email": null,
+        "producer_contact_phone": null,
+        "wc_xmod_effective_date": null,
+        "additional_remarks_text": null,
+        "auto_garaging_addresses": [],
+        "building_ITV_percentage": null,
+        "cyber_pii_records_count": null,
+        "loss_run_valuation_date": null,
+        "num_employees_full_time": null,
+        "num_employees_part_time": null,
+        "property_building_value": null,
+        "property_deductible_aop": null,
+        "umbrella_effective_date": {
+          "value": "07/15/2026",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "wc_monopolistic_payroll": {},
+        "agreed_value_endorsement": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "explicit_no",
+          "evidence_state": "suggested"
+        },
+        "auto_liability_structure": null,
+        "auto_radius_of_operation": null,
+        "builders_risk_owner_name": null,
+        "non_owned_auto_indicator": null,
+        "property_deductible_wind": null,
+        "umbrella_expiration_date": {
+          "value": "07/15/2027",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "additional_named_insureds": [],
+        "auto_deductible_collision": {
+          "value": "$1,000",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "contractor_commercial_pct": null,
+        "contractor_license_number": null,
+        "cyber_third_party_vendors": null,
+        "inland_marine_total_value": null,
+        "property_deductible_flood": null,
+        "umbrella_attachment_point": null,
+        "builders_risk_project_cost": null,
+        "certificate_holder_address": null,
+        "contractor_high_hazard_ops": [],
+        "contractor_residential_pct": null,
+        "employers_liability_limits": null,
+        "gl_class_codes_by_location": [],
+        "wc_el_disease_policy_limit": null,
+        "inland_marine_transit_limit": null,
+        "wc_el_disease_each_employee": null,
+        "auto_dealers_inventory_value": null,
+        "garagekeeper_coll_deductible": null,
+        "garagekeeper_comp_deductible": null,
+        "garagekeeper_liability_limit": null,
+        "wc_description_of_operations": null,
+        "builders_risk_completion_date": null,
+        "builders_risk_contractor_name": null,
+        "builders_risk_project_address": null,
+        "auto_physical_damage_valuation": null,
+        "builders_risk_insured_interest": null,
+        "gl_personal_advertising_injury": null,
+        "property_deductible_earthquake": null,
+        "builders_risk_construction_type": null,
+        "umbrella_medical_payments_limit": null,
+        "schedule_of_underlying_insurance": null,
+        "certificate_description_of_operations": null
+      }
+    },
+    {
+      "doc_id": "dfdc23038b354f73be42fd59221dadf9",
+      "filename": "2_certificate.pdf",
+      "doc_type": "certificate",
+      "facts": {
+        "fein": null,
+        "wc_xmod": null,
+        "dba_name": null,
+        "sic_code": null,
+        "gl_limits": {
+          "value": "Each Occurrence $1,000,000; General Aggregate $2,000,000",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "locations": [
+          "4800 Dahlia Street D13, Denver, CO 80216"
+        ],
+        "roof_year": null,
+        "is_renewal": null,
+        "naics_code": null,
+        "num_claims": null,
+        "retro_date": null,
+        "total_paid": null,
+        "wc_payroll": null,
+        "year_built": null,
+        "crime_limit": null,
+        "cyber_limit": null,
+        "entity_type": null,
+        "wc_officers": [],
+        "audit_period": null,
+        "auto_drivers": [],
+        "billing_plan": null,
+        "carrier_naic": null,
+        "carrier_name": {
+          "value": "EMC Property & Casualty Company",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "contact_name": null,
+        "gl_aggregate": {
+          "value": "$2,000,000",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "gl_form_type": null,
+        "loss_history": [],
+        "payment_plan": null,
+        "producer_fax": null,
+        "umbrella_sir": null,
+        "contact_email": null,
+        "contact_phone": null,
+        "gl_deductible": null,
+        "num_employees": null,
+        "policy_number": {
+          "value": "BBC7263-26",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "prior_carrier": null,
+        "producer_name": {
+          "value": "Summit Commercial Insurance",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "risk_transfer": {
+          "mortgagee_name": null,
+          "loss_payee_name": null,
+          "certificate_holder_name": null,
+          "additional_insured_names": [],
+          "additional_insured_required": null,
+          "specific_wording_requirements": null,
+          "waiver_of_subrogation_required": null,
+          "primary_noncontributory_required": null
+        },
+        "total_payroll": null,
+        "total_revenue": null,
+        "applicant_name": {
+          "value": "Orbin Contracting, LLC",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "coverage_lines": [
+          {
+            "line": "General Liability",
+            "naic": null,
+            "carrier": "EMC Property & Casualty Company",
+            "premium": null,
+            "policy_number": "BBC7263-26",
+            "effective_date": "07/15/26",
+            "expiration_date": "07/15/27"
+          },
+          {
+            "line": "Automobile Liability",
+            "naic": null,
+            "carrier": "Employers Mutual Casualty Company",
+            "premium": null,
+            "policy_number": "6E7-40-02---26",
+            "effective_date": "07/15/26",
+            "expiration_date": "07/15/27"
+          },
+          {
+            "line": "Umbrella Liability",
+            "naic": null,
+            "carrier": "Employers Mutual Casualty Company",
+            "premium": null,
+            "policy_number": "6J7-40-02---26",
+            "effective_date": "07/15/26",
+            "expiration_date": "07/15/27"
+          }
+        ],
+        "effective_date": {
+          "value": "07/15/26",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "mortgagee_name": null,
+        "occupancy_type": null,
+        "total_incurred": null,
+        "umbrella_limit": {
+          "value": "$1,000,000",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "wc_class_codes": [],
+        "carrier_website": null,
+        "contractor_type": {
+          "value": "electrical and roofing contractor",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "cyber_retention": null,
+        "expiration_date": {
+          "value": "07/15/27",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "loss_payee_name": null,
+        "loss_run_status": null,
+        "mailing_address": {
+          "value": "4800 Dahlia Street D13, Denver, CO 80216",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "crime_deductible": null,
+        "dec_page_entries": [
+          {
+            "label": "Issue Date",
+            "owner": "policy",
+            "value": "08/01/2026",
+            "section": "CERTIFICATE OF LIABILITY INSURANCE",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Insured",
+            "owner": "applicant",
+            "value": "Orbin Contracting, LLC",
+            "section": "CERTIFICATE OF LIABILITY INSURANCE",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Address",
+            "owner": "applicant",
+            "value": "4800 Dahlia Street D13, Denver, CO 80216",
+            "section": "CERTIFICATE OF LIABILITY INSURANCE",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Producer",
+            "owner": "producer",
+            "value": "Summit Commercial Insurance, 1800 Market Street, Denver, CO 80202",
+            "section": "CERTIFICATE OF LIABILITY INSURANCE",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Insurer A",
+            "owner": "carrier",
+            "value": "EMC Property & Casualty Company",
+            "section": "CERTIFICATE OF LIABILITY INSURANCE",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Insurer B",
+            "owner": "carrier",
+            "value": "Employers Mutual Casualty Company",
+            "section": "CERTIFICATE OF LIABILITY INSURANCE",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "TYPE OF INSURANCE",
+            "owner": "policy",
+            "value": "POLICY NUMBER POLICY PERIOD LIMITS",
+            "section": "COVERAGES",
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "General Liability",
+            "owner": "policy",
+            "value": "BBC7263-26 07/15/26-07/15/27 Each Occurrence $1,000,000",
+            "section": "COVERAGES",
+            "policy_number": "BBC7263-26",
+            "line_of_business": "General Liability"
+          },
+          {
+            "label": "General Aggregate",
+            "owner": "policy",
+            "value": "$2,000,000",
+            "section": "COVERAGES",
+            "policy_number": "BBC7263-26",
+            "line_of_business": "General Liability"
+          },
+          {
+            "label": "Automobile Liability",
+            "owner": "policy",
+            "value": "6E7-40-02---26 07/15/26-07/15/27 Combined Single Limit $1,000,000",
+            "section": "COVERAGES",
+            "policy_number": "6E7-40-02---26",
+            "line_of_business": "Automobile Liability"
+          },
+          {
+            "label": "Umbrella Liability",
+            "owner": "policy",
+            "value": "6J7-40-02---26 07/15/26-07/15/27 Each Occurrence $1,000,000",
+            "section": "COVERAGES",
+            "policy_number": "6J7-40-02---26",
+            "line_of_business": "Umbrella Liability"
+          },
+          {
+            "label": "DESCRIPTION OF OPERATIONS",
+            "owner": "other",
+            "value": "Licensed electrical and roofing contractor. Commercial and residential installation, repair and service work performed at customer locations.",
+            "section": "DESCRIPTION OF OPERATIONS",
+            "policy_number": null,
+            "line_of_business": null
+          }
+        ],
+        "deductible_basis": null,
+        "physical_address": {
+          "value": "4800 Dahlia Street D13, Denver, CO 80216",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "producer_address": {
+          "value": "1800 Market Street, Denver, CO 80202",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "sprinkler_system": null,
+        "valuation_method": null,
+        "wc_prior_carrier": null,
+        "applicant_website": null,
+        "auto_um_uim_limit": null,
+        "auto_vin_schedule": [],
+        "construction_type": null,
+        "garage_deductible": null,
+        "lines_of_business": [
+          "General Liability",
+          "Automobile Liability",
+          "Umbrella Liability"
+        ],
+        "loss_run_age_days": null,
+        "open_claims_count": null,
+        "umbrella_um_limit": null,
+        "wc_payroll_period": null,
+        "years_in_business": null,
+        "auto_bi_per_person": null,
+        "auto_med_pay_limit": null,
+        "certificate_holder": null,
+        "cyber_controls_mfa": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "gl_each_occurrence": {
+          "value": "$1,000,000",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "gl_medical_expense": null,
+        "loss_history_years": null,
+        "prior_carrier_naic": null,
+        "property_bpp_value": null,
+        "property_locations": [],
+        "umbrella_uim_limit": null,
+        "account_description": null,
+        "auto_hired_nonowned": null,
+        "business_start_date": null,
+        "distance_to_hydrant": null,
+        "extra_expense_limit": null,
+        "inland_marine_items": [],
+        "loss_run_period_end": null,
+        "prior_policy_number": null,
+        "state_of_operations": {
+          "value": "CO",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "underlying_policies": [],
+        "wc_el_each_accident": null,
+        "wc_payroll_by_state": {},
+        "auto_bi_per_accident": null,
+        "auto_covered_symbols": [],
+        "auto_deductible_comp": null,
+        "auto_liability_limit": {
+          "value": "$1,000,000",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "auto_pd_per_accident": null,
+        "crime_employee_count": null,
+        "fire_department_type": null,
+        "gl_fire_damage_limit": null,
+        "hired_auto_indicator": null,
+        "prior_effective_date": null,
+        "total_policy_premium": null,
+        "umbrella_follow_form": null,
+        "business_income_limit": null,
+        "crime_locations_count": null,
+        "cyber_prior_incidents": null,
+        "fire_protection_class": null,
+        "gl_products_aggregate": null,
+        "loss_run_period_start": null,
+        "percent_subcontracted": null,
+        "period_of_restoration": null,
+        "prior_expiration_date": null,
+        "producer_contact_name": null,
+        "wc_officer_exclusions": null,
+        "coinsurance_percentage": null,
+        "cyber_controls_backups": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "deductible_application": null,
+        "garage_liability_limit": null,
+        "garage_operations_type": null,
+        "gl_class_code_schedule": [],
+        "operations_description": {
+          "value": "Licensed electrical and roofing contractor. Commercial and residential installation, repair and service work performed at customer locations.",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "prior_coverage_by_line": [],
+        "producer_contact_email": null,
+        "producer_contact_phone": null,
+        "wc_xmod_effective_date": null,
+        "additional_remarks_text": null,
+        "auto_garaging_addresses": [],
+        "building_ITV_percentage": null,
+        "cyber_pii_records_count": null,
+        "loss_run_valuation_date": null,
+        "num_employees_full_time": null,
+        "num_employees_part_time": null,
+        "property_building_value": null,
+        "property_deductible_aop": null,
+        "umbrella_effective_date": {
+          "value": "07/15/26",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "wc_monopolistic_payroll": {},
+        "agreed_value_endorsement": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "auto_liability_structure": {
+          "value": "Combined Single Limit",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "auto_radius_of_operation": null,
+        "builders_risk_owner_name": null,
+        "non_owned_auto_indicator": null,
+        "property_deductible_wind": null,
+        "umbrella_expiration_date": {
+          "value": "07/15/27",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "additional_named_insureds": [],
+        "auto_deductible_collision": null,
+        "contractor_commercial_pct": null,
+        "contractor_license_number": null,
+        "cyber_third_party_vendors": null,
+        "inland_marine_total_value": null,
+        "property_deductible_flood": null,
+        "umbrella_attachment_point": null,
+        "builders_risk_project_cost": null,
+        "certificate_holder_address": null,
+        "contractor_high_hazard_ops": [],
+        "contractor_residential_pct": null,
+        "employers_liability_limits": null,
+        "gl_class_codes_by_location": [],
+        "wc_el_disease_policy_limit": null,
+        "inland_marine_transit_limit": null,
+        "wc_el_disease_each_employee": null,
+        "auto_dealers_inventory_value": null,
+        "garagekeeper_coll_deductible": null,
+        "garagekeeper_comp_deductible": null,
+        "garagekeeper_liability_limit": null,
+        "wc_description_of_operations": null,
+        "builders_risk_completion_date": null,
+        "builders_risk_contractor_name": null,
+        "builders_risk_project_address": null,
+        "auto_physical_damage_valuation": null,
+        "builders_risk_insured_interest": null,
+        "gl_personal_advertising_injury": null,
+        "property_deductible_earthquake": null,
+        "builders_risk_construction_type": null,
+        "umbrella_medical_payments_limit": null,
+        "schedule_of_underlying_insurance": null,
+        "certificate_description_of_operations": null
+      }
+    },
+    {
+      "doc_id": "5cb3d03d24254c79b11230fee78933c5",
+      "filename": "3_application.pdf",
+      "doc_type": "application",
+      "facts": {
+        "fein": {
+          "value": "84-2210987",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "wc_xmod": null,
+        "dba_name": null,
+        "sic_code": null,
+        "gl_limits": null,
+        "locations": [
+          "Denver, Colorado"
+        ],
+        "roof_year": null,
+        "is_renewal": null,
+        "naics_code": null,
+        "num_claims": null,
+        "retro_date": null,
+        "total_paid": null,
+        "wc_payroll": null,
+        "year_built": null,
+        "crime_limit": null,
+        "cyber_limit": null,
+        "entity_type": null,
+        "wc_officers": [],
+        "audit_period": null,
+        "auto_drivers": [],
+        "billing_plan": null,
+        "carrier_naic": null,
+        "carrier_name": null,
+        "contact_name": null,
+        "gl_aggregate": null,
+        "gl_form_type": null,
+        "loss_history": [],
+        "payment_plan": null,
+        "producer_fax": null,
+        "umbrella_sir": null,
+        "contact_email": null,
+        "contact_phone": null,
+        "gl_deductible": null,
+        "num_employees": {
+          "value": "18",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "policy_number": null,
+        "prior_carrier": null,
+        "producer_name": {
+          "value": "Summit Commercial Insurance",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "risk_transfer": {
+          "mortgagee_name": null,
+          "loss_payee_name": null,
+          "certificate_holder_name": null,
+          "additional_insured_names": [],
+          "additional_insured_required": null,
+          "specific_wording_requirements": null,
+          "waiver_of_subrogation_required": null,
+          "primary_noncontributory_required": null
+        },
+        "total_payroll": null,
+        "total_revenue": {
+          "value": "$4,250,000",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "applicant_name": {
+          "value": "Orbin Contract",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "coverage_lines": [
+          {
+            "line": "Professional Liability",
+            "naic": null,
+            "carrier": "Hartford Fire Insurance Company",
+            "premium": null,
+            "policy_number": "PL-99881-26",
+            "effective_date": null,
+            "expiration_date": null
+          }
+        ],
+        "effective_date": null,
+        "mortgagee_name": null,
+        "occupancy_type": null,
+        "total_incurred": null,
+        "umbrella_limit": null,
+        "wc_class_codes": [],
+        "carrier_website": null,
+        "contractor_type": null,
+        "cyber_retention": null,
+        "expiration_date": null,
+        "loss_payee_name": null,
+        "loss_run_status": null,
+        "mailing_address": null,
+        "crime_deductible": null,
+        "dec_page_entries": [],
+        "deductible_basis": null,
+        "physical_address": {
+          "value": "Denver, Colorado",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "producer_address": null,
+        "sprinkler_system": null,
+        "valuation_method": null,
+        "wc_prior_carrier": null,
+        "applicant_website": null,
+        "auto_um_uim_limit": null,
+        "auto_vin_schedule": [],
+        "construction_type": null,
+        "garage_deductible": null,
+        "lines_of_business": [
+          "Professional Liability"
+        ],
+        "loss_run_age_days": null,
+        "open_claims_count": null,
+        "umbrella_um_limit": null,
+        "wc_payroll_period": null,
+        "years_in_business": null,
+        "auto_bi_per_person": null,
+        "auto_med_pay_limit": null,
+        "certificate_holder": null,
+        "cyber_controls_mfa": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "gl_each_occurrence": null,
+        "gl_medical_expense": null,
+        "loss_history_years": null,
+        "prior_carrier_naic": null,
+        "property_bpp_value": null,
+        "property_locations": [],
+        "umbrella_uim_limit": null,
+        "account_description": null,
+        "auto_hired_nonowned": null,
+        "business_start_date": {
+          "value": "06/15/2014",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "distance_to_hydrant": null,
+        "extra_expense_limit": null,
+        "inland_marine_items": [],
+        "loss_run_period_end": null,
+        "prior_policy_number": null,
+        "state_of_operations": {
+          "value": "CO",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "underlying_policies": [],
+        "wc_el_each_accident": null,
+        "wc_payroll_by_state": {},
+        "auto_bi_per_accident": null,
+        "auto_covered_symbols": [],
+        "auto_deductible_comp": null,
+        "auto_liability_limit": null,
+        "auto_pd_per_accident": null,
+        "crime_employee_count": null,
+        "fire_department_type": null,
+        "gl_fire_damage_limit": null,
+        "hired_auto_indicator": null,
+        "prior_effective_date": null,
+        "total_policy_premium": null,
+        "umbrella_follow_form": null,
+        "business_income_limit": null,
+        "crime_locations_count": null,
+        "cyber_prior_incidents": null,
+        "fire_protection_class": null,
+        "gl_products_aggregate": null,
+        "loss_run_period_start": null,
+        "percent_subcontracted": null,
+        "period_of_restoration": null,
+        "prior_expiration_date": null,
+        "producer_contact_name": null,
+        "wc_officer_exclusions": null,
+        "coinsurance_percentage": null,
+        "cyber_controls_backups": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "deductible_application": null,
+        "garage_liability_limit": null,
+        "garage_operations_type": null,
+        "gl_class_code_schedule": [],
+        "operations_description": {
+          "value": "Administrative office, contracting warehouse and material storage at the Denver premises. Crews perform electrical installation, panel upgrades and roofing work at customer sites. No manufacturing is performed.",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "prior_coverage_by_line": [],
+        "producer_contact_email": null,
+        "producer_contact_phone": null,
+        "wc_xmod_effective_date": null,
+        "additional_remarks_text": null,
+        "auto_garaging_addresses": [],
+        "building_ITV_percentage": null,
+        "cyber_pii_records_count": null,
+        "loss_run_valuation_date": null,
+        "num_employees_full_time": null,
+        "num_employees_part_time": null,
+        "property_building_value": null,
+        "property_deductible_aop": null,
+        "umbrella_effective_date": null,
+        "wc_monopolistic_payroll": {},
+        "agreed_value_endorsement": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "auto_liability_structure": null,
+        "auto_radius_of_operation": null,
+        "builders_risk_owner_name": null,
+        "non_owned_auto_indicator": null,
+        "property_deductible_wind": null,
+        "umbrella_expiration_date": null,
+        "additional_named_insureds": [],
+        "auto_deductible_collision": null,
+        "contractor_commercial_pct": null,
+        "contractor_license_number": null,
+        "cyber_third_party_vendors": null,
+        "inland_marine_total_value": null,
+        "property_deductible_flood": null,
+        "umbrella_attachment_point": null,
+        "builders_risk_project_cost": null,
+        "certificate_holder_address": null,
+        "contractor_high_hazard_ops": [],
+        "contractor_residential_pct": null,
+        "employers_liability_limits": null,
+        "gl_class_codes_by_location": [],
+        "wc_el_disease_policy_limit": null,
+        "inland_marine_transit_limit": null,
+        "wc_el_disease_each_employee": null,
+        "auto_dealers_inventory_value": null,
+        "garagekeeper_coll_deductible": null,
+        "garagekeeper_comp_deductible": null,
+        "garagekeeper_liability_limit": null,
+        "wc_description_of_operations": null,
+        "builders_risk_completion_date": null,
+        "builders_risk_contractor_name": null,
+        "builders_risk_project_address": null,
+        "auto_physical_damage_valuation": null,
+        "builders_risk_insured_interest": null,
+        "gl_personal_advertising_injury": null,
+        "property_deductible_earthquake": null,
+        "builders_risk_construction_type": null,
+        "umbrella_medical_payments_limit": null,
+        "schedule_of_underlying_insurance": null,
+        "certificate_description_of_operations": null
+      }
+    },
+    {
+      "doc_id": "153b95c97f78433eaf78c91d8e85c198",
+      "filename": "4_loss_run.pdf",
+      "doc_type": "loss_run",
+      "facts": {
+        "fein": {
+          "value": "842210987",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "wc_xmod": null,
+        "dba_name": null,
+        "sic_code": null,
+        "gl_limits": null,
+        "locations": [],
+        "roof_year": null,
+        "is_renewal": null,
+        "naics_code": null,
+        "num_claims": {
+          "value": "2",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "retro_date": null,
+        "total_paid": null,
+        "wc_payroll": null,
+        "year_built": null,
+        "crime_limit": null,
+        "cyber_limit": null,
+        "entity_type": null,
+        "wc_officers": [],
+        "audit_period": null,
+        "auto_drivers": [],
+        "billing_plan": null,
+        "carrier_naic": null,
+        "carrier_name": {
+          "value": "EMC Insurance Companies",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "contact_name": null,
+        "gl_aggregate": null,
+        "gl_form_type": null,
+        "loss_history": [
+          {
+            "date": "03/28/2024",
+            "open": false,
+            "paid": "$4,850",
+            "amount": "$4,850",
+            "open_code": "C",
+            "claim_date": null,
+            "description": "Business Auto Insured vehicle rear-ended third party",
+            "claim_number": null,
+            "reserved_amount": "$0",
+            "line_of_business": "Business Auto",
+            "subrogation_code": "N"
+          },
+          {
+            "date": "11/02/2022",
+            "open": false,
+            "paid": "$12,300",
+            "amount": "$12,300",
+            "open_code": "C",
+            "claim_date": null,
+            "description": "General Liability Water damage to customer premises",
+            "claim_number": null,
+            "reserved_amount": "$0",
+            "line_of_business": "General Liability",
+            "subrogation_code": "N"
+          }
+        ],
+        "payment_plan": null,
+        "producer_fax": null,
+        "umbrella_sir": null,
+        "contact_email": null,
+        "contact_phone": null,
+        "gl_deductible": null,
+        "num_employees": null,
+        "policy_number": {
+          "value": "6E7 40 02 26",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "prior_carrier": null,
+        "producer_name": null,
+        "risk_transfer": {
+          "mortgagee_name": null,
+          "loss_payee_name": null,
+          "certificate_holder_name": null,
+          "additional_insured_names": [],
+          "additional_insured_required": null,
+          "specific_wording_requirements": null,
+          "waiver_of_subrogation_required": null,
+          "primary_noncontributory_required": null
+        },
+        "total_payroll": null,
+        "total_revenue": null,
+        "applicant_name": {
+          "value": "Orbin Contracting, LLC",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "coverage_lines": [
+          {
+            "line": "Business Auto",
+            "naic": null,
+            "carrier": "EMC Insurance Companies",
+            "premium": null,
+            "policy_number": "6E7 40 02 26",
+            "effective_date": null,
+            "expiration_date": null
+          },
+          {
+            "line": "General Liability",
+            "naic": null,
+            "carrier": "EMC Insurance Companies",
+            "premium": null,
+            "policy_number": "6E7 40 02 26",
+            "effective_date": null,
+            "expiration_date": null
+          }
+        ],
+        "effective_date": null,
+        "mortgagee_name": null,
+        "occupancy_type": null,
+        "total_incurred": {
+          "value": "$17,150",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "umbrella_limit": null,
+        "wc_class_codes": [],
+        "carrier_website": null,
+        "contractor_type": null,
+        "cyber_retention": null,
+        "expiration_date": null,
+        "loss_payee_name": null,
+        "loss_run_status": null,
+        "mailing_address": null,
+        "crime_deductible": null,
+        "dec_page_entries": [
+          {
+            "label": "LOSS RUN REPORT",
+            "owner": "other",
+            "value": "LOSS RUN REPORT",
+            "section": null,
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Prepared by",
+            "owner": "carrier",
+            "value": "EMC Insurance Companies",
+            "section": null,
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Valuation Date",
+            "owner": "policy",
+            "value": "08/01/2026",
+            "section": null,
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Insured",
+            "owner": "applicant",
+            "value": "Orbin Contracting, LLC",
+            "section": null,
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "FEIN",
+            "owner": "applicant",
+            "value": "842210987",
+            "section": null,
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Policy Number",
+            "owner": "policy",
+            "value": "6E7 40 02 26",
+            "section": null,
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": null
+          },
+          {
+            "label": "Carrier",
+            "owner": "carrier",
+            "value": "EMC Insurance Companies",
+            "section": null,
+            "policy_number": null,
+            "line_of_business": null
+          },
+          {
+            "label": "Period Covered",
+            "owner": "policy",
+            "value": "07/15/2021 to 08/01/2026 (5 years)",
+            "section": null,
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": null
+          },
+          {
+            "label": "DATE OF LOSS",
+            "owner": "policy",
+            "value": "03/28/2024",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "Business Auto"
+          },
+          {
+            "label": "LINE",
+            "owner": "policy",
+            "value": "Business Auto",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "Business Auto"
+          },
+          {
+            "label": "DESCRIPTION",
+            "owner": "policy",
+            "value": "Insured vehicle rear-ended third party",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "Business Auto"
+          },
+          {
+            "label": "PAID",
+            "owner": "policy",
+            "value": "$4,850",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "Business Auto"
+          },
+          {
+            "label": "RESERVED",
+            "owner": "policy",
+            "value": "$0",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "Business Auto"
+          },
+          {
+            "label": "STATUS",
+            "owner": "policy",
+            "value": "Closed",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "Business Auto"
+          },
+          {
+            "label": "DATE OF LOSS",
+            "owner": "policy",
+            "value": "11/02/2022",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "General Liability"
+          },
+          {
+            "label": "LINE",
+            "owner": "policy",
+            "value": "General Liability",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "General Liability"
+          },
+          {
+            "label": "DESCRIPTION",
+            "owner": "policy",
+            "value": "Water damage to customer premises",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "General Liability"
+          },
+          {
+            "label": "PAID",
+            "owner": "policy",
+            "value": "$12,300",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "General Liability"
+          },
+          {
+            "label": "RESERVED",
+            "owner": "policy",
+            "value": "$0",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "General Liability"
+          },
+          {
+            "label": "STATUS",
+            "owner": "policy",
+            "value": "Closed",
+            "section": "CLAIM DETAIL",
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": "General Liability"
+          },
+          {
+            "label": "Total Incurred",
+            "owner": "policy",
+            "value": "$17,150",
+            "section": null,
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": null
+          },
+          {
+            "label": "Number of Claims",
+            "owner": "policy",
+            "value": "2",
+            "section": null,
+            "policy_number": "6E7 40 02 26",
+            "line_of_business": null
+          }
+        ],
+        "deductible_basis": null,
+        "physical_address": null,
+        "producer_address": null,
+        "sprinkler_system": null,
+        "valuation_method": null,
+        "wc_prior_carrier": null,
+        "applicant_website": null,
+        "auto_um_uim_limit": null,
+        "auto_vin_schedule": [],
+        "construction_type": null,
+        "garage_deductible": null,
+        "lines_of_business": [
+          "Business Auto",
+          "General Liability"
+        ],
+        "loss_run_age_days": null,
+        "open_claims_count": null,
+        "umbrella_um_limit": null,
+        "wc_payroll_period": null,
+        "years_in_business": null,
+        "auto_bi_per_person": null,
+        "auto_med_pay_limit": null,
+        "certificate_holder": null,
+        "cyber_controls_mfa": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "gl_each_occurrence": null,
+        "gl_medical_expense": null,
+        "loss_history_years": {
+          "value": "5",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "prior_carrier_naic": null,
+        "property_bpp_value": null,
+        "property_locations": [],
+        "umbrella_uim_limit": null,
+        "account_description": null,
+        "auto_hired_nonowned": null,
+        "business_start_date": null,
+        "distance_to_hydrant": null,
+        "extra_expense_limit": null,
+        "inland_marine_items": [],
+        "loss_run_period_end": {
+          "value": "08/01/2026",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "prior_policy_number": null,
+        "state_of_operations": null,
+        "underlying_policies": [],
+        "wc_el_each_accident": null,
+        "wc_payroll_by_state": {},
+        "auto_bi_per_accident": null,
+        "auto_covered_symbols": [],
+        "auto_deductible_comp": null,
+        "auto_liability_limit": null,
+        "auto_pd_per_accident": null,
+        "crime_employee_count": null,
+        "fire_department_type": null,
+        "gl_fire_damage_limit": null,
+        "hired_auto_indicator": null,
+        "prior_effective_date": null,
+        "total_policy_premium": null,
+        "umbrella_follow_form": null,
+        "business_income_limit": null,
+        "crime_locations_count": null,
+        "cyber_prior_incidents": null,
+        "fire_protection_class": null,
+        "gl_products_aggregate": null,
+        "loss_run_period_start": {
+          "value": "07/15/2021",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "percent_subcontracted": null,
+        "period_of_restoration": null,
+        "prior_expiration_date": null,
+        "producer_contact_name": null,
+        "wc_officer_exclusions": null,
+        "coinsurance_percentage": null,
+        "cyber_controls_backups": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "deductible_application": null,
+        "garage_liability_limit": null,
+        "garage_operations_type": null,
+        "gl_class_code_schedule": [],
+        "operations_description": null,
+        "prior_coverage_by_line": [],
+        "producer_contact_email": null,
+        "producer_contact_phone": null,
+        "wc_xmod_effective_date": null,
+        "additional_remarks_text": null,
+        "auto_garaging_addresses": [],
+        "building_ITV_percentage": null,
+        "cyber_pii_records_count": null,
+        "loss_run_valuation_date": {
+          "value": "08/01/2026",
+          "source": "ai",
+          "confidence": "ai_high",
+          "value_state": "present",
+          "evidence_state": "suggested"
+        },
+        "num_employees_full_time": null,
+        "num_employees_part_time": null,
+        "property_building_value": null,
+        "property_deductible_aop": null,
+        "umbrella_effective_date": null,
+        "wc_monopolistic_payroll": {},
+        "agreed_value_endorsement": {
+          "value": "False",
+          "source": "ai",
+          "confidence": "ai_high"
+        },
+        "auto_liability_structure": null,
+        "auto_radius_of_operation": null,
+        "builders_risk_owner_name": null,
+        "non_owned_auto_indicator": null,
+        "property_deductible_wind": null,
+        "umbrella_expiration_date": null,
+        "additional_named_insureds": [],
+        "auto_deductible_collision": null,
+        "contractor_commercial_pct": null,
+        "contractor_license_number": null,
+        "cyber_third_party_vendors": null,
+        "inland_marine_total_value": null,
+        "property_deductible_flood": null,
+        "umbrella_attachment_point": null,
+        "builders_risk_project_cost": null,
+        "certificate_holder_address": null,
+        "contractor_high_hazard_ops": [],
+        "contractor_residential_pct": null,
+        "employers_liability_limits": null,
+        "gl_class_codes_by_location": [],
+        "wc_el_disease_policy_limit": null,
+        "inland_marine_transit_limit": null,
+        "wc_el_disease_each_employee": null,
+        "auto_dealers_inventory_value": null,
+        "garagekeeper_coll_deductible": null,
+        "garagekeeper_comp_deductible": null,
+        "garagekeeper_liability_limit": null,
+        "wc_description_of_operations": null,
+        "builders_risk_completion_date": null,
+        "builders_risk_contractor_name": null,
+        "builders_risk_project_address": null,
+        "auto_physical_damage_valuation": null,
+        "builders_risk_insured_interest": null,
+        "gl_personal_advertising_injury": null,
+        "property_deductible_earthquake": null,
+        "builders_risk_construction_type": null,
+        "umbrella_medical_payments_limit": null,
+        "schedule_of_underlying_insurance": null,
+        "certificate_description_of_operations": null
+      }
+    }
+  ]
+}

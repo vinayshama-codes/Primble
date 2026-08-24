@@ -37,7 +37,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Workstream-2 normalization layer (leaf module — no cycle). "identity" fields
 # (name/date/entity/address/carrier/fein) compare via this so the picker uses
@@ -520,9 +520,32 @@ GENERATION_BLOCKING_RECONCILABLE_KEYS = frozenset({
 # legal limit is exactly where the merge's most-frequent-wins ranking must
 # never pick a winner silently. Extend by adding the key here - the stamping
 # side (pdf_service._resolve_conflicted_fact_blank) is generic.
-CONFLICT_WITHHOLD_KEYS = frozenset({
-    "umbrella_limit",
-})
+# BRENT DECISION 2026-08-21 (Q4), answering "when two documents disagree, do
+# we leave the box empty on the form?" - **"we should patch the suggested
+# value."** So this set is now EMPTY: a cross-document conflict stamps the
+# merge's suggested value instead of shipping an owned blank.
+#
+# WHY THIS DOES NOT BREAK CLIENT RULE 1.4. The rule says *"do not arbitrarily
+# select one ... the conflict should remain visible and route to the producer"*.
+# Both halves still hold: the Data Consistency picker still shows every
+# competing value with its source and a Confirm button, the fact is still
+# `value_state: conflicting`, and confirming still re-applies across every
+# form. What changed is only whether the BOX is empty while that is open -
+# and the owner's point is that an empty box on a form he may want to send
+# today is worse than a marked suggestion he can see and change.
+#
+# THE TENSION, recorded so nobody reverses this by accident: the 2026-08-15
+# client note ("unresolved conflicts must remain unresolved ... rather than
+# choosing whichever value seems most likely") is what put `umbrella_limit`
+# here in the first place, over the $3,000,000-vs-$1,000,000 case. Brent has
+# now answered the narrower question directly. To restore the old behaviour,
+# put the key back in this set - nothing else needs to change.
+#
+# NOT AFFECTED: `extraction_service._flag_intra_document_limit_conflicts`
+# writes `_uw_conflicted_keys` for a conflict INSIDE one document. Brent was
+# asked about two documents disagreeing, and Principle 7 forbids extending a
+# ruling past what was asked, so that path still blanks.
+CONFLICT_WITHHOLD_KEYS: frozenset = frozenset()
 
 
 def is_withheld(facts: Optional[dict], fact_key: str) -> bool:
@@ -655,6 +678,34 @@ def _normalize(value: Any, kind: str, fact_key: Optional[str] = None) -> Optiona
     # detectors. normalize_value() dispatches by fact_key (name/date/entity/
     # address/carrier/fein) and returns '' for no-signal → treated as absent.
     if kind == "identity":
+        # ENTITY NAMES GROUP ON THE STRICT KEY, NEVER ON THE FAMILY MAP (D10).
+        # `normalize_value` dispatches a carrier to `normalize_carrier`, whose
+        # curated alias map folds "EMC Property & Casualty Company" and
+        # "Employers Mutual Casualty Company" BOTH to "emc" - two real legal
+        # entities pronounced one fact before the comparison door is ever
+        # consulted. That is Round 10 fix 46, and D10 records the same rule for
+        # the door's own first pass: *"the coarse normalisers fold two real
+        # carriers into one token; that is Round 10 fix 46 and it must not come
+        # back one layer up."* It had come back one layer up - here.
+        #
+        # Invisible until C1b made the per-line carriers candidates: with only
+        # one carrier spelling on the package there was nothing to mis-merge.
+        # With five, the merged group inherited BOTH the GL line and the Auto
+        # line and collided with itself, producing a "two policies on the same
+        # coverage line" conflict on a package that has no such thing.
+        #
+        # SPLITTING HERE IS SAFE: `_merge_equivalent_value_groups` runs after
+        # this and re-merges through the door, which folds spelling variants
+        # (including abbreviations) while keeping distinct entities apart.
+        # Grouping too finely costs a merge pass; grouping too coarsely cannot
+        # be undone.
+        try:
+            from services.fact_comparison import _fe as _door
+            if _door.value_kind(fact_key or "") == _door.KIND_NAME:
+                from services.normalization import strict_entity_key
+                return strict_entity_key(value) or None
+        except Exception:                                     # noqa: BLE001
+            pass
         norm = normalize_value(fact_key or "", value)
         return norm or None
     if kind == "currency":
@@ -885,7 +936,8 @@ def _drop_foreign_line_values(fact_key: str, values: List[dict]) -> List[dict]:
     if len(values) < 2:
         return values
     try:
-        from services.fact_equivalence import names_a_foreign_line
+        from services.fact_comparison import _fe as _door
+        names_a_foreign_line = _door.names_a_foreign_line
         kept = [g for g in values
                 if not names_a_foreign_line(fact_key, g.get("display"))]
         if kept and len(kept) < len(values):
@@ -898,6 +950,95 @@ def _drop_foreign_line_values(fact_key: str, values: List[dict]) -> List[dict]:
     except Exception as exc:                                  # noqa: BLE001
         logger.warning(
             "underwriting: foreign-line filter failed for %s - %s", fact_key, exc)
+        return values
+
+
+def _class_exposure_amounts(merged_facts: Optional[dict]) -> set:
+    """Every per-class rating basis the package's own schedules state.
+
+    Columns are SCHEMA-DERIVED, not hand-typed: `extraction_service.
+    _CLASS_EXPOSURE_COLUMNS` is a class-code schedule's field name (the schema
+    names both `gl_class_code_schedule` and `wc_class_codes` for exactly this
+    reason) plus whichever of ITS columns are money-shaped. A future class
+    schedule with a money column is picked up automatically; nothing outside
+    a class schedule ever is - see that constant's own docstring in
+    extraction_service.py for the false positives a looser scan produced
+    (the primary declarations-index list, a line's own premium,
+    `property_locations`, `inland_marine_items`) and why each was excluded.
+    """
+    out: set = set()
+    if not isinstance(merged_facts, dict):
+        return out
+    try:
+        from services.extraction_service import _CLASS_EXPOSURE_COLUMNS
+    except Exception:                                         # noqa: BLE001
+        return out
+    for list_key, columns in _CLASS_EXPOSURE_COLUMNS.items():
+        rows = merged_facts.get(list_key)
+        if isinstance(rows, dict) and "value" in rows:
+            rows = rows["value"]
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            for col in columns:
+                norm = _normalize_currency(row.get(col))
+                if norm:
+                    out.add(norm)
+    return out
+
+
+def _drop_class_exposure_candidates(fact_key: str, values: List[dict],
+                                    merged_facts: Optional[dict]) -> List[dict]:
+    """A per-CLASS rating basis is not a rival to the package TOTAL.
+
+    LIVE RUN A: the picker asked the producer to choose between `$1,880,000`
+    Total Annual Payroll and `$285,000` / `$640,000` / `$95,000` - the payroll
+    bases for GL classes 91580, 98305 and 91340 out of the package's own
+    SCHEDULE OF HAZARDS. They are not rival totals; they do not even sum to one.
+
+    THE SOURCE IS THE TEXT SCAN, not extraction. `_text_scan_values` looks for
+    a "payroll" label followed by an amount, and a hazard schedule prints that
+    phrase once per class. Measured on the live document: the scan returns all
+    four amounts for `total_payroll`.
+
+    TWO GUARDS, and both are needed:
+      1. **Positive evidence.** The amount must literally appear as an
+         `exposure_amount` / `payroll` on one of THIS package's class schedule
+         rows. No schedule, no opinion.
+      2. **Text-scan-only.** A candidate any document's EXTRACTION produced as
+         this fact survives untouched. The extractor naming it `total_payroll`
+         is independent evidence, and a single-class business can legitimately
+         have a total equal to its one class basis.
+
+    Never empties the list, and never raises.
+    """
+    if len(values) < 2:
+        return values
+    try:
+        exposures = _class_exposure_amounts(merged_facts)
+        if not exposures:
+            return values
+        kept = []
+        for g in values:
+            srcs = g.get("sources") or []
+            scan_only = bool(srcs) and all(
+                s.get("source_method") == "text_scan" for s in srcs)
+            norm = _normalize_currency(g.get("display"))
+            if scan_only and norm and norm in exposures:
+                continue
+            kept.append(g)
+        if kept and len(kept) < len(values):
+            logger.info(
+                "underwriting: %s - dropped %d candidate(s) that this package's "
+                "own class schedule states as a PER-CLASS rating basis, not a "
+                "package total", fact_key, len(values) - len(kept))
+            return kept
+        return values
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: class-exposure filter failed for %s - %s",
+                       fact_key, exc)
         return values
 
 
@@ -916,8 +1057,8 @@ def _merge_equivalent_value_groups(fact_key: str, values: List[dict],
     if len(values) < 2:
         return values
     try:
-        from services.fact_equivalence import equivalent_index
-        mapping = equivalent_index(
+        from services.fact_comparison import _fe as _door
+        mapping = _door.equivalent_index(
             fact_key, [g.get("display") for g in values], context)
         if not mapping:
             return values
@@ -940,6 +1081,276 @@ def _merge_equivalent_value_groups(fact_key: str, values: List[dict],
         logger.warning(
             "underwriting: equivalence filter failed for %s - %s", fact_key, exc)
         return values
+
+
+# Facts that carry ONE value per policy on a multi-policy package. Package-
+# level identity (applicant, FEIN, addresses) is deliberately absent - one
+# insured however many policies (client 1.2).
+#
+# EVERY MEMBER IS AN IDENTIFIER, A NAME OR A DATE. Money is deliberately
+# excluded and that is not fussiness: `PackageContext.value_owner` keys on the
+# value's own characters, so two facts that happen to share an AMOUNT share an
+# owner. Live run 2026-08-21 proved the damage - the certificate's umbrella
+# $1,000,000 inherited the GL policy's ownership purely because the dec page
+# prints $1,000,000 as the GL Each Occurrence limit, and the $3M-vs-$1M
+# umbrella conflict (the one the client praised) was scoped into silence.
+# Identifiers, carrier names and dates do not collide that way; amounts do.
+LINE_SCOPED_FACT_KEYS = frozenset({
+    "policy_number", "carrier_name", "carrier_naic", "effective_date",
+    "expiration_date",
+})
+
+# Which column of a `coverage_lines` row states each of those facts. A
+# declarations page for a package prints these PER COVERAGE PART, not once, so
+# the per-line value is often the ONLY place the fact exists (D-1 Layer 1). The
+# key set above is deliberately reused: a fact may only be raised per line if it
+# is a fact that legitimately has one value per line.
+_LINE_SCOPED_FACT_COLUMN: Dict[str, str] = {
+    "policy_number":   "policy_number",
+    "carrier_name":    "carrier",
+    "carrier_naic":    "naic",
+    "effective_date":  "effective_date",
+    "expiration_date": "expiration_date",
+}
+assert set(_LINE_SCOPED_FACT_COLUMN) == set(LINE_SCOPED_FACT_KEYS), (
+    "every line-scoped fact needs a coverage_lines column, and vice versa")
+
+_SINGLE_LINE_CACHE: Optional[frozenset] = None
+
+
+def _facts_pinned_to_one_line() -> frozenset:
+    """Facts that belong to exactly ONE coverage line, by definition.
+
+    These must NEVER be scoped across policies - `umbrella_limit` is the
+    umbrella's limit and nothing else, so two different values for it are a
+    real disagreement, not two policies' worth of legitimate difference.
+
+    THIS IS THE INVERSE OF WHAT THE FIRST CUT DID. C1-C treated "the registry
+    can place this fact on a line" as a reason to ALLOW scoping. It is a reason
+    to FORBID it: a fact the registry can place already has its one scope.
+    Getting this backwards silenced the client's umbrella conflict on the first
+    live run (v1-20AUG C1-H).
+    """
+    global _SINGLE_LINE_CACHE
+    if _SINGLE_LINE_CACHE is None:
+        keys = set()
+        try:
+            from services.fact_registry import FACT_REGISTRY
+            from services.fact_comparison import _fe as _door
+            for k in FACT_REGISTRY:
+                if _door.fact_line(k):
+                    keys.add(k)
+        except Exception:                                     # noqa: BLE001
+            pass
+        _SINGLE_LINE_CACHE = frozenset(keys)
+    return _SINGLE_LINE_CACHE
+
+
+def _scope_by_item(fact_key: str, values: List[dict], context) -> bool:
+    """Client 1.2's LOCATION / VEHICLE / PROPERTY / ITEM scope.
+
+    Two buildings legitimately have two years built; two vehicles legitimately
+    have two costs new. Before this, every column where a package's own
+    schedule rows differ raised a Data Consistency question, because the
+    picker's only scope axis was the POLICY.
+
+    Both of the context's gates must hold (see `PackageContext._build_item_index`
+    for why each exists):
+      1. the fact key is literally a column in one of this package's schedules,
+         so the package's own data proves it varies per item;
+      2. every value group maps to a NON-EMPTY set of rows and no two groups
+         share one.
+
+    A value that appears in no row at all fails gate 2, so a genuine
+    cross-document disagreement about ONE item still surfaces - only values
+    each attributable to a different row are separated. Returns False on
+    anything it cannot prove, which is today's behaviour.
+    """
+    if context is None or len(values) < 2:
+        return False
+    try:
+        if not context.is_item_scoped_fact(fact_key):
+            return False
+        items: List[set] = []
+        for g in values:
+            got: set = set(context.items_of(g.get("display")))
+            for src in g.get("sources") or []:
+                got |= set(context.items_of(src.get("raw")))
+            items.append(got)
+        if not all(items):
+            return False
+        for i in range(len(items)):
+            for j in range(i + 1, len(items)):
+                if items[i] & items[j]:
+                    return False
+        for g, own in zip(values, items):
+            g["scope"] = sorted(own)
+        logger.info(
+            "underwriting: %s - %d value(s) retained under their own item "
+            "scope (%s); different things, not a disagreement",
+            fact_key, len(values),
+            ", ".join(sorted({i for s_ in items for i in s_})[:4]))
+        return True
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: item scope check failed for %s - %s",
+                       fact_key, exc)
+        return False
+
+
+def _scope_from_store(fact_key: str, values: List[dict],
+                      merged_facts: Optional[dict]) -> tuple:
+    """(scoped, reason) decided from the STORED scope, not from spelling.
+
+    C1b / D19. `facts["_scoped"]` carries each line-scoped fact WITH the
+    coverage line and policy it belongs to, written once at merge while the
+    relationship still existed. Reading it here replaces
+    `PackageContext.owners_of`, which attributes a value by its own
+    CHARACTERS - the weakness behind B14, G3 and the reverted Pass 1b, where a
+    carrier printed `EMC Prop & Cas Co` on one page and `EMC Property &
+    Casualty Company` on another lost its scope and became a false conflict.
+
+    THE RULE IS THE CLIENT'S, unchanged (1.2 / 1.5):
+      * every surviving group maps to at least one coverage LINE   -> else no opinion
+      * no two groups share a line                                 -> SCOPED, retain each
+      * two groups on the SAME line                                -> CONFLICT, and say so
+
+    Positive evidence only. A group the store cannot place returns
+    ``(False, None)`` and the caller behaves exactly as it did before C1b.
+    """
+    if len(values) < 2 or not isinstance(merged_facts, dict):
+        return False, None
+    try:
+        store = (merged_facts.get("_scoped") or {}).get(fact_key)
+        if not store:
+            return False, None
+        # value -> the lines that value is stated on, matched through the ONE
+        # comparison door so a spelling variant still finds its scope.
+        lines_for: List[set] = []
+        for g in values:
+            printings = [g.get("display")] + [s.get("raw") for s in (g.get("sources") or [])]
+            found: set = set()
+            for rec in store:
+                if any(p and _door_values_agree(fact_key, p, rec.get("value"))
+                       for p in printings):
+                    ln = (rec.get("scope") or {}).get("line")
+                    if ln:
+                        found.add(ln)
+            lines_for.append(found)
+        if not all(lines_for):
+            return False, None                    # something is unplaceable
+        for i in range(len(lines_for)):
+            for j in range(i + 1, len(lines_for)):
+                if lines_for[i] & lines_for[j]:
+                    return False, ("two policies on the same coverage line in one "
+                                   "submission - confirm which applies")
+        for g, own in zip(values, lines_for):
+            g["scope"] = sorted(own)
+        logger.info(
+            "underwriting: %s - %d value(s) retained under their own STORED "
+            "line scope (%s); not a conflict", fact_key, len(values),
+            ", ".join(sorted({l for s_ in lines_for for l in s_})))
+        return True, None
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: stored-scope check failed for %s - %s",
+                       fact_key, exc)
+        return False, None
+
+
+def _door_values_agree(fact_key: str, a, b) -> bool:
+    """Two printings of one value, decided by the one door (D3)."""
+    try:
+        from services.fact_comparison import values_agree
+        return bool(values_agree(fact_key, a, b))
+    except Exception:                                         # noqa: BLE001
+        return str(a or "").strip().lower() == str(b or "").strip().lower()
+
+
+def _scope_values(fact_key: str, values: List[dict], context) -> tuple:
+    """(scoped: bool, reason: Optional[str]) for the surviving value groups.
+
+    Positive evidence only: every group must be attributed to at least one
+    owner (contract or line) by the verified index, owners must be pairwise
+    disjoint, and no two owners may resolve to the same coverage line. Any
+    failure of those conditions returns (False, reason-or-None) and the
+    caller treats the groups exactly as before. Mutates each group to carry
+    its ``scope`` (sorted owner tokens) when scoped.
+    """
+    try:
+        if len(values) < 2 or context is None:
+            return False, None
+        # ITEM axis first (client 1.2), and BEFORE the multi-contract gate.
+        # `is_multi_contract` is a precondition of the POLICY axis - it asks
+        # whether there are two contracts to tell apart. The item axis asks a
+        # different question entirely, and its subject is a package with two
+        # BUILDINGS or two VEHICLES, which is completely ordinary on ONE policy.
+        # Requiring two contracts here would have made this branch unreachable
+        # on exactly the packages it exists for.
+        if _scope_by_item(fact_key, values, context):
+            return True, None
+        if not context.is_multi_contract:
+            return False, None
+        # Only an explicitly line-scoped fact may scope, and never one the
+        # registry pins to a single line (see _facts_pinned_to_one_line).
+        if fact_key not in LINE_SCOPED_FACT_KEYS:
+            return False, None
+        if fact_key in _facts_pinned_to_one_line():
+            return False, None
+        owners: List[set] = []
+        for g in values:
+            o: set = set(context.owners_of(g.get("display")))
+            for src in g.get("sources") or []:
+                o |= set(context.owners_of(src.get("raw")))
+            owners.append(o)
+        if not all(owners):
+            return False, None
+        for i in range(len(owners)):
+            for j in range(i + 1, len(owners)):
+                if owners[i] & owners[j]:
+                    return False, None
+        lines = [set().union(*(context.lines_of_owner(o) for o in os_)) for os_ in owners]
+        for i in range(len(lines)):
+            for j in range(i + 1, len(lines)):
+                if lines[i] & lines[j]:
+                    return False, ("two policies on the same coverage line in one "
+                                   "submission - confirm which applies")
+        for g, o in zip(values, owners):
+            g["scope"] = sorted(o)
+        logger.info("underwriting: %s - %d value(s) retained under their own "
+                    "policy scope; not a conflict", fact_key, len(values))
+        return True, None
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("underwriting: scope check failed for %s - %s", fact_key, exc)
+        return False, None
+
+
+def _conflict_reason(fact_key: str, kind: str, values: List[dict]) -> str:
+    """Plain-language reason a conflict is a conflict (client 1.5 "reason for
+    conflict"; persisted with the producer's resolution, F10)."""
+    if kind in ("currency", "integer"):
+        return "the documents state different amounts"
+    try:
+        from services.fact_comparison import _fe as _door
+        k = _door.value_kind(fact_key)
+    except Exception:                                         # noqa: BLE001
+        k = ""
+    # A CURATED field arrives with kind "currency"/"integer" and is answered
+    # above. An AUTO-DISCOVERED one arrives as "identity" whatever it holds, so
+    # the only thing that knows it is an amount is `value_kind` - and there was
+    # no branch for it. Live 2026-08-23: `gl_each_occurrence`, `gl_aggregate`,
+    # `gl_products_aggregate` and `total_policy_premium` all showed the generic
+    # "materially different values remain after normalization and scope
+    # matching" against two plain dollar figures.
+    if k in ("money", "count", "percent"):
+        return "the documents state different amounts"
+    if k == "date":
+        return "the documents state different dates"
+    if k == "name":
+        return "the documents name materially different entities"
+    if k == "address":
+        return "the documents point to materially different locations"
+    if k in ("identifier", "fein", "code"):
+        return "the documents carry different identifiers"
+    return "materially different values remain after normalization and scope matching"
 
 
 def _auto_scalar_keys(docs: List[dict], exclude: set) -> set:
@@ -1037,12 +1448,8 @@ def assess_underwriting_consistency(
     # conflicting if Primble establishes that they belong to the same policy and
     # coverage context"). Positive evidence only - no index, no opinion, and the
     # behaviour is exactly what it is today.
-    try:
-        from services.fact_equivalence import PackageContext
-        eq_context = PackageContext(merged_facts, docs)
-    except Exception as _cex:                                 # noqa: BLE001
-        logger.warning("underwriting: package context unavailable - %s", _cex)
-        eq_context = None
+    from services.fact_comparison import build_context, document_witnesses as _door_witnesses
+    eq_context = build_context(merged_facts, docs)
 
     # Statements the submission's narrative fields make, mined ONCE. Read-only:
     # they annotate conflict rows and never become facts (see narrative_facts).
@@ -1068,6 +1475,19 @@ def assess_underwriting_consistency(
     if _full_field_enabled():
         for _k in _auto_scalar_keys(docs, exclude=set(RECONCILABLE_FIELDS)):
             effective_fields[_k] = {"label": _humanize(_k), "kind": "identity", "forms": [], "_auto": True}
+    # V1 plan C1 F7 (client 1.5): a questionnaire answer that disagreed with
+    # the documents was held as a CANDIDATE instead of overwriting the fact.
+    # It joins the field here as one more source - "Client questionnaire" -
+    # so the producer resolves it in the same picker, through the same
+    # confirm endpoint, with the same audit row. No second screen.
+    client_candidates: Dict[str, dict] = {
+        k: v for k, v in ((merged_facts.get("_client_answer_conflicts") or {}).items())
+        if isinstance(v, dict) and str(v.get("client_value") or "").strip()
+        and k not in confirmations
+    }
+    for _k in client_candidates:
+        if _k not in effective_fields:
+            effective_fields[_k] = {"label": _humanize(_k), "kind": "identity", "forms": [], "_auto": True}
 
     for fact_key, cfg in effective_fields.items():
         kind = cfg["kind"]
@@ -1092,6 +1512,12 @@ def assess_underwriting_consistency(
             dt_label = DOC_TYPE_LABELS.get(dt, dt.replace("_", " ").title())
 
             # Pass 1: LLM-extracted fact value.
+            # A document only testifies about what its ROLE covers (client 1.2).
+            # A loss run's policy number / carrier / dates describe the CLAIMS,
+            # not the policy being applied for - comparing them manufactured two
+            # of the three conflicts on the 2026-08-21 live run.
+            if not _door_witnesses(dt, fact_key):
+                continue
             raw = _fv(d.get("facts") or {}, fact_key)
             llm_norm = None
             if raw is not None:
@@ -1110,6 +1536,44 @@ def assess_underwriting_consistency(
                     # display, not just whichever document happened to come first.
                     if _value_completeness(fact_key, kind, str(raw)) > _value_completeness(fact_key, kind, g["display"]):
                         g["display"] = str(raw)
+
+            # ── Pass 1b: the fact stated PER COVERAGE LINE (C1b) ────────────
+            # A multi-policy declarations page prints one carrier and one
+            # policy number PER COVERAGE PART, so extraction correctly declines
+            # to elect a package-level scalar - measured live, every dec page
+            # had `carrier_name = None` while its `coverage_lines` named four
+            # carriers. Reading only the scalar meant a rival GL carrier was
+            # never a CANDIDATE, so no conflict row and no scoped row appeared.
+            #
+            # THIS IS SAFE ONLY BECAUSE OF THE SCOPED STORE. The first attempt
+            # raised these values with no scope attached, and `_scope_values`
+            # then had to recover it from the value's characters - which fails
+            # on an abbreviated spelling and turned the client's own "GL carrier
+            # and Auto carrier may legitimately differ" case into a false
+            # conflict. `_scope_from_store` now supplies the line directly.
+            _line_attr = _LINE_SCOPED_FACT_COLUMN.get(fact_key)
+            if _line_attr:
+                for _ln in (_fv(d.get("facts") or {}, "coverage_lines") or []):
+                    if not isinstance(_ln, dict):
+                        continue
+                    _lv = _ln.get(_line_attr)
+                    _ln_norm = _normalize(_lv, kind, fact_key) if _lv else None
+                    if not _ln_norm:
+                        continue
+                    _g = groups.setdefault(
+                        _ln_norm,
+                        {"normalized": _ln_norm, "display": str(_lv), "sources": []})
+                    if not any(s.get("raw") == str(_lv) and s.get("doc_id") == doc_id
+                               for s in _g["sources"]):
+                        _g["sources"].append({
+                            "doc_id": doc_id, "filename": filename,
+                            "doc_type": dt, "doc_type_label": dt_label,
+                            "raw": str(_lv), "source_method": "coverage_line",
+                            "line": _ln.get("line"),
+                        })
+                    if _value_completeness(fact_key, kind, str(_lv)) > \
+                            _value_completeness(fact_key, kind, _g["display"]):
+                        _g["display"] = str(_lv)
 
             # Pass 2: text-scan of raw OCR.
             # Only add a text-scan value if it is DIFFERENT from the LLM value,
@@ -1137,6 +1601,20 @@ def assess_underwriting_consistency(
                     if _value_completeness(fact_key, kind, scanned_raw) > _value_completeness(fact_key, kind, g["display"]):
                         g["display"] = scanned_raw
 
+        _cc = client_candidates.get(fact_key)
+        if _cc:
+            _c_raw = str(_cc.get("client_value"))
+            _c_norm = _normalize(_c_raw, kind, fact_key)
+            if _c_norm:
+                src = {
+                    "doc_id": "client_questionnaire", "filename": "Client questionnaire",
+                    "doc_type": "client_questionnaire",
+                    "doc_type_label": "Client Questionnaire",
+                    "raw": _c_raw, "source_method": "client_answer",
+                }
+                g = groups.setdefault(_c_norm, {"normalized": _c_norm, "display": _c_raw, "sources": []})
+                g["sources"].append(src)
+
         confirmed_raw = confirmations.get(fact_key)
         confirmed_value = str(confirmed_raw) if confirmed_raw is not None else None
 
@@ -1157,9 +1635,16 @@ def assess_underwriting_consistency(
         # unresolved". Formatting/truncation/suffixless variants stay merged.
         if kind == "identity" and len(groups) == 1:
             try:
+                # The sameness decision comes from the ONE DOOR (D3); only the
+                # key builder and the field tables come from `normalization`.
+                # Importing `entity_identity_conflict` directly here was a
+                # second opinion living outside the door - and it slipped past
+                # `test_comparison_has_one_owner` for weeks because that guard
+                # matched imports with a regex that could not see an indented
+                # one inside a function body (fixed 2026-08-23).
+                from services.fact_comparison import entities_materially_differ
                 from services.normalization import (
-                    entity_identity_conflict, strict_entity_key,
-                    NAME_FIELDS, CARRIER_FIELDS,
+                    strict_entity_key, NAME_FIELDS, CARRIER_FIELDS,
                 )
                 _is_entity_field = (
                     fact_key in NAME_FIELDS or fact_key in CARRIER_FIELDS
@@ -1167,7 +1652,7 @@ def assess_underwriting_consistency(
                 if _is_entity_field:
                     _raws = [s["raw"] for g in groups.values()
                              for s in g["sources"]]
-                    if entity_identity_conflict(_raws):
+                    if entities_materially_differ(_raws):
                         _regrouped: Dict[str, dict] = {}
                         for g in groups.values():
                             for s in g["sources"]:
@@ -1197,6 +1682,11 @@ def assess_underwriting_consistency(
         # the field: if EVERY candidate is foreign we have no basis to prefer
         # one, so all are kept and the row renders as it does today.
         values = _drop_foreign_line_values(fact_key, values)
+        # A per-class rating basis is not a rival to the package total. Runs
+        # with the other mis-extraction filters, BEFORE any grouping decision:
+        # these are not rival answers, so they must never reach the point where
+        # something has to choose between them.
+        values = _drop_class_exposure_candidates(fact_key, values, merged_facts)
 
         # ── Equivalence filter (client 2026-08-17) ───────────────────────────
         # "Primble should escalate judgment, not formatting." The grouping above
@@ -1211,17 +1701,53 @@ def assess_underwriting_consistency(
         # It runs AFTER the grouping and only ever MERGES groups, so it cannot
         # manufacture a conflict; a failure inside it leaves the grouping
         # untouched (see services/fact_equivalence for the full argument).
-        values = _merge_equivalent_value_groups(fact_key, values, eq_context)
+        # Pass 1 - pure VALUE equivalence (formatting, containment, cliques),
+        # no package context: two printings of one value fold here whatever
+        # policy they belong to.
+        values = _merge_equivalent_value_groups(fact_key, values, None)
+
+        # ── Scope BEFORE conflict (V1 plan C1 F2b, client 1.2 / 1.5) ────────
+        # "Different values with different valid scope: retain each under its
+        # correct scope. Do not create a conflict." On a multi-policy package
+        # a line-scoped fact (policy number, carrier, term) legitimately has
+        # one value PER POLICY. Each surviving group is attributed to its
+        # owner through the verified dec index; when every group has an owner
+        # and no two owners share a coverage line, the field is SCOPED - every
+        # value kept, each labelled, nothing to resolve. Two policies on the
+        # SAME line in one period are NOT two scopes (a real GL twice) and
+        # stay a conflict, with the reason saying so. An unattributed group
+        # keeps today's behaviour - positive evidence only.
+        # C1b: the STORED scope is consulted first. It is the only source that
+        # knows which coverage line a value belongs to without inferring it
+        # from the value's own characters, so it settles the case the
+        # character-keyed path cannot (a carrier printed two ways). The legacy
+        # path still runs when the store cannot place every group, which is
+        # every pre-C1b session and any package with no `coverage_lines`.
+        scoped, conflict_reason = _scope_from_store(fact_key, values, merged_facts)
+        if not scoped and conflict_reason is None:
+            scoped, conflict_reason = _scope_values(fact_key, values, eq_context)
+
+        # Pass 2 - package-context equivalence (two printings of one contract,
+        # a line premium inside the package total, values the index proves
+        # belong to different contracts). Skipped when the field is SCOPED:
+        # the client's rule is "retain each under its correct scope", and
+        # merging three policies into one displayed number is the opposite.
+        if not scoped and conflict_reason is None:
+            values = _merge_equivalent_value_groups(fact_key, values, eq_context)
 
         distinct = len(values)
 
         if confirmed_value is not None:
             status = "confirmed"
             review_required = False
+        elif distinct >= 2 and scoped:
+            status = "scoped"
+            review_required = False
         elif distinct >= 2:
             status = "conflict"
             review_required = True
             conflict_count += 1
+            conflict_reason = conflict_reason or _conflict_reason(fact_key, kind, values)
         elif distinct == 1:
             status = "consistent"
             review_required = False
@@ -1235,7 +1761,7 @@ def assess_underwriting_consistency(
         # in assessed_keys above, so the crude detector skips it) but is not
         # listed. Curated fields keep their existing behavior (consistent rows
         # are still emitted, unchanged).
-        if is_auto and status == "consistent":
+        if is_auto and status in ("consistent", "scoped"):
             continue
 
         # Figure 3: recommend the most complete/correct value + a confidence level.
@@ -1292,6 +1818,7 @@ def assess_underwriting_consistency(
             "kind":            kind,
             "forms":           _forms_for_field(fact_key, cfg),
             "status":          status,
+            "conflict_reason": conflict_reason if status == "conflict" else None,
             "review_required": review_required,
             "merged_value":    _display(_fv(merged_facts, fact_key)),
             "confirmed_value": confirmed_value,
@@ -1412,6 +1939,14 @@ def apply_confirmations(merged_facts: dict, confirmations: Optional[dict], docs:
         if norm:
             envelope["normalized"] = norm
         out[fact_key] = envelope
+    # A confirmed key is resolved: its held client candidate (F7) is released.
+    _cc = out.get("_client_answer_conflicts")
+    if isinstance(_cc, dict):
+        remaining = {k: v for k, v in _cc.items() if k not in confirmations}
+        if remaining:
+            out["_client_answer_conflicts"] = remaining
+        else:
+            out.pop("_client_answer_conflicts", None)
     return out
 
 

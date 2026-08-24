@@ -10,7 +10,10 @@ import httpx
 import openai
 
 from config.database import get_pool
-from config.settings import ENABLE_SCHEDULE_CAPTURE, FRONTEND_URL, LLM_MODEL
+from config.settings import (
+    ENABLE_CLIENT_ANSWER_CONFLICT_ROUTING, ENABLE_SCHEDULE_CAPTURE, FRONTEND_URL,
+    LLM_MODEL,
+)
 from services import schedule_capture
 from services.question_classifier import (
     AUDIENCE_CLIENT,
@@ -326,6 +329,7 @@ _FIELD_QUESTION_MAP = {
     "naics_code":               "Do you know your business's industry classification code (NAICS code)? If yes, please share it. (If unsure, leave blank)",
     "sic_code":                 "Do you know your business's SIC code (an older industry classification number)? If yes, please share it. (If unsure, leave blank)",
     "years_in_business":        "How many years has your business been open?",
+    "loss_run_status":          "Have loss runs been requested, or are any available to upload?",
     # General Liability
     "gl_limits":                "How much liability coverage are you looking for? (For example: $1,000,000 per incident / $2,000,000 total)",
     "gl_each_occurrence":       "What is the maximum amount you want covered for a single incident or accident?",
@@ -467,6 +471,7 @@ _FIELD_HINT_MAP = {
     "num_claims":               "Enter the total number of insurance claims your business has filed in the past 3–5 years, e.g. '2'. Enter '0' if none.",
     "loss_history_years":       "Enter how many years of claims history you can provide documentation for, e.g. '5'.",
     "loss_history_no_prior_losses_indicator": "Choose one. If you have had claims, we will ask for your loss runs or claim count next. Leaving this blank is not the same as answering 'No' - an unanswered question cannot be credited.",
+    "loss_run_status":          "Choose the option that matches where things stand. Loss runs are claim reports from your previous insurance company.",
     "certificate_holder":       "Enter the name and address of anyone who needs a certificate of insurance, e.g. 'ABC Property Management, 456 Oak Ave, Dallas TX 75201'.",
     "carrier_marketing_reason": "Select the primary reason for seeking coverage. This helps the underwriter understand the account background and is much more reliable than trying to extract this from documents.",
     "submission_urgency":       "Optional. Note any binding deadline, renewal date, or time-sensitivity, e.g. 'Need to bind by 07/01 for a new job'. Leave blank if none.",
@@ -565,6 +570,8 @@ _FIELD_PRODUCER_LABEL_MAP = {
     "num_claims":               "Claim count - last 3-5 years",
     "loss_history_years":       "Loss history years available",
     "loss_history_no_prior_losses_indicator": "No known losses attestation",
+    "loss_run_status":          "Loss run availability status",
+    "new_venture_indicator":    "New venture confirmation",
     "certificate_holder":       "Certificate holder",
     "carrier_marketing_reason": "Marketing reason - submission context",
     "submission_urgency":       "Submission urgency / deadline",
@@ -1798,6 +1805,99 @@ def _maybe_inject_loss_conflict_question(questions: List[dict], facts: dict, fla
     })
 
 
+# ── Loss-history workflow states (client C2 2.9 / 2.10, 2026-08-24) ──────────
+# Every predicate lives in services.loss_history_state - the ONE owner of the
+# loss-history state - so this file, the scorer and the display state can never
+# disagree about what the questionnaire should ask.
+
+NEW_VENTURE_FIELD = "new_venture_indicator"
+LOSS_RUN_STATUS_FIELD = "loss_run_status"
+
+
+def _maybe_inject_loss_run_status_question(questions: List[dict], facts: dict,
+                                           flags: dict,
+                                           has_loss_run_doc: bool = False) -> None:
+    """Client 2.10 (Prior Claims Exist): when claims are known but no loss runs
+    are uploaded, ask whether runs have been requested or are available. The
+    chosen option TEXT is what gets stored (the _NO_LOSS_OPTIONS no-inversion
+    design) and services.loss_history_state.parse_loss_run_status is the one
+    reader for every shape the fact can hold. In-place, additive, fail-open."""
+    from services.loss_history_state import (
+        LOSS_RUN_STATUS_OPTIONS, parse_loss_run_status, prior_claims_exist)
+    facts = facts or {}
+    flags = flags or {}
+    if has_loss_run_doc:
+        return                      # runs are in hand - availability is moot
+    if not prior_claims_exist(facts, flags):
+        return
+    _existing = facts.get(LOSS_RUN_STATUS_FIELD)
+    if isinstance(_existing, dict):
+        _existing = _existing.get("value")
+    if parse_loss_run_status(_existing) is not None:
+        return                      # already answered, or extraction stated it
+    if any(q.get("field_name") == LOSS_RUN_STATUS_FIELD for q in questions):
+        return
+    questions.append({
+        "field_name":         LOSS_RUN_STATUS_FIELD,
+        "question":           _FIELD_QUESTION_MAP.get(LOSS_RUN_STATUS_FIELD)
+                              or "Have loss runs been requested, or are any available to upload?",
+        "hint":               _FIELD_HINT_MAP.get(LOSS_RUN_STATUS_FIELD, ""),
+        "forms":              "",
+        "form_ids":           [],
+        # Select, never a checkbox: blank must stay distinguishable from an
+        # answer (same principle as the No Known Losses control).
+        "field_type":         "select",
+        "options":            list(LOSS_RUN_STATUS_OPTIONS),
+        "current_value":      "",
+        "_group_label":       None,
+        "_is_curated_client": True,
+        "_canonical_key":     LOSS_RUN_STATUS_FIELD,
+    })
+
+
+def _apply_loss_state_question_gate(questions: List[dict], facts: dict,
+                                    flags: dict,
+                                    has_loss_run_doc: bool = False) -> List[dict]:
+    """Client 2.10 questionnaire gating, applied AFTER every injector so ONE
+    rule governs all three append sites (form scan, coverage guarantee, curated
+    injectors). A verified New Venture suppresses the prior-history questions
+    (loss runs, prior carrier, claim count, the prior-policy trio and the
+    loss-history schedule table); uploaded runs suppress the availability-class
+    questions ("validate what is already present"). Fail-open: no state means
+    no removals, and a CONTRADICTED New Venture confirmation suppresses nothing
+    - the questions return exactly when the evidence says they matter."""
+    try:
+        from services.loss_history_state import (
+            STATE_NEW_VENTURE, resolve_loss_history_state,
+            suppressed_question_fields)
+        suppressed = suppressed_question_fields(facts or {}, flags or {},
+                                                has_loss_run_doc)
+        if not suppressed:
+            return questions
+        state = resolve_loss_history_state(facts or {}, flags or {}, has_loss_run_doc)
+        kept: List[dict] = []
+        dropped: List[str] = []
+        for q in questions:
+            key = q.get("_canonical_key") or _canonical_key(q.get("field_name") or "")
+            fname = str(q.get("field_name") or "")
+            if key in suppressed:
+                dropped.append(fname or str(key))
+                continue
+            # The loss-history schedule table presumes prior operations too.
+            if (state == STATE_NEW_VENTURE and fname.startswith("schedule::")
+                    and "loss" in fname):
+                dropped.append(fname)
+                continue
+            kept.append(q)
+        if dropped:
+            logger.info("arq: loss-history state %r suppressed %d question(s): %s",
+                        state, len(dropped), ", ".join(sorted(set(dropped))[:8]))
+        return kept
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("arq: loss-state question gate skipped - %s", exc)
+        return questions
+
+
 # Prior carrier marketing reason (Brent feedback: ask via questionnaire, not document extraction)
 CARRIER_MARKETING_FIELD = "carrier_marketing_reason"
 
@@ -2159,6 +2259,96 @@ def _finalize_schedule_taxonomy(questions: List[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 # ASYNC-SAFE
+# ── Client 1.3: never ask about a coverage the package says it does not carry ─
+# `fact_state.is_not_applicable` answers from POSITIVE evidence only - a
+# `coverage_lines` entry that literally denies a family, with no other entry
+# granting it. No `coverage_lines`, an unmapped line name, or any disagreement
+# between two sources all mean "no opinion", and the question is asked exactly
+# as it is today.
+#
+# This is the difference between "not stated" and "not applicable" doing real
+# work: a package whose declarations page prints "COMMERCIAL PROPERTY - NO
+# COVERAGE" was still asking the client for the building's year built, roof
+# year and construction type, because a blank fact looked identical whatever
+# the reason for the blank.
+def _lines_the_producer_is_applying_for(form_ids) -> frozenset:
+    """Coverage families the producer has SELECTED a section form for.
+
+    Read off `pdf_service._SECTION_FORM_LINE_PHRASES`, the same table
+    `fact_line` uses, so the two can never drift: ACORD 140 -> property,
+    127/137 -> auto, 131 -> umbrella, and so on. Package-level forms (125,
+    101, 25) name no line and correctly contribute nothing.
+    """
+    out: set = set()
+    try:
+        from services.pdf_service import _SECTION_FORM_LINE_PHRASES
+        from services.lob_canon import canon_line
+        for fid in (form_ids or ()):
+            for phrase in _SECTION_FORM_LINE_PHRASES.get(str(fid), ()):
+                fam = canon_line(phrase)
+                if fam:
+                    out.add(fam)
+    except Exception:                                         # noqa: BLE001
+        return frozenset()                # no opinion -> suppress nothing
+    return frozenset(out)
+
+
+def _drop_not_applicable_questions(questions: List[dict], facts: dict,
+                                   form_ids=None) -> List[dict]:
+    """Remove questions about a coverage this package's documents rule out.
+
+    `fact_state.is_not_applicable` answers from POSITIVE evidence only - a
+    `coverage_lines` entry that literally denies a family, with no other entry
+    granting it. No `coverage_lines`, an unmapped line name, or any
+    disagreement between two sources all mean "no opinion", and the question is
+    asked exactly as it is today.
+
+    THE SELECTED FORMS OVERRIDE THE DOCUMENTS, and that is the whole safety
+    story. `coverage_lines` is read off the uploaded declarations page, which
+    on a renewal is the EXPIRING policy - so "COMMERCIAL PROPERTY - NO
+    COVERAGE" is a statement about what they had, not about what they are
+    applying for. A producer who selected ACORD 140 is applying for property,
+    and suppressing those questions would leave that form blank AND unaskable,
+    which is a far worse outcome than one question too many. Selecting the
+    section is the producer's own positive evidence and it wins.
+
+    What survives the override is the real target: a package that declines
+    property, does NOT select ACORD 140, and was still being asked for the
+    building's year built and construction type off ACORD 125's premises grid.
+    """
+    if not questions or not isinstance(facts, dict):
+        return questions
+    if form_ids is None:
+        # "The caller did not say which forms these questions came from." That
+        # is not the same as "no section form was selected", and a filter that
+        # REMOVES questions must never act on a missing input - same fail-open
+        # rule as the exception path below.
+        return questions
+    try:
+        from services.fact_state import is_not_applicable, denied_lines
+        denied = denied_lines(facts) - _lines_the_producer_is_applying_for(form_ids)
+        if not denied:
+            return questions              # nothing declined, or all of it re-applied for
+        kept, dropped = [], []
+        for q in questions:
+            key = q.get("_canonical_key") or _canonical_key(q.get("field_name") or "")
+            if key and is_not_applicable(facts, key):
+                dropped.append(key)
+                continue
+            kept.append(q)
+        if dropped:
+            logger.info(
+                "arq: dropped %d question(s) about coverage the documents "
+                "decline and no selected form applies for (%s): %s",
+                len(dropped), ", ".join(sorted(denied)),
+                ", ".join(sorted(set(dropped))[:8]),
+            )
+        return kept or questions
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("arq: not-applicable filter skipped - %s", exc)
+        return questions
+
+
 async def generate_arq_questions(
     facts: dict,
     flags: dict,
@@ -2438,6 +2628,14 @@ async def generate_arq_questions(
     _maybe_inject_no_loss_question(questions, facts, flags)
     # §6.4 item 1: ask the client to explain a no-loss / loss-run-claims conflict.
     _maybe_inject_loss_conflict_question(questions, facts, flags)
+    # C2 2.10: loss-run availability status (known claims, no runs uploaded).
+    # Doc presence computed once here and reused by the state gate below.
+    _lh_has_loss_run = any(
+        isinstance(d, dict) and d.get("doc_type") == "loss_run" and not d.get("excluded")
+        for d in (session_docs or [])
+    )
+    _maybe_inject_loss_run_status_question(questions, facts, flags,
+                                           has_loss_run_doc=_lh_has_loss_run)
     # NOTE: "Why are you marketing this account?" is intentionally NOT injected
     # here - it is asked upfront on the recommendation screen (producer-facing,
     # drives ACORD 101 live). Re-asking the client would be redundant, so it is
@@ -2497,6 +2695,12 @@ async def generate_arq_questions(
     # Figure 20: business-specific NAICS / SIC candidates. Same placement
     # constraint again - resolves against `_canonical_key`.
     _attach_classification_suggestions(questions, facts)
+
+    # C2 2.10: state-driven loss-question gating - one rule for all inject sites.
+    questions = _apply_loss_state_question_gate(
+        questions, facts, flags, has_loss_run_doc=_lh_has_loss_run)
+    questions = _drop_not_applicable_questions(
+        questions, facts, (generated_forms or {}).keys())
 
     for q in questions:
         q.pop("_group_label", None)
@@ -2599,6 +2803,11 @@ def generate_arq_questions_from_facts(
     _maybe_inject_no_loss_question(questions, facts, flags)
     # §6.4 item 1: ask the client to explain a no-loss / loss-run-claims conflict.
     _maybe_inject_loss_conflict_question(questions, facts, flags)
+    # C2 2.10: loss-run availability status. This facts-only path has no doc
+    # list, so has_loss_run_doc stays False (fail-open - asking once too often
+    # beats suppressing on a guess).
+    _maybe_inject_loss_run_status_question(questions, facts, flags,
+                                           has_loss_run_doc=False)
     # Umbrella underlying-schedule + follow-form evidence fallback (umbrella present
     # but evidence missing) - keeps the Clarity path in step with the form-aware ARQ.
     _maybe_inject_umbrella_evidence_questions(questions, facts, flags)
@@ -2631,6 +2840,12 @@ def generate_arq_questions_from_facts(
     # Figure 20: business-specific NAICS / SIC candidates. Same placement
     # constraint again - resolves against `_canonical_key`.
     _attach_classification_suggestions(questions, facts)
+
+    # C2 2.10: state-driven loss-question gating (facts-only path: no doc list).
+    questions = _apply_loss_state_question_gate(
+        questions, facts, flags, has_loss_run_doc=False)
+    questions = _drop_not_applicable_questions(
+        questions, facts, selected_form_ids)
 
     for q in questions:
         q.pop("_group_label", None)
@@ -3363,9 +3578,39 @@ async def apply_arq_answers_to_session(
     flags     = dict(proc_session.get("flags", {}) or {})
     flags_changed = False
     updated   = []
+    # V1 plan C1 F7 (client 1.5): answers that materially disagree with a
+    # value the documents state are HELD here, not written. Persisted on the
+    # session and surfaced in the Data Consistency picker as a "Client
+    # questionnaire" source; the producer picks.
+    held_conflicts = dict(proc_session.get("client_answer_conflicts") or {})
+    held_this_run: List[str] = []
 
     for field_name, form_ids in field_to_forms.items():
         new_val = answers[field_name]
+
+        # Decide BEFORE any form is stamped: a held answer must not reach the
+        # PDF either, or the form would show a value the fact does not carry.
+        _canon_pre = _canonical_key(field_name)
+        if (_canon_pre and not _canon_pre.startswith("_")
+                and not schedule_capture.is_schedule_answer_key(field_name)):
+            _src_raw = facts.get(_canon_pre)
+            _src_val = _src_raw.get("value") if isinstance(_src_raw, dict) else _src_raw
+            if _client_answer_conflicts_with_source(_canon_pre, _src_raw, _src_val, new_val):
+                held_conflicts[_canon_pre] = {
+                    "client_value": str(new_val),
+                    "source_value": str(_src_val),
+                    "field_name": field_name,
+                    "arq_id": arq_id,
+                    "held_at": datetime.now(timezone.utc).isoformat(),
+                }
+                held_this_run.append(_canon_pre)
+                logger.info(
+                    "ARQ %s: client answer for %s (%r) disagrees with the source "
+                    "value (%r) - held for producer resolution, not applied",
+                    arq_id, _canon_pre, str(new_val)[:60], str(_src_val)[:60])
+                if field_name not in updated:
+                    updated.append(field_name)
+                continue
 
         # Schedule answers carry a list of rows, not a scalar. They are written
         # to `facts[list_key]` (the shape `_resolve_schedule_row` reads) and
@@ -3465,6 +3710,15 @@ async def apply_arq_answers_to_session(
                     if flags.get("no_prior_losses"):
                         flags["no_prior_losses"] = False
                         flags_changed = True
+            elif canon == NEW_VENTURE_FIELD:
+                # C2 2.2: the producer's New Venture confirmation drives the
+                # Loss History Not Applicable. Parsed by the state module (the
+                # option text or a bare Yes/No); an unparseable answer clears
+                # the flag rather than guessing - failing toward scoring the
+                # pillar, never toward N/A.
+                from services.loss_history_state import new_venture_answer
+                flags["new_venture_confirmed"] = new_venture_answer(new_val) is True
+                flags_changed = True
             elif canon == CARRIER_MARKETING_FIELD:
                 # Derive prior_carrier_adverse_action from the selected reason.
                 # Adverse options escalate ACORD 101 and impact Narrative Quality.
@@ -3479,12 +3733,49 @@ async def apply_arq_answers_to_session(
         if field_name not in updated:
             updated.append(field_name)
 
-    _update_payload = {"generated_forms": generated, "facts": facts}
+    if held_conflicts:
+        facts["_client_answer_conflicts"] = held_conflicts
+    else:
+        facts.pop("_client_answer_conflicts", None)
+    _update_payload = {"generated_forms": generated, "facts": facts,
+                       "client_answer_conflicts": held_conflicts}
     if flags_changed:
         _update_payload["flags"] = flags
-    await upd_processing_session(processing_session_id, _update_payload)
-    logger.info(f"ARQ {arq_id}: applied {len(updated)} fields to session {processing_session_id}")
+    # See B13: the facts merge is additive, so clearing the last held answer
+    # needs an explicit retraction, not a pop.
+    await upd_processing_session(
+        processing_session_id, _update_payload,
+        delete_facts=(None if held_conflicts else ["_client_answer_conflicts"]),
+    )
+    logger.info(f"ARQ {arq_id}: applied {len(updated)} fields to session {processing_session_id}"
+                + (f"; held {len(held_this_run)} for producer resolution: {held_this_run}"
+                   if held_this_run else ""))
     return True, updated
+
+
+def _client_answer_conflicts_with_source(canon: str, source_raw, source_val, client_val) -> bool:
+    """True when a client answer must be HELD rather than applied (F7).
+
+    Held only on POSITIVE disagreement: the source value is present, was not
+    itself supplied by a human, and the one comparison door says DIFFERENT.
+    An answer that agrees, fills a blank, or cannot be compared (prose) applies
+    exactly as before. Fail-open: any error applies the answer (today's path).
+    """
+    if not ENABLE_CLIENT_ANSWER_CONFLICT_ROUTING:
+        return False
+    try:
+        if source_val is None or str(source_val).strip() == "" or client_val is None                 or str(client_val).strip() == "":
+            return False
+        if isinstance(source_val, (list, dict)):
+            return False
+        from services.fact_state import derive_evidence_state, USER_CONFIRMED
+        if derive_evidence_state(source_raw)[0] == USER_CONFIRMED:
+            return False                      # a human already owns this value
+        from services.fact_comparison import verdict, DIFFERENT
+        return verdict(canon, source_val, client_val) == DIFFERENT
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("ARQ: client-answer conflict check failed for %s - %s", canon, exc)
+        return False
 
 
 # ASYNC-SAFE
@@ -3686,6 +3977,12 @@ async def apply_producer_answer_to_session(
         elif flags.get("no_prior_losses"):
             flags["no_prior_losses"] = False
             flags_changed = True
+    elif canon == NEW_VENTURE_FIELD:
+        # C2 2.2 - mirror of the ARQ apply path above: the producer's New
+        # Venture confirmation drives the Loss History Not Applicable.
+        from services.loss_history_state import new_venture_answer
+        flags["new_venture_confirmed"] = new_venture_answer(new_val) is True
+        flags_changed = True
     elif canon == CARRIER_MARKETING_FIELD:
         _val_lower = new_val.lower()
         if _val_lower.startswith("other:"):

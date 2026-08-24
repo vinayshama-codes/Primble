@@ -331,7 +331,15 @@ def test_form_and_package_scores_stay_independently_computed():
     )
     assert form["breakdown"]["structural_completeness"] != pkg["pillars"]["structural_completeness"]
     assert form["breakdown"]["exposure_consistency"] != pkg["pillars"]["exposure_consistency"]
-    assert form["sqs_score"] != pkg["package_sqs_score"]
+    # 2026-08-24: asserting the two HEADLINES are unequal was wrong - two
+    # independently computed weighted sums may legitimately collide on one
+    # fixture (they did, 65 == 65, after the C2 loss-history renumbering
+    # shifted both scores for different reasons; the pillar asserts above
+    # still prove the models differ). Guard the real property structurally:
+    # the package headline reconstructs from the PACKAGE's own pillars, so a
+    # regression that copies the form headline into the package would mismatch.
+    from services.sqs_service import SPEC_PILLAR_WEIGHTS, _weighted_pillar_sum
+    assert pkg["raw_sqs_score"] == _weighted_pillar_sum(pkg["pillars"], SPEC_PILLAR_WEIGHTS)
 
 
 def test_package_score_is_not_an_average_of_the_form_scores():

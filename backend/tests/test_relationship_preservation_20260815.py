@@ -433,11 +433,33 @@ def _uw_result(review_required: bool) -> dict:
 
 class TestConflictWithhold:
 
-    def test_umbrella_limit_is_a_withhold_key(self):
-        assert "umbrella_limit" in CONFLICT_WITHHOLD_KEYS
+    def test_no_cross_document_conflict_withholds_a_box(self):
+        """SUPERSEDED BY BRENT 2026-08-21 (v1-20AUG Q4 / D16): "we should patch
+        the suggested value". This test asserted the opposite - that
+        umbrella_limit shipped an owned blank while its conflict was open.
 
-    def test_unresolved_conflict_is_withheld(self):
-        assert unresolved_withheld_keys(_uw_result(True), {}) == ["umbrella_limit"]
+        The MECHANISM is deliberately still covered by the two tests below,
+        which drive `_uw_conflicted_keys` directly: it remains live for
+        `extraction_service._flag_intra_document_limit_conflicts` (a conflict
+        INSIDE one document), which Brent's ruling did not cover.
+
+        To restore the old behaviour, put "umbrella_limit" back in
+        CONFLICT_WITHHOLD_KEYS - nothing else changes."""
+        assert CONFLICT_WITHHOLD_KEYS == frozenset()
+        assert unresolved_withheld_keys(_uw_result(True), {}) == []
+
+    def test_the_conflict_itself_is_still_raised(self):
+        """Brent asked us to stop BLANKING, not to stop DETECTING. Client rule
+        1.4 still requires the conflict visible and routed to the producer."""
+        from services.underwriting_consistency import assess_underwriting_consistency
+        docs = [{"filename": "dec.pdf", "doc_type": "policy", "text": "x",
+                 "doc_id": "1", "facts": {"umbrella_limit": "$3,000,000"}},
+                {"filename": "coi.pdf", "doc_type": "certificate", "text": "x",
+                 "doc_id": "2", "facts": {"umbrella_limit": "$1,000,000"}}]
+        row = next(f for f in assess_underwriting_consistency(docs, {})["fields"]
+                   if f["fact_key"] == "umbrella_limit")
+        assert row["status"] == "conflict" and row["review_required"] is True
+        assert {v["display"] for v in row["values"]} == {"$3,000,000", "$1,000,000"}
 
     def test_confirmation_clears_the_withhold(self):
         assert unresolved_withheld_keys(

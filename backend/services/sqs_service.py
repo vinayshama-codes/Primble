@@ -8,7 +8,12 @@ from typing import List, Tuple, Dict, Optional, Any
 
 from utils.validators import run_field_validations
 from services.extraction_service import _fv, _focr, _narrative_remarks_text
-from services.normalization import distinct_normalized, normalize_general, normalize_date
+from services.normalization import normalize_general, normalize_date
+from services.fact_comparison import (
+    conflict as _fact_conflict, build_context as _build_pkg_context,
+    document_witnesses as _doc_witnesses,
+)
+from services.lob_canon import canon_line as _canon_line_leaf
 
 logger = logging.getLogger(__name__)
 
@@ -309,32 +314,15 @@ def _to_float(v) -> float | None:
         return None
 
 
-_TRUTHY_TOKENS = {"yes", "true", "1", "y", "no prior losses", "no losses", "no claims"}
-_FALSY_TOKENS  = {"no", "false", "0", "n", ""}
-
-
-def _attested_true(value) -> bool:
-    """Safely interpret an attestation value as a boolean.
-
-    Avoids the bug where bool("No") / bool("false") / bool("0") evaluate True
-    (any non-empty string is truthy in Python). For an evidence field - where a
-    stored "No" must mean *not* attested - we parse the token explicitly and only
-    fall back to Python truthiness for non-string values (e.g. a real bool/int).
-    """
-    if value is None:
-        return False
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    s = str(value).strip().lower()
-    if s in _FALSY_TOKENS:
-        return False
-    if s in _TRUTHY_TOKENS:
-        return True
-    # Unknown free text on a no-loss indicator: a phrase that mentions "no" loss
-    # counts as attested; anything else is treated as not-attested (conservative).
-    return ("no " in s and ("loss" in s or "claim" in s))
+# C2 (2026-08-24): the attestation parser moved to services/loss_history_state
+# - the ONE owner of every loss-history state decision - and is imported back
+# under its historical private name so every existing consumer (this module,
+# arq_service, tests importing sq._attested_true) keeps working unchanged.
+from services.loss_history_state import (  # noqa: E402
+    _FALSY_TOKENS,
+    _TRUTHY_TOKENS,
+    attested_true as _attested_true,
+)
 
 
 def _score_narrative_components(text: str, strict: bool = False) -> Dict[str, bool]:
@@ -462,12 +450,15 @@ TIER2_FIELDS = {
     "fein":                   "FEIN / Tax ID",
     "operations_description": "Operations description",
     "total_revenue":          "Annual revenue",
-    "prior_carrier":          "Prior carrier name",
     "num_employees":          "Number of employees",
     "years_in_business":      "Years in business",
     "naics_code":             "NAICS / industry code",
-    "num_claims":             "Number of prior claims",
     "total_payroll":          "Annual payroll",
+    # Client C2 2.7 / 2.8 (2026-08-24): prior_carrier and num_claims are
+    # REMOVED from Structural Completeness. Their scoring home is Loss History
+    # (calculate_p4_loss_history), where applicability and new-venture status
+    # are handled correctly; keeping them here double-counted one gap in two
+    # pillars and docked a legitimate new venture for history it cannot have.
     # Spec ACORD 130: X-mod, payroll period, owner/officer exclusions are required for WC.
     "wc_xmod":                "WC experience modification factor (X-mod)",
     "wc_payroll_period":      "WC payroll period",
@@ -1410,37 +1401,29 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     # the identity checks called it before it existed - the exception was
     # swallowed by the fail-open guard and the filter silently never fired. A
     # fix that looks applied and is not is worse than no fix.)
-    _pkg_ctx = None
-    try:
-        from services.fact_equivalence import PackageContext
-        _pkg_ctx = PackageContext(None, docs)
-    except Exception as _cx:                                  # noqa: BLE001
-        logger.warning("check_doc_consistency: package context unavailable - %s", _cx)
+    _pkg_ctx = _build_pkg_context(None, docs)
 
     def _raw(key: str) -> List:
-        return [_fv(d["facts"], key) for d in docs if _fv(d["facts"], key)]
+        # Role scope (client 1.2): a document is only read as stating a fact its
+        # ROLE covers. See fact_comparison.document_witnesses.
+        return [_fv(d["facts"], key) for d in docs
+                if _fv(d["facts"], key) and _doc_witnesses(d.get("doc_type"), key)]
 
-    def _still_differs(key: str, raw_values: List) -> bool:
-        """True when the values genuinely differ AFTER the equivalence filter.
+    def _conflicts(key: str, raw_values: List) -> bool:
+        """True when the documents genuinely disagree about ``key``.
 
-        `distinct_normalized` compares normalized TEXT, so it cannot see that
-        one address is a COMPONENT of another, that a code carries its printed
-        description, or that two printings name one contract. This is the same
-        filter the Data Consistency picker uses, so the two surfaces can never
-        disagree about whether something is a conflict - probe run B raised the
-        identical address non-problem on both.
-
-        Fail-open: any problem returns True and the caller behaves as today.
+        ONE DOOR (V1 plan C1, decision D3): this is `fact_comparison.conflict`,
+        the same call the Data Consistency picker makes, so the two surfaces
+        cannot disagree - they did, reproduced on the client's literal
+        address trio (picker: 0 conflicts; this function: a warning and an 85
+        cap), because this function fed RAW strings to a filter the picker fed
+        normalised groups. Formatting, containment, code descriptions, prose,
+        two printings of one contract and three printings of one address are
+        all NOT a conflict; two different entities, amounts, dates or
+        identifiers ARE. Applied to EVERY field below, the hard stops included
+        - applicant_name used to hard-stop (cap 60) on a mid-word truncation.
         """
-        try:
-            from services.fact_equivalence import equivalent_index
-            vals = [str(v) for v in raw_values if str(v or "").strip()]
-            if len(vals) < 2:
-                return True
-            merged = equivalent_index(key, vals, _pkg_ctx)
-            return not merged or (len(vals) - len(merged)) > 1
-        except Exception:                                     # noqa: BLE001
-            return True
+        return _fact_conflict(key, raw_values, _pkg_ctx)
 
     # ── Attribution brackets (client feedback: "which document created the
     # issue... and how to fix it") ────────────────────────────────────────────
@@ -1500,7 +1483,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     applicant_raw = _raw("applicant_name")
     if "applicant_name" in confirmed_keys:
         pass  # resolved via the Data Consistency picker — no longer a hard stop
-    elif len(distinct_normalized("applicant_name", applicant_raw)) > 1:
+    elif _conflicts("applicant_name", applicant_raw):
         issues.append(
             "[hard_stop] code=name_conflict "
             f"Applicant name differs across documents: {_show(applicant_raw)}"
@@ -1514,7 +1497,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
 
     # DBA consistency - spec: "DBAs must be consistently represented or explicitly explained"
     dba_raw = _raw("dba_name")
-    if "dba_name" not in confirmed_keys and len(distinct_normalized("dba_name", dba_raw)) > 1:
+    if "dba_name" not in confirmed_keys and _conflicts("dba_name", dba_raw):
         issues.append(
             "[warning] field=dba_name "
             f"DBA / trade name differs across documents: {_show(dba_raw)}. "
@@ -1537,7 +1520,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         # full street address and the certificate printed "Denver, Colorado" -
         # one is inside the other, and this warning fired alongside the Data
         # Consistency row for the same non-problem (client 2026-08-17 item 1).
-        if len(distinct_normalized(key, vals_raw)) > 1 and _still_differs(key, vals_raw):
+        if _conflicts(key, vals_raw):
             issues.append(
                 f"[warning] field={key} "
                 f"{_FIELD_LABELS[key]} differs across documents: {_show(vals_raw)}"
@@ -1550,7 +1533,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
             )
 
     fein_raw = _raw("fein")
-    if "fein" not in confirmed_keys and len(distinct_normalized("fein", fein_raw)) > 1:
+    if "fein" not in confirmed_keys and _conflicts("fein", fein_raw):
         issues.append(
             "[hard_stop] code=fein_conflict "
             "FEIN differs across uploaded documents. Score is capped at 60 until this is confirmed."
@@ -1622,7 +1605,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         pass  # resolved via the Data Consistency picker
     elif _dates_owned_separately("effective_date"):
         pass  # PROVEN to be two contracts' own terms - not a disagreement
-    elif len(distinct_normalized("effective_date", eff_raw)) > 1:
+    elif _conflicts("effective_date", eff_raw):
         issues.append(
             f"{_date_prefix} code=date_conflict "
             "Policy date mismatch across documents." + (
@@ -1638,7 +1621,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         pass  # resolved via the Data Consistency picker
     elif _dates_owned_separately("expiration_date"):
         pass  # PROVEN to be two contracts' own terms - not a disagreement
-    elif len(distinct_normalized("expiration_date", exp_raw)) > 1:
+    elif _conflicts("expiration_date", exp_raw):
         issues.append(
             f"{_date_prefix} code=expiration_conflict "
             "Policy expiration date mismatch across documents." + (
@@ -1661,10 +1644,7 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
     # normalized strings made probe run C report them as differing coverage.
     # A line `_canon_line` cannot place keeps its own normalized text as its
     # key, so an unrecognised line is never silently dropped from the compare.
-    try:
-        from services.extraction_service import _canon_line as _cl
-    except Exception:                                         # pragma: no cover
-        _cl = lambda _s: None                                 # noqa: E731
+    _cl = _canon_line_leaf
 
     for d in docs:
         lob = _fv(d["facts"], "lines_of_business")
@@ -1675,15 +1655,92 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
                 lob_norm_sets.append(norm)
                 lob_raw_display.append(", ".join(str(x).strip() for x in lob if str(x).strip()))
                 lob_doc_names.append(d.get("filename") or "an uploaded document")
-    # A SUBSET is not a disagreement (client 2026-08-17). A certificate or a
-    # single-line dec page names fewer lines than the package dec - probe run C
-    # produced "General Liability, Commercial Auto, Commercial Umbrella" vs
-    # "Business Auto" and called it a conflict. Only sets that each carry a line
-    # the other lacks genuinely disagree.
-    _lob_disagree = any(
-        (a - b) and (b - a)
-        for i, a in enumerate(lob_norm_sets) for b in lob_norm_sets[i + 1:]
-    )
+    # ── A LOB conflict needs a DENIAL, not just a different list ────────────
+    # Client 1.7 acceptance: create a conflict only when two applicable sources
+    # "materially disagree about whether coverage exists". Two positive lists
+    # can never establish that - a COI certifies selected coverages, a narrative
+    # names only relevant lines, an application may name a line placed
+    # elsewhere. SILENCE IS NOT DENIAL (Principle 3).
+    #
+    # The old rule ("each set carries a line the other lacks") called the
+    # 2026-08-21 live package a conflict because one document named Professional
+    # Liability - a REAL extra policy written by a different carrier, which the
+    # package dec has no reason to list. That is more information, not a
+    # contradiction.
+    #
+    # So a conflict now requires POSITIVE EVIDENCE ON BOTH SIDES: one document
+    # DENIES a line ("PROPERTY - NO COVERAGE" on its own coverage_lines) while
+    # another lists that same line as active. No denial anywhere -> the
+    # difference renders as [info], which is exactly what the acceptance
+    # criteria ask for.
+    # TWO denial witnesses per document, because one alone is too easy to miss:
+    #   1. STRUCTURED - a `coverage_lines` entry that does not GRANT the line
+    #      (no premium/limit, or a detail that is itself a denial).
+    #   2. RAW TEXT - the same scanner `apply_declared_absent_downgrades` uses
+    #      (`_lines_declared_absent`), which reads "PROPERTY - NO COVERAGE" off
+    #      the page. Without this the check could only fire on packages whose
+    #      extraction happened to build a denial entry, which is exactly the
+    #      "looks like coverage, never fires" trap.
+    _denied_by_doc = []
+    for d in docs:
+        _denied = set()
+        try:
+            # EXPLICIT denial only. `not _line_entry_grants_coverage(...)` is
+            # NOT a denial - a certificate never prints premiums, so most COI
+            # rows fail the grant test while saying nothing about absence. That
+            # mistake manufactured this very warning on the live package.
+            from services.extraction_service import _line_entry_denies_coverage
+            for _e in (_fv(d["facts"], "coverage_lines") or []):
+                if not isinstance(_e, dict):
+                    continue
+                _c = _cl(_e.get("line"))
+                if _c and _line_entry_denies_coverage(_e):
+                    _denied.add(_c)
+        except Exception:                                     # noqa: BLE001
+            pass
+        try:
+            from services.extraction_service import (
+                _lines_declared_absent, _FLAG_LINE_WORDS,
+            )
+            for _flag in _lines_declared_absent(str(d.get("text") or "")):
+                for _w in _FLAG_LINE_WORDS.get(_flag, ()):
+                    _c = _cl(_w)
+                    if _c:
+                        _denied.add(_c)
+                        break
+        except Exception:                                     # noqa: BLE001
+            pass
+        _denied_by_doc.append(_denied)
+    # CROSS-document, and that word is load-bearing (bug in the first cut of
+    # this rule, found on the 2026-08-21 live run). A dec page routinely BOTH
+    # prints "COMMERCIAL PROPERTY - NO COVERAGE" and lists Commercial Property
+    # in the coverage table its own extraction reads - so unioning the denials
+    # and the actives matched the document AGAINST ITSELF and the false warning
+    # survived the fix meant to remove it. A document contradicting itself is an
+    # extraction artefact that `apply_declared_absent_downgrades` already
+    # settles; it is not two sources disagreeing.
+    #
+    # `lob_doc_names` is built alongside lob_norm_sets, so index i of one is the
+    # same document as index i of the other. `_denied_by_doc` is keyed by the
+    # FULL docs list, so it is re-indexed onto the same footing first.
+    _denied_for_lob = []
+    _seen_names = []
+    for _d, _den in zip(docs, _denied_by_doc):
+        _seen_names.append(_d.get("filename") or "an uploaded document")
+        _denied_for_lob.append(_den)
+    _contradicted = set()
+    for _i, _active in enumerate(lob_norm_sets):
+        _name_i = lob_doc_names[_i]
+        for _j, _den in enumerate(_denied_for_lob):
+            if _seen_names[_j] == _name_i:
+                continue                      # same document - not a disagreement
+            _contradicted |= (_den & _active)
+    _lob_disagree = bool(_contradicted)
+    if _contradicted:
+        logger.info(
+            "lines_of_business: %s is DENIED by one document and listed as "
+            "active by another - a real coverage contradiction",
+            ", ".join(sorted(_contradicted)))
     if len(lob_norm_sets) >= 2 and len(set(lob_norm_sets)) > 1 and _lob_disagree:
         _lob_display = "; ".join(lob_raw_display)
         # Not a Data Consistency reconcilable field (no picker exists for it) -
@@ -1787,26 +1844,61 @@ def doc_consistency_stops(session_data: dict) -> Tuple[List[str], List[str]]:
 # ── Confidence-weighted fill rate ────────────────────────────────────────────
 
 CONFIDENCE_SCORE = {
-    # Producer-verified / deterministic fills score 1.00.
-    "deterministic":    1.00,
-    "filled":           1.00,
-    "client_arq":       1.00,    # producer-/client-supplied via ARQ
-    # AI-mapped fills - high vs low confidence per spec (producer=1.00, AI-high=0.85, AI-low=0.50).
-    "ai_high":          0.85,
-    "ai_low":           0.50,
-    "low_confidence":   0.50,    # actual label emitted by pdf_service for GPT-inferred fields
-    # Empty / required-but-missing fields contribute nothing.
-    "missing_required": 0.00,
-    None:               0.00,
+    # ── THE WEIGHTS ARE OURS, NOT THE CLIENT'S ──────────────────────────────
+    # The comment here used to read "per spec (producer=1.00, AI-high=0.85,
+    # AI-low=0.50)". That attribution is FALSE, corrected 2026-08-24
+    # (v1-20AUG.md C1-R / C1-S): `SQS_Scoring_Specification.docx.pdf` was
+    # extracted in full and searched - "0.85" and "0.50" appear ZERO times. The
+    # spec mandates only that the fill rate be "confidence-weighted" and never
+    # sets a weight. These are engineering defaults awaiting Brent's ruling
+    # (Q9). Do not defend them as a client decision.
+    #
+    # ── EVERY LABEL pdf_service / form_routes EMITS MUST BE A KEY HERE ──────
+    # `confidence_fill_rate` does `CONFIDENCE_SCORE.get(label, 0.0)`, so a
+    # label missing from this table silently scores ZERO. That is exactly what
+    # happened to "ai_verified" from the day the raw-text verification shipped
+    # until 2026-08-24: an AI value CONFIRMED present in the uploaded document
+    # (painted pink "AI-OK" on the form) scored 0.00 while an UNVERIFIED guess
+    # scored 0.50 - verification made the score worse. Measured: a form of ten
+    # document-verified AI fields reported a 0% fill rate. Fill rate is 35% of
+    # Structural Completeness (25% of the package), so every submission since
+    # that label shipped has scored low. `tests/test_confidence_score_covers_
+    # every_label.py` now harvests every assigned label from the source and
+    # fails the build if one is missing here.
+    #
+    # Producer-entered / deterministic (Pass 1, alias stamp) fills.
+    "deterministic":    1.00,    # not emitted per field today; kept for fact-level callers
+    "filled":           1.00,    # the label pdf_service actually emits for deterministic fills
+    "client_arq":       1.00,    # producer-/client-supplied via ARQ (form_routes)
+    # AI-mapped fills. The verification split is pdf_service's own contract:
+    #   found word-for-word in the documents -> "ai_verified"   (pink,   AI-OK)
+    #   NOT found - a guess, or a claim we
+    #   could not locate                     -> "low_confidence" (orange, verify)
+    # "ai_verified" takes the AI-high slot: it is the highest confidence the
+    # AI path can reach - the value is on the page - but it was still placed
+    # by the model, not read deterministically, so it is not 1.00. Brent may
+    # re-tune the number (Q9); its slot in the ladder is not in question.
+    "ai_verified":      0.85,
+    "ai_high":          0.85,    # fact-level label (extraction); never a field label today
+    "ai_low":           0.50,    # fact-level label (extraction); never a field label today
+    "low_confidence":   0.50,    # the field label pdf_service actually emits for unverified AI
+    # Empty / required-but-missing fields contribute nothing. Both gate labels
+    # are listed EXPLICITLY so that 0.00 is a decision, not a `.get` default.
+    "missing_required":      0.00,
+    "missing_required_gate": 0.00,   # ACORD 125/126 "started row" sibling gate
+    None:                    0.00,
 }
 
 
 def confidence_fill_rate(mapped_data: dict, confidence_dict: dict) -> int:
     """Calculate confidence-weighted fill rate.
 
-    Spec: producer-edits=1.00, AI-high=0.85, AI-low=0.50. Denominator is the
-    count of *filled* fields so the score reflects the average confidence of
-    what was filled, not how big the template happens to be.
+    The SPEC's requirement is only that this be "confidence-weighted"; the
+    weights themselves (producer-edits=1.00, AI-high=0.85, AI-low=0.50) are an
+    ENGINEERING DEFAULT, not a client decision - see the note on
+    ``CONFIDENCE_SCORE``. Denominator is the count of *filled* fields so the
+    score reflects the average confidence of what was filled, not how big the
+    template happens to be.
     """
     filled_items = [
         field for field, val in mapped_data.items()
@@ -1908,20 +2000,19 @@ def _loss_history_conflict(facts: dict, flags: dict) -> bool:
 
 
 def _recency_penalty(age_days: int) -> int:
-    """Loss-run recency reduction - client Q3 tiered bands (Clarification 2).
+    """Loss-run recency reduction - client C2 2.3 stepped bands (2026-08-24).
 
-    0-90 days = 0 | 91-180 = 10 | 181-365 = linear ramp 15 -> 20 | >365 = 25 (cap).
-    Replaces the previous continuous excess/11 curve so each band matches the
-    client's stepped values exactly. Shared by the doc-only and year-tier paths so
-    the two can never diverge.
+    0-90 days = 0 | 91-180 = 10 | 181-365 = 20 flat | >365 = 25 (cap).
+    The 181-365 band was previously a 15->20 ramp (older spec's "-15 rising to
+    -20"); the C2 revision fixes it at -20. Shared by the doc-only and
+    year-tier paths so the two can never diverge.
     """
     if age_days <= _LOSS_RECENCY_DAYS:            # <= 90: currently valued, no deduction
         return 0
     if age_days <= 180:                           # 91-180
         return 10
-    if age_days <= 365:                           # 181-365: ramp 15 (at 181) -> 20 (at 365)
-        span = (age_days - 181) / (365 - 181)
-        return int(round(15 + span * 5))
+    if age_days <= 365:                           # 181-365: flat 20 (client C2 2.3)
+        return 20
     return _LOSS_RECENCY_MAX_PEN                   # > 365: 25 cap
 
 
@@ -1968,6 +2059,14 @@ _LOSS_RECOMMENDATION_FIELDS: Tuple[Tuple[str, Optional[str]], ...] = (
     ("loss runs appear stale",                          None),
     ("loss run valuation date",                         None),   # not a writable canonical fact
     ("loss history conflict",                           None),
+    # C2 (2026-08-24): new venture, availability and advisory rows.
+    ("new venture status conflicts",                    None),
+    ("new venture confirmed",                           None),
+    ("confirm new venture status",                      "new_venture_indicator"),
+    ("claim years are not readable",                    "loss_history_years"),
+    ("prior claims are known",                          "loss_run_status"),
+    ("no loss runs are available",                      None),
+    ("underwriting advisory",                           None),
 )
 
 
@@ -1986,21 +2085,55 @@ def loss_recommendation_field(message: str) -> Optional[str]:
     return None
 
 
+_NEW_VENTURE_CONFIRM_REC = (
+    "If this business is a new venture with no prior operations, confirm New "
+    "Venture status - Loss History will then be marked Not Applicable instead "
+    "of counting against the score."
+)
+
+
 def calculate_p4_loss_history(
     facts: dict,
     flags: dict,
     has_loss_run_doc: bool = False,
     loss_run_match: str = "no_loss_run",
-) -> Tuple[int, List[str]]:
-    """Loss History Integrity pillar - client-approved year tiers & recency (Q3).
+) -> Tuple[Optional[int], List[str]]:
+    """Loss History pillar - client C2 revised scoring (2026-08-24).
 
-    Year tiers (Q3):  ≥5 yr fully valued = 100 | ≥3 yr = 80 | <3 yr = 40
-    Recency (Q3):     90-day grace window, then gradual reduction (max 25 pts)
-    Insured match (Q3): strong (name+FEIN/policy) = full | possible = -15 pts + warning
+    SQS PRINCIPLE (client 2.1): this measures the QUALITY AND COMPLETENESS of
+    the loss information, never how desirable the losses are. The old
+    claim-frequency / loss-ratio deductions are now underwriting ADVISORIES
+    with no score effect.
+
+    Path A - runs uploaded, readable claim years: 5+ fully valued = 100,
+      3-4 = 85, 1-2 = 70. Recency 0 / -10 / -20 / -25, unknown valuation date
+      -15. Insured match 0 / -8 / -15; no credible match caps the pillar at 25.
+      Prior carrier: present = 0, missing WHEN APPLICABLE = -10 (the +10 bonus
+      is removed - expected context is not bonus-quality information).
+    Path B - runs uploaded, claim years NOT readable: strong match (name +
+      FEIN/policy) = 60 PINNED AND TERMINAL - no recency, carrier or
+      unknown-date deduction ever moves it (only the contradiction CEILING
+      can). Moderate 42 / possible 35 / no match 15, with recency applied only
+      when a valuation date exists and -10 for a missing applicable carrier.
+    Path C - no runs: attested no-loss 60, requested/pending 50,
+      narrative-only 40, nothing 25. Known claims + pending = 50; attestation
+      + pending = 60; known claims with no runs and nothing pending = 25.
+    New venture (client 2.2): producer-confirmed and uncontradicted -> returns
+      None (Not Applicable); the caller's _weighted_pillar_sum rescales the
+      remaining pillars proportionally.
+    Ceilings (client 2.6 + spec): no-match caps at 25; a no-loss attestation
+      contradicted by actual loss-run claims caps at 45. Ceilings, never
+      floors - a score already below stays its own value.
     """
+    from services.loss_history_state import (
+        loss_runs_pending_stated, new_venture_applicable, new_venture_confirmed,
+        no_runs_available_stated, parse_loss_run_status,
+        prior_carrier_applicable, prior_claims_exist, prior_operations_evidence,
+    )
     years    = _resolve_loss_history_years(facts)
     age_days = _loss_run_age_days(facts)          # None when recency is UNVERIFIED
     has_carrier = bool(_fv(facts, "prior_carrier"))
+    carrier_applicable = prior_carrier_applicable(facts, flags)
 
     # Fix: also read the actual canonical alias key (fixes dead-key bug §6.4).
     # Use _attested_true so a stored "No"/"false"/"0" is NOT misread as attested.
@@ -2026,7 +2159,10 @@ def calculate_p4_loss_history(
 
     def _result(score: int, msgs: List[str]) -> Tuple[int, List[str]]:
         capped = score
-        out_msgs = list(msgs)
+        # Recs accumulated BEFORE a terminal branch (e.g. the contradicted
+        # new-venture notice) must survive it - a literal msgs list used to
+        # silently drop them. Deduped so `_result(x, recs)` callers don't double.
+        out_msgs = [m for m in recs if m not in msgs] + list(msgs)
         if _no_match:
             capped = min(capped, _LOSS_NO_MATCH_CAP)
         if _conflict:
@@ -2037,29 +2173,45 @@ def calculate_p4_loss_history(
             )
         return capped, out_msgs
 
-    # ── Base score by year tier (client's recommended scoring) ──────────────
-    #     5 yr current loss runs = 100 | 3-4 yr = 80 | 1-2 yr = 40
-    # The year tiers themselves carry no carrier coupling; the client's
-    # "Prior Carrier Present +10 / Missing -10" additional validation is layered
-    # on AFTER the base tier (below) and on the loss-runs-uploaded path. It is
-    # deliberately NOT applied to the no-loss-run states (attests = 60, pending =
-    # 70, no-info = 25), whose explicit recommended scores a -10 would contradict.
+    # ── Client 2.2: verified new venture -> the pillar is Not Applicable ─────
+    # Producer-confirmed AND uncontradicted by positive evidence of prior
+    # operations. Returns None; every weighted sum goes through
+    # _weighted_pillar_sum, which removes the pillar and rescales the rest.
+    if new_venture_applicable(facts, flags, has_loss_run_doc):
+        return None, [
+            "New Venture confirmed - no prior operations, so Loss History is "
+            "Not Applicable and removed from the score (remaining pillars "
+            "rescale proportionally)."
+        ]
+    if new_venture_confirmed(facts, flags):
+        # Confirmed but contradicted (client 2.10's "unless contradictory
+        # source information"): keep scoring normally and tell the producer
+        # exactly which evidence blocked the N/A.
+        _evidence = prior_operations_evidence(facts, flags, has_loss_run_doc)
+        recs.append(
+            "New Venture status conflicts with evidence of prior operations "
+            f"({', '.join(_evidence)}) - confirm with the insured before "
+            "relying on the new-venture answer."
+        )
+
+    # ── Base score by year tier (client C2 2.3: 100 / 85 / 70) ──────────────
+    # The old 1-2 year base of 40 was too punitive for actual loss evidence -
+    # it made real loss runs score worse than some no-loss-run states.
     # Bug fix (2026-07-11, found via loss-history test suite): `years` is a raw
     # extracted number with no document backing required. A Yes/No question's
     # lookback window ("...in the past five (5) years?") or the ACORD form's own
     # "FOR THE LAST ___ YEARS" boilerplate blank can populate loss_history_years
     # with zero loss-run evidence attached, and this tier previously credited
-    # that the same as an actual multi-year loss run (100/80/40). Require
-    # has_loss_run_doc so a bare number can never outscore real documentation -
-    # an undocumented years value now falls through to the attestation/no-info
-    # tiers below instead.
+    # that the same as an actual multi-year loss run. Require has_loss_run_doc
+    # so a bare number can never outscore real documentation - an undocumented
+    # years value falls through to the attestation/no-info tiers below instead.
     if has_loss_run_doc and years >= _LOSS_YEARS_FULL:
         base_score = 100
     elif has_loss_run_doc and years >= _LOSS_YEARS_PART:
-        base_score = 80
+        base_score = 85
         recs.append("3 years of loss runs provided - 5 years preferred for full credit")
     elif has_loss_run_doc and years > 0:
-        base_score = 40
+        base_score = 70
         recs.append("Loss history incomplete - fewer than 3 years provided")
     elif has_loss_run_doc:
         # §6.4 pending-status shortcut: a document classified as a loss_run that only
@@ -2068,18 +2220,27 @@ def calculate_p4_loss_history(
         # narrative, not an actual loss run. Honour the pending state instead of treating
         # it as an uploaded-but-unconfirmed run. Must be checked FIRST so it takes
         # priority over the rest of the has_loss_run_doc credit logic below.
-        _lrs = str(_fv(facts, "loss_run_status") or "").lower()
         _has_claims = (
             (_to_int(_fv(facts, "num_claims")) or 0) > 0
             or (_to_float(_fv(facts, "total_incurred")) or 0.0) > 0.0
         )
-        if _lrs in ("pending", "requested") and years == 0 and not _has_claims:
-            return _result(70, ["Loss runs requested / pending - update score when received"])
-        # Client three-tier match (sqs-pillars spec): name + FEIN/policy = strong;
-        # name + address = moderate; name only = possible. Each tier earns distinct
-        # credit - address is a meaningful secondary identifier, not equivalent to
-        # FEIN/policy, but it does provide more certainty than name alone.
-        match_credit = {"strong": 50, "moderate": 42, "possible": 35, "no_match": 15, "no_loss_run": 50}
+        if (parse_loss_run_status(_fv(facts, "loss_run_status")) == "pending"
+                and years == 0 and not _has_claims):
+            return _result(50, ["Loss runs requested / pending - update score when received"])
+        # ── Path B (client 2.4): runs uploaded, claim years NOT readable ────
+        # Strong (name + FEIN/policy) = 60 FIXED AND TERMINAL. The 60 already
+        # prices in "the details are unreadable"; deducting recency or the
+        # unknown-valuation -15 on top charged the same unreadability twice
+        # (a strong run with no readable valuation date used to fall 60 -> 45).
+        # Only the _result ceilings (contradiction 45) may move it.
+        if loss_run_match == "strong":
+            return _result(60, [
+                "Loss runs match the insured (name + FEIN/policy) but claim "
+                "years are not readable - pinned at 60. Confirm claim years "
+                "to unlock the year-based score."
+            ])
+        # Moderate / possible / no-match tiers (client 2.4 base scores).
+        match_credit = {"moderate": 42, "possible": 35, "no_match": 15, "no_loss_run": 50}
         credit = match_credit.get(loss_run_match, 50)
         if loss_run_match == "moderate":
             recs.append("Loss run ownership partially verified - name and address match but FEIN/policy number not confirmed")
@@ -2089,41 +2250,30 @@ def calculate_p4_loss_history(
             recs.append("Loss run insured name does not match - verify these runs belong to this submission")
         else:
             recs.append("Loss runs uploaded - confirm claim years and recency to finalize loss-history score")
-        # Client Clarification 2 (§6.4): a strong (name + FEIN/policy) match with no
-        # claim years is the "Loss runs match insured, years = 0" state, pinned at 60
-        # - the loss runs effectively confirm no known losses. The prior-carrier
-        # +/-10 does NOT move this pinned state (it would otherwise read 40 with no
-        # carrier). All other match tiers keep the prior-carrier adjustment (client:
-        # present +10, missing -10 - "commonly found on loss runs / prior policies").
-        if loss_run_match == "strong":
-            credit = 60
-        elif has_carrier:
-            credit = min(100, credit + 10)
-        else:
+        # Prior carrier (client 2.4): -10 when applicable and missing; the +10
+        # bonus is removed on every tier.
+        if carrier_applicable and not has_carrier:
             credit = max(0, credit - 10)
             recs.append("Prior carrier name missing - add carrier details to strengthen the loss history record")
-        # L6 fix: Q3 says ">90 days -> reduce + warn" - apply recency even on the
-        # doc-only path, but ONLY when the age is KNOWN (a real valuation date or a
-        # stated age). Never fabricate an age when it could not be determined.
+        # Recency (client 2.4): "apply available recency deductions when a
+        # valuation date exists" - so ONLY when the age is known. The
+        # unknown-valuation -15 does NOT apply on this path (unreadable is
+        # already priced into the tier).
         if age_days is not None:
             recency_pen = _recency_penalty(age_days)
             if recency_pen:
                 credit = max(0, credit - recency_pen)
                 recs.append(f"Loss runs appear stale ({age_days} days old). Updated loss runs may be required before bind.")
-        elif age_days is None:
-            credit = max(0, credit - _LOSS_RECENCY_UNKNOWN_PEN)
-            recs.append("Loss run valuation date could not be verified. Updated or currently valued loss runs may be required.")
         return _result(credit, recs)
     elif no_loss_attested:
-        # §6.4 item 3: a no-loss attestation. The client's approved scoring table
-        # distinguishes the two evidence sources by NUMBER, not just by state:
-        #   - user attestation      -> 60 (an affirmative statement by the insured)
-        #   - stated in narrative    -> 45 (weaker: a passing mention in prose, not an
-        #                                    attestation; below the user-attested 60 and
-        #                                    above no-information 25)
-        # They also stay distinguished by the loss-history STATE, the evidence label,
-        # and the recommendation wording below. "No Known Losses" is the industry term
-        # surfaced to users.
+        # Client 2.5: the two no-loss evidence sources score differently -
+        #   - user attestation    -> 60 (an affirmative statement by the insured)
+        #   - stated in narrative -> 40 (weaker: a passing mention in prose, not
+        #                                an attestation; below the attested 60
+        #                                and above no-information 25)
+        # They also stay distinguished by the loss-history STATE, the evidence
+        # label, and the recommendation wording below. Checked BEFORE pending so
+        # attestation + runs pending = 60 (client 2.5).
         _user_attested = (
             bool(flags.get("no_prior_losses"))
             or _attested_true(_fv(facts, "no_prior_losses"))
@@ -2131,17 +2281,43 @@ def calculate_p4_loss_history(
         )
         if _user_attested:
             return _result(60, ["No Known Losses (attested by user) - attach loss runs or a signed no-known-loss letter to fully confirm"])
-        return _result(45, ["No Known Losses (stated in narrative) - confirm with the insured, or attach loss runs or a signed no-known-loss letter to corroborate the statement"])
-    elif flags.get("loss_run_pending") or str(_fv(facts, "loss_run_status") or "").lower() in ("pending", "requested"):
-        return _result(70, ["Loss runs requested / pending - update score when received"])
+        return _result(40, ["No Known Losses (stated in narrative) - confirm with the insured, or attach loss runs or a signed no-known-loss letter to corroborate the statement"])
+    elif loss_runs_pending_stated(facts, flags):
+        # Client 2.5: pending evidence is useful workflow context but is NOT
+        # stronger than an actual attestation (was 70; now 50 < attested 60).
+        # Known prior claims + runs pending also lands here at 50.
+        return _result(50, ["Loss runs requested / pending - update score when received"])
+    elif prior_claims_exist(facts, flags):
+        # Client 2.5: known prior claims + no runs and no pending evidence = 25
+        # until meaningful loss evidence or status is provided. Checked before
+        # the availability statement (same order as the state resolver) so the
+        # actionable "get the runs" message wins when both are true.
+        return _result(25, [
+            "Prior claims are known but no loss runs or pending request is on "
+            "file - request loss runs from the prior carrier, or record that "
+            "they have been requested."
+        ])
+    elif no_runs_available_stated(facts):
+        # Client 2.9 state. No score is defined for it in 2.5, so it takes the
+        # Nothing Provided 25 unless an attestation (above) already earned 60.
+        # Flagged for Brent - see v1-20AUG.md Q11.
+        return _result(25, [
+            "No loss runs are available for this account - ask the insured to "
+            "attest No Known Losses, or record known claims, to firm up the "
+            "loss history.",
+            _NEW_VENTURE_CONFIRM_REC,
+        ])
     else:
-        return _result(25, ["No loss history provided - required for carrier submission"])
+        return _result(25, [
+            "No loss history provided - required for carrier submission",
+            _NEW_VENTURE_CONFIRM_REC,
+        ])
 
-    # ── Prior-carrier adjustment (client: present +10, missing -10) ──────────
-    # Applies uniformly on the year-tier path regardless of year tier achieved.
-    if has_carrier:
-        base_score = min(100, base_score + 10)
-    else:
+    # ── Prior-carrier adjustment (client C2 2.3: present 0 / missing -10) ────
+    # The +10 presence bonus is REMOVED - prior carrier is expected context
+    # when applicable, not bonus-quality information. The -10 applies only when
+    # applicable (never to a confirmed new venture).
+    if carrier_applicable and not has_carrier:
         base_score = max(0, base_score - 10)
         recs.append("Prior carrier name missing - add carrier details to complete the underwriting picture")
 
@@ -2171,23 +2347,24 @@ def calculate_p4_loss_history(
         base_score = max(0, base_score - 30)
         recs.append("Loss run insured name does not match this submission - verify ownership before crediting")
 
-    # ── Claim frequency / loss ratio (existing logic preserved) ─────────────
+    # ── Claim frequency / loss ratio - ADVISORY ONLY (client C2 2.1) ────────
+    # "SQS measures submission quality, not risk desirability." These
+    # conditions no longer deduct a single point - they surface as
+    # underwriting advisories so the broker still sees them. This also retires
+    # the undefined generic "$1M of exposure" denominator as a scoring input.
     num_claims     = _to_int(_fv(facts, "num_claims"))
     total_incurred = _to_float(_fv(facts, "total_incurred"))
     exposure = _to_float(_fv(facts, "total_revenue")) or _to_float(_fv(facts, "total_payroll"))
     if num_claims is not None and num_claims > 0 and exposure and exposure > 0:
         claims_per_m = num_claims / (exposure / 1_000_000.0)
         if claims_per_m > 2.0:
-            base_score = max(0, base_score - 25)
-            recs.append(f"High loss frequency: {num_claims} claims on ${exposure:,.0f} exposure (~{claims_per_m:.1f}/$1M)")
+            recs.append(f"Underwriting advisory (no score effect): high loss frequency - {num_claims} claims on ${exposure:,.0f} exposure (~{claims_per_m:.1f}/$1M)")
         elif claims_per_m > 1.0:
-            base_score = max(0, base_score - 10)
-            recs.append(f"Elevated loss frequency relative to exposure ({claims_per_m:.1f} claims/$1M)")
+            recs.append(f"Underwriting advisory (no score effect): elevated loss frequency relative to exposure ({claims_per_m:.1f} claims/$1M)")
     if total_incurred and exposure and exposure > 0:
         loss_ratio = total_incurred / exposure
         if loss_ratio > 0.10:
-            base_score = max(0, base_score - 15)
-            recs.append(f"Loss ratio {loss_ratio*100:.1f}% exceeds 10% of exposure - review with underwriter")
+            recs.append(f"Underwriting advisory (no score effect): loss ratio {loss_ratio*100:.1f}% exceeds 10% of exposure")
 
     return _result(base_score, recs)
 
@@ -2900,75 +3077,26 @@ def _compute_positive_signals(
 
 # ── Loss-run insured match (§6.4 item 2, Q3 answer) ──────────────────────────
 
-def _check_loss_run_insured_match(docs: List[dict], applicant_name: Optional[str]) -> str:
+def _check_loss_run_insured_match(docs: List[dict], applicant_name: Optional[str],
+                                  merged_facts: Optional[dict] = None) -> str:
+    """Loss-run ownership tier: strong / moderate / possible / no_match / no_loss_run.
+
+    Delegates to ``services.loss_run_identity`` (V1 plan C1 F4). The body that
+    lived here compared FEIN and policy number as RAW strings and took the
+    first policy number from any document - on a three-policy package a
+    formatting difference cost up to 35 Loss History points. Every identifier
+    now goes through the one comparison door; the tier rules are the client's
+    1.8 tiers unchanged. ``_check_loss_run_insured_match_detail`` returns the
+    full explainable verdict for the review screen.
     """
-    Compare loss-run doc insured names against the main applicant (Q3 answer).
+    from services.loss_run_identity import loss_run_match_tier
+    return loss_run_match_tier(docs, applicant_name, merged_facts)
 
-    Returns:
-        "strong"      - name + FEIN or name + policy number agree
-        "possible"    - name matches only (warn, partial credit)
-        "no_match"    - name present but doesn't match
-        "no_loss_run" - no loss-run docs in the package
-    """
-    from services.normalization import normalize_name, normalize_address
-    loss_docs = [
-        d for d in (docs or [])
-        if d.get("doc_type") == "loss_run" and not d.get("excluded")
-    ]
-    if not loss_docs:
-        return "no_loss_run"
-    # Loss-run docs exist but we have no applicant name to verify ownership
-    # against - do NOT grant full credit. Treat as "possible" (partial + warning).
-    if not applicant_name:
-        return "possible"
 
-    main_name = normalize_name(str(applicant_name))
-    # Pull FEIN/policy from non-excluded, NON-loss-run docs only.
-    # If we include loss-run docs here, a submission where the only FEIN carrier
-    # is the loss run itself will self-verify (loss run FEIN == loss run FEIN → "strong"),
-    # defeating Q3's requirement for independent corroboration (M3 fix).
-    main_fein = ""
-    main_pol  = ""
-    main_addr = ""
-    for d in (docs or []):
-        if not d.get("excluded") and d.get("doc_type") != "loss_run":
-            f = d.get("facts") or {}
-            if not main_fein:
-                main_fein = str(_fv(f, "fein") or "").strip()
-            if not main_pol:
-                main_pol = str(_fv(f, "policy_number") or "").strip()
-            if not main_addr:
-                main_addr = str(_fv(f, "mailing_address") or _fv(f, "physical_address") or "").strip()
-    main_addr_norm = normalize_address(main_addr) if main_addr else ""
-
-    best = None  # None = no doc with a verifiable insured name found yet
-    for doc in loss_docs:
-        facts_d  = doc.get("facts") or {}
-        doc_name = normalize_name(str(_fv(facts_d, "applicant_name") or ""))
-        if not doc_name:
-            continue
-        if doc_name != main_name:
-            # Record mismatch only if no match has been found yet — a later doc
-            # may still match (multi-doc packages where one loss run is for a
-            # subsidiary and another is for the named insured).
-            if best is None:
-                best = "no_match"
-            continue
-        # Name matches — check for corroborating identifier.
-        doc_fein = str(_fv(facts_d, "fein") or "").strip()
-        doc_pol  = str(_fv(facts_d, "policy_number") or "").strip()
-        if (doc_fein and main_fein and doc_fein == main_fein) or \
-           (doc_pol  and main_pol  and doc_pol  == main_pol):
-            return "strong"   # Best possible result — stop scanning.
-        # Name matches but no FEIN/policy corroboration. Client tier hierarchy:
-        # name + address = MODERATE; name only = WEAK ("possible").
-        doc_addr = str(_fv(facts_d, "mailing_address") or _fv(facts_d, "physical_address") or "").strip()
-        doc_addr_norm = normalize_address(doc_addr) if doc_addr else ""
-        if doc_addr_norm and main_addr_norm and doc_addr_norm == main_addr_norm:
-            best = "moderate"     # name + address - upgrades possible / no_match
-        elif best != "moderate":
-            best = "possible"     # name only - does not downgrade a prior moderate
-    return best if best is not None else "no_loss_run"
+def _check_loss_run_insured_match_detail(docs: List[dict], applicant_name: Optional[str],
+                                         merged_facts: Optional[dict] = None) -> dict:
+    from services.loss_run_identity import match_loss_run_identity
+    return match_loss_run_identity(docs, applicant_name, merged_facts)
 
 
 # ── Loss-history evidence state (§6.4 item 1) ────────────────────────────────
@@ -2985,6 +3113,10 @@ LOSS_HISTORY_STATE_LABELS: Dict[str, str] = {
     "loss_data_reconciled":            "Loss data reconciled",
     "loss_history_conflicting":        "Loss history conflicting",
     "loss_history_pending_validation": "Loss history pending validation",
+    # C2 (2026-08-24) states.
+    "new_venture_not_applicable":      "Not applicable - new venture, no prior operations",
+    "no_loss_runs_available":          "No loss runs available",
+    "prior_claims_exist":              "Prior claims known - loss runs not provided",
 }
 
 # ── Client-facing 5-bucket loss-history vocabulary (Image 28 item 3) ──────────
@@ -3003,6 +3135,9 @@ CLIENT_LOSS_STATE_LABELS: Dict[str, str] = {
     "loss_runs_attached": "Loss runs attached",
     "losses_extracted":   "Losses extracted",
     "unknown":            "Unknown",
+    # C2 (2026-08-24): a verified new venture is a sixth, honest bucket - none
+    # of the five evidence buckets can truthfully describe "no history exists".
+    "not_applicable":     "Not applicable",
 }
 
 _LOSS_STATE_TO_CLIENT: Dict[str, str] = {
@@ -3024,6 +3159,10 @@ _LOSS_STATE_TO_CLIENT: Dict[str, str] = {
     "loss_runs_parsed":                "losses_extracted",
     "loss_data_reconciled":            "losses_extracted",
     "loss_history_conflicting":        "losses_extracted",
+    # C2 (2026-08-24) states.
+    "new_venture_not_applicable":      "not_applicable",
+    "no_loss_runs_available":          "unknown",
+    "prior_claims_exist":              "unknown",
 }
 
 
@@ -3055,6 +3194,16 @@ def _get_loss_history_state(
     )
     narrative_no_loss = bool(flags.get("narrative_states_no_losses"))
 
+    # C2 2.2: a verified new venture has no loss history to evaluate - the
+    # pillar is Not Applicable (same gate the scorer consults, so state and
+    # score can never disagree).
+    from services.loss_history_state import (
+        new_venture_applicable, no_runs_available_stated,
+        parse_loss_run_status, prior_claims_exist,
+    )
+    if new_venture_applicable(facts, flags, has_loss_run_doc):
+        return "new_venture_not_applicable"
+
     # Conflict (single source of truth shared with the P4 score): a no-loss
     # attestation contradicted by ACTUAL loss-run claims.
     if _loss_history_conflict(facts, flags):
@@ -3064,12 +3213,12 @@ def _get_loss_history_state(
         # Mirror the pending-status shortcut from calculate_p4_loss_history: a doc
         # classified as a loss_run that only mentions runs are pending with no actual
         # years or claims extracted should show the pending state, not "uploaded".
-        _lrs = str(_fv(facts, "loss_run_status") or "").lower()
         _has_claims = (
             (_to_int(_fv(facts, "num_claims")) or 0) > 0
             or (_to_float(_fv(facts, "total_incurred")) or 0.0) > 0.0
         )
-        if _lrs in ("pending", "requested") and years == 0 and not _has_claims:
+        if (parse_loss_run_status(_fv(facts, "loss_run_status")) == "pending"
+                and years == 0 and not _has_claims):
             return "loss_runs_pending"
         if loss_run_match == "no_match":
             return "loss_runs_do_not_match"
@@ -3102,8 +3251,14 @@ def _get_loss_history_state(
         return "user_states_no_losses"
     if narrative_no_loss:
         return "narrative_states_no_losses"
-    if flags.get("loss_run_pending") or str(_fv(facts, "loss_run_status") or "").lower() in ("pending", "requested"):
+    if flags.get("loss_run_pending") or parse_loss_run_status(_fv(facts, "loss_run_status")) == "pending":
         return "loss_runs_pending"
+    # C2 2.9: known claims with no runs, and an explicit "no runs available",
+    # are their own states (claims first - 2.5's ordering).
+    if prior_claims_exist(facts, flags):
+        return "prior_claims_exist"
+    if no_runs_available_stated(facts):
+        return "no_loss_runs_available"
     return "no_information"
 
 
@@ -3199,10 +3354,11 @@ def _compute_category_breakdown(
     elif doc_types is not None:
         supp_doc_score = min(100, sum(w for t, w in _KEY_SUPP_DOC_WEIGHTS.items() if t in doc_types))
     else:
+        # prior_carrier removed 2026-08-24 (client C2 2.7): it must not act as
+        # a structural-completeness proxy; its scoring home is Loss History.
         _supp_proxy = [
             _ok("policy_number"), _ok("producer_name"),
             _ok("contact_name") or _ok("contact_phone"),
-            _ok("prior_carrier"),
         ]
         supp_doc_score = int(sum(_supp_proxy) / len(_supp_proxy) * 100)
 
@@ -3672,6 +3828,25 @@ SPEC_PILLAR_WEIGHTS = {
     "narrative_quality":       0.10,    # ACORD 101 clarity
 }
 
+def _weighted_pillar_sum(pillars: Dict[str, Optional[float]],
+                         weights: Dict[str, float]) -> int:
+    """Weighted pillar sum with GENERIC Not-Applicable rescaling (client C2
+    2.2, 2026-08-24): any pillar valued None is removed from the calculation
+    and the remaining pillars' ORIGINAL weights are scaled proportionally to
+    total 100%. One mechanism serves umbrella N/A, Loss History N/A (verified
+    new venture), and both at once - replacing three hand-inlined
+    umbrella-only copies that could drift (the second-independent-copy defect
+    class this codebase keeps paying for). With nothing N/A the scale is 1.0
+    and the arithmetic is byte-identical to the previous inline sums.
+    """
+    active = {k: v for k, v in pillars.items() if v is not None and k in weights}
+    total_w = sum(weights[k] for k in active)
+    if not active or total_w <= 0:
+        return 0
+    scale = 1.0 / total_w
+    return int(sum(v * weights[k] * scale for k, v in active.items()))
+
+
 # ── Score caps and credits ───────────────────────────────────────────────────
 # Behaviour is UNCHANGED from the three inline copies this replaces: a cap is a
 # CEILING, never a floor (a submission already below it keeps its own value - 42
@@ -4008,7 +4183,9 @@ def calculate_package_sqs(
     p3 = _calculate_cope_score(facts, flags)
 
     # P4 - Loss History Alignment (with insured-match check, Q3)
-    _loss_run_match = _check_loss_run_insured_match(_session_docs, _fv(facts, "applicant_name"))
+    _loss_run_detail = _check_loss_run_insured_match_detail(
+        _session_docs, _fv(facts, "applicant_name"), facts)
+    _loss_run_match = _loss_run_detail["tier"]
     p4, p4_recs = calculate_p4_loss_history(
         facts, flags,
         has_loss_run_doc=_has_loss_run,
@@ -4046,25 +4223,20 @@ def calculate_package_sqs(
     # (re-normalised when the umbrella pillar is N/A so it counts as excluded, not
     # zero). Computed independently of the per-form scores. Hard stops cap at 60,
     # soft stops at 85.
-    if p5 is None:
-        _na_w   = SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"]
-        _scale  = 1.0 / (1.0 - _na_w)
-        raw = int(
-            p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] * _scale +
-            p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"]    * _scale +
-            p3 * SPEC_PILLAR_WEIGHTS["property_integrity"]      * _scale +
-            p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"]  * _scale +
-            p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]       * _scale
-        )
-    else:
-        raw = int(
-            p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] +
-            p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"] +
-            p3 * SPEC_PILLAR_WEIGHTS["property_integrity"] +
-            p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"] +
-            p5 * SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"] +
-            p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
-        )
+    # Generic N/A rescaling (client C2 2.2): p5 is None with no umbrella, p4 is
+    # None for a verified new venture - _weighted_pillar_sum drops any None
+    # pillar and rescales the remaining original weights proportionally.
+    raw = _weighted_pillar_sum(
+        {
+            "structural_completeness": p1,
+            "exposure_consistency":    p2,
+            "property_integrity":      p3,
+            "loss_history_alignment":  p4,
+            "umbrella_limit_adequacy": p5,
+            "narrative_quality":       p6,
+        },
+        SPEC_PILLAR_WEIGHTS,
+    )
     # The UNCAPPED weighted sum is preserved before capping. It used to be
     # overwritten here, which made a capped score impossible to audit (an 88 held
     # at 60 was indistinguishable from a genuine 60) and meant later gains had to
@@ -4191,7 +4363,8 @@ def calculate_package_sqs(
     # Inject computed P4/P5/P6 into the loss/umbrella/narrative sub-rows
     _category_breakdown["loss_history_alignment"]["loss_history"]["score"] = p4
     _category_breakdown["loss_history_alignment"]["loss_history"]["status"] = (
-        "ok" if p4 >= 80 else ("partial" if p4 >= 40 else "insufficient")
+        "not_applicable" if p4 is None
+        else ("ok" if p4 >= 80 else ("partial" if p4 >= 40 else "insufficient"))
     )
     _category_breakdown["umbrella_limit_adequacy"]["umbrella_limits"]["score"] = p5
     _category_breakdown["umbrella_limit_adequacy"]["umbrella_limits"]["status"] = (
@@ -4267,6 +4440,9 @@ def calculate_package_sqs(
         "category_breakdown":    _category_breakdown,
         "narrative_components":  _narrative_components,
         "loss_run_match":        _loss_run_match,
+        # Why the tier is what it is - which identifiers matched, which did
+        # not, and any producer-facing note (DBA, FEIN-with-different-name).
+        "loss_run_match_detail": _loss_run_detail,
         # Extraction Confidence: AI fill quality metric, reported separately from SQS (client spec).
         "extraction_confidence": _extraction_confidence,
     }
@@ -4337,25 +4513,20 @@ def calculate_package_sqs_spec_compliant(
         narrative_doc_text=_extract_narrative_doc_text(_spec_session_docs),
     )
 
-    # Calculate weighted score using SPEC-COMPLIANT weights (re-normalise if P5 N/A)
-    if p5 is None:
-        _scale = 1.0 / (1.0 - SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"])
-        raw = int((
-            p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] +
-            p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"] +
-            p3 * SPEC_PILLAR_WEIGHTS["property_integrity"] +
-            p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"] +
-            p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
-        ) * _scale)
-    else:
-        raw = int(
-            p1 * SPEC_PILLAR_WEIGHTS["structural_completeness"] +
-            p2 * SPEC_PILLAR_WEIGHTS["exposure_consistency"] +
-            p3 * SPEC_PILLAR_WEIGHTS["property_integrity"] +
-            p4 * SPEC_PILLAR_WEIGHTS["loss_history_alignment"] +
-            p5 * SPEC_PILLAR_WEIGHTS["umbrella_limit_adequacy"] +
-            p6 * SPEC_PILLAR_WEIGHTS["narrative_quality"]
-        )
+    # Weighted score with the generic N/A rescaling (client C2 2.2): any None
+    # pillar (umbrella without an umbrella, loss history for a verified new
+    # venture) drops out and the remaining original weights rescale.
+    raw = _weighted_pillar_sum(
+        {
+            "structural_completeness": p1,
+            "exposure_consistency":    p2,
+            "property_integrity":      p3,
+            "loss_history_alignment":  p4,
+            "umbrella_limit_adequacy": p5,
+            "narrative_quality":       p6,
+        },
+        SPEC_PILLAR_WEIGHTS,
+    )
 
     # Hard/soft stop penalties. Uses the SHARED cap resolver and tier ladder so
     # this retained-for-imports variant cannot drift from the live scorer - it
@@ -5004,12 +5175,15 @@ def calculate_sqs(
             })
 
     elif fid == "ACORD_130":
-        # Workers Comp: payroll, class codes, X-mod, carrier, officer inclusions.
+        # Workers Comp: payroll, class codes, X-mod, officer inclusions, count.
+        # prior_carrier removed 2026-08-24 (client C2 2.7): a structural
+        # checklist cannot see new-venture applicability, so its deduction
+        # lives in Loss History only. The spec's 130 checklist listed it; the
+        # C2 document takes precedence (see v1-20AUG.md C2-A).
         chks = [
             bool(_fv(facts, "wc_payroll") or _fv(facts, "total_payroll")),
             bool(_fv(facts, "wc_class_codes")),
             bool(_fv(facts, "wc_xmod")),
-            bool(_fv(facts, "prior_carrier")),
             bool(_fv(facts, "wc_officer_exclusions")),
             bool(_fv(facts, "num_employees")),
         ]
@@ -5326,6 +5500,15 @@ def calculate_sqs(
     )
     _loss_doc_phrases = ("no loss history provided", "loss runs", "required for carrier")
     for rec_msg in loss_recs:
+        # C2 2.1 (found on the 2026-08-24 live run): an "Underwriting advisory
+        # (no score effect)" card - and the informational New Venture notices -
+        # must not carry the typed +8 literal. The chip ("up to +8 pts") would
+        # contradict the card's own text, and dismissing it with a reason would
+        # CREDIT points an advisory can never earn back (impact measurement
+        # skips field-less recs, so the literal survived un-corrected).
+        _no_impact = rec_msg.lower().startswith(
+            ("underwriting advisory", "new venture confirmed",
+             "new venture status conflicts"))
         recommendations.append({
             "rec_id": _loss_rec_id(rec_msg),
             # Was hardcoded "loss_history_years" for EVERY loss message, so the
@@ -5336,8 +5519,8 @@ def calculate_sqs(
             "component": "loss_history_alignment",
             "message": rec_msg,
             "type": "suggestion",
-            "score_impact": 8,
-            "priority": 2,
+            "score_impact": 0 if _no_impact else 8,
+            "priority": 3 if _no_impact else 2,
             # Structured flag so requires_supporting_document detection in arq_service
             # doesn't rely on keyword scanning of message strings.
             "requires_doc": any(p in rec_msg.lower() for p in _loss_doc_phrases),
@@ -5415,14 +5598,10 @@ def calculate_sqs(
         "umbrella_limit_adequacy": 0.10,
         "narrative_quality":       0.10,
     }
-    if umbrella_score is None:
-        # Exclude N/A pillar and scale remaining weights proportionally
-        _active_w = {k: w for k, w in weights.items() if k != "umbrella_limit_adequacy"}
-        _total_w  = sum(_active_w.values())
-        _scale    = 1.0 / _total_w if _total_w else 1.0
-        raw_score = int(sum(breakdown[k] * w * _scale for k, w in _active_w.items()))
-    else:
-        raw_score = int(sum(breakdown[k] * w for k, w in weights.items()))
+    # Generic N/A rescaling (client C2 2.2): umbrella_limit_adequacy is None
+    # with no umbrella and loss_history_alignment is None for a verified new
+    # venture - any None pillar drops out and the rest rescale proportionally.
+    raw_score = _weighted_pillar_sum(breakdown, weights)
 
     # ── Cap gates ─────────────────────────────────────────────────────────────
     cope_hard = fid in ("ACORD_140", "ACORD_141", "ACORD_133") and breakdown["property_integrity"] == 0
@@ -5525,7 +5704,8 @@ def calculate_sqs(
     )
     _cat_breakdown["loss_history_alignment"]["loss_history"]["score"]  = loss_score
     _cat_breakdown["loss_history_alignment"]["loss_history"]["status"] = (
-        "ok" if loss_score >= 80 else ("partial" if loss_score >= 40 else "insufficient")
+        "not_applicable" if loss_score is None
+        else ("ok" if loss_score >= 80 else ("partial" if loss_score >= 40 else "insufficient"))
     )
     _cat_breakdown["umbrella_limit_adequacy"]["umbrella_limits"]["score"] = umbrella_score
     _cat_breakdown["umbrella_limit_adequacy"]["umbrella_limits"]["status"] = (

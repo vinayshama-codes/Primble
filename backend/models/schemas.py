@@ -135,9 +135,17 @@ UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS = [
         label         TEXT NOT NULL,
         confirmed_value TEXT NOT NULL,
         previous_value  TEXT,
-        confirmed_at  TEXT NOT NULL
+        confirmed_at  TEXT NOT NULL,
+        candidates    JSONB,
+        reason        TEXT
     )
     """,
+    # V1 plan C1 F10 (client 1.5 "Producer Resolution ... must not delete the
+    # prior evidence"): every competing value, its sources and scope, and the
+    # reason for the conflict, kept next to the chosen value. Existing
+    # databases pick the columns up via the ALTER list in config/database.py.
+    "ALTER TABLE underwriting_confirmation_audit ADD COLUMN IF NOT EXISTS candidates JSONB",
+    "ALTER TABLE underwriting_confirmation_audit ADD COLUMN IF NOT EXISTS reason TEXT",
     "CREATE INDEX IF NOT EXISTS idx_uw_confirm_session ON underwriting_confirmation_audit(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_uw_confirm_user    ON underwriting_confirmation_audit(user_id)",
 ]
@@ -291,6 +299,18 @@ class UnderwritingConfirmRequest(BaseModel):
     session_id: str
     fact_key: str
     value: str
+
+
+class ClientAnswerResolveRequest(BaseModel):
+    """Producer's decision on a client questionnaire answer that disagreed with
+    the uploaded documents (V1 plan C1 F7 / C1-D, client rule 1.5).
+
+    ``choice`` is "use_client" (apply the client's value to the generated forms
+    as a producer-provenance fact) or "keep_source" (the documents stand).
+    """
+    session_id: str
+    fact_key: str
+    choice: str
 
 
 class MarketingReasonRequest(BaseModel):

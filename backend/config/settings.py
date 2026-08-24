@@ -181,6 +181,18 @@ ENABLE_PRODUCER_ANSWERS: bool = os.getenv("ENABLE_PRODUCER_ANSWERS", "true").low
 # restore the legacy per-field questions.
 ENABLE_SCHEDULE_CAPTURE: bool = os.getenv("ENABLE_SCHEDULE_CAPTURE", "true").lower() == "true"
 
+# Client questionnaire answer vs source document (V1 plan C1 F7, client rule
+# 1.5 "Client Answer Conflicts With Source: do not automatically overwrite the
+# source value. Create a conflict and route it to the producer."). When true, an
+# ARQ answer that materially DISAGREES with a value the documents state is held
+# as a candidate and surfaced in the Data Consistency picker with source
+# "Client questionnaire" instead of overwriting the fact and re-stamping every
+# form; the producer picks. An answer that AGREES with the source, or fills a
+# blank, applies immediately exactly as before. Server-side kill switch; set
+# ENABLE_CLIENT_ANSWER_CONFLICT_ROUTING=false to restore overwrite-on-answer.
+ENABLE_CLIENT_ANSWER_CONFLICT_ROUTING: bool = (
+    os.getenv("ENABLE_CLIENT_ANSWER_CONFLICT_ROUTING", "true").lower() == "true")
+
 
 ADMIN_EMAILS: set = {
     e.strip().lower()
@@ -383,11 +395,62 @@ async def _openai_chat(
             status = getattr(ex, "status_code", None)
             is_timeout = isinstance(ex, (_openai.APITimeoutError, httpx.TimeoutException))
             if attempt < _retries and (status in (429, 500, 502, 503) or is_timeout):
-                wait = 2 ** attempt
+                wait = _retry_wait_seconds(ex, status, attempt)
                 logger.warning(
-                    f"OpenAI {'timeout' if is_timeout else status} on attempt {attempt+1}, retrying in {wait}s: {ex}"
+                    "OpenAI %s on attempt %d, retrying in %ss: %s",
+                    "timeout" if is_timeout else status, attempt + 1, wait, ex,
                 )
                 await asyncio.sleep(wait)  # non-blocking; slot NOT held during sleep
             else:
                 break
     raise last_ex
+
+
+# ── 429 IS NOT A TRANSIENT ERROR - IT IS A CLOCK (2026-08-23) ────────────────
+# The backoff used to be `2 ** attempt` for every retryable status: 1s, 2s, 4s,
+# 8s, then give up. That is right for a 500 or a timeout, which clear in
+# milliseconds. It is WRONG for a 429, because a tokens-per-minute limit clears
+# on a SIXTY-SECOND window - so the whole retry budget expired in 15 seconds and
+# the call raised while the limit still had 45 seconds to run.
+#
+# WHAT THAT COST, measured. The declarations-index pass makes ~39 calls right
+# behind the main extraction's 14. On a cold cache those two bursts together
+# exceed the TPM ceiling, every index call took a 429, every one exhausted its
+# 15 seconds and raised, and `_harvest_dec_index` caught them all and returned
+# an empty list. Three consecutive live runs produced ZERO declarations entries
+# and nothing looked wrong. The same code with a warm cache - no first burst,
+# no 429 - returns 2,215 entries from four chunks.
+#
+# Two changes, both narrow:
+#   1. OpenAI states the wait in a `Retry-After` header. We ignored it. Now it
+#      wins outright when present - the server knows better than any formula.
+#   2. Absent that header, a 429 gets a schedule that actually crosses a minute
+#      (5s, 15s, 30s, 60s) instead of one that expires inside it. Everything
+#      else keeps the original 1/2/4/8 exactly.
+#
+# Worst case a rate-limited call now waits ~110s across its retries instead of
+# 15s. That is the correct trade: extraction is a background job, and a slow
+# answer beats a silent empty one. Cap kept so nothing can hang indefinitely.
+_LLM_RATE_LIMIT_BACKOFF = (5, 15, 30, 60)
+_LLM_RETRY_AFTER_MAX = float(os.getenv("LLM_RETRY_AFTER_MAX", "90"))
+
+
+def _retry_wait_seconds(ex: Exception, status: object, attempt: int) -> float:
+    """Seconds to wait before the next attempt.
+
+    `Retry-After` first (the server's own instruction, capped so a hostile or
+    mistaken header cannot stall the pipeline), then a rate-limit-aware schedule
+    for 429, then the original exponential backoff for everything else.
+    """
+    try:
+        resp = getattr(ex, "response", None)
+        hdr = getattr(resp, "headers", None)
+        raw = hdr.get("retry-after") if hdr is not None else None
+        if raw:
+            return max(1.0, min(_LLM_RETRY_AFTER_MAX, float(str(raw).strip())))
+    except Exception:                                      # noqa: BLE001
+        pass                                               # header absent or unparseable
+    if status == 429:
+        idx = min(attempt, len(_LLM_RATE_LIMIT_BACKOFF) - 1)
+        return float(_LLM_RATE_LIMIT_BACKOFF[idx])
+    return float(2 ** attempt)

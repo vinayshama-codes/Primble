@@ -132,13 +132,75 @@ _CODE_TOKENS = frozenset({"code", "codes", "naics", "sic", "class", "symbol",
                           "symbols"})
 # STRONG: the token itself names an identifier, so it decides before the weaker
 # money/count shapes. WEAK: only meaningful once nothing else has claimed it.
-_IDENTIFIER_TOKENS_STRONG = frozenset({"identifier", "vin", "license", "policy",
+# STRONG means the token names an identifier ON ITS OWN. "policy" does not -
+# it is a QUALIFIER, and it was outranking every money token because the strong
+# set is tested before `_MONEY_TOKENS`. So `total_policy_premium` was classed
+# `identifier`, which (a) printed "the documents carry different identifiers"
+# about a dollar amount on the live Run B screen, and (b) denied the field the
+# component rule that `is_component_of` exists for - a LINE premium being part
+# of the PACKAGE premium is its own headline example, and
+# `test_a_line_premium_is_a_component_of_the_package_total` had been passing
+# only because nothing gated the rule by kind.
+#
+# Demoted to WEAK, which is tested AFTER money: `policy_number`,
+# `prior_policy_number`, `policy_form_type` and `policy_term_months` still
+# resolve to `identifier` (no money token), while `total_policy_premium`,
+# `policy_limit`, `policy_deductible` and the per-line `*_policy_premium` keys
+# resolve to `money`. Swept: 7 keys corrected, 0 identifiers broken.
+_IDENTIFIER_TOKENS_STRONG = frozenset({"identifier", "vin", "license",
                                        "naic", "certificate"})
-_IDENTIFIER_TOKENS_WEAK = frozenset({"number", "id", "no"})
+_IDENTIFIER_TOKENS_WEAK = frozenset({"number", "id", "no", "policy"})
 _PHONE_TOKENS = frozenset({"phone", "fax", "telephone", "mobile", "cell"})
 _NARRATIVE_TOKENS = frozenset({
     "description", "descriptions", "remarks", "narrative", "notes", "note",
     "comment", "comments", "explanation", "wording", "operations", "text",
+})
+
+# Free-text CHARACTERISATIONS of the business that the schema defines no
+# enumeration for. The model returns whatever phrasing each document used, so
+# two documents produce two phrasings of one trade - the client's "levels of
+# detail", verbatim.
+#
+# LIVE RUN A: "Licensed electrical and roofing contractor" (certificate) against
+# "Commercial General Contractor - Roofing and Electrical" (dec page) opened a
+# Data Consistency conflict. Both describe one business, and picking one string
+# fixes nothing - the SAME package's `operations_description` holds
+# "Licensed electrical and roofing contractor. Commercial and residential
+# installation..." and already folds correctly, because it is narrative.
+#
+# DELIBERATELY NOT ROUTED THROUGH KIND_NARRATIVE. A true narrative field
+# (`operations_description`, `additional_remarks_text`) exits `same_fact`
+# unconditionally at the top, before containment or truncation ever run - the
+# right default for an actual paragraph, where a coincidental substring match
+# is a real risk. `contractor_type` holds a short PHRASE, not a paragraph, and
+# it still needs those checks: reclassifying it as KIND_NARRATIVE was tried
+# first and broke `test_equivalence_families[contractor_type-...]` - an OCR
+# truncation ("Commercia" / "Commercial roofing contractor") stopped being
+# recognised as one value, because the narrative branch short-circuits before
+# `_is_midword_truncation` ever runs.
+#
+# So this set is consulted only once ALL of `same_fact`'s ordinary machinery -
+# exact match, containment, truncation, the WS-2 synonym table - has failed to
+# find SAME. At that point a normal field would return DIFFERENT; a field in
+# this set returns INCOMPARABLE instead, because "two different phrasings we
+# could not otherwise reconcile" is not evidence they are different, only that
+# neither is a strict rewording of the other.
+#
+# AN EXPLICIT LIST, NOT A SHAPE TEST, and that is deliberate. 39 facts classify
+# as KIND_TEXT and most are ENUMERATED terms that must keep comparing -
+# `construction_type`, `occupancy_type`, `valuation_method`, `sprinkler_system`,
+# `entity_type`. A "looks like a phrase" heuristic would silence real conflicts
+# on all of them. Adding a key here is a decision about that key.
+# `test_no_enumerated_type_field_is_treated_as_narrative` fails the build if one
+# of those is ever added.
+#
+# KNOWN RESIDUAL, stated rather than hidden: two documents naming genuinely
+# DIFFERENT trades ("roofing contractor" vs "restaurant") also stop being a
+# conflict here. That is judged the lesser risk - a different insured is caught
+# by `applicant_name`, and today's behaviour asks the producer a question they
+# cannot meaningfully answer.
+_SOFT_TEXT_FACT_KEYS = frozenset({
+    "contractor_type",
 })
 _STATE_TOKENS = frozenset({"state", "states"})
 
@@ -224,6 +286,11 @@ def _resolve_kind(fact_key: str) -> str:
     # 3. Key shape. Narrative first - a "..._description" holding an amount is
     #    still prose, and reading it as money would compare two paragraphs by
     #    whatever number they happen to contain.
+    #
+    # `_SOFT_TEXT_FACT_KEYS` (contractor_type) is deliberately NOT dispatched
+    # to KIND_NARRATIVE here - it stays KIND_TEXT so containment and truncation
+    # still run, and only the final DIFFERENT-vs-INCOMPARABLE choice at the
+    # bottom of `same_fact` is softened. See that constant's docstring.
     tk = _tokens(key)
     if tk & _NARRATIVE_TOKENS:
         return KIND_NARRATIVE
@@ -420,7 +487,33 @@ def same_fact(fact_key: str, a: Any, b: Any) -> str:
 
     # A paragraph is never a rival answer - not for a narrative field and not
     # for any other field that happens to have swallowed one.
-    if kind == KIND_NARRATIVE or is_prose(sa) or is_prose(sb):
+    #
+    # EXCEPT A LIMITS SCHEDULE, WHICH IS LONG BUT IS NOT PROSE. Live Run A,
+    # 2026-08-23: `gl_limits` came back a CONFLICT across three printings of one
+    # set of limits, because the fullest one -
+    #   "$1,000,000 Each Occurrence / $2,000,000 General Aggregate /
+    #    $2,000,000 Products-Completed Operations Aggregate / $1,000,000
+    #    Personal and Advertising Injury / $100,000 Damage to Premises Rented
+    #    to You / $5,000 Medical Expense"
+    # - is 36 words, over the 25-word prose floor. The money branch below
+    # already owns exactly this case ("a COMPOSITE that lists FEWER limits is
+    # not disagreeing - it is saying less"), but the prose gate returned
+    # INCOMPARABLE before it could run. That is the client's own "levels of
+    # detail" complaint, on a legal limit.
+    #
+    # The distinguishing signal is POSITIVE and structural: a limits schedule is
+    # dense with money amounts, a paragraph is not. Both sides must parse to two
+    # or more amounts, and the field must already be money-kind - so a narrative
+    # field is untouched (KIND_NARRATIVE is still tested first) and a paragraph
+    # that happens to quote a couple of figures on a money field still has to
+    # survive the subset test below on its actual amounts.
+    _money_composite = (
+        kind == KIND_MONEY
+        and len(money_amounts(sa)) > 1
+        and len(money_amounts(sb)) > 1
+    )
+    if kind == KIND_NARRATIVE or (
+            not _money_composite and (is_prose(sa) or is_prose(sb))):
         return INCOMPARABLE
 
     # A DATE is a date whatever the key is called. `policy_period` classifies as
@@ -612,6 +705,14 @@ def same_fact(fact_key: str, a: Any, b: Any) -> str:
                 return SAME
         except Exception:                                    # pragma: no cover
             pass
+
+    # A SOFT TEXT field (client 1.1 "levels of detail") gets one more chance
+    # before DIFFERENT: two phrasings neither containment nor truncation nor
+    # the synonym table could reconcile are not proven to disagree, only
+    # unreconciled. See `_SOFT_TEXT_FACT_KEYS` for the reasoning and the
+    # known residual it accepts.
+    if fact_key in _SOFT_TEXT_FACT_KEYS:
+        return INCOMPARABLE
     return DIFFERENT
 
 
@@ -640,7 +741,7 @@ def fact_line(fact_key: str) -> Optional[str]:
     try:
         from services.fact_registry import FACT_REGISTRY
         from services.pdf_service import _SECTION_FORM_LINE_PHRASES
-        from services.extraction_service import _canon_line
+        from services.lob_canon import canon_line as _canon_line
         forms = (FACT_REGISTRY.get(fact_key) or {}).get("forms") or set()
         # EVERY form must be a line SECTION, and they must agree on one line.
         # A fact that also reaches ACORD 125/101 is package-level by definition
@@ -693,11 +794,8 @@ def names_a_foreign_line(fact_key: str, value: Any) -> bool:
     own = fact_line(fact_key)
     if not own:
         return False
-    try:
-        from services.extraction_service import _canon_line
-        theirs = _canon_line(value)
-    except Exception:                                        # pragma: no cover
-        return False
+    from services.lob_canon import canon_line as _canon_line
+    theirs = _canon_line(value)
     return bool(theirs) and theirs != own
 
 
@@ -718,7 +816,8 @@ class PackageContext:
     """
 
     __slots__ = ("contracts", "value_owner", "line_level_values",
-                 "package_level_values", "_ok")
+                 "package_level_values", "contract_line",
+                 "item_owner", "item_columns", "_ok")
 
     def __init__(self, merged_facts: Optional[dict] = None,
                  docs: Optional[List[dict]] = None):
@@ -726,6 +825,19 @@ class PackageContext:
         self.value_owner: Dict[str, set] = {}
         self.line_level_values: set = set()
         self.package_level_values: set = set()
+        # contract (alnum policy number) -> canonical coverage line(s) it is
+        # printed under. V1 plan C1 F2b: two policies on the SAME line in one
+        # period are not two scopes, they are a question for the producer.
+        self.contract_line: Dict[str, set] = {}
+        # ── THE ITEM AXIS (client 1.2: "location; vehicle/property/item") ────
+        # value token -> the schedule row(s) that print it, e.g.
+        # {"2014": {"property_locations#0"}}. Two values printed by DIFFERENT
+        # rows describe different physical things and are not rival answers.
+        self.item_owner: Dict[str, set] = {}
+        # Fact keys PROVEN to vary per item, because the package's own rows
+        # carry a column of that exact name. This gate is the whole safety
+        # story - see `_build_item_index`.
+        self.item_columns: set = set()
         self._ok = False
         try:
             self._build(merged_facts or {}, docs or [])
@@ -741,12 +853,10 @@ class PackageContext:
             if isinstance(got, list):
                 entries.extend(e for e in got if isinstance(e, dict))
 
+        from services.lob_canon import canon_line as _canon_line
         try:
-            from services.extraction_service import (
-                _canon_line, _looks_like_a_policy_number,
-            )
+            from services.extraction_service import _looks_like_a_policy_number
         except Exception:                                    # pragma: no cover
-            _canon_line = lambda _s: None                    # noqa: E731
             _looks_like_a_policy_number = lambda _s: False   # noqa: E731
 
         for e in entries:
@@ -754,6 +864,8 @@ class PackageContext:
             line = _canon_line(e.get("line_of_business")) or _canon_line(e.get("section"))
             if pol and _looks_like_a_policy_number(pol):
                 self.contracts.add(_alnum(pol))
+                if line:
+                    self.contract_line.setdefault(_alnum(pol), set()).add(line)
             # The owner of a printed VALUE: prefer the contract, fall back to
             # the coverage line. Either is enough to say "these two values
             # describe different things".
@@ -782,9 +894,11 @@ class PackageContext:
                 continue
             pn_raw = str(ln.get("policy_number") or "")
             pn = _alnum(pn_raw)
+            line = _canon_line(ln.get("line"))
             if pn and _looks_like_a_policy_number(pn_raw):
                 self.contracts.add(pn)
-            line = _canon_line(ln.get("line"))
+                if line:
+                    self.contract_line.setdefault(pn, set()).add(line)
             owner = pn or line
             if not owner:
                 continue
@@ -795,11 +909,93 @@ class PackageContext:
                     if line:
                         self.line_level_values.add(v)
 
+        self._build_item_index(merged_facts)
+
+    # ── The item index (client 1.2) ─────────────────────────────────────────
+    # A schedule row IS a scope: `property_locations[1]` is a different building
+    # from `property_locations[0]`, so two different `year_built` values printed
+    # by those two rows are two facts, not a contradiction. Before this, a
+    # two-building package raised a Data Consistency question for every column
+    # where the buildings legitimately differ.
+    #
+    # TWO GATES, and both are needed. B14 is the reason: `value_owner` keys on
+    # a value's own CHARACTERS, so the certificate's umbrella $1,000,000
+    # inherited the GL policy's ownership purely because the dec page prints
+    # $1,000,000 as the GL Each Occurrence limit, and the client's real
+    # $3M-vs-$1M conflict was scoped into silence.
+    #
+    #   Gate 1 - THE FACT MUST BE PROVEN PER-ITEM. Only a fact key that is
+    #     literally a column name in one of this package's own schedules may be
+    #     item-scoped. Exact match, never a suffix: `total_payroll` ends with
+    #     `payroll`, which is a wc_class_codes column, and the package TOTAL is
+    #     emphatically not a per-class figure.
+    #   Gate 2 - THE OWNERSHIP MUST BE DISJOINT AND NON-EMPTY on both sides. A
+    #     coincidental character match can only ADD owners, which makes an
+    #     overlap MORE likely and scoping LESS likely, so the failure mode is
+    #     "show the conflict" - the safe direction.
+    #
+    # CONTRACT INDEXES ARE EXCLUDED, and derived rather than named: a list whose
+    # rows carry `policy_number` / `line` / `line_of_business` is a contract
+    # index (`coverage_lines`, `dec_page_entries`), and those belong to the
+    # POLICY axis above, which has its own proven overlap rules. Letting them
+    # in would give `policy_number` a second, weaker route to being scoped that
+    # bypasses the "two policies on the same coverage line" check.
+    _CONTRACT_ROW_KEYS = ("policy_number", "line", "line_of_business")
+
+    def _build_item_index(self, merged_facts: dict) -> None:
+        if not isinstance(merged_facts, dict):
+            return
+        for list_key, rows in merged_facts.items():
+            if not list_key or str(list_key).startswith("_"):
+                continue
+            if not isinstance(rows, list) or len(rows) < 2:
+                continue                  # one row cannot separate two values
+            dict_rows = [r for r in rows if isinstance(r, dict)]
+            if len(dict_rows) < 2:
+                continue
+            if any(k in r for r in dict_rows for k in self._CONTRACT_ROW_KEYS):
+                continue                  # a contract index, not an item schedule
+            for idx, row in enumerate(dict_rows):
+                item_id = f"{list_key}#{idx}"
+                for col, val in row.items():
+                    if not col or str(col).startswith("_"):
+                        continue
+                    if isinstance(val, (list, dict)) or val is None:
+                        continue
+                    token = _alnum(val)
+                    if not token:
+                        continue
+                    self.item_columns.add(str(col))
+                    self.item_owner.setdefault(token, set()).add(item_id)
+
+    def items_of(self, value: Any) -> set:
+        """Schedule row(s) that print this value."""
+        return self.item_owner.get(_alnum(value), set()) if self._ok else set()
+
+    def is_item_scoped_fact(self, fact_key: Any) -> bool:
+        """Gate 1: does this package's own data prove the fact varies per item?"""
+        return bool(self._ok and fact_key and str(fact_key) in self.item_columns)
+
+    def different_items(self, a: Any, b: Any) -> bool:
+        """PROOF that two values were printed by different schedule rows."""
+        ia, ib = self.items_of(a), self.items_of(b)
+        return bool(ia and ib and not (ia & ib))
+
     # -- queries -------------------------------------------------------------
     @property
     def is_multi_contract(self) -> bool:
         """Two or more distinct contracts are evidenced in this package."""
         return self._ok and len(self.contracts) >= 2
+
+    def lines_of_owner(self, owner: Any) -> set:
+        """Canonical coverage line(s) an owner token stands for. A contract
+        maps through ``contract_line``; a bare line token maps to itself."""
+        if not self._ok:
+            return set()
+        o = str(owner or "")
+        if o in self.contract_line:
+            return set(self.contract_line[o])
+        return {o} if o else set()
 
     def owners_of(self, value: Any) -> set:
         return self.value_owner.get(_alnum(value), set()) if self._ok else set()
@@ -812,7 +1008,18 @@ class PackageContext:
         return False - the conflict then stands, which is the safe direction.
         """
         oa, ob = self.owners_of(a), self.owners_of(b)
-        return bool(oa and ob and not (oa & ob))
+        if not (oa and ob) or (oa & ob):
+            return False
+        # Two contracts on the SAME coverage line in one package are not
+        # proof of two scopes - a GL policy number twice is a question for the
+        # producer, not a formatting difference (V1 plan C1 F2b). Only when
+        # the owners resolve to disjoint lines (or carry no line at all) is
+        # the difference explained.
+        la = set().union(*(self.lines_of_owner(o) for o in oa)) if oa else set()
+        lb = set().union(*(self.lines_of_owner(o) for o in ob)) if ob else set()
+        la = {x for x in la if x not in self.contract_line}    # line tokens only
+        lb = {x for x in lb if x not in self.contract_line}
+        return not (la & lb)
 
     def same_contract_printing(self, a: Any, b: Any) -> bool:
         """True when two printings name ONE contract in this package.
@@ -860,6 +1067,64 @@ class PackageContext:
 
 # ── The filter (the only thing callers need) ─────────────────────────────────
 
+def _owner_split_allowed(fact_key: str) -> bool:
+    """May "these belong to different contracts" excuse a difference here?
+
+    NO for two families, both learned the hard way (v1-20AUG C1-H):
+
+    * **A fact pinned to ONE coverage line.** ``umbrella_limit`` IS the
+      umbrella's limit; it cannot have one value per policy, so two values are
+      a real disagreement. ``fact_line()`` is exactly the test for "the
+      registry can place this fact on a line".
+    * **Money.** ``PackageContext`` keys ownership on the value's own
+      characters, so any two facts that share an amount share an owner - an
+      accidental identity, not a real one. Identifiers, carrier names and dates
+      do not collide that way.
+
+    Everything else (policy numbers, carriers, terms) keeps the behaviour.
+    """
+    try:
+        if fact_line(fact_key):
+            return False
+        return value_kind(fact_key) != KIND_MONEY
+    except Exception:                                        # pragma: no cover
+        return True
+
+
+_COMPONENT_KINDS = frozenset({KIND_MONEY, KIND_COUNT, KIND_PERCENT})
+
+
+def _component_split_allowed(fact_key: str) -> bool:
+    """May "one of these is a PIECE of the other" excuse a difference here?
+
+    ONLY FOR QUANTITIES. `is_component_of` exists for exactly one situation,
+    and its own docstring is entirely about it: a LINE premium is part of the
+    PACKAGE premium, so `$2,991` and `$10,663` are not rivals. That reasoning
+    has no meaning for anything that is not a quantity - an address is never a
+    component of another address, a carrier is never a component of another
+    carrier, a date is never part of another date.
+
+    LIVE REGRESSION 2026-08-23 (Run B) is why this gate exists. `is_component_of`
+    compares `_alnum(value)`, which on an address yields a meaningless token
+    (`4800DahliaStD13DenverCO802163121`). The package's verified index happened
+    to record the Denver address as a line-level value and the LAKEWOOD address
+    as a package-level one, so the rule fired and pronounced two materially
+    different premises the same fact. The client's original complaint, produced
+    by the machinery built to fix it.
+
+    THIS IS THE SECOND TIME A CONTEXT RULE KEYED ON A VALUE'S CHARACTERS HAS
+    SILENCED A REAL CONFLICT. The first was C1-H / B14, where the certificate's
+    umbrella `$1,000,000` inherited the GL policy's ownership because the dec
+    page prints that same amount as the GL limit; `_owner_split_allowed` is the
+    gate that was added then. `is_component_of` was left ungated. Both rules
+    now have to say which FACTS they may speak about.
+    """
+    try:
+        return value_kind(fact_key) in _COMPONENT_KINDS
+    except Exception:                                        # pragma: no cover
+        return False
+
+
 def equivalent_index(fact_key: str, values: Sequence[Any],
                      context: Optional[PackageContext] = None,
                      ) -> Optional[Dict[int, int]]:
@@ -897,15 +1162,67 @@ def equivalent_index(fact_key: str, values: Sequence[Any],
                     #   * they belong to different contracts / coverage lines
                     #   * one is a LINE figure and the other the package total
                     #   * they are two printings of ONE contract number
-                    if (context.different_owners(values[i], values[j])
+                    #
+                    # `different_owners` is GATED - see _owner_split_allowed.
+                    # It attributes a value by the value's own characters, so
+                    # two facts sharing an AMOUNT share an owner. On the first
+                    # live run that silenced the client's $3M-vs-$1M umbrella
+                    # conflict: the certificate's umbrella $1,000,000 inherited
+                    # the GL policy's ownership because the dec page prints
+                    # $1,000,000 as the GL Each Occurrence limit.
+                    _component_ok = _component_split_allowed(fact_key)
+                    if ((_owner_split_allowed(fact_key)
+                         and context.different_owners(values[i], values[j]))
                             or context.same_contract_printing(values[i], values[j])
-                            or context.is_component_of(values[i], values[j])
-                            or context.is_component_of(values[j], values[i])):
+                            or (_component_ok
+                                and context.is_component_of(values[i], values[j]))
+                            or (_component_ok
+                                and context.is_component_of(values[j], values[i]))):
                         partners.setdefault(i, []).append(j)
                         partners.setdefault(j, []).append(i)
 
         mapping: Dict[int, int] = {}
+        # ── Cliques first (V1 plan C1, defect B1 / decision D7) ──────────────
+        # The exactly-one rule below is the ambiguity guard: "Denver, Colorado"
+        # sitting inside TWO different street addresses must not merge. But
+        # it could not tell that case from THREE printings of ONE address,
+        # where every value has two partners because all three are the same
+        # thing - so the client's literal trio (ZIP+4 / ZIP5 / city-state)
+        # stayed three groups and capped the score at 85. The distinguishing
+        # signal: in a false-conflict clique every PAIR is partnered; in the
+        # two-hosts case the hosts are NOT partnered with each other. So a
+        # connected component in which every pair is partnered is one value,
+        # and merges whole. A component with any unpartnered pair falls
+        # through to the exactly-one rule untouched, which is what keeps
+        # test_a_fragment_matching_two_hosts_is_not_merged green.
+        adj = {i: set(m) for i, m in partners.items()}
+        visited: set = set()
+        for start in sorted(adj):
+            if start in visited:
+                continue
+            comp, stack = set(), [start]
+            while stack:
+                node = stack.pop()
+                if node in comp:
+                    continue
+                comp.add(node)
+                stack.extend(adj.get(node, ()) - comp)
+            visited |= comp
+            if len(comp) < 3:
+                continue                       # pairs are the exactly-one rule's job
+            is_clique = all(b in adj.get(a, ()) for a in comp for b in comp if a != b)
+            if not is_clique:
+                continue
+            keep = min(comp)
+            for i in comp:
+                if i != keep and _prefer(fact_key, values[i], values[keep]):
+                    keep = i
+            for i in comp:
+                if i != keep:
+                    mapping[i] = keep
         for i, mates in partners.items():
+            if i in mapping or i in mapping.values():
+                continue                       # already settled by a clique
             if len(set(mates)) != 1:
                 continue                       # ambiguous - leave it alone
             j = mates[0]

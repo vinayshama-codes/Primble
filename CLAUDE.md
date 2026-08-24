@@ -176,7 +176,9 @@ backend/
 ├── utils/
 │   ├── llm_limiter.py       # Redis-distributed adaptive semaphore (cap=12, Redis TTL=180s)
 │   ├── crypto.py            # Field-level encryption (FIELD_ENCRYPTION_KEY)
-│   ├── table_extractor.py   # Table extraction (skips docs >40 pages)
+│   ├── page_layout.py       # 2026-08-22: per-page riffle repair (pa$rt4y,850) + header-anchored
+│   │                        #   tables emitted INLINE by ocr_service. Read extraction_arch_change.md first.
+│   ├── table_extractor.py   # DEPRECATED for the pipeline - lines-mode fallback lives in ocr_service now
 │   ├── helpers.py           # Address parsing, misc
 │   ├── concurrency.py       # Async helpers
 │   ├── rate_limiter.py      # API rate limiting
@@ -229,6 +231,24 @@ OCR_PROVIDER=google   # google | google_vision | vision (all mean Google Cloud V
 # ACORD 101 overflow) are NO LONGER env vars — they are hardcoded `True` in
 # backend/config/settings.py. Nothing to set in any environment.
 ENABLE_SCHEDULE_CAPTURE=true           # Figure 15: bulk vehicle/driver/location/loss tables
+
+# Declarations index (LLM call 1). Defaults are the shipped behaviour - see the
+# "Declarations Index" section above and LLMcall1-promptChange.md before changing.
+DEC_INDEX_DEDICATED_PASS=0             # 2026-08-23: the extra index pass is OFF.
+                                       # 1 re-enables it (~39 calls, ~593k output
+                                       # tokens, +18-20 min on a 271-page package).
+                                       # The main extraction records the index for
+                                       # free either way.
+PURGE_DEC_INDEX_AFTER_GENERATION=1     # DEFAULT IS ON - production deletes
+                                       # dec_page_entries from the session row once
+                                       # forms are generated (PII, ~33 KB/session).
+                                       # Measured cost of the delete: 9 of 5,852
+                                       # fields degrade to a blank or a shorter
+                                       # policy-number printing; none get a wrong
+                                       # value. 0 keeps the index for debugging.
+LLM_RETRY_AFTER_MAX=90                 # cap on an obeyed Retry-After header. A 429
+                                       # backs off 5/15/30/60s (a TPM window is 60s);
+                                       # every other retryable status keeps 1/2/4/8.
 
 # Cost / coverage knobs (all have safe derived or auto defaults - see improving-ll.md)
 # Nothing below needs to be set in any environment. They exist to be turned OFF.
@@ -290,11 +310,106 @@ legacy "off" paths survive at the call sites only as import-failure fallbacks.
 
 ---
 
+## CHANGE QUALITY BAR (owner, 2026-08-21)
+
+Every change clears four gates before it ships:
+
+1. **Root cause, not the reported case.** A fix that only makes the reported example pass is
+   a symptom fix - go back and find the class.
+2. **Generic.** No allow-list tuned to the fixture. 1 policy, 4, 12? An unseen document type?
+3. **Every edge case.** Empty, missing, malformed, duplicated, N=1, N=many, both directions.
+4. **Simulate forward.** Execute the change against every existing consumer and ask what it
+   BREAKS, not just what it fixes. Run the full suite; when a test fails, decide whether the
+   TEST or the CODE is wrong and say which.
+
+**Why this is a rule and not advice:** two bugs in C1 were introduced BY a fix - the
+`E 9 Mile Rd` / `East 9 Mile Rd` split from a normalisation reorder, and the umbrella
+$3M-vs-$1M conflict silenced by scope logic keyed on an amount. Both passed their unit
+tests, because both fixtures were easier than reality. Write the gate test from the LIVE
+data shape (D22).
+
+---
+
+## V1 Master Plan (2026-08-20 onward)
+
+**`v1-20AUG.md` at the repo root is the running memory for V1.** Client principles, the
+to-do snapshot, every change with its root cause and the alternatives rejected, the
+decision register (D0-D12) and the open questions for Brent. Read it BEFORE any V1 work
+and append to it before ending a session. `125_reference/` holds the client's ACORD 125
+answer key.
+
+**C1 (Data Consistency) shipped 2026-08-21.** One comparison door
+(`services/fact_comparison.py`) - every "are these the same fact?" decision goes through
+it and `tests/test_comparison_has_one_owner.py` fails the build otherwise. LOB canon is
+a leaf (`services/lob_canon.py`). Loss-run identity is `services/loss_run_identity.py`.
+Fact envelopes carry `value_state` / `evidence_state` (`services/fact_state.py`). A client
+questionnaire answer that contradicts the documents is held for the producer, not applied.
+
 ## Handoff
 
 **`HANDOFF.md` at the repo root is the current entry point** for the LLM cost/quality work:
 problem statement, what shipped 2026-07-30, measured before/after, the three chunkers and
 their limits, and the ranked open-issue list. Read it with `improving-ll.md`.
+
+### The Declarations Index: A Dedicated Pass Was Built, Measured And Switched Off - 2026-08-23
+
+**Read `LLMcall1-promptChange.md` (repo root) before touching LLM call 1's index.**
+It is the full account: nine rounds, what was measured, what was reverted and why.
+
+**Net state - extraction costs exactly what it did before this work.** 14 calls
+producing facts, flags and `dec_page_entries` together. The facts/flags prompt is
+byte-identical to its pre-2026-08-23 form (verified against git), and
+`dec_page_entries` is back inside `_EXTRACT_SCHEMA` where it has always been.
+`PROMPT_VERSION`/`SCHEMA_VERSION` are **v14** - the schema equals v12, but the
+version moves forward because v13 replies (facts and flags with NO dec entries)
+are sitting in the extraction cache.
+
+**Why the dedicated pass is off.** `_harvest_dec_index` had discarded 100% of its
+output since the day it shipped - `_run_extraction` merged into
+`result["dec_page_entries"]` when `_merge_list_fields` returns
+`{"facts": {...}, "flags": {...}}`, so the key was one level too high and
+`extraction_pipeline` (which stores only `extracted["facts"]`) dropped it. Fixed,
+and with it finally running the A/B was decisive: **39 calls and ~593,000 output
+tokens against ~30,000 for the whole of facts+flags** - roughly 20x the rest of
+extraction, +18-20 minutes per cold upload - and the owner's regenerated ACORD
+forms came back *"almost the same"*. `DEC_INDEX_DEDICATED_PASS` now defaults to
+`0`. The prompt and machinery remain in the file for a future experiment.
+
+**Why it could not help, measured:** the index rendered to 619,451 chars against a
+699,844-char document - **89%** - and split across **8** Stage A calls.
+`_render_dec_index` is designed to be ~3% of the document in ONE call. At 89% it
+is the policy rewritten as JSON, so gap fill gained nothing over walking the raw
+document and co-visibility (the entire point) was spread across eight calls.
+
+**Two fixes were KEPT because they are independent of the pass:**
+- `config/settings._retry_wait_seconds`. The backoff was `2 ** attempt` for every
+  retryable status - ~15 seconds total - against a TPM limit that clears on a
+  **60-second** window. Now `Retry-After` is obeyed (capped by
+  `LLM_RETRY_AFTER_MAX`, 90s) and a 429 backs off 5/15/30/60; every other status
+  keeps 1/2/4/8 exactly. **This affects every LLM caller in the codebase.**
+- Label-aware Stage A splitting in `_dec_index_chunks`. The old path cut the
+  rendered index by character count and could separate the umbrella's $3,000,000
+  from the GL's $1,000,000 - C23 by accident of position. Dormant at ~250 entries.
+
+**The purge is safe, and the comment defending it is wrong.**
+`PURGE_DEC_INDEX_AFTER_GENERATION` defaults to `1`, so **production deletes
+`dec_page_entries` from the session row after forms generate** (one key only -
+facts, flags, forms, PDFs and the per-document copies all survive). Its comment
+claims nothing after generation reads facts; `arq_service._restamp_canonical_into_
+forms` does, via `_deterministic_map`. Measured blast radius: of **5,852 fields
+across all 17 schemas, 9 change** when the index is absent - four policy numbers
+degrade to a shorter printing of the same number, five fall through to blank.
+**No field ever gets a wrong value.** Fix the comment, not the behaviour.
+
+**`declarations_authority` does not discriminate on a real package** - 39 of 39
+pieces cleared the 0.25 bar, 33 at ~0.5, because its `brevity` half measures mean
+LINE LENGTH and a column-laid-out policy PDF has short lines everywhere. Raising
+the bar to 0.60 would cut 39 index calls to 5; **not done**, on the owner's
+standing instruction that the whole uploaded document matters.
+
+**Standing lesson from this arc:** every offline probe passed while the pipeline
+was broken, because each called `_harvest_dec_index` directly and read its return
+value. An offline probe proves the FUNCTION, never the SEAM around it.
 
 ## Critical Issues & Roadmap
 

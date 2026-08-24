@@ -1,5 +1,5 @@
 ﻿//AcordModal.jsx
-import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from "react";
 import { API_BASE } from "../../config/constants";
 import { gradeColor, barColor, sqsGradeFromScore, shortFormLabel } from "../../utils/formatters";
 import ProcessStageOverlay from "../overlays/ProcessStageOverlay";
@@ -144,6 +144,9 @@ const LOSS_STATE_PROV = {
   loss_data_reconciled:           { direction: "increased", rule: "Loss data reconciled - the strongest loss-history evidence." },
   loss_history_conflicting:       { direction: "reduced",  rule: "A no-loss statement is contradicted by actual loss-run claims.", remediation: "Reconcile the attestation with the loss runs before submission." },
   loss_history_pending_validation:{ direction: "info",     rule: "Loss runs parsed but ownership not fully verified.", remediation: "Confirm ownership with a FEIN or policy number." },
+  new_venture_not_applicable:     { direction: "info",     rule: "Verified new venture - no prior operations exist, so Loss History is removed from the score and the remaining pillars rescale.", remediation: "No action needed. If prior operations actually existed, correct the New Venture answer." },
+  no_loss_runs_available:         { direction: "reduced",  rule: "The insured reports no loss runs are available - scored as no loss evidence until something stronger arrives.", remediation: "Ask the insured to attest No Known Losses, or record known claims." },
+  prior_claims_exist:             { direction: "reduced",  rule: "Prior claims are known but no loss runs are on file.", remediation: "Request loss runs from the prior carrier, or record that they have been requested." },
 };
 // Umbrella state → rule + how-to-improve, keyed by the backend umbrella_state.
 const UMBRELLA_STATE_PROV = {
@@ -274,6 +277,9 @@ const LOSS_HISTORY_STATE_LABEL = {
   loss_data_reconciled:           "Loss data reconciled",
   loss_history_conflicting:       "Conflicting - attested no losses but loss runs show claims",
   loss_history_pending_validation: "Loss history pending validation",
+  new_venture_not_applicable:      "Not applicable - new venture",
+  no_loss_runs_available:          "No loss runs available",
+  prior_claims_exist:              "Prior claims known - runs not provided",
 };
 // §6.3: narrative component labels (must mirror backend NARRATIVE_COMPONENT_LABELS).
 const NARRATIVE_COMPONENT_LABELS = {
@@ -2371,12 +2377,61 @@ const AcordModal = forwardRef(function AcordModal({
   const [normalizedDiffs, setNormalizedDiffs] = useState([]);
   // Core Underwriting Data Consistency - Gross Sales reconciliation (Beta Report §4.3)
   const [underwriting, setUnderwriting] = useState(null);
+  // V1 C1-D: client questionnaire answers that disagreed with the uploaded
+  // documents. Held server-side (never stamped) and resolved by the producer
+  // HERE, on the generated-forms screen - the Data Consistency picker cannot
+  // be used post-generation because confirming there re-runs the pipeline and
+  // wipes generated_forms.
+  const [clientAnswerReview, setClientAnswerReview] = useState([]);
+  const [clientAnswerBusy, setClientAnswerBusy] = useState(null);
+  const [clientAnswerMsg, setClientAnswerMsg] = useState(null);
   const [underwritingBusy, setUnderwritingBusy] = useState(null); // fact_key currently confirming
   const [underwritingPicks, setUnderwritingPicks] = useState({});  // {fact_key: chosen/typed value}
   // "Fix in Data Consistency" jump target: a banner conflict issue routes here
   // instead of the inline modal. dcOpenTick force-opens the (possibly collapsed)
   // section; dcHighlight briefly rings the specific field row it landed on.
   const dcSectionRef = useRef(null);
+
+  // Apply the producer's decision on one held client answer. "use_client"
+  // stamps the client's value into the EXISTING forms (producer provenance);
+  // "keep_source" discards it. Either way the row retires.
+  const resolveClientAnswer = useCallback(async (factKey, choice) => {
+    if (!sessionId || clientAnswerBusy) return;
+    setClientAnswerBusy(factKey);
+    setClientAnswerMsg(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/client-answer/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ session_id: sessionId, fact_key: factKey, choice }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data && data.success) {
+        setClientAnswerReview(data.client_answer_review || []);
+        if (data.package_sqs) setPackageSqs(data.package_sqs);
+        setClientAnswerMsg({ type: "ok", text: data.message || "Applied." });
+        // The forms changed on the server - drop the cached PDFs so the next
+        // view re-fetches them with the new value baked in.
+        if ((data.forms_updated || []).length > 0) {
+          setPdfLoading((prev) => {
+            const next = { ...prev };
+            (data.forms_updated || []).forEach((fid) => { if (fid in next) next[fid] = false; });
+            return next;
+          });
+        }
+      } else {
+        setClientAnswerMsg({ type: "err", text: (data && data.message) || "Could not apply your decision." });
+        if (data && data.resolved_already) {
+          setClientAnswerReview((rows) => rows.filter((r) => r.fact_key !== factKey));
+        }
+      }
+    } catch (e) {
+      setClientAnswerMsg({ type: "err", text: "Could not reach the server. Try again." });
+    } finally {
+      setClientAnswerBusy(null);
+    }
+  }, [sessionId, clientAnswerBusy]);
   const [dcOpenTick, setDcOpenTick] = useState(0);
   const [dcHighlight, setDcHighlight] = useState(null); // fact_key being highlighted
   const jumpToDataConsistency = (factKey) => {
@@ -2644,6 +2699,7 @@ const AcordModal = forwardRef(function AcordModal({
           setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
           setCrossGrouped(data.grouped_cross_issues || null);
           setIssueDiff(data.issue_diff || null);
+          setClientAnswerReview(data.client_answer_review || []);
           if (data.package_sqs) setPackageSqs(data.package_sqs);
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
@@ -2983,6 +3039,7 @@ const AcordModal = forwardRef(function AcordModal({
           setGeneratedForms(data.generated_forms); setCrossIssues(data.cross_issues || []);
           setCrossGrouped(data.grouped_cross_issues || null);
           setIssueDiff(data.issue_diff || null);
+          setClientAnswerReview(data.client_answer_review || []);
           if (data.package_sqs) setPackageSqs(data.package_sqs);
           const firstId = Object.keys(data.generated_forms)[0]; setActiveFormId(firstId);
           const readyMap = {}; Object.keys(data.generated_forms).forEach(fid => { readyMap[fid] = false; });
@@ -4057,9 +4114,12 @@ const AcordModal = forwardRef(function AcordModal({
           for (const [fid, upd] of Object.entries(data.updated_forms)) {
             const form = next[fid];
             if (!form?.sqs) continue;
+            // An answer changes FACTS, so the whole per-form sqs (pillars,
+            // states, recommendations) is replaced when the server sends it -
+            // patching only the headline left pillar rows stale (C2-C).
             next[fid] = {
               ...form,
-              sqs: {
+              sqs: upd.new_sqs ? upd.new_sqs : {
                 ...form.sqs,
                 sqs_score:  upd.new_sqs_score,
                 grade:      upd.new_grade      ?? form.sqs.grade,
@@ -4071,7 +4131,11 @@ const AcordModal = forwardRef(function AcordModal({
           return next;
         });
       }
-      if (data.new_package_sqs_score != null) {
+      if (data.package_sqs) {
+        // Full recomputed package payload: pillar rows, loss-history state,
+        // category breakdown and top recommendations all refresh together.
+        setPackageSqs(data.package_sqs);
+      } else if (data.new_package_sqs_score != null) {
         setPackageSqs(prev => {
           if (!prev) return prev;
           return {
@@ -4357,9 +4421,12 @@ const AcordModal = forwardRef(function AcordModal({
           for (const [fid, upd] of Object.entries(data.updated_forms)) {
             const form = next[fid];
             if (!form?.sqs) continue;
+            // An answer changes FACTS, so the whole per-form sqs (pillars,
+            // states, recommendations) is replaced when the server sends it -
+            // patching only the headline left pillar rows stale (C2-C).
             next[fid] = {
               ...form,
-              sqs: {
+              sqs: upd.new_sqs ? upd.new_sqs : {
                 ...form.sqs,
                 sqs_score:  upd.new_sqs_score,
                 grade:      upd.new_grade      ?? form.sqs.grade,
@@ -4371,7 +4438,11 @@ const AcordModal = forwardRef(function AcordModal({
           return next;
         });
       }
-      if (data.new_package_sqs_score != null) {
+      if (data.package_sqs) {
+        // Full recomputed package payload: pillar rows, loss-history state,
+        // category breakdown and top recommendations all refresh together.
+        setPackageSqs(data.package_sqs);
+      } else if (data.new_package_sqs_score != null) {
         setPackageSqs(prev => {
           if (!prev) return prev;
           return {
@@ -5683,7 +5754,7 @@ const AcordModal = forwardRef(function AcordModal({
                 Sales plus identity/policy fields (name, FEIN, dates, entity type,
                 address, carrier) — with each document's value as a choice plus a
                 custom-value option. Consistent fields are silent (no action). */}
-            {underwriting?.fields?.some(f => f.status === "conflict" || f.status === "confirmed") && (
+            {underwriting?.fields?.some(f => f.status === "conflict" || f.status === "confirmed" || f.status === "scoped") && (
               <div ref={dcSectionRef} className="doc-summary review-section" style={{ marginTop: 12 }}>
                 <CollapsibleSection
                   title="Data Consistency"
@@ -5700,6 +5771,36 @@ const AcordModal = forwardRef(function AcordModal({
                   </div>
                 )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {/* V1 C1 F2b: a multi-policy package legitimately carries one
+                      policy number / carrier / term PER POLICY. Client 1.5 says
+                      "retain each under its correct scope. Do not create a
+                      conflict" - so these render read-only, with their scope,
+                      and there is nothing to confirm. */}
+                  {underwriting.fields.filter(f => f.status === "scoped").map((f) => (
+                    <div key={`scoped-${f.fact_key}`} style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "#0369a1", textTransform: "uppercase", letterSpacing: 0.3 }}>
+                          {f.values?.length} policies, {f.values?.length} values - not a conflict
+                        </span>
+                      </div>
+                      <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                        {(f.values || []).map((v, vi) => (
+                          <div key={vi} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#475569", flexWrap: "wrap" }}>
+                            <span style={{ minWidth: 0, overflowWrap: "anywhere", fontWeight: 600, color: "#1e293b" }}>{v.display}</span>
+                            {(v.scope || []).length > 0 && (
+                              <span style={{ fontSize: 10, color: "#64748b", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 4, padding: "1px 6px" }}>
+                                {v.scope.join(" / ").replace(/_/g, " ")}
+                              </span>
+                            )}
+                            <span style={{ fontSize: 10.5, color: "#94a3b8", minWidth: 0, overflowWrap: "anywhere" }}>
+                              {(v.sources || []).map(sr => sr.filename).filter(Boolean).join(", ")}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                   {underwriting.fields.filter(f => f.status === "conflict" || f.status === "confirmed").map((f) => {
                     const isConflict = f.status === "conflict";
                     const isConfirmed = f.status === "confirmed";
@@ -5730,6 +5831,10 @@ const AcordModal = forwardRef(function AcordModal({
                         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 13 }}>{f.label}</span>
                           {isConflict && <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", textTransform: "uppercase" }}>Values differ - confirm</span>}
+                          {/* V1 C1 F10: why they conflict, in plain language. */}
+                          {isConflict && f.conflict_reason && (
+                            <span style={{ fontSize: 10.5, color: "#64748b" }}>{f.conflict_reason}</span>
+                          )}
                           {isConflict && f.confidence && CONFIDENCE_META[f.confidence] && (
                             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.3, color: CONFIDENCE_META[f.confidence].color, background: CONFIDENCE_META[f.confidence].bg, border: `1px solid ${CONFIDENCE_META[f.confidence].border}`, borderRadius: 6, padding: "1px 7px" }}>
                               Confidence: {CONFIDENCE_META[f.confidence].label}
@@ -6300,6 +6405,52 @@ const AcordModal = forwardRef(function AcordModal({
                       </div>
                     )}
 
+                    {/* ── Needs your decision (V1 C1-D, client rule 1.5) ──
+                        Client questionnaire answers that contradict the uploaded
+                        documents. Nothing was stamped - the producer chooses,
+                        and "Use the client's answer" patches the existing forms
+                        in place. Hidden entirely when there is nothing held. */}
+                    {clientAnswerReview.length > 0 && (
+                      <div style={{ background: "#fff", border: "1px solid #fbbf24", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: "#b45309" }}>Needs your decision</span>
+                          <span style={{ fontSize: 9, fontWeight: 700, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 20, padding: "1px 6px" }}>{clientAnswerReview.length}</span>
+                        </div>
+                        <div style={{ fontSize: 9.5, color: "#64748b", lineHeight: 1.45, marginBottom: 8 }}>
+                          The client answered differently from the uploaded documents. Nothing has been changed on the forms yet.
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                          {clientAnswerReview.map((row) => {
+                            const busy = clientAnswerBusy === row.fact_key;
+                            return (
+                              <div key={row.fact_key} style={{ border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 6, padding: "7px 9px" }}>
+                                <div style={{ fontSize: 10.5, fontWeight: 700, color: "#1e293b", marginBottom: 4 }}>{row.label}</div>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 9.5, color: "#475569", marginBottom: 7 }}>
+                                  <div><span style={{ color: "#94a3b8" }}>Documents:</span> <strong style={{ color: "#1e293b" }}>{row.source_value || "-"}</strong></div>
+                                  <div><span style={{ color: "#94a3b8" }}>Client answered:</span> <strong style={{ color: "#1e293b" }}>{row.client_value || "-"}</strong></div>
+                                </div>
+                                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                  <button type="button" disabled={busy}
+                                    onClick={() => resolveClientAnswer(row.fact_key, "use_client")}
+                                    style={{ fontSize: 9.5, fontWeight: 600, padding: "4px 9px", borderRadius: 5, border: "1px solid #E61B84", background: busy ? "#f1f5f9" : "#E61B84", color: busy ? "#94a3b8" : "#fff", cursor: busy ? "default" : "pointer" }}>
+                                    {busy ? "Applying…" : `Use client's ${row.client_value}`}
+                                  </button>
+                                  <button type="button" disabled={busy}
+                                    onClick={() => resolveClientAnswer(row.fact_key, "keep_source")}
+                                    style={{ fontSize: 9.5, fontWeight: 600, padding: "4px 9px", borderRadius: 5, border: "1px solid #cbd5e1", background: "#fff", color: busy ? "#94a3b8" : "#475569", cursor: busy ? "default" : "pointer" }}>
+                                    Keep {row.source_value}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {clientAnswerMsg && (
+                          <div style={{ marginTop: 7, fontSize: 9.5, color: clientAnswerMsg.type === "ok" ? "#15803d" : "#dc2626" }}>{clientAnswerMsg.text}</div>
+                        )}
+                      </div>
+                    )}
+
                     {/* ── Session delta ── */}
                     {packageSqs && packageSqs.sqs_history?.length > 1 && (() => {
                       // Prefer the genuine initial_extract baseline (matches
@@ -6531,6 +6682,18 @@ const AcordModal = forwardRef(function AcordModal({
                               style={{ fontSize: 9.5, fontWeight: 600, cursor: "pointer", width: "fit-content", textDecoration: provCard?.group === "loss_history" ? "underline" : "none", color: packageSqs.loss_history_state === "loss_history_conflicting" || packageSqs.loss_history_state === "loss_runs_do_not_match" ? "#dc2626" : (packageSqs.loss_history_state === "no_information" ? "#b45309" : "#334155") }}>{LOSS_HISTORY_STATE_LABEL[packageSqs.loss_history_state] || packageSqs.loss_history_state}</div>
                             {packageSqs.loss_history_state_client_label && (
                               <div style={{ fontSize: 8.5, color: "#94a3b8", marginTop: 2, textTransform: "uppercase", letterSpacing: 0.3 }}>{packageSqs.loss_history_state_client_label}</div>
+                            )}
+                            {/* V1 C1 F4: WHY the tier is what it is. Without this the
+                                producer saw "Loss runs do not match insured" with no
+                                reason - the DBA / FEIN-name-mismatch notes existed only
+                                in the backend payload. */}
+                            {packageSqs.loss_run_match_detail?.notes?.map((n, i) => (
+                              <div key={`lrn-${i}`} style={{ fontSize: 9, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 5, padding: "3px 6px", marginTop: 4, lineHeight: 1.4 }}>{n}</div>
+                            ))}
+                            {packageSqs.loss_run_match_detail?.matched_on?.length > 0 && (
+                              <div style={{ fontSize: 8.5, color: "#94a3b8", marginTop: 3 }}>
+                                Matched on: {packageSqs.loss_run_match_detail.matched_on.join(", ").replace(/_/g, " ")}
+                              </div>
                             )}
                             {packageSqs.loss_history_state === "no_information" && (
                               <div style={{ fontSize: 9.5, color: "#64748b", marginTop: 3, lineHeight: 1.4 }}>Request loss runs or have the client confirm via the questionnaire.</div>

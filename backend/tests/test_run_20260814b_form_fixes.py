@@ -449,12 +449,13 @@ def test_the_index_prompt_forbids_row_id_only_labels():
     pairs deduped away and 26 entries replaced 80. Labels must carry the
     printed caption, not just the row id."""
     p = es._DEC_INDEX_SYSTEM_PROMPT
-    assert "labels must differ exactly as the printed captions differ" in p
-    assert "the amount's LABEL, not a separate entry" in p
+    # Re-pinned 2026-08-23 to the v3 wording of the same two guarantees.
+    assert "NEVER label several different cells with only the shared row identifier" in p
+    assert "is that amount's LABEL" in p
 
 
 def test_the_index_prompt_forbids_paraphrased_headings():
     """'COMMERCIAL UMBRELLA DECLARATIONS' was the model's own rewording of a
     heading the document never prints - 17 entries lost their section to it."""
     p = es._DEC_INDEX_SYSTEM_PROMPT
-    assert "never shorten, reorder or reword" in p
+    assert "Never shorten, reorder or reword" in p
