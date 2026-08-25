@@ -72,7 +72,8 @@ async def _scan(limit: int = 500) -> None:
             SELECT id, created_at, updated_at,
                    length(data->>'facts')                       AS facts_bytes,
                    length(data->'docs'->0->>'facts')            AS doc_facts_bytes,
-                   jsonb_array_length(COALESCE(data->'docs','[]'::jsonb)) AS ndocs,
+                   CASE WHEN jsonb_typeof(data->'docs') = 'array'
+                        THEN jsonb_array_length(data->'docs') ELSE 0 END AS ndocs,
                    (SELECT count(*) FROM jsonb_object_keys(
                         COALESCE(data->'generated_forms','{}'::jsonb)))   AS nforms
             FROM processing_sessions

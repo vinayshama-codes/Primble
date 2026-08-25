@@ -691,8 +691,31 @@ def _attach_classification_suggestions(questions: List[dict], facts: dict) -> No
     existing hint and gains no `suggestions` key, so the renderer shows exactly
     what it shows today. Nothing here fills an answer - `suggestions` is a list
     the client must tap, and the hint says to confirm with their agent.
+
+    ── OFF FOR V1 (C3 3.13, 2026-08-25) ────────────────────────────────────
+    Client 3.13, on a missing NAICS / SIC: *"route to producer; do not ask the
+    client; do not generate a classification recommendation in V1"*, with
+    *"Classification assistance is addressed separately in Section 19"* for V2.
+
+    It was ALREADY dark, and nobody had noticed. `suggestions` is rendered by
+    exactly one component, `ClientQuestionnaire.jsx`, and on 2026-08-12 NAICS
+    and SIC were re-routed to the PRODUCER audience on the client's earlier
+    instruction ("those come from the producer or underwriter"). A
+    producer-audience question never reaches the client questionnaire, so the
+    chips from Figure 20 - the feature the client praised - have not rendered
+    for anyone since that day. We simply kept paying to compute them.
+
+    `ENABLE_CLASSIFICATION_SUGGESTIONS` makes that state deliberate instead of
+    accidental. `services/naics_suggester.py` and its 43 tests are untouched, so
+    Section 19 is one flag away. Do not delete the module.
     """
     if not questions:
+        return
+    try:
+        from config.settings import ENABLE_CLASSIFICATION_SUGGESTIONS
+    except Exception:                                          # noqa: BLE001
+        ENABLE_CLASSIFICATION_SUGGESTIONS = False
+    if not ENABLE_CLASSIFICATION_SUGGESTIONS:
         return
     try:
         from services import naics_suggester
@@ -4344,7 +4367,7 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
     # rather than stacking on top of the pillar improvement it duplicates.
     try:
         from services.audit_service import active_score_credits
-        from services.sqs_service import _resolve_cap, final_score_with_credits
+        from services.sqs_service import _resolve_cap, apply_credits_to_score
 
         _credits_total, _credit_rows = await active_score_credits(
             processing_session_id, facts=facts,
@@ -4355,20 +4378,15 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
             _form_cap, _ = _resolve_cap(re_hard, re_soft)
             _pkg_cap, _  = _resolve_cap(hard_stops, soft_stops)
 
+            # ONE DOOR (apply_credits_to_score) - headline and trace together.
             for _fid, _fdata in (generated or {}).items():
-                _s = _fdata.get("sqs") if isinstance(_fdata, dict) else None
-                if not isinstance(_s, dict) or _s.get("raw_sqs_score") is None:
-                    continue
-                _s["sqs_score"] = final_score_with_credits(
-                    _s["raw_sqs_score"], _credits_total, _form_cap,
+                apply_credits_to_score(
+                    _fdata.get("sqs") if isinstance(_fdata, dict) else None,
+                    _credits_total, _form_cap, "sqs_score",
                 )
-                _s["credits_applied"] = _credits_total
-
-            if isinstance(package_sqs, dict) and package_sqs.get("raw_sqs_score") is not None:
-                package_sqs["package_sqs_score"] = final_score_with_credits(
-                    package_sqs["raw_sqs_score"], _credits_total, _pkg_cap,
-                )
-                package_sqs["credits_applied"] = _credits_total
+            apply_credits_to_score(
+                package_sqs, _credits_total, _pkg_cap, "package_sqs_score",
+            )
             logger.info(
                 "recalc: re-applied %d credit point(s) from %d dismissal(s) (session %s)",
                 _credits_total, len(_credit_rows), processing_session_id,

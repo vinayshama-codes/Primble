@@ -209,11 +209,28 @@ def test_headroom_helper():
 # ── O9: one definition of what a dec page owes ───────────────────────────────
 
 def test_the_dec_page_exemption_is_shared_by_both_scorers():
-    """The form scorer kept its own copy of the checklist and lacked the
-    exemption, so answering contact_name moved the form and not the package."""
-    flags = {"_doc_type": "dec_page"}
+    """One definition of what a dec page owes, used by both scorers.
+
+    C3 3.3 (2026-08-25) NARROWED this in two ways, and this test was rewritten
+    with it. Client 3.3 and spec section 3.1 carry the identical sentence:
+    *"Producer name is not required when the ONLY source document is a
+    declarations page."*
+
+      1. It keys on `_only_dec_page` (every active document is a dec page), not
+         on `_doc_type` (the PRIMARY document), which exempted a dec page
+         uploaded alongside an application that prints the producer's name.
+      2. CONTACT INFORMATION is no longer waived. Neither document grants that;
+         producer name is the only Tier 1 exemption either one lists.
+
+    The original property this test exists for is unchanged: whatever the rule
+    is, BOTH scorers must apply the same one.
+    """
+    flags = {"_only_dec_page": True}
     assert producer_fields_exempt(flags) is True
     assert producer_fields_exempt({}) is False
+    assert producer_fields_exempt({"_doc_type": "dec_page"}) is False, (
+        "the PRIMARY document being a dec page is not 'the only source document'"
+    )
 
     facts = {"applicant_name": "ORBIN CONTRACTING LLC",
              "mailing_address": "4800 Dahlia St, Denver CO",
@@ -223,9 +240,13 @@ def test_the_dec_page_exemption_is_shared_by_both_scorers():
 
     a = _score(facts, flags)["breakdown"]["structural_completeness"]
     b = _score(with_contact, flags)["breakdown"]["structural_completeness"]
-    assert a == b == 100, (
-        "on a dec page neither scorer may dock the pillar for producer-side "
-        f"details (got {a} then {b})"
+    assert b > a, (
+        "contact information is owed on every submission, dec page or not, so "
+        f"supplying it must raise the pillar (got {a} then {b})"
+    )
+    assert b == 100, (
+        "with contact supplied, a dec-page-only package owes nothing else - "
+        f"producer name stays exempt (got {b})"
     )
 
 
@@ -240,14 +261,35 @@ def test_the_exemption_does_not_leak_to_ordinary_submissions():
 
 
 def test_the_card_is_still_raised_even_when_exempt():
-    """Exempt from SCORING is not exempt from ASKING."""
+    """Exempt from SCORING is not exempt from ASKING.
+
+    Re-pointed at `producer_name` by C3 3.3 (2026-08-25): that is now the only
+    exempt Tier 1 item, so it is the only one that can demonstrate the property.
+    Contact information moved to the test below, which asserts the opposite -
+    it is scored again, so its card must be worth real points.
+    """
+    facts = {"applicant_name": "ORBIN CONTRACTING LLC",
+             "mailing_address": "4800 Dahlia St, Denver CO",
+             "effective_date": "2026-07-15",
+             "contact_name": "Erin Royal",
+             "lines_of_business": ["General Liability"]}
+    r = _rec(_score(facts, {"_only_dec_page": True}), "producer_name")
+    assert r is not None, "we still want the producing agency's name"
+    assert r["score_impact"] == 0, "but it honestly cannot move the score"
+
+
+def test_contact_information_is_scored_on_a_dec_page_too():
+    """C3 3.3: producer name is the ONLY dec-page Tier 1 exemption."""
     facts = {"applicant_name": "ORBIN CONTRACTING LLC",
              "mailing_address": "4800 Dahlia St, Denver CO",
              "effective_date": "2026-07-15",
              "lines_of_business": ["General Liability"]}
-    r = _rec(_score(facts, {"_doc_type": "dec_page"}), "contact_name")
+    r = _rec(_score(facts, {"_only_dec_page": True}), "contact_name")
     assert r is not None, "we still want the contact details"
-    assert r["score_impact"] == 0, "but it honestly cannot move the score"
+    assert r["score_impact"] > 0, (
+        "contact information is owed on every submission, so its card carries "
+        "real points again"
+    )
 
 
 # ── Anti-rot ─────────────────────────────────────────────────────────────────

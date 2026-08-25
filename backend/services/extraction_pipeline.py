@@ -53,6 +53,7 @@ from services.submission_integrity import assess_submission_integrity
 from services.underwriting_consistency import (
     assess_underwriting_consistency, apply_confirmations, validate_confirmation,
     RECONCILABLE_FIELDS, RECONCILABLE_FIELD_KEYS, unresolved_withheld_keys,
+    unresolved_conflict_keys,
 )
 from repositories.session_repository import new_processing_session, upd_processing_session
 
@@ -448,6 +449,20 @@ async def _finalize_pipeline(
     if _held_client:
         merged_facts["_client_answer_conflicts"] = _held_client
     mflags["_doc_type"]  = primary.get("doc_type", "unknown")
+    # C3 3.3 (2026-08-25): the Tier 1 producer-name exemption is granted only
+    # when the ONLY source document is a declarations page - the client's words
+    # and the spec's, identically. `_doc_type` above is the PRIMARY document's
+    # type, so a dec page uploaded alongside an application was wrongly exempted
+    # even though the application prints the producer's name. This flag answers
+    # the question the documents actually ask. Every ACTIVE document must be a
+    # dec page; an empty list is not "only dec pages".
+    _active_types = [
+        str(d.get("doc_type") or "").strip().lower()
+        for d in active_docs if isinstance(d, dict)
+    ]
+    mflags["_only_dec_page"] = bool(_active_types) and all(
+        t == "dec_page" for t in _active_types
+    )
     await reporter.package_phase("normalized", "Normalizing data across documents…")
 
     # ── Deterministic has_umbrella safety net (Umbrella / Excess Adequacy) ────
@@ -865,6 +880,21 @@ async def _finalize_pipeline(
             logger.info("underwriting: stamped-value withhold active for %s", sorted(_withheld))
         else:
             merged_facts.pop("_uw_conflicted_keys", None)
+
+        # C3 3.8 (2026-08-25): the SUPERSET - every fact still under an
+        # unconfirmed cross-document conflict, whether or not its value is
+        # withheld. `_uw_conflicted_keys` above cannot answer this: Brent's Q4
+        # ruling (D16) emptied CONFLICT_WITHHOLD_KEYS, so it is normally empty
+        # by design. This key drives ONE thing - the reduced fill-rate credit
+        # 3.8 asks for ("Conflicting fields should not receive full
+        # completed-field credit"). It must NEVER be used to blank a value;
+        # D16 says the suggested value stamps.
+        _conflicts = set(unresolved_conflict_keys(underwriting, confirmations))
+        _conflicts |= _withheld          # a withheld fact is conflicted too
+        if _conflicts:
+            merged_facts["_uw_conflict_keys"] = sorted(_conflicts)
+        else:
+            merged_facts.pop("_uw_conflict_keys", None)
     except Exception as _wex:  # noqa: BLE001 — never block the pipeline
         logger.warning("underwriting: withheld-key computation failed: %s", _wex)
     if underwriting.get("review_required"):

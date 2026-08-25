@@ -495,10 +495,12 @@ async def list_sessions_for_user(user_id: str, limit: int = 50, offset: int = 0,
                 -- could disagree with the banner inside the same submission.
                 (data->'package_sqs'->>'package_sqs_score')::int      AS package_sqs_score,
                 (SELECT jsonb_object_agg(key, value->'sqs')
-                   FROM jsonb_each(COALESCE(data->'generated_forms', '{}'::jsonb)))
+                   FROM jsonb_each(CASE WHEN jsonb_typeof(data->'generated_forms') = 'object'
+                                        THEN data->'generated_forms' ELSE '{}'::jsonb END))
                                                                      AS sqs_scores,
                 (SELECT jsonb_agg(key)
-                   FROM jsonb_each(COALESCE(data->'generated_forms', '{}'::jsonb)))
+                   FROM jsonb_each(CASE WHEN jsonb_typeof(data->'generated_forms') = 'object'
+                                        THEN data->'generated_forms' ELSE '{}'::jsonb END))
                                                                      AS form_ids,
                 EXISTS (
                     SELECT 1 FROM arq_sessions a

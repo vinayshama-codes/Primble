@@ -134,19 +134,36 @@ async def _apply_dismiss_score_credit(
             # Active-stop counts. hard_stops/soft_stops are COMBINED (field+cross);
             # cross_issues_last carries the cross-form issues (type hard_stop /
             # soft_warning). Field-level = combined - cross.
+            # ── COALESCE IS NOT ENOUGH ON JSONB, AND THIS COST FOUR TEST RUNS ──
+            # `COALESCE(x, '[]'::jsonb)` only substitutes when x is SQL NULL. A
+            # stored JSON **null** - which is what a session carries whenever a
+            # list was written as `None` - is a perfectly good jsonb value, so it
+            # sails through COALESCE and straight into `jsonb_array_elements`,
+            # which raises `cannot extract elements from a scalar`. The blanket
+            # handler at the bottom then returned `new_package_sqs_score: None`
+            # and the producer saw "+6 pts credited" beside a frozen score.
+            #
+            # `jsonb_typeof(...) = 'array'` is the only test that means "is this
+            # actually a list". Applied to EVERY expansion in this function, not
+            # just the one that happened to throw - the others are the same
+            # landmine waiting for a different session shape.
             stop_row = await conn.fetchrow(
                 """
                 SELECT
-                    COALESCE(jsonb_array_length(data->'hard_stops'), 0) AS hard_total,
-                    COALESCE(jsonb_array_length(data->'soft_stops'), 0) AS soft_total,
+                    CASE WHEN jsonb_typeof(data->'hard_stops') = 'array'
+                         THEN jsonb_array_length(data->'hard_stops') ELSE 0 END AS hard_total,
+                    CASE WHEN jsonb_typeof(data->'soft_stops') = 'array'
+                         THEN jsonb_array_length(data->'soft_stops') ELSE 0 END AS soft_total,
                     COALESCE((
                         SELECT count(*) FROM jsonb_array_elements(
-                            COALESCE(data->'cross_issues_last', '[]'::jsonb)) e
+                            CASE WHEN jsonb_typeof(data->'cross_issues_last') = 'array'
+                                 THEN data->'cross_issues_last' ELSE '[]'::jsonb END) e
                         WHERE e->>'type' = 'hard_stop'
                     ), 0) AS hard_cross,
                     COALESCE((
                         SELECT count(*) FROM jsonb_array_elements(
-                            COALESCE(data->'cross_issues_last', '[]'::jsonb)) e
+                            CASE WHEN jsonb_typeof(data->'cross_issues_last') = 'array'
+                                 THEN data->'cross_issues_last' ELSE '[]'::jsonb END) e
                         WHERE e->>'type' = 'soft_warning'
                     ), 0) AS soft_cross
                 FROM processing_sessions
@@ -203,17 +220,29 @@ async def _apply_dismiss_score_credit(
                        (ge.value->'sqs'->>'raw_sqs_score')::int AS raw_score,
                        COALESCE((
                            SELECT SUM((c->>'impact')::int)
-                           FROM jsonb_array_elements($2::jsonb) AS c
+                           FROM jsonb_array_elements(
+                               CASE WHEN jsonb_typeof($2::jsonb) = 'array'
+                                    THEN $2::jsonb ELSE '[]'::jsonb END
+                           ) AS c
                            WHERE EXISTS (
                                SELECT 1
                                FROM jsonb_array_elements(
-                                   COALESCE(ge.value->'sqs'->'recommendations', '[]'::jsonb)
+                                   -- THE LINE THAT THREW, 2026-08-26. A form
+                                   -- whose sqs.recommendations was stored as
+                                   -- JSON null reached jsonb_array_elements as
+                                   -- a scalar. COALESCE never saw it.
+                                   CASE WHEN jsonb_typeof(ge.value->'sqs'->'recommendations') = 'array'
+                                        THEN ge.value->'sqs'->'recommendations'
+                                        ELSE '[]'::jsonb END
                                ) AS r
                                WHERE r->>'rec_id' = c->>'rec_id'
                            )
                        ), 0) AS form_credits
                 FROM processing_sessions ps,
-                     jsonb_each(COALESCE(ps.data->'generated_forms', '{}'::jsonb)) AS ge
+                     jsonb_each(
+                         CASE WHEN jsonb_typeof(ps.data->'generated_forms') = 'object'
+                              THEN ps.data->'generated_forms' ELSE '{}'::jsonb END
+                     ) AS ge
                 WHERE ps.id = $1
                 """,
                 session_id, _credit_json,
@@ -230,7 +259,20 @@ async def _apply_dismiss_score_credit(
                 "FROM processing_sessions WHERE id = $1",
                 session_id,
             )
+            # `pkg_base` is bound on BOTH branches. It used to be assigned only
+            # inside the legacy `else`, while the log line further down
+            # interpolates it unconditionally - so on every modern session (any
+            # session scored since raw_sqs_score shipped, 2026-08-16) that
+            # f-string raised UnboundLocalError, the blanket `except` caught it,
+            # and this function returned `new_package_sqs_score: None`.
+            #
+            # The database UPDATE runs BEFORE that line, so the credit really was
+            # applied - it just never reached the response, and the producer
+            # watched a card say "+6 pts credited" while the score on screen sat
+            # still. Reported live on S8, 2026-08-26. A debug string took out the
+            # feature it was describing.
             if existing_pkg_raw is not None:
+                pkg_base      = existing_pkg_raw
                 new_pkg_score = final_score_with_credits(
                     existing_pkg_raw, credits_total, pkg_cap,
                 )
@@ -298,37 +340,77 @@ async def _apply_dismiss_score_credit(
                     "new_tier_color": new_tier_color,
                 }
 
-            # Always update the package score.
+            # Always update the package score - AND the trace that explains it.
+            # The frontend patches its own copy, but the STORED payload is what a
+            # reload reads: leaving `score_trace.arithmetic` at the scorer's
+            # original `credits: 0` made the How line render "81 earned = 85" -
+            # a sum that does not add up - as soon as the producer refreshed.
+            # `create_missing=false` on every path, so a payload without a trace
+            # (or without credits_applied) is left exactly as it is rather than
+            # gaining half-built keys.
             await conn.execute(
                 """
                 UPDATE processing_sessions
                 SET data = jsonb_set(
                     jsonb_set(
-                        data,
-                        ARRAY['package_sqs', 'package_sqs_score'],
-                        to_jsonb($1::int), false
+                        jsonb_set(
+                            jsonb_set(
+                                jsonb_set(
+                                    data,
+                                    ARRAY['package_sqs', 'package_sqs_score'],
+                                    to_jsonb($1::int), false
+                                ),
+                                ARRAY['package_sqs', 'tier'],
+                                to_jsonb($2::text), false
+                            ),
+                            ARRAY['package_sqs', 'credits_applied'],
+                            to_jsonb($5::int), true
+                        ),
+                        ARRAY['package_sqs', 'score_trace', 'arithmetic', 'credits'],
+                        to_jsonb($5::int), false
                     ),
-                    ARRAY['package_sqs', 'tier'],
-                    to_jsonb($2::text), false
+                    ARRAY['package_sqs', 'score_trace', 'arithmetic', 'displayed'],
+                    to_jsonb($1::int), false
                 ),
                 updated_at = $3
                 WHERE id = $4
                 """,
-                new_pkg_score, new_pkg_tier, now_ts, session_id,
+                new_pkg_score, new_pkg_tier, now_ts, session_id, credits_total,
             )
 
-        logger.info(
-            f"Dismiss credit applied: session={session_id} rec={rec_id} "
-            f"forms_credited={list(updated_forms.keys())} (form_cap={form_cap}) "
-            f"pkg({pkg_base}+{score_impact}->{new_pkg_score} pkg_cap={pkg_cap})"
-        )
+        # DIAGNOSTICS CANNOT BE ALLOWED TO EAT THE RESULT. The work is done and
+        # committed by this point; a broken log line must never turn a successful
+        # credit into `new_package_sqs_score: None`, which is precisely what it
+        # did for months (see the pkg_base note above). Its own try, deliberately.
+        try:
+            logger.info(
+                "Dismiss credit applied: session=%s rec=%s forms_credited=%s "
+                "(form_cap=%s) pkg(%s+%s->%s pkg_cap=%s)",
+                session_id, rec_id, list(updated_forms.keys()), form_cap,
+                pkg_base, score_impact, new_pkg_score, pkg_cap,
+            )
+        except Exception:                                      # noqa: BLE001
+            pass
         return {
             "updated_forms":        updated_forms,
             "new_package_sqs_score": new_pkg_score,
             "new_package_tier":      new_pkg_tier,
+            # ── SELF-DIAGNOSING, deliberately ───────────────────────────────
+            # "the card says credited and the score did not move" took three
+            # rounds to pin down because the response carried no evidence of
+            # WHY. These four make the answer readable straight off the network
+            # tab: a null score means this function raised; `credits_total` 0
+            # means the credit did not survive `active_score_credits`; a score
+            # equal to `package_raw` means the ceiling swallowed it. Cheap, and
+            # it retires a whole class of "it just doesn't work".
+            "credits_total":        credits_total,
+            "package_raw":          existing_pkg_raw,
+            "package_ceiling":      pkg_cap,
         }
     except Exception as ex:
-        logger.error(f"Failed to apply dismiss score credit: {ex}")
+        # exc_info, because the previous bare message gave no traceback and an
+        # UnboundLocalError three lines above read exactly like a database error.
+        logger.error("Failed to apply dismiss score credit: %s", ex, exc_info=True)
         return {"updated_forms": {}, "new_package_sqs_score": None}
 
 
@@ -380,6 +462,14 @@ async def dismiss_recommendation(
         "updated_forms":         credit.get("updated_forms", {}),
         "new_package_sqs_score": credit.get("new_package_sqs_score"),
         "new_package_tier":      credit.get("new_package_tier"),
+        # Passed through so the whole story is readable off the network tab.
+        # `credit_attempted` distinguishes "we never tried" (a plain dismiss, or
+        # a zero score_impact) from "we tried and it produced nothing", which
+        # are different bugs and used to look identical from the outside.
+        "credit_attempted":      bool(credit),
+        "credits_total":         credit.get("credits_total"),
+        "package_raw":           credit.get("package_raw"),
+        "package_ceiling":       credit.get("package_ceiling"),
     })
 
 

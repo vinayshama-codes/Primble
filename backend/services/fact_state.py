@@ -237,6 +237,27 @@ def derive_value_state(fact_key: str, raw: Any, facts: Optional[dict] = None,
         return NOT_APPLICABLE
     if env.get("rejected_by") or env.get("withheld") is True:
         return UNABLE_TO_DETERMINE
+    # ── A STATE A HUMAN ALREADY RECORDED (C3, 2026-08-25) ───────────────────
+    # `answer_semantics.build_fact_envelope` stores an answered absence as
+    # ``value: "" + value_state: "explicit_no"`` and an answered inapplicability
+    # as ``value_state: "not_applicable"``. This function re-derives from
+    # SIGNALS and knew nothing about that key - it looked only for the older
+    # ``not_applicable: True`` flag - so it returned `not_stated` for both.
+    # Measured: `fact_answered(env)` said True while `value_state_of(...)` said
+    # `not_stated` on the SAME envelope. Two modules, two vocabularies, one
+    # fact. That mismatch made C3 3.6's "Not Applicable fields are removed from
+    # the denominator" unreachable for any human answer, and left
+    # `_drop_not_applicable_questions` re-asking questions already answered.
+    #
+    # Deliberately narrow, so this can only ever REFINE and never override:
+    #   * gated on a BLANK value - a fact carrying a real value is untouched;
+    #   * only these two states are honoured - a stored `present` / `not_stated`
+    #     / `conflicting` is still re-derived from signals as before;
+    #   * placed ahead of the package-level derivations below so an explicit
+    #     human answer outranks "we could not read this" for the same fact.
+    _recorded = env.get("value_state")
+    if _recorded in (NOT_APPLICABLE, EXPLICIT_NO) and _is_blank(value):
+        return _recorded
     # The two package-level derivations. Ordered NOT APPLICABLE first: if the
     # coverage is not carried at all, the field does not apply, whatever we
     # tried and failed to read for it. Both are gated on an EMPTY value.

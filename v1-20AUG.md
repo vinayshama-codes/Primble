@@ -156,7 +156,7 @@ Source documents this plan is built against. Read the relevant one before starti
 |---|------|--------|-------|
 | C1 | Data Consistency, Canonical Facts & Normalization | **In progress - 6 clauses complete, 2 partial, all remaining gaps are Brent's** | **Updated 2026-08-24 (C1-Q FIX 10).** 1.3 / 1.6 / 1.7 / 1.8 complete - 1.3's "No subcontracting" now reaches `explicit_no` via a schema-derived, self-verifying mechanism (FIX 10), not a third hand-typed case; "No Property coverage" stays `not_applicable`, a genuine box-choice question for Brent, not an engineering gap. **1.1 / 1.2 complete on everything engineering can decide** (C1b closed D-1); account/entity scope axis deliberately not built - zero reported defect, owner-confirmed unnecessary. **1.5 blocked only on Brent** (Suggested-vs-Verified scoring). 1.4 correct but unconsumed by scoring - same Brent item. Open for Brent: Q3a/Q3b, Q8, Q9 (Q10 CLOSED) - **all four are carried by the Loss History chat's list in `20Aug_questions_brent.md`** (consolidated 2026-08-24: every Data Consistency question turned out to be the same decision the Loss History list already asks - the DBA/FEIN tiers ARE Loss History scoring, prior carrier feeds its -10, and the AI weights are SQS. Section 1 has NO question of its own left). BI=Building wrong test DELETED 2026-08-24 (C1-R). Q5 closed 2026-08-24, was stale. **Independent audit 2026-08-24 (C1-R) executed every clause: 1.1 / 1.2 / 1.3 / 1.6 / 1.7 / 1.8 COMPLETE, 1.4 / 1.5 complete on facts, blocked on Q9 for scoring** |
 | C2 | Loss History - Scoring, Evidence & Questionnaire Logic | **CLOSED 2026-08-25 (C2-A..C2-M). All 11 clauses + all 7 Brent rulings, live-verified over six runs. Nothing open.** | One state owner (`services/loss_history_state.py`); client tables 2.1-2.11 implemented verbatim (freq/ratio advisory-only, new-venture N/A + generic pillar rescaling via `_weighted_pillar_sum`, Path A/B/C revised numbers, strong pin terminal at 60, prior_carrier/num_claims out of Structural, 2.6 Data Consistency routing, state-gated questionnaire). Identity matcher was already DONE under C1/F4. **Brent ruled on all seven open questions 2026-08-24 (C2-E): DBA+EIN = verified match, EIN+unknown-name = probable match, prior-carrier-from-dec DECLINED, AI weights confirmed, and TWO corrections to what C2-A shipped - the years-in-business ladder ("we can't treat N/A as 0") and previously-uninsured vs missing prior carrier.** Read C2-A then C2-E at the end of this file BEFORE touching any loss-history code |
-| C3 | SQS Scoring Integrity & Critical-Field Weighting | Not started | **F-1 (invented GL class codes) found live 2026-08-22 - see C1-N.** Needs a verified-source gate on NAIC / GL class code / payment plan / policy premium / policy number. Also inherits from C1: `CONFIDENCE_SCORE` still keys on `confidence`; switching it to `evidence_state` (ai_high = suggested) is a score change for Brent |
+| C3 | SQS Scoring Integrity & Critical-Field Weighting | **SHIPPED 2026-08-26 (C3-A..C3-J). All 14 clauses + the traceability Desired Outcome, live-verified over five runs across 8 scenarios. Two product questions open (Q14, Q15).** | Structural blend 40/35/25 (SUBMISSION ONLY - spec sections 3.1 and 10 give forms their own checklist); no-form rescale 53.3/46.7; Tier 2 cut to the client's six; Not Applicable leaves the DENOMINATOR; all four fill-rate rules; dec-page Tier 1 exemption narrowed to producer name on an ONLY-dec-page package; credits de-duplicated per fact and re-applied on EVERY rebuild path. `sqs_service.build_score_trace` emits the ledger on the package and every form. **`ENABLE_CLASSIFICATION_SUGGESTIONS` is OFF** (3.13). **Nine bugs found on the way, three of them pre-existing and invisible until this work made them reachable** - see C3-G / C3-I / C3-J. **NOT addressed here: F-1** (invented GL class codes) is a form-fill grounding defect, not a scoring one, and stays open under H6. Q9's `CONFIDENCE_SCORE`-vs-`evidence_state` switch is CLOSED for V1: Brent confirmed the weights as-is and 3.8 forbids the redesign this pass |
 | C4 | Contextual Questionnaire Logic | Not started | |
 | C1c | **Route `submission_integrity.py` through the one door** | **Done** | LIVE RUN 2026-08-21: it still reports "Multiple distinct policy numbers found", "Location address differs", "Operations descriptions differ" on a clean multi-policy package. It is the SIXTH comparison site and does not use `fact_comparison` |
 | C1b | **Scoped fact store (D19)** - carry scope ON the fact, additively | **Done 2026-08-23 (C1-Q FIX 7)** | `facts["_scoped"][key]` written once at the end of `merge_facts` from the settled `coverage_lines`; read by `_scope_from_store` BEFORE the character-keyed path. Additive - `mf[key]` untouched, private key skipped by every fact loop. Closed D-1 Layer 1: Run A scopes two carriers on different lines, Run B conflicts two on the same line |
@@ -178,6 +178,10 @@ Source documents this plan is built against. Read the relevant one before starti
 ---
 
 ## LIVE TEST RESULTS - C1 (last updated 2026-08-24, C1-R)
+
+> **C2's verdict** is in the C2 session block (all 11 clauses closed 2026-08-25).
+> **C3's verdict** is in `LIVE TEST RESULTS - C3` immediately after the
+> Decision Register - eight scenarios, five runs, every clause verified.
 
 **Read this first.** Everything below was observed on the real application with real
 uploads, not in a unit test. Full reasoning for each item is in the change log.
@@ -2927,6 +2931,102 @@ these, it has to argue with what is written here first.
 | D17 | **BRENT 2026-08-21 (Q2):** a client answer that contradicts the documents is held and the agent picks. Confirmed as the shipped default | 2026-08-21 | Already built (F7 + C1-D); Brent's answer makes it the ruled behaviour, not a proposal |
 | D18 | Any code that must REMOVE a fact key uses `upd_processing_session(..., delete_facts=[...])`, never a bare `pop` | 2026-08-21 | B13: the facts merge is additive by design, so a pop is a silent no-op |
 | D15 | A human-supplied fact survives every pipeline re-run. Restored when the documents are still silent or agree; HELD (rule 1.5) when they now disagree | 2026-08-21 | C1-D closes Q7. A re-run reads the same documents, so no precedence ruling was ever needed - that framing in C1-C was wrong |
+| D29 | **C3 3.2's 40 / 35 / 25 is the SUBMISSION Structural formula ONLY.** Per-form Structural stays that form's own ACORD checklist minus the OCR penalty. Do not "unify" them; `calculate_sqs`'s `tier2_score` parameter is unread BY DESIGN | 2026-08-25 | `SQS_Scoring_Specification` prints both formulas side by side TWICE (section 3.1 and section 10's scope table) and the master plan modifies only the submission line. Precedence: an unmodified rule stays authoritative. The owner's *"for both per form as well as package"* ruling carries *"wherever applicable"*, and this is the one place it is not |
+| D30 | **A ceiling and a pillar deduction may BOTH charge for the same fact.** That is not double counting | 2026-08-25 | 3.9 preserves the ceilings verbatim and adds *"Individual pillar deductions continue to reflect the volume/severity of underlying issues"*; spec section 7 says the same. Settles what the de-duplication work may and may not touch |
+| D31 | **Double counts the client did not NAME are reported, never removed** - except the two the owner explicitly ruled on (2026-08-25: operations description, revenue). Engineering does not decide which deductions disappear | 2026-08-25 | Precedence note: no new scoring rules without product approval; Principle 7. C3-D records why the revenue removal could not be naive - the same -15 was payroll's ONLY home after 3.14 |
+| D32 | **Removing a field from the SCORE never removes it from the QUESTIONNAIRE.** Fields dropped from Tier 2 are pinned by name in `question_classifier._SCORE_REMOVED_STILL_ASKED` | 2026-08-25 | Measured before the pin: `total_payroll`, `wc_payroll_period` and `wc_officer_exclusions` all fell to audience=internal / suppressed - Primble would have stopped asking anyone for annual payroll, a far worse regression than the scoring bug 3.14 fixes |
+| D33 | **The score trace is emitted BY the scorer, never reconstructed for display**, and anything that credits a score goes through `sqs_service.apply_credits_to_score` so the headline and the trace move together | 2026-08-26 | C3-J: FOUR call sites patched the headline and left the trace stale, printing "81 earned = 85" in the one panel built to make the arithmetic reconcile. A second computation "for the panel" is how the panel and the score drift apart again - the defect C3 exists to close |
+| D34 | **`COALESCE` is not a guard on jsonb.** Every `jsonb_array_elements` / `jsonb_each` / `jsonb_array_length` argument uses `CASE WHEN jsonb_typeof(x) = 'array'` (or `'object'`) | 2026-08-26 | C3-I: COALESCE substitutes only for SQL NULL. A stored JSON **null** is a valid jsonb value, reaches the expansion as a scalar, and raises `cannot extract elements from a scalar`. It was live in five places and silently broke dismissal credits |
+| D35 | **Observability code is production code.** A `try` that wraps both the work AND the reporting of it can lose work that already succeeded; every blanket `except Exception` logs with `exc_info=True` | 2026-08-26 | C3-G / C3-I: a log line interpolating an unbound variable turned a completed credit into a null response, and a bare `str(ex)` made three different failures read identically. One traceback from the owner's logs settled what three of my diagnoses could not |
+
+---
+
+## LIVE TEST RESULTS - C3 (last updated 2026-08-26, C3-J)
+
+**Read this for the C3 verdict.** Every row below was observed on the real
+application with real uploads, not reasoned about. Test data and the numbered
+checks are in `v1_c3_testdata/` (regenerate with
+`py backend/scripts/make_v1_c3_test_pdfs.py` - the policy dates are computed
+from today, and a stale set drifts into paths the scenario was not built for).
+
+**Baseline before any C3 work: 4291 passed / 1 failed. After: 4329 passed /
+1 failed** - the same `httpx`/`openai` environment conflict throughout, zero
+regressions at any stage. Frontend production build clean.
+
+### The eight scenarios
+
+| # | What it proves | Verdict |
+|---|---|---|
+| S1 | Dec page ONLY - producer name exempt, contact information NOT | **PASS.** Tier 1 80%, contact owed, producer-name card reads 0 pts |
+| S2 | Dec page + application - the exemption switches OFF | **PASS.** Tier 1 60%, both owed, package 65 against S1's 69 |
+| S3 | GL-only - Tier 2 reaches 100 with no payroll or WC data | **PASS.** Tier 2 100%, zero WC recommendations, no NAICS chips |
+| S4 | Revenue charged ONCE, not again in Exposure | **PASS.** Tier 2 83% listing "Annual revenue", Exposure Revenue/Sales 100% |
+| S5 | A conflicting value surfaces and does not read as complete | **PASS.** Data Consistency shows both figures; value still stamps (D16) |
+| S6A / S6B | Location schedule satisfies the physical-address rule; the control still fires | **PASS both directions** |
+| S7 | Ceiling 60 **with the reason named** - the headline check for all of C3 | **PASS.** *"77 earned, held at 60 = 60"* + the invalid policy period |
+| S8 | A credit is earned, and SURVIVES a field edit | **PASS.** A 81 -> B 85 (*"81 earned + 6 credited, held at 85 = 85"*) -> C 85 |
+
+### Clause by clause
+
+| Clause | State |
+|---|---|
+| 3.1 pillar weights | No change needed - already 25/25/15/15/10/10. Now test-pinned |
+| 3.2 Structural 40/35/25 | **Shipped, SUBMISSION only** (D29) |
+| 3.3 Tier 1 fields + exceptions | **Shipped.** Exemption narrowed twice - `_only_dec_page`, and contact information is no longer waived |
+| 3.4 Tier 1 scoring | No change needed - verified equivalent, not assumed |
+| 3.5 / 3.14 Tier 2 fields | **Shipped.** Six fields; the four removed are pinned into the questionnaire (D32) |
+| 3.6 NA out of the denominator | **Shipped.** 80, not 83 - and it needed a `fact_state` seam fix to be reachable at all |
+| 3.7 no-form rescale | **Shipped.** 53.3 / 46.7, DERIVED from 3.2 rather than typed |
+| 3.8 fill-rate rules | **All four shipped** via confidence labels; the denominator is untouched, as 3.8 requires. See Q15 |
+| 3.9 ceilings | No change needed - verified against his four worked examples and the no-stacking rule |
+| 3.10 recalculation | **Shipped.** The field-edit path re-applies credits; Download Anyway, the issue toggle and a junk resolve were verified already correct |
+| 3.11 credits | **Shipped.** One credit per fact; survives every rebuild (D33) |
+| 3.12 physical address | **Shipped.** Auto garaging added; a location schedule satisfies it |
+| 3.13 NAICS / SIC | **Shipped** - already producer-routed; suggestions off behind a flag. See Q16 |
+| **Desired Outcome** (traceability) | **Shipped.** `build_score_trace` on the package AND every form; the breakdown reconstructs its pillar to the point |
+
+### The nine bugs, and who owns them
+
+**Pre-existing, invisible until C3 made them reachable:**
+1. `pkg_base` UnboundLocalError in `_apply_dismiss_score_credit` - live since 2026-08-16 (C3-G)
+2. **`COALESCE` does not catch a JSON null** - broke dismissal credits outright, in five places (C3-I)
+3. A field edit destroyed earned credits - live since 2026-08-16 (C3-D / F5)
+
+**Mine, found by the owner's live runs:**
+4. `locations` row shape guessed as dict; it is a list of strings (C3-E)
+5. An exempt card advertising +5 points from a measured zero (C3-E)
+6. A non-binding ceiling claiming *"held at 85 = 81"* (C3-H)
+7. A credit applied but not displayed - *"81 earned = 85"* (C3-H)
+8. The same trace defect on four more paths (C3-J)
+9. A dismissed card springing back into the open list (C3-H)
+
+**Plus four fixture faults, all mine**, every one a shape ASSUMED rather than
+read from the writer (C3-E, C3-F).
+
+### What C3 did NOT do
+
+* **F-1 (invented GL class codes) is untouched** and stays open under H6. It is a
+  form-fill grounding defect, not a scoring one; C3 changes what a gap COSTS,
+  never what fills a box.
+* **Q9's `CONFIDENCE_SCORE` -> `evidence_state` switch is closed for V1.** Brent
+  confirmed the weights as-is (2026-08-24) and 3.8 forbids the redesign this pass.
+* **Per-form Structural is unchanged** - see D29.
+* **The live before/after measurement for Brent has NOT been run.** Scores moved
+  in both directions and he has not seen real numbers. D6 applies.
+
+### Standing lesson from this arc
+
+**The scoring engine was right from the first run.** Every failure after that was
+in the layer that EXPLAINS the score - a ceiling claiming to hold a score it was
+not holding, a credit applied but not shown, then shown and unshown again on a
+different path. Each was the same shape: **a number changing without the thing
+that explains it changing too.**
+
+And C3-H closed with the words *"any future patch-the-headline path has the same
+hazard"* - after which one path was fixed and four were left, and the next run
+reproduced the defect somewhere else. **A hazard named in a log entry is not a
+hazard mitigated.** When a defect is "this can happen anywhere that does X", make
+X impossible - one door plus a test that fails on a second one.
 
 ---
 
@@ -2938,6 +3038,10 @@ Principle 7 applies.
 | ID | Question | Blocking | Raised | Answer |
 |----|----------|----------|--------|--------|
 | ~~Q1~~ | ~~Three rows or one?~~ **CLOSED 2026-08-21, not a product question.** Client 1.5: *"retain each under its correct scope"* - retain means show. Three read-only rows, one per policy, shipped in C1-D | - | 2026-08-20 | Answered by the spec |
+| Q14 | **Two double counts the client did not name.** After his own 3.5 / 3.14 removals, `operations_description` is still charged in Structural Tier 2 AND in Exposure, and `total_revenue` is charged in Tier 2 AND in Exposure whenever payroll is also absent. **The owner ruled on these two 2026-08-25 ("remove them as well") and they are DONE** - see C3-D for why the revenue removal could not be naive. This row stays open only for Brent's confirmation, since it changes scores on accounts missing those facts | C3 | 2026-08-25 | **Owner: remove. SHIPPED.** Brent not yet told (D6) |
+| Q15 | **What does Brent think the fill-rate denominator is?** 3.8's *"Not Applicable fields must not reduce fill rate"* only bites if the denominator contains UNFILLED fields; ours counts only FILLED ones, so it is an average confidence rather than a fill rate. **Measured 2026-08-25: the bullet is NOT a no-op** - a box holding the literal `"N/A"` dragged a form from 100 to 75, and a box holding `"None"` scored 0. Both are fixed via confidence labels WITHOUT touching the denominator, which 3.8 forbids this pass. Open question: does he want filled / applicable (a redesign), or is the current measure what he meant? | C3 | 2026-08-25 | |
+| Q16 | **The Figure 20 NAICS chips have been dark since 2026-08-12** - `suggestions` renders only in `ClientQuestionnaire.jsx` and NAICS moved to the PRODUCER audience that day, so a praised feature stopped reaching a screen and nobody noticed. 3.13 now defers classification assistance to Section 19 anyway, so V1 leaves it dark behind `ENABLE_CLASSIFICATION_SUGGESTIONS=false`. **A disclosure, not a decision** - D6: he hears it from us rather than discovering it | C3 | 2026-08-25 | Tell Brent; no action needed |
+| Q17 | **Should a card WITH a fillable field also offer dismiss-with-reason?** Spec section 9 says any dismissal with a written reason earns credit and draws no distinction, but the control renders only on cards with NO fillable field (`answerable = !!rec.field && onAnswer`), so on every other card `Dismiss` sends an empty reason and earns nothing - and a filled text box beside it is silently discarded | C3 | 2026-08-26 | **OWNER 2026-08-26: not now, maybe in future.** Semantics unchanged for V1 |
 | ~~Q2~~ | ~~Do we hold a contradicting client answer for the agent?~~ **ANSWERED 2026-08-21: YES** - *"implement this behaviour properly."* Already built (F7 + C1-D); now the ruled default. See D17 | - | 2026-08-20 | **Brent: yes, hold and let the agent pick** |
 | Q3a | Loss run filed under the DBA, FEIN matches: what tier? **Measured cost of the default (2026-08-21): 5 clean years scores `strong`=100 / `moderate`=92 / `possible`=85 / `no_match`=**25** on the Loss History pillar (`_LOSS_NO_MATCH_CAP`). So "no credit" is a 75-point swing on that pillar, not a nudge.** Engineering default stays `no_match` + the note `NOTE_DBA`, rendered on the Loss History card. **C1-R 2026-08-24: the first draft asked Brent to split "DBA matches the declared DBA" from "trading name only on the loss run" - the second is NOT detectable (`loss_run_identity` only knows DBAs from `pkg["dba"]`; an unseen name is indistinguishable from a different company), so it IS Q3b. Client doc now recommends: a match against a DECLARED DBA is a name match and the normal tiers apply. Implementation if accepted: `dba_ok` joins `name_ok` in the tier branch** | F4 row 4 | 2026-08-20 | **BRENT 2026-08-24: verified match.** *"Treat it as a verified match if the DBA is listed by the applicant and the EIN matches."* SHIPPED (C2-E): a declared-DBA name is a name match; ordinary tiers follow |
 | Q3b | Loss run where FEIN matches but the legal NAME does not (name change, merger): what tier? Client spec only lists name+FEIN. Same default (`no_match`, same 100->25 swing) and the note `NOTE_FEIN_NAME_DIFFERS`, rendered on the Loss History card. **C1-R: client doc recommends 92 + keep the note (a 9-digit FEIN is unique per entity and survives a name change; the name cannot be corroborated)** | F4 | 2026-08-21 | **BRENT 2026-08-24: probable match.** *"Treat it as a probable match and ask for confirmation of the prior name or entity relationship."* SHIPPED (C2-E): `moderate` + confirmation note |
@@ -4050,7 +4154,7 @@ true before any of them can be verified.
 | F5 | **A producer field edit destroys earned dismissal credits.** 3.11 requires credits to survive recalculation. `form_routes.update_pdf` (3.10's "field edit" / "form edit" trigger) rebuilds every score and never calls `active_score_credits`. Only `recalculate_session_scores` re-applies them | grep: `active_score_credits` has zero call sites in `routes/form_routes.py` |
 | F6 | **`physical_address` is asked of NOBODY.** The classifier returns `audience: internal, suppressed: true`, yet its absence raises a soft warning that caps the package at 85 on any property or multi-location account. It IS resolvable from the issue card, so not a dead end | `question_classifier` executed; `issue_registry.py:308` `_r_field("physical_address")` |
 | F7 | **The Figure 20 NAICS suggestion chips are ALREADY DARK in production.** `suggestions` is rendered ONLY by `ClientQuestionnaire.jsx`. `naics_code` is producer-audience + suppressed, and `isClientFacing = bucket === "client" && !suppressed`, so the question never reaches the component that draws the chips. The feature went dark on 2026-08-12 when NAICS was re-routed to the producer; nobody noticed because the tests only cover generation | grep: `suggestions` appears in `ClientQuestionnaire.jsx` only |
-| F8 | **`tier2_score` is a dead parameter in the per-form scorer.** Threaded through five call sites into `calculate_sqs` and never read. Per-form Structural is a hand-written per-form checklist instead - so "Structural Completeness" means two different things on one screen | grep of `calculate_sqs`'s body |
+| F8 | **`tier2_score` is a dead parameter in the per-form scorer** - threaded through five call sites into `calculate_sqs` and never read. **This is CORRECT per spec section 10:** per-form Structural is that form's own ACORD checklist by design. The two rival meanings of "Structural Completeness" on one screen are therefore INTENDED, not a defect. Remove the dead parameter for clarity; do not wire it | grep of `calculate_sqs`'s body; spec section 10 scope table |
 
 #### The double-count claim, measured precisely
 
@@ -4075,7 +4179,7 @@ Measure it, report it, let product decide. See Q14.
 
 | Ruling | Effect |
 |---|---|
-| **"All the things mentioned are for both per form score as well as package wherever applicable"** | Section 3 is NOT package-only. Per-form Structural becomes the same Tier 1 x 40 / Tier 2 x 35 / that form's own fill rate x 25 blend. This RESTORES the intent of `tier2_score` (F8, the dead parameter) and collapses the two rival meanings of "Structural Completeness" into one. The per-form checklists survive as RECOMMENDATION sources; they stop being the score |
+| **"All the things mentioned are for both per form score as well as package wherever applicable"** | **CORRECTED 2026-08-25 after reading the spec.** The word that decides it is *"wherever applicable"*. `SQS_Scoring_Specification` **section 10** explicitly splits the two: *"Structural input - Individual form score: that form's own ACORD checklist, minus an OCR confidence penalty of up to 30 points. Total submission score: Tier 1 x 0.35 + Tier 2 x 0.30 + fill rate x 0.35."* The master plan's 3.2 modifies the SUBMISSION line only, so under the precedence note the per-form structural input **stays a checklist**. Everything else in section 3 - Tier 2 field list, Not-Applicable removal, ceilings, credits, recalculation, traceability - applies to BOTH. `tier2_score` in `calculate_sqs` is therefore dead by DESIGN, not an unwired feature; the earlier reading in this entry was wrong |
 | **"Form fill rate and quality fill rate ... keep them disabled but still apply changes to them"** | `SHOW_COMPLETION_METRICS` stays `false` in `AcordModal.jsx`. The underlying numbers still change. Do not re-enable the section as a side effect of the reweight |
 
 #### ASSUMPTION REGISTER - C3
@@ -4085,10 +4189,10 @@ chose. Listed so a later chat argues with the assumption rather than rediscoveri
 
 | ID | Assumption | Basis | If wrong |
 |----|-----------|-------|----------|
-| **A1** | 3.2's 40/35/25 applies to per-form Structural as well as package | **CLOSED by owner 2026-08-25** - a ruling now, not an assumption | - |
+| **A1** | **RETRACTED 2026-08-25.** 3.2's 40/35/25 is the SUBMISSION Structural formula only. Per-form Structural keeps its own ACORD checklist plus the OCR penalty | `SQS_Scoring_Specification` section 10's scope table states both formulas side by side and the master plan modifies only the submission one. Precedence note: unmodified rules stay authoritative | changing per-form Structural is a change BEYOND both documents and needs Brent's approval |
 | **A2** | A fact may deduct inside a pillar AND independently trigger a ceiling. That is not double counting | 3.9 preserves the ceilings verbatim and adds *"Individual pillar deductions continue to reflect the volume/severity of underlying issues"* | the ceiling model collapses into the pillar model - a far larger rewrite than section 3 describes |
 | **A3** | Double counts NOT named in 3.5 / 3.14 stay exactly as they are. Engineering reports them (Q14), never removes them | Precedence note: no new scoring rules without product approval. Principle 7 | `total_revenue` and `operations_description` keep costing a submission twice |
-| **A4** | The dec-page **contact-information** waiver survives as an APPLICABILITY removal under 3.4 ("Not Applicable fields are removed rather than treated as missing"), even though 3.3 names only producer name | 3.4's applicability language; the waiver is existing behaviour and the plan does not modify it | Tier 1 gets stricter on dec-page-only submissions and those scores drop 20 |
+| **A4** | **RETRACTED 2026-08-25 (C3-B).** The spec grants exactly ONE Tier-1 exemption - producer name, dec-page-only - and the master plan repeats that sentence verbatim. `producer_fields_exempt` waives producer name AND contact, and keys on the PRIMARY document rather than the only one. Both deviations are engineering-added and outside both documents | spec section 3.1; master plan 3.3 | conforming drops dec-page-led Tier 1 by up to 40 points. D6 applies |
 | **A5** | Brent's 1.00 / 0.85 / 0.50 confidence weights stand | Ruling 4, 2026-08-24 (*"Those assignments will do for now"*); the master plan sets no numbers and 3.8 forbids the redesign | every fill rate in the system moves |
 | **A6** | Credit MAGNITUDES are untouched. Only stacking, retirement and survival are fixed | 3.11: *"Retain the existing V1 recommendation-credit mechanism unless separately revised"* | package credits keep being a number measured against a FORM's scale |
 | **A7** | A captured `locations` schedule carrying the address satisfies 3.12's physical-address requirement | 3.12: *"It becomes applicable when the exposure requires it"* - if the schedule already carries it, the exposure's requirement is met | more 85 ceilings than the client expects on property accounts |
@@ -4110,3 +4214,778 @@ chose. Listed so a later chat argues with the assumption rather than rediscoveri
   because he will otherwise discover a praised feature is gone.
 
 **Known / deliberately not done.** Nothing shipped in this entry. No code changed.
+
+### C3-B Second pass - full spec read, 6 more findings, 2 retractions (2026-08-25)
+**Priority:** V1-CRITICAL
+**Trigger:** owner asked for a complete re-analysis with nothing left for later.
+`SQS_Scoring_Specification.docx.pdf` was extracted in full (24,688 chars) and read
+end to end for the first time in this arc. C3-A had been written against the code
+plus the master plan only.
+
+#### What the spec settles, verbatim
+
+| Spec | Quote | Consequence |
+|---|---|---|
+| §3.1 | *"Submission level: Structural = (Tier 1 score x 0.35) + (Tier 2 score x 0.30) + (Fill rate x 0.35)"* then *"Individual form scores use that form's own checklist"* | 3.2's reweight is **submission-only**, stated twice (again in §10's scope table). Per-form Structural keeps its checklist plus the OCR penalty |
+| §3.1 | *"Producer name is not required when the only source document is a declarations page."* | The ONLY Tier-1 exemption the spec grants. It does **not** exempt contact information |
+| §3.1 | *"Certificate-only submissions are judged on two items instead: applicant legal name and effective date."* | Matches `check_tier1`'s certificate branch exactly. No change |
+| §8 | *"What each recalculation runs, in order: ... 7. Re-application of any outstanding earned credits"* | Credit re-application is a SPEC requirement of every recalculation, not just a master-plan wish. F5 is a defect against both documents |
+| §9 | *"They are scoped per form by which recommendations that form actually carries; the submission score uses the full total"* | The package using the session-wide credit total is SPEC'D. C3-A's concern that package credits are "measured on a form's scale" is **retracted** - that is the designed behaviour |
+| §7 | *"the pillars already carry the severity ... Stacking cap penalties on top would count the same gap twice"* | Confirms A2: a fact may deduct in a pillar AND trigger a ceiling. Not double counting |
+| §3.3 | Property Integrity model, incl. *"Valuation method is deliberately excluded from the Tier-2 credits"* | `_calculate_cope_score` matches the spec line for line. No change |
+| §4 | 7 field-level hard stops | All 7 verified present in `evaluate_stops` + `run_field_validations`. No change |
+
+#### New findings
+
+| # | Finding | Evidence |
+|---|---|---|
+| F9 | **Credit stacking on one fact is reachable today.** `_LOSS_RECOMMENDATION_FIELDS` maps **four** distinct messages to `loss_history_years`, two to `fein`, and two to `loss_history_no_prior_losses_indicator`. Each message has its own stable `rec_id`, so two cards for the SAME missing fact can each be dismissed with a written reason and each earn a credit. 3.11: *"never stack on top of the same improvement twice"* | `sqs_service._LOSS_RECOMMENDATION_FIELDS`; `audit_service.active_score_credits` sums rows without deduping on `field` |
+| F10 | **An explicit "No" answer stores an EMPTY value, so it can never count as a completed response.** `answer_semantics.build_fact_envelope` writes `value: interp.value`, which is empty for an ABSENCE, plus `value_state: explicit_no`. `_answered()` reads the state and credits Tier 1 / Tier 2 correctly - but `_fv()` returns empty, nothing stamps on the form, and `confidence_fill_rate` never sees a filled field. 3.8's *"Explicit No may count as a valid completed response"* is unmet | `answer_semantics.py:508` and its own docstring: *"the value ... is empty for an absence"* |
+| F11 | **A conflicting fact receives FULL fill-rate credit.** `CONFLICT_WITHHOLD_KEYS` is an empty frozenset (D16 / Brent Q4), so `_uw_conflicted_keys` is always empty and `_resolve_conflicted_fact_blank` never fires. The conflicted value stamps with an ordinary confidence label and scores 0.85 or 1.00. 3.8's *"Conflicting fields should not receive full completed-field credit"* is unmet. **D16 and 3.8 do not conflict** - D16 says STAMP the value, 3.8 says give it less fill-rate CREDIT | `underwriting_consistency.py:548`; `pdf_service.py:4813` |
+| F12 | **R2 quantified by simulation, not theory.** Removing the four fields from `TIER2_FIELDS` and re-running the live classifier: `total_payroll`, `wc_payroll_period` and `wc_officer_exclusions` all fall to `audience=internal, priority=suppressed` - **we would stop asking anyone for annual payroll.** `wc_xmod` survives only because it is already pinned by name in `IMPORTANT_FIELDS` | executed against `question_classifier` with the removal simulated |
+| F13 | **Per-form `category_breakdown` is computed and never drawn.** `calculate_sqs` returns it; the frontend's per-form section renders only `activeSqs.breakdown` (the six pillar bars). Same shape as F2 - the detail exists in the payload and no surface reads it | `sqs_service.py:5849`; `AcordModal.jsx` per-form breakdown block |
+| F14 | **`_estimate_score_impact` is dead code.** Defined, never called. It reads `TIER1_FIELDS` / `TIER2_FIELDS` so it looks like a consumer of the tier lists and is not | grep: one hit, the definition |
+
+#### Retractions from C3-A
+
+* **A4 is RETRACTED.** C3-A assumed the dec-page **contact-information** waiver survives as an
+  applicability removal. The spec grants exactly one Tier-1 exemption - producer name - and the
+  master plan repeats that sentence word for word. `producer_fields_exempt` waives producer name
+  **and** the whole contact requirement, and it keys on the **primary** document rather than the
+  only one. **Two deviations, both making the exemption wider than either document allows, worth
+  up to 40 Tier-1 points on a dec-page-led package.** Conforming lowers those scores - D6 applies.
+* **The package-credit-scale concern is RETRACTED** - §9 specifies it (see table above).
+
+#### Corrected scope table - which score each item touches
+
+| Item | Submission | Per-form |
+|---|---|---|
+| 3.1 pillar weights | already correct | already correct |
+| 3.2 40/35/25 | **change** | no - spec §3.1 / §10 assign forms a checklist |
+| 3.3 Tier 1 applicability (F3 + A4 retraction) | **change** | **change** - the ACORD 125 checklist calls `producer_fields_exempt` too |
+| 3.4 Tier 1 scoring | already correct | n/a |
+| 3.5 / 3.14 Tier 2 fields | **change** | no - WC fields already live on the ACORD 130 checklist, which is what 3.14 asks for |
+| 3.6 NA out of the denominator | **change** (small) | n/a |
+| 3.7 no-form rescale | **change** | n/a |
+| 3.8 fill-rate rules (F10, F11) | **change** | **change** - `conf_rate` is per form |
+| 3.9 ceilings | already correct | already correct |
+| 3.10 recalculation (F5) | **change** | **change** |
+| 3.11 credits (F9) | **change** | **change** |
+| 3.12 physical address | **change** | no - cross-form issues never cap a form (§10) |
+| 3.13 NAICS | **change** (dead-code removal) | n/a |
+| Traceability (the Desired Outcome) | **change** | **change** (F13) |
+
+#### Risk R6 downgraded - the field-to-fact link already exists
+
+C3-A recorded that 3.8's conflicting-field rule may be unbuildable because conflicts are per
+FACT and the fill rate is per FIELD. **That link is already written and in production:**
+`_resolve_conflicted_fact_blank` resolves a form field to its source fact through
+`_ACORD_FIELD_RULES` and then through the alias map plus `CANONICAL_TO_EXTRACTION`. Extract
+that resolution into one shared helper and both 3.8 bullets become reachable for every
+deterministically-stamped field. Gap-filled fields keep their existing AI labels, which is
+correct - a model's guess has no source fact to be in conflict with.
+
+**Known / deliberately not done.** Nothing shipped in this entry. No code changed.
+
+### C3-C Owner answers verified; Q15 answered by MEASUREMENT, not reasoning (2026-08-25)
+**Priority:** V1-CRITICAL
+**Baseline before any change:** `py -m pytest -q` from `backend/` -> **4291 passed, 1 failed,
+4 skipped, 191.87s**. The single failure is `test_arq_acord125_missing_only` -
+`ImportError: cannot import name 'URL' from 'httpx'`, the documented environment conflict.
+**CLAUDE.md's quoted baseline of "2139 passed / 2 failed" is STALE** - the suite has doubled,
+and `test_normalization` (the second documented failure) now passes.
+
+#### Owner rulings 2026-08-25 (second set)
+
+| # | Ruling | Verified? |
+|---|---|---|
+| 1 | *"remove them as well"* - the two unnamed double counts | **Partially executable.** See below - 3.5 explicitly KEEPS operations description and annual revenue in Tier 2, so the removal can only happen on the Exposure side |
+| 2 | *"recheck it for him"* - the fill-rate denominator | **Done, and the answer is NOT an assurance.** Two real defects found by measurement. See Q15 CLOSED below |
+| 3 | *"follow him properly"* - the dec-page exemption | Accepted. Conform to 3.3: producer name waived ONLY when the ONLY source document is a dec page; contact information NOT waived at all |
+| 4 | *"Download Anyway ... and mark as resolve without any significant value ... should not change"* | **Already correct on all three doors.** Verified, see below |
+
+#### Q15 CLOSED BY MEASUREMENT - both fill-rate bullets are real defects
+
+Executed against the live `confidence_fill_rate`:
+
+```
+one good field                        -> 100
+same form + one "N/A" field           ->  75      <-- NA REDUCES the fill rate
+a field holding the string "None"     ->   0      <-- explicit No gets ZERO credit
+```
+
+* **3.8 bullet 1 is NOT a no-op.** `_fv` returns the literal string `"N/A"` verbatim
+  (confirmed: `_fv({'k':'N/A'},'k') == 'N/A'`), it stamps onto the form, and
+  `confidence_fill_rate` counts it as a filled field at whatever confidence label it
+  carries - dragging the average down. Brent was right; C3-A's reading that the bullet
+  was already satisfied is **retracted**. This is the scoring-side consequence of the
+  extraction gap already recorded as GAP 1 in CLAUDE.md.
+* **3.8 bullet 4 is broken in the opposite direction.** `confidence_fill_rate`'s filled
+  test is `str(val).strip() not in ("", "null", "None")`, so a field legitimately holding
+  `"None"` scores **0**, not credit.
+
+#### NEW FINDING F15 - the client questionnaire DESTROYS "None" before the semantics door
+
+`_clean_answer_ex` (arq_service ~1110) returns `(None, "")` for
+`"n/a", "na", "?", "unknown", "none", "null", "-", "--", "tbd", "unsure"`. A client typing
+**"None"** to a prior-carrier question has the answer **discarded outright** - it never
+becomes a fact, never gets `value_state: explicit_no`, and the gap stays open. The producer
+path reads the same word correctly as an ANSWER via `answer_semantics`.
+
+**Two doors, two behaviours, on the exact question Brent ruled on** (*"we can't treat 'N/A'
+as '0' ... 'No known losses' is a legitimate answer"*). C2-G's claim that
+`answer_semantics` is "the ONE door ... (producer recommendation cards, inline hard-stop /
+warning resolution, client questionnaire)" is **false for the client questionnaire**:
+`_clean_answer_ex` runs FIRST and eats the answer before `apply_arq_answers_to_session`
+ever calls `interpret_answer`. Partially masked in practice because `answer_options`
+(C2-H) offers long option strings such as "No - no claims ..." which survive the filter,
+but a free-text "None" still dies.
+
+#### Ruling 4 verified - all three doors already correct
+
+| Door | Behaviour today | Verdict |
+|---|---|---|
+| "Download Anyway" | `download_routes` only READS `sqs_score` for the cover page and the audit row. No scorer call, no write | correct |
+| Issue Resolved / Dismissed toggle | `/api/issues/status` -> `set_issue_status`, display-only, never calls a scorer | correct |
+| Resolve an issue by typing junk | `resolve_issue` -> `_validate_producer_answer`, which calls `interpret_answer` and returns `(False, message)` when `not interp.accepted`. Verified live: `"TBD"`, `"dont know"`, `"?"`, `"-"` all resolve to `not_stated` / not accepted | correct |
+
+**One hardening worth doing anyway:** `apply_producer_answer_to_session` and the client
+apply path both call `build_fact_envelope` **without** checking `interp.accepted`, so the
+refusal lives only at the route. A future caller bypasses it silently. Move the gate inside
+the function - defence in depth, no behaviour change on today's callers.
+
+#### Ruling 1 - what "remove them as well" can and cannot mean
+
+**3.5 explicitly lists "Operations description" and "Annual revenue" under V1 Tier 2.** They
+cannot be removed from Structural without contradicting the client's own document, so the
+de-duplication has to happen on the EXPOSURE side.
+
+| Exposure deduction | Same trigger as Tier 2? | Action |
+|---|---|---|
+| -20 GL coverage with no class codes at all | no - different fact (class codes) | **keep** |
+| -10 class codes present but no operations description | **yes** | **remove** |
+| -15 GL class code does not match the operations description | no - requires ops to be PRESENT | **keep** |
+| -10 no GL coverage and no operations description | **yes** | **remove** |
+| -10 WC coverage with no class codes / -15 WC mismatch | no | **keep** |
+| -15 no payroll and no revenue anywhere | **partly** - fires only when BOTH are absent, and this is the bucket 3.14 sends PAYROLL to | **OWNER DECISION - see below** |
+
+**The -15 is the one judgement call.** 3.14 says the WC/payroll requirements are *"handled
+through WC/Exposure rules instead"*, so Exposure is payroll's new and only home. Deleting
+the -15 removes revenue's double count AND payroll's home in one stroke; payroll would then
+score only through `-12 WC coverage with no payroll` plus the soft stop. That is defensible
+(GL is revenue-rated; WC is payroll-rated, and each keeps its own rule) and it gives every
+fact exactly one pillar - but it is a scoring change beyond either document and needs an
+explicit owner confirmation, not an inference.
+
+**Known / deliberately not done.** Nothing shipped in this entry. No code changed.
+
+### C3-D Section 3 SHIPPED (2026-08-25)
+**Priority:** V1-CRITICAL
+**Principle(s) touched:** 1 (one canonical fact), 3 (missing does not mean no),
+6 (preserve provenance), 7 (unknown edge cases default to producer review)
+
+**Suite: 4291 passed / 1 failed (baseline) -> 4298+ passed / 1 failed.** The one
+failure is `test_arq_acord125_missing_only` (`ImportError: cannot import name
+'URL' from 'httpx'`), the documented environment conflict, unchanged. Frontend
+production build verified (`vite build`, clean).
+
+#### What shipped, by clause
+
+| Clause | Change | File |
+|---|---|---|
+| 3.1 | none needed - weights already 25/25/15/15/10/10 | - |
+| **3.2** | Structural blend 35/30/35 -> **40/35/25**, as `_W_TIER1` / `_W_TIER2` / `_W_FILL` read by BOTH package scorers. **Submission only** - spec sections 3.1 and 10 print both formulas side by side and 3.2 modifies only the submission one | `sqs_service` |
+| 3.3 | `producer_fields_exempt` narrowed TWICE: keys on the new `_only_dec_page` (every active document) instead of `_doc_type` (the primary one), and **contact information is no longer waived** - producer name is the only exemption either document grants. Applied to BOTH copies of the rule (`check_tier1` and the ACORD 125 checklist) | `sqs_service`, `extraction_pipeline` |
+| 3.4 | none needed - N/A already contributes no -20, and Tier 1 deducts per missing item rather than dividing, so "removed" and "counted as answered" are the same arithmetic. **Verified, not assumed** | - |
+| **3.5 / 3.14** | Tier 2 is now exactly the client's six. `total_payroll`, `wc_xmod`, `wc_payroll_period`, `wc_officer_exclusions` removed; `_TIER2_WC_FIELDS` and the `has_workers_comp` gate deleted with them | `sqs_service` |
+| **3.6** | Not Applicable now leaves the DENOMINATOR (`_tier2_not_applicable`), which is different arithmetic from counting it answered: 6 fields with 1 N/A and 1 missing is **80**, not 83 | `sqs_service` |
+| **3.7** | No-form rescale 53.8/46.2 -> **53.3/46.7**, DERIVED from 3.2's weights rather than typed, so the ratio survives a future change | `sqs_service` |
+| **3.8** | All four rules. New `apply_fact_state_confidence_labels` reads each stamped box back to its source fact and labels it `not_applicable` (excluded from the fill rate entirely), `explicit_no` (full credit) or `conflicted` (half credit) | `pdf_service`, `sqs_service`, `underwriting_consistency`, `extraction_pipeline` |
+| 3.9 | none needed - verified against the client's four worked examples and the no-stacking rule, now test-pinned | - |
+| **3.10** | `form_routes.update_pdf` re-applies outstanding credits. Verified already-correct: Download Anyway never touches a score, the issue Resolved/Dismissed toggle is display-only, and a junk resolve ("TBD", "?") is refused by `_validate_producer_answer` | `form_routes` |
+| **3.11** | One credit per FIELD, largest of the competing rows | `audit_service` |
+| **3.12** | Auto garaging added as a trigger (3.12 names it); a `locations` schedule that already carries an address SATISFIES the requirement instead of warning | `cross_form_validator` |
+| **3.13** | `ENABLE_CLASSIFICATION_SUGGESTIONS`, default **off** | `settings`, `arq_service` |
+| **Desired Outcome** | `build_score_trace` - the ledger, emitted BY the scorer, on both the package and every form | `sqs_service`, `AcordModal.jsx` |
+
+#### The owner's ruling on the two unnamed double counts
+
+*"remove them as well"*. Executed, but NOT where it first appears: **3.5
+explicitly lists Operations description and Annual revenue as V1 Tier 2 fields**,
+so they cannot leave Structural. The de-duplication happened on the EXPOSURE
+side, and only for deductions that fire on the SAME condition Tier 2 charges for:
+
+* **removed** - "class codes present but no operations description" (-10) and
+  "no GL coverage and no operations description" (-10);
+* **removed** - "no payroll and no revenue anywhere" (-15);
+* **kept** - missing CLASS CODES (-20, a different fact), the ops/class-code
+  MISMATCH (-15, which requires ops to be PRESENT and so can never collide),
+  and "WC coverage with no payroll" (-12).
+
+**The -15 was the delicate one and the reasoning is worth keeping.** It was
+simultaneously revenue's second charge AND, after 3.14, payroll's only home.
+Deleting it naively would have contradicted 3.14's own instruction that those
+fields are *"handled through WC/Exposure rules instead"*. Resolved by giving each
+fact exactly one home: revenue -> Structural Tier 2; payroll -> the WC bucket
+(-12) plus the "GL coverage with no revenue or payroll" warning, which is a
+CEILING and not a deduction (3.9 and spec section 7 keep those separate). A
+GL-only account is revenue-rated and a WC account is payroll-rated, so neither
+loses a check that was ever meaningful for it.
+
+#### A seam defect found while implementing 3.6, and fixed
+
+`answer_semantics.build_fact_envelope` stores an answered N/A as
+``value: "" + value_state: "not_applicable"``. `fact_state.derive_value_state`
+re-derives from signals and looked only for an older ``not_applicable: True``
+flag, so it returned `not_stated`. Measured: `fact_answered(env)` returned True
+while `value_state_of(...)` returned `not_stated` **on the same envelope**. Two
+modules, two vocabularies, one fact.
+
+That made 3.6 unreachable for any human answer, and left
+`_drop_not_applicable_questions` re-asking questions already answered. Fixed at
+the one door, deliberately narrow so it can only REFINE and never override:
+gated on a BLANK value, honouring only `not_applicable` / `explicit_no`, and
+placed ahead of the package-level derivations so an explicit human answer
+outranks "we could not read this".
+
+#### F7 - a regression to DISCLOSE, not a question
+
+**The Figure 20 NAICS chips have been dark since 2026-08-12.** `suggestions` is
+rendered by exactly one component, `ClientQuestionnaire.jsx`; NAICS and SIC moved
+to the PRODUCER audience that day on the client's earlier instruction, and a
+producer-audience question never reaches that component. We kept computing
+candidates nobody could see. 3.13 now defers classification assistance to Section
+19 anyway, so the flag makes an accidental state deliberate. **Tell Brent** - he
+praised that feature (D6). `naics_suggester` and its 44 tests are untouched; one
+env var restores it.
+
+#### Tests
+
+`tests/test_c3_sqs_integrity.py` - **30 tests**, four of them anti-rot for defects
+that had already happened once:
+* `test_tier2_removals_are_still_asked_for` - measured before the pin:
+  `total_payroll`, `wc_payroll_period`, `wc_officer_exclusions` all fell to
+  audience=internal / suppressed. **Primble would have stopped asking anyone for
+  annual payroll.** `wc_xmod` survived only because it was separately named.
+* `test_the_trace_reconciles_*` - the ledger's contributions must sum to the raw
+  score, and the Structural rows must reconstruct their own pillar. Drift now
+  fails the build instead of reaching a producer.
+* `test_one_improvement_earns_one_credit` - 8 + 5 on one field is 8, not 13.
+* `test_no_fact_is_deducted_in_two_pillars` - driven through the REAL scorers,
+  because a comment claiming a deduction was removed is not evidence.
+
+Updated rather than deleted, each with the superseded rule recorded in the
+docstring: `test_check_tier2_wc_fields_excluded_when_no_wc` (now
+`test_tier2_carries_no_wc_or_payroll_field_at_all`),
+`test_the_dec_page_exemption_is_shared_by_both_scorers`,
+`test_the_card_is_still_raised_even_when_exempt`,
+`test_wi3_structural_rows_are_client_approved`, and the two
+`_attach_classification_suggestions` tests (now behind a `suggestions_on`
+fixture, so Section 19 does not inherit dead code).
+
+#### Blast radius - tell Brent BOTH directions (D6)
+
+| What | Direction |
+|---|---|
+| WC accounts: four fields no longer docked in Structural | UP |
+| Operations description and revenue no longer charged twice | UP |
+| A location schedule carrying the address no longer trips the 85 physical-address ceiling | UP |
+| Fields holding a literal "N/A" no longer drag the fill rate down | UP |
+| An answered "None" now earns fill-rate credit instead of zero | UP |
+| Credits survive a field edit instead of being wiped | UP |
+| Dec-page-led packages: contact information is owed again, and the producer-name waiver needs EVERY document to be a dec page | **DOWN, up to 40 Tier 1 points** |
+| Two cards about one missing fact now pay once | DOWN |
+| Conflicting values earn half fill-rate credit instead of full | DOWN |
+| Weight moved off Form Fill Rate (35% -> 25%) | mixed, per account |
+
+**Not measured on live sessions yet.** The before/after on real packages is the
+next step and goes to Brent before anyone sees a moved number.
+
+#### Known / deliberately not done
+
+* **Per-form Structural is untouched** and stays that form's own ACORD checklist
+  plus the OCR penalty. The owner's *"for both per form as well as package"*
+  ruling carries the words *"wherever applicable"*, and this is the one place it
+  is not: spec sections 3.1 and 10 print the two formulas side by side, 3.2
+  modifies only the submission one, and the precedence note keeps an unmodified
+  rule authoritative. `tier2_score` in `calculate_sqs` is therefore dead BY
+  DESIGN - remove it for clarity if you like, do not wire it.
+* **Q15 is CLOSED by measurement** (see C3-C): both 3.8 bullets were real
+  defects, not the no-ops an earlier reading claimed. The denominator itself is
+  unchanged, per 3.8's *"do not redesign the full confidence-weighting
+  algorithm in this V1 pass"*.
+* **`apply_fact_state_confidence_labels` covers deterministically-stamped fields
+  only.** A gap-filled box has no source fact, so it can be neither in conflict
+  with the documents nor a recorded Explicit No. That is correct, not a gap.
+* **The five old Structural sub-rows survive as a fallback** for callers that
+  pass no `structural_parts` (stored payloads), so an old session renders detail
+  rather than an empty panel.
+
+### C3-E FIRST LIVE RUN - 4 of 8 scenarios PASS, 2 code bugs, 2 fixture faults (2026-08-25)
+**Priority:** V1-CRITICAL
+
+The owner ran S1-S8 and sent the panels back. Recorded here in full, because two
+of the four problems were MINE and both are instances of a rule this file already
+carries.
+
+#### PASSED, exactly as documented
+
+| Scenario | Evidence |
+|---|---|
+| **S1** | Tier 1 **80%**, only "Contact information" missing, producer name exempt. Structural 91 = 32 + 35 + 24.25 |
+| **S2** | Tier 1 **60%**, BOTH producer name and contact owed. Package **65 against S1's 69** - the -4 predicted in C3-C |
+| **S3** | Tier 2 **100%** with no payroll, X-mod or WC data anywhere. Zero WC recommendations. NAICS and SIC sit in the producer "Agency" bucket, **no suggestion chips** |
+| **S6B** | The control fires - physical-address warning present with no location schedule |
+
+The **How / Why** lines rendered on every scenario ("69 earned, held at 85 = 69"
+plus the naming reason), and the Structural rows reconstruct their pillar to the
+point on all of them. That was the headline check for the whole of C3.
+
+#### BUG 1 (mine) - S6A warned with two street addresses in its schedule
+
+`_check_identity_address_distinction`'s new satisfied-check tested
+`isinstance(row, dict)` only. **`facts["locations"] is a list of plain
+STRINGS`** - `extraction_service` line ~6468 ends with
+``facts["locations"] = [str(o["address"]) for o in consolidated if o.get("address")]``.
+The dict shape survives only on paths that skip consolidation, so the check never
+fired on a real session.
+
+I guessed the row shape from schedule capture instead of reading the writer -
+the same class of error as D22 ("gate fixtures must be built from the LIVE index
+shape") one layer over. Fixed to accept both shapes.
+
+The second cut then let `"Location 1"` through, because it has a digit and
+letters. A street address needs **three tokens and a digit**: that separates
+"1450 Lantern Court" from both "See attached" (no digit) and "Location 1" (two
+tokens). Five cases now pinned.
+
+#### BUG 2 (mine) - an EXEMPT card advertised "up to +5 pts"
+
+On S1 the producer-name card offered +5 while the pillar it belongs to could not
+move at all. `_measure_recommendation_impacts` MEASURED zero correctly, then fell
+into its `elif declared > 0 and headroom > 0` fallback - the branch that exists
+because "no movement" might mean the probe was the wrong shape for the field.
+True in general; wrong here, because the emitter already knows the check was
+excluded from the pillar.
+
+The ACORD 125 checklist now stamps `unscored: True` on a card whose check is not
+scored, and the measurer returns `(0, True)` for it before any fallback.
+
+**My own test passed while this was live.**
+`test_the_card_is_still_raised_even_when_exempt` supplied `contact_name`, so the
+pillar sat at 100, headroom was 0, and the fallback returned 0 for the wrong
+reason. Rewritten to leave contact MISSING so there is real headroom for a bad
+fallback to claim, and to assert the contact card is still worth >0 - otherwise
+it would pass against a scorer that simply zeroed everything.
+
+#### FIXTURE FAULT 1 - S4 proved nothing
+
+S4 omitted the operations description. Extraction READ one anyway, out of the
+class code's classification text ("Building Material Dealers"), so Tier 2 came
+back **100** and there was no gap to observe.
+
+Redesigned: the absent facts are now **revenue and payroll**. A dollar figure
+that is not printed cannot be inferred from a trade name. Measured on the new
+fixture: Tier 2 **83** listing "Annual revenue", Exposure Payroll/Employee
+**92 (-8)** - and the -8 is the "employees but no WC coverage" rule, a different
+check. Before the de-duplication it would have been 77 (-23).
+
+#### FIXTURE FAULT 2 - S7 never reached the scorer
+
+Two conflicting FEINs tripped the **"Possible multiple submissions" integrity
+gate** before form generation, so the ceiling and the trace - the headline check
+for all of C3 - never rendered.
+
+Redesigned as a SINGLE document with the effective date AFTER the expiration
+date. That is field-level hard stop #1 in spec section 4, one document, nothing
+standing in front of the scorer. Verified: `evaluate_stops` returns the invalid-
+period hard stop and `_resolve_cap` returns `(60, <that reason>)`.
+
+#### OPEN - S8 could not be tested, and it is a real product question
+
+The owner reported: *"I dismissed but i couldnot able to write, i just got to
+dismiss it altogether"*, and both cards recorded **"Dismissed without reason"**,
+so no credit was earned and the score did not move.
+
+**Cause:** in `AcordModal`, `answerable = !!rec.field && typeof onAnswer === "function"`.
+The dismiss-reason picker renders only on the NON-answerable path; an answerable
+card's Dismiss calls `onDismiss(rec, sqsScore, "")` with an empty reason. Every
+recommendation in the C3 test data has a fillable field, so the credit mechanism
+was unreachable throughout.
+
+**Not changed unilaterally.** There is a defensible design behind it - if you can
+answer a card, answer it, and credits are for gaps you cannot fill - but spec
+section 9 states plainly *"Dismiss a recommendation with a written reason ->
+EARNS CREDIT"* and draws no such distinction. **Q17** raised. 3.11's other three
+clauses (added to raw before ceilings, retire when filled, never stack) are
+covered by unit tests and unaffected.
+
+#### Improvement shipped from the run - Exposure buckets now show their arithmetic
+
+Exposure sub-rows rendered a completeness WORD. The S4 fix moves Payroll/Employee
+from 77 to 92, which reads as "Strong" versus "Complete" and proves nothing to
+anyone. The buckets reconstruct their pillar exactly (headline = 100 minus the
+sum of the deductions), so each row now carries `deducted` and the panel prints
+`-8` or `no deduction`. Same principle as the Structural rows, applied to the
+other pillar that can support it.
+
+#### Verification
+
+Backend suite re-run clean after all edits. Frontend production build clean.
+`tests/test_c3_sqs_integrity.py` is **37 tests**, up from 30: the strengthened
+exempt-card test, five parametrised location-schedule shapes (including the two
+label cases that must still warn), and the auto-garaging trigger.
+
+### C3-F SECOND LIVE RUN - both code fixes CONFIRMED; 2 more fixture faults, both mine (2026-08-26)
+**Priority:** V1-CRITICAL
+
+#### CONFIRMED FIXED by the run
+
+| | Evidence from the owner's panels |
+|---|---|
+| **S6A** (BUG 1) | The physical-address warning is **GONE**. Two warnings remain, both unrelated (AOP deductible, crime coverage). S6B still fires it, so the control holds |
+| **S1** (BUG 2) | The producer-name card now shows **no points line at all**; contact info still reads "up to +5 pts" |
+| **Tooltip** | Sub-rows render bare percentages - "Core Application (Tier 1) 80%" - with the arithmetic moved into the hover, per the owner's 2026-08-25 instruction |
+| **S4** (the double count) | **Exposure Revenue/Sales = 100%** while Structural Tier 2 = 83% carrying "Annual revenue". Revenue is charged ONCE. Structural reconciles: 100x0.40 + 83x0.35 + 92x0.25 = 92.05 -> **92**, the printed pillar |
+| **Ceiling + trace** | Rendered on every scenario. S7 printed **"71 earned, held at 60 = 60"** with a named reason |
+
+#### FIXTURE FAULT 3 (mine) - S7 fired the WRONG hard stop
+
+The panel's Why read *"Policy Effective Date: documents disagree (09/15/2026,
+09/29/2027)"* - on a scenario that is now a **single document**. Nothing can
+disagree with itself across documents.
+
+Cause: `_gl_coverage` hardcoded the module-level `EFF`/`EXP`, so S7 printed its
+deliberately-invalid proposed period AND a perfectly valid policy period in the
+same file. Two effective dates in one document tripped the date-conflict check,
+which won the race to become the cap reason.
+
+**The ceiling still read 60 and the trace still rendered** - so C3's mechanism
+was never in doubt. But a fixture that passes for the wrong reason is worse than
+one that fails, because it retires a question that was never asked.
+
+Fixed: `_gl_coverage(..., eff=, exp=)` and S7 passes its own dates. A new
+self-check refuses to ship S7 if the ordinary `EFF`/`EXP` appear anywhere in it.
+Verified: the file now prints one period only, `09/30/2027 to 09/30/2026`.
+
+#### FIXTURE FAULT 4 (mine) - class codes were never extracted, on ANY scenario
+
+Exposure's Operations bucket was docked on S1 (72%), S4 (80%), S7 (80%) and S8
+alike, and *"GL coverage detected but no class codes found"* was the cap reason
+on several. Not a scoring defect - the fact was **empty**.
+
+`gl_class_codes_by_location`'s extraction contract is
+``[{"location": string, "codes": [string]}]`` and my schedule-of-hazards table
+had **no LOCATION column**, so there was nothing to populate it with. Pure
+fixture noise, and it masked what each scenario was actually testing.
+
+Fixed: the table now leads with LOCATION.
+
+#### S8 - the card exists, my INSTRUCTIONS named the wrong one
+
+The run did produce a card carrying a reason dropdown - *"Loss run valuation
+date not detected - recency unverified"*, whose `loss_recommendation_field` is
+None. The credit path is reachable.
+
+But the document classified as a **loss run** rather than an application (the
+panel shows *"Loss runs attached"*, *"Matched on: name"*, Loss History 60), so
+the card I predicted - "Loss runs requested / pending" - never appeared, and the
+owner was hunting for text that was not there.
+
+**The fixture is NOT being changed.** It already produces what the test needs,
+and fighting the classifier to hit an exact message would trade a working
+scenario for a guess. The INSTRUCTIONS now identify the card **by its shape** -
+"the one card showing a Select a reason dropdown" - which cannot go stale when
+classification shifts. Recorded because the lesson generalises: pin a live test
+to a STRUCTURAL property, never to a sentence a model chose.
+
+#### Standing lesson from C3-E and C3-F together
+
+Four fixture faults across two runs, all mine, and every one was a shape I
+ASSUMED rather than read: the `locations` row shape, the ops-description that
+extraction could infer, the integrity gate standing in front of the scorer, and
+a helper printing its own dates. **The self-verification block in the generator
+caught none of them**, because each check tested what I remembered to doubt.
+It now also refuses to ship S7 with a contradictory period - one more doubt,
+added after the fact, which is the honest pattern.
+
+### C3-G THIRD LIVE RUN - S7 PASSES; a MONTHS-OLD credit bug found (2026-08-26)
+**Priority:** V1-CRITICAL
+
+#### S7 PASSES - the headline check for all of C3
+
+*"How: **77 earned, held at 60 = 60**"*, and *"Why: Effective date is on or
+after expiration date - policy period is invalid"*. One document, one hard stop,
+the ceiling binding and naming itself. The date-conflict that masked it in C3-F
+is gone, and the LOCATION column fix landed too: **Operations 100%**, Exposure
+92% (the residual 8 is the employees-without-WC rule, as designed).
+
+#### THE BUG - a debug string had been eating the credit response for months
+
+Owner, verbatim: *"I selected an option from dropdown and clicked submit ...
+Dismissed **+6 pts credited** ... But score didnot change."*
+
+`audit_routes._apply_dismiss_score_credit` binds `pkg_base` **only inside its
+LEGACY branch**, then interpolates it unconditionally in the success log:
+
+```python
+if existing_pkg_raw is not None:
+    new_pkg_score = final_score_with_credits(...)      # pkg_base NEVER bound
+else:
+    pkg_base = ...                                      # bound only here
+...
+logger.info(f"... pkg({pkg_base}+{score_impact}->{new_pkg_score} ...)")
+```
+
+Every session scored since `raw_sqs_score` shipped (2026-08-16) takes the first
+branch, so that f-string raises **UnboundLocalError**, the blanket
+`except Exception` catches it, and the function returns
+`new_package_sqs_score: None`.
+
+**The database UPDATE runs BEFORE the log line.** So the credit was genuinely
+applied and committed - it simply never reached the response, the frontend had
+nothing to apply, and the producer watched a card announce "+6 pts credited"
+beside a score that did not move. Reproduced exactly before touching anything.
+
+**NOT introduced by C3.** It has been live since 2026-08-16 and means no
+dismissal has visibly moved an on-screen score since. It surfaced now only
+because C3-F finally made the credit path reachable in a test.
+
+**Fixed, in two parts:**
+1. `pkg_base` is bound on both branches.
+2. **The success log now sits in its own `try`.** The work is committed by that
+   point; a diagnostic must never be able to convert a completed credit into a
+   null result. The outer handler also gained `exc_info=True` - the bare message
+   made an UnboundLocalError read exactly like a database failure.
+
+Guarded by `test_the_dismiss_credit_response_survives_its_own_logging`, which
+asserts both properties on the source (the function needs a live database, so
+the structure is what can be pinned).
+
+**Lesson worth keeping: the observability code is production code.** A log line
+took out the feature it was describing, and the blanket `except` turned a
+NameError into a silent wrong answer. Any `except Exception` that wraps both the
+work AND the reporting of it can lose work that already succeeded.
+
+#### Display fix - a ceiling that is not binding must not claim to be
+
+Owner asked what *"81 earned, held at 85 = 81"* means. The answer: the ceiling
+exists (warnings are open) but sits ABOVE the score, so it holds nothing -
+`min(81, 85)` is just 81. Saying "held at 85 = 81" describes a cap that did not
+happen, and 81 is neither held nor equal to 85.
+
+The How line now names the ceiling **only when it actually binds**. Otherwise it
+reads *"81 earned = 81"* with the ceiling explained in the hover, and the Why
+line is suppressed for the same reason - it is the reason a ceiling EXISTS, not
+a reason the score was reduced. S7's binding case is unchanged and still loud,
+because that is the case worth seeing.
+
+### C3-H FOURTH LIVE RUN - the credit WORKS; two display defects it exposed (2026-08-26)
+**Priority:** V1-CRITICAL
+
+#### CONFIRMED WORKING
+
+| | Evidence |
+|---|---|
+| **The credit** | **A = 81 -> B = 85.** The C3-G fix landed once the backend was restarted (no `--reload` is configured, so the running process had held the pre-fix module in memory - which is why the third run looked identical to the second) |
+| **Non-binding ceiling wording** | A read *"81 earned = 81"*, not the old *"held at 85 = 81"*. A ceiling above the score no longer claims to be holding it |
+| **S7** | Passed in C3-G: *"77 earned, held at 60 = 60"* with the invalid policy period named |
+
+**Seven of eight scenarios now verified live.**
+
+#### DEFECT 1 (mine) - "81 earned = 85", a sum that does not add up
+
+B rendered **"81 earned = 85"**. The credit was applied but never displayed: the
+dismiss handler patched only `package_sqs_score` and `tier`, leaving
+`credits_applied` at 0 and `score_trace.arithmetic` stale. So the How line -
+the one element built specifically to make the arithmetic reconcile - printed
+arithmetic that does not.
+
+The backend already returns `credits_total`, `package_raw` and
+`package_ceiling` (added in C3-G for diagnosis). The handler now applies all
+three, so the line reads *"81 earned + 6 credited, held at 85 = 85"* and the
+`binds` test sees 87 > 85 and correctly says "held".
+
+**Worth noting: I built the reconciliation and then broke it from the one code
+path that changes a score without recomputing it.** The trace is emitted by the
+scorer, but this path patches the score WITHOUT the scorer, so nothing enforced
+the invariant. Any future patch-the-headline path has the same hazard.
+
+#### DEFECT 2 - the dismissed card sprang back into the open list
+
+Owner: *"it never reached the reviewed block, i could see it again"*.
+
+`loadDismissedRecs` does `setDismissedRecs(new Set(next.keys()))` - a wholesale
+REPLACE from the server's reviewed list. The dismiss handler adds the id
+optimistically and then calls it, so whenever that list has not caught up the
+optimistic entry is wiped: the card leaves Reviewed and returns to the open
+list, while the score change (already committed) stays. The producer sees a card
+they just dismissed, still open, and a score that moved for no visible reason.
+
+Fixed by passing the just-dismissed id and retaining it, plus its locally-known
+reason and credited points, when the server has not returned it yet. Safe
+against the reopen path: reopen deletes its id AFTER this runs and never passes
+one, so nothing can be resurrected.
+
+#### The owner's question, answered - Submit versus Dismiss
+
+*"if i dismiss and there is something in the text box then it is sent with
+dismiss, then what is apply for"*
+
+It is **not** sent. `dismiss = () => onDismiss(rec, sqsScore, "")` - always an
+empty reason, whatever is typed. Only the **Submit** button uses the input, and
+it means different things per card type:
+
+| Card | Submit does | Dismiss does |
+|---|---|---|
+| Has a fillable field (`Type your answer…`) | Writes the value as a FACT, re-runs the pipeline, stamps the form. The pillar earns the points | Hides the card. Empty reason, no credit. **The typed text is discarded** |
+| No fillable field (`Select a reason…`) | Dismisses WITH the reason -> credit | Hides the card. No reason, no credit |
+
+So: **Apply changes the SUBMISSION. Dismiss-with-reason changes only the SCORE**
+and records a human judgement that the gap cannot be closed.
+
+**Known trap, NOT fixed:** on an answerable card a filled text box sits beside a
+Dismiss button that throws it away. The owner ruled on the related question
+(*"not now maybe in future"* - should answerable cards offer dismiss-with-reason)
+so the semantics stay as they are for V1. Recorded here rather than silently
+left: the discard is invisible to the producer.
+
+### C3-I THE REAL CAUSE, from the owner's logs - COALESCE does not catch a JSON null (2026-08-26)
+**Priority:** V1-CRITICAL
+
+**C3-G's diagnosis was WRONG and is corrected here.** The `pkg_base`
+UnboundLocalError is real and worth having fixed, but it was never the one
+biting: the failure happens EARLIER, so `pkg_base` was never reached.
+
+#### The traceback (owner's log, and the reason `exc_info=True` was added)
+
+```
+ERROR routes.audit_routes: Failed to apply dismiss score credit:
+      cannot extract elements from a scalar
+  File "audit_routes.py", line 199, in _apply_dismiss_score_credit
+    affected_rows = await conn.fetch(
+asyncpg.exceptions.InvalidParameterValueError: cannot extract elements from a scalar
+```
+
+`COALESCE(ge.value->'sqs'->'recommendations', '[]'::jsonb)` substitutes only
+when the value is **SQL NULL**. A stored JSON **null** - what a session carries
+whenever a list was written as `None` - is a perfectly valid jsonb value, so it
+passes straight through COALESCE into `jsonb_array_elements`, which refuses a
+scalar.
+
+**This throws BEFORE the package UPDATE.** So the credit never reached the
+database at all, and C3-G's claim that "the credit really was applied, it just
+never reached the response" was wrong. The audit row was written (a different
+statement, already committed), which is why the card said *"+6 pts credited"*
+next to a score that had genuinely not changed.
+
+Why it looked intermittent: the session that DID work (81 -> 85) had proper
+arrays in every form's `sqs.recommendations`. A session where one form stored
+`null` there takes the fault. Same code, different data shape.
+
+#### Fixed everywhere, not just where it threw
+
+`jsonb_typeof(x) = 'array'` (or `'object'`) is the only test that means "is this
+really a list". Applied to **five** call sites - the four others were the same
+landmine waiting for a different session shape:
+
+| File | What was unguarded |
+|---|---|
+| `routes/audit_routes.py` | `sqs.recommendations`, the `$2` credit array, `generated_forms`, `hard_stops`, `soft_stops`, `cross_issues_last` |
+| `repositories/session_repository.py` | `generated_forms` (x2) |
+| `routes/form_routes.py` | `generated_forms` (x2) |
+| `scripts/restore_session_facts.py` | `docs` |
+
+Guarded by `test_no_live_sql_expands_jsonb_behind_only_a_coalesce`, which scans
+`routes/`, `repositories/` and `services/` for any jsonb expansion whose
+argument is a bare COALESCE and fails the build naming file and line.
+
+#### Two display fixes from the same run
+
+* **"81 earned = 85"** - the dismiss handler patched only the headline score,
+  leaving `credits_applied` at 0 and `score_trace.arithmetic` stale, so the one
+  element built to make the arithmetic reconcile printed arithmetic that does
+  not. It now applies `credits_total` / `package_raw` / `package_ceiling` from
+  the response and reads *"81 earned + 6 credited, held at 85 = 85"*.
+* **The dismissed card sprang back into the open list.** `loadDismissedRecs`
+  REPLACES the set from the server's reviewed list, wiping the optimistic entry
+  whenever that list has not caught up. It now retains the just-dismissed id and
+  its locally-known reason and points; the reopen path is unaffected because it
+  deletes its id afterwards and never passes one.
+
+#### Owner request - a recalculation indicator
+
+*"unless all the recalculation gets done add some spinner or something"*.
+The How line now reads **"Recalculating the score…"** while a dismissal is in
+flight, cleared in a `finally` so a failed request can never leave it spinning.
+Directly relevant to this arc: with no indicator the producer cannot tell "still
+working" from "nothing happened", which is exactly how a genuinely broken credit
+survived three test runs.
+
+#### THE LESSON, and it is about me
+
+Three diagnoses in three messages, two of them wrong, and the thing that
+actually settled it was **one traceback from the owner's logs**. `exc_info=True`
+went in on a hunch in C3-G and immediately earned its place.
+
+A blanket `except Exception` that logs only `str(ex)` turns every failure into
+the same sentence. `cannot extract elements from a scalar` reads exactly like a
+database problem, an UnboundLocalError reads exactly like a database problem,
+and neither is distinguishable from the other without a stack. **Stop reasoning
+about which of several hypotheses is true and go get the traceback.**
+
+### C3-J S8 PASSES END TO END - and the trace defect recurs on a fourth path (2026-08-26)
+**Priority:** V1-CRITICAL
+
+#### S8 PASSES. C3's last scenario is closed.
+
+| Step | Result |
+|---|---|
+| **A** | **81** - *"81 earned = 81"*, no ceiling claimed |
+| **B** dismiss with a reason | **85** - *"81 earned + 6 credited, held at 85 = 85"*, Why names the open warning, card sits in Reviewed with its reason and badge |
+| **C** edit a field, save | **85** - **the credit SURVIVED** |
+
+Step C is the 2026-08-16 defect (`form_routes.update_pdf` rebuilt every score and
+never re-applied credits) proven fixed against a live session. **All eight C3
+scenarios are now verified live.**
+
+The 85 rather than 87 is correct and is the ceiling doing its job: 81 + 6 = 87
+held at the 85 warning ceiling, with two points earned, stored, and released the
+moment the warning clears - Brent's own rule that credits land on the RAW score
+before the ceiling.
+
+#### THE DEFECT - "81 earned = 85" came back at step C
+
+B was right and C was wrong, on the same session, minutes apart. The edit path
+REBUILDS the score (fresh trace, `credits: 0`) and re-applies the credit
+**afterwards** - patching the headline and leaving `score_trace.arithmetic`
+holding the scorer's zero.
+
+**FOUR independent copies** were doing this: package and per-form in
+`form_routes.update_pdf`, and package and per-form in
+`arq_service.recalculate_session_scores`. A fifth wrote the DB directly from
+`audit_routes`, so a plain page reload after a dismissal resurrected it too.
+
+**Fixed with one door.** `sqs_service.apply_credits_to_score(sqs, credits, cap,
+score_key)` moves the headline, `credits_applied` and the trace together, and is
+now the only way in. The SQL path updates the stored trace in the same statement
+(`create_missing=false`, so a payload without a trace is left alone rather than
+gaining half-built keys).
+
+Guarded by two tests: one drives the helper and asserts the trace carries the
+same credit and displayed score as the headline; the other fails the build if
+`form_routes` or `arq_service` ever calls `final_score_with_credits` directly
+again.
+
+#### THE LESSON - I wrote the warning and then did not act on it
+
+C3-H closed with, verbatim: *"Any future patch-the-headline path has the same
+hazard."* I wrote that, shipped the fix for ONE path, and left the other four.
+The next run reproduced the identical defect somewhere else.
+
+**A hazard named in a log entry is not a hazard mitigated.** When a defect is
+"this can happen anywhere that does X", the fix is to make X impossible - one
+door plus a test that fails on a second one - not to fix the instance in front
+of you and write the general case down for later. Three of this session's
+recurrences (the second stamping copy, the second cap copy, and now the fourth
+credit copy) are the same shape as defects this file already documents.

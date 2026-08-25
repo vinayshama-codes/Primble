@@ -1921,6 +1921,65 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             logger.error(f"package_sqs recompute (edit) failed: {_pkg_ex}", exc_info=True)
             pkg_sqs = None
 
+        # ── C3 3.11 / spec section 8: credits SURVIVE a recalculation ────────
+        # "Credits must survive recalculation where legitimately earned", and
+        # the spec's ordered list of what every recalculation runs ends with
+        # "7. Re-application of any outstanding earned credits".
+        #
+        # This path rebuilds every score wholesale and did NOT do step 7, so a
+        # producer who had earned points by dismissing a recommendation with a
+        # written reason lost them the moment they edited any field on any form.
+        # `arq_service.recalculate_session_scores` gained this on 2026-08-16 and
+        # this second rebuild path was missed - the same second-copy defect this
+        # codebase keeps paying for.
+        #
+        # Credits are added to the RAW (uncapped) score and then re-capped, so
+        # clearing the stops later still releases the full earned value. A
+        # credit whose field the producer just FILLED retires inside
+        # active_score_credits rather than stacking on the pillar improvement it
+        # was standing in for - which is exactly what an edit tends to do, so
+        # this must run AFTER the recompute above, on the new facts.
+        try:
+            from services.audit_service import active_score_credits
+            from services.sqs_service import _resolve_cap, apply_credits_to_score
+
+            _credits_total, _credit_rows = await active_score_credits(
+                req.session_id, facts=updated_facts,
+            )
+            if _credits_total:
+                # Per-form ceiling uses FIELD-LEVEL stops only; the package
+                # ceiling adds the cross-form stops. Same split the scorers use.
+                _cf_hard_msgs = [
+                    i.get("message") for i in _cf_deduped
+                    if isinstance(i, dict) and i.get("type") == "hard_stop"
+                ]
+                _form_cap, _ = _resolve_cap(fresh_hard_stops, fresh_soft_stops)
+                _pkg_cap, _ = _resolve_cap(
+                    fresh_hard_stops, fresh_soft_stops, hard_cross=_cf_hard_msgs,
+                )
+                # ONE DOOR (apply_credits_to_score): the headline AND the trace
+                # move together. Patching them separately is what put
+                # "81 earned = 85" back on screen after every field edit.
+                for _fdata in (generated or {}).values():
+                    apply_credits_to_score(
+                        _fdata.get("sqs") if isinstance(_fdata, dict) else None,
+                        _credits_total, _form_cap, "sqs_score",
+                    )
+                apply_credits_to_score(
+                    pkg_sqs, _credits_total, _pkg_cap, "package_sqs_score",
+                )
+                logger.info(
+                    "field edit: re-applied %d credit point(s) from %d dismissal(s) "
+                    "(session %s)", _credits_total, len(_credit_rows), req.session_id,
+                )
+        except Exception as _cx:
+            # Non-fatal, exactly as on the ARQ path: worst case the scores keep
+            # their freshly-computed values, i.e. the prior behaviour.
+            logger.error(
+                f"field edit: credit re-application failed (non-fatal): {_cx}",
+                exc_info=True,
+            )
+
         await upd_processing_session(req.session_id, {
             "generated_forms": generated,
             "facts": updated_facts,
@@ -2132,7 +2191,8 @@ async def session_stats(current_user: dict = Depends(get_current_user)):
                 (
                     SELECT COUNT(*)::int
                     FROM processing_sessions ps2,
-                         jsonb_each(COALESCE(ps2.data->'generated_forms', '{}'::jsonb)) gf
+                         jsonb_each(CASE WHEN jsonb_typeof(ps2.data->'generated_forms') = 'object'
+                                     THEN ps2.data->'generated_forms' ELSE '{}'::jsonb END) gf
                     WHERE ps2.user_id = $1
                 )                                                      AS total_forms,
                 (
@@ -2140,7 +2200,8 @@ async def session_stats(current_user: dict = Depends(get_current_user)):
                     FROM (
                         SELECT AVG((gf.value->'sqs'->>'sqs_score')::numeric) AS session_avg
                         FROM processing_sessions ps3,
-                             jsonb_each(COALESCE(ps3.data->'generated_forms', '{}'::jsonb)) gf
+                             jsonb_each(CASE WHEN jsonb_typeof(ps3.data->'generated_forms') = 'object'
+                                         THEN ps3.data->'generated_forms' ELSE '{}'::jsonb END) gf
                         WHERE ps3.user_id = $1
                           AND (gf.value->'sqs'->>'sqs_score') IS NOT NULL
                         GROUP BY ps3.id

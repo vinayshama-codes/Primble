@@ -1878,13 +1878,68 @@ def _check_identity_address_distinction(
     locations = _fv(facts, "locations") or []
     loc_count = len(locations) if isinstance(locations, list) else 0
 
+    # ── C3 3.12 (2026-08-25) ────────────────────────────────────────────────
+    # *"Physical address is not universally required for Structural
+    # Completeness. It becomes applicable when the exposure requires it.
+    # Examples: Property location, Auto garaging, location-specific
+    # operations/exposures."*
+    #
+    # AUTO GARAGING added: the client names it, so this is his rule, not a new
+    # one. A garaged fleet has a physical location by definition, and the
+    # garaging address is what rates it.
     has_property_or_multi = (
         flags.get("has_property_coverage")
         or loc_count > 1
         or flags.get("has_multiple_locations")
+        or flags.get("has_auto_coverage")
     )
 
-    if mailing and not physical and has_property_or_multi:
+    # ...and the requirement is SATISFIED, not merely triggered, when the
+    # location schedule already carries the address. 3.12 says the requirement
+    # exists "when the exposure requires it" - if the exposure's own schedule
+    # states where it is, that requirement is met, and warning anyway would be
+    # the "universal Structural penalty" the same clause forbids. Positive
+    # evidence only: a row must actually carry an address-shaped value, so an
+    # empty or label-only schedule still leaves the question open.
+    #
+    # BOTH ROW SHAPES, because `locations` is normally a list of plain STRINGS.
+    # `extraction_service` ends with
+    #   facts["locations"] = [str(o["address"]) for o in consolidated ...]
+    # so the dict form only survives on paths that skip consolidation. The first
+    # version of this check tested `isinstance(row, dict)` alone - guessed from
+    # the schedule-capture shape instead of read from the writer - and therefore
+    # never fired on a real session: S6A warned on 2026-08-25 with two street
+    # addresses sitting in its schedule. Read the writer, not the shape you
+    # expect.
+    def _row_address(row) -> str:
+        if isinstance(row, str):
+            return row.strip()
+        if isinstance(row, dict):
+            for key in ("address", "street", "location_address", "address1",
+                        "line1", "full_address"):
+                val = str(row.get(key) or "").strip()
+                if val:
+                    return val
+        return ""
+
+    # A street ADDRESS, not a label. Three tokens and a digit is what separates
+    # "1450 Lantern Court" from the two shapes that must still warn:
+    # "See attached" (no digit) and "Location 1" (only two tokens). A digit
+    # alone is not enough - that was the first cut and "Location 1" walked
+    # straight through it.
+    def _looks_like_street_address(text: str) -> bool:
+        return (len(text.split()) >= 3
+                and re.search(r"\d", text) is not None
+                and re.search(r"[A-Za-z]{3}", text) is not None)
+
+    _schedule_has_address = any(
+        _looks_like_street_address(_a)
+        for _a in (_row_address(r)
+                   for r in (locations if isinstance(locations, list) else []))
+        if _a
+    )
+
+    if mailing and not physical and has_property_or_multi and not _schedule_has_address:
         issues.append(_issue(
             "soft_warning",
             "physical_vs_mailing_address_unclear",

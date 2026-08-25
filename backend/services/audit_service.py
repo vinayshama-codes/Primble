@@ -541,17 +541,56 @@ async def active_score_credits(
 
     total, kept = 0, []
     try:
+        # ── C3 3.11: "never stack on top of the same improvement twice" ─────
+        # Credits are keyed per RECOMMENDATION, and several recommendations can
+        # point at ONE fact. Measured 2026-08-25: `_LOSS_RECOMMENDATION_FIELDS`
+        # maps four different loss-history messages to `loss_history_years`,
+        # two to `fein` and two to `loss_history_no_prior_losses_indicator`.
+        # Each carries its own stable `rec_id`, so dismissing two cards about
+        # the same missing fact - both with written reasons - paid for that one
+        # gap twice.
+        #
+        # One credit per FIELD, the largest of the competing rows. Largest, not
+        # first, because the rows are ordered by when the producer happened to
+        # click and a credit must not depend on click order; and it is the
+        # honest ceiling, since whichever card is worth most is what filling
+        # that one field would actually have earned. Rows with NO field (a
+        # document is needed, nothing to fill) cannot collide, so they are kept
+        # individually - deduping them would silently merge unrelated asks.
+        _best_by_field: dict = {}
+        _fieldless: list = []
         for row in await get_dismissed_recommendations(session_id):
             if not dismiss_earned_credit(row.get("override_reason"), row.get("score_impact")):
                 continue
-            if _filled(row.get("field")):
+            field = row.get("field")
+            if _filled(field):
                 logger.info(
                     "credit retired: session=%s rec=%s field=%s now filled",
-                    session_id, row.get("rec_id"), row.get("field"),
+                    session_id, row.get("rec_id"), field,
                 )
                 continue
-            total += int(row["score_impact"])
-            kept.append(row)
+            if not field:
+                _fieldless.append(row)
+                continue
+            prev = _best_by_field.get(field)
+            if prev is None or int(row["score_impact"]) > int(prev["score_impact"]):
+                if prev is not None:
+                    logger.info(
+                        "credit de-duplicated: session=%s field=%s keeping rec=%s "
+                        "(%s pts) over rec=%s (%s pts) - one improvement, one credit",
+                        session_id, field, row.get("rec_id"), row.get("score_impact"),
+                        prev.get("rec_id"), prev.get("score_impact"),
+                    )
+                _best_by_field[field] = row
+            else:
+                logger.info(
+                    "credit de-duplicated: session=%s field=%s dropping rec=%s "
+                    "(%s pts) - already credited by rec=%s",
+                    session_id, field, row.get("rec_id"), row.get("score_impact"),
+                    prev.get("rec_id"),
+                )
+        kept = list(_best_by_field.values()) + _fieldless
+        total = sum(int(r["score_impact"]) for r in kept)
     except Exception as ex:
         logger.error(f"active_score_credits failed for {session_id}: {ex}")
         return 0, []

@@ -147,21 +147,59 @@ def test_wi2_matching_building_values_do_not_block():
 # Structural Completeness now shows: Applicant Info, Entity Info,
 # Effective Date Consistency, Policy Term Consistency, Supporting Documentation.
 
-def test_wi3_structural_rows_are_client_approved():
+def test_wi3_structural_rows_fall_back_for_legacy_callers():
+    """No `structural_parts` supplied - the older five detail rows still render.
+
+    C3 (2026-08-25) made the Structural sub-rows BE the pillar's formula when
+    the scorer passes its own inputs (see the test below). A caller that passes
+    nothing - a stored payload, or any code path that never had them - keeps a
+    meaningful panel instead of an empty one.
+    """
     cats = sq._compute_category_breakdown({}, {})
     sc = cats["structural_completeness"]
     assert set(sc.keys()) == {
         "applicant_information", "entity_information",
         "effective_date_consistency", "policy_term_consistency",
         "supporting_documentation",
-    }, "structural rows must be the 5 client-approved sub-categories"
+    }
     assert sc["applicant_information"]["label"] == "Applicant Info"
-    assert sc["entity_information"]["label"] == "Entity Info"
-    assert sc["effective_date_consistency"]["label"] == "Effective Date Consistency"
-    assert sc["policy_term_consistency"]["label"] == "Policy Term Consistency"
     assert sc["supporting_documentation"]["label"] == "Supporting Documentation"
-    # Old 3-row keys must be gone.
-    assert "underwriting_profile" not in sc and "form_fill_quality" not in sc
+
+
+def test_wi3_structural_rows_reconstruct_the_pillar_exactly():
+    """C3 Desired Outcome: the breakdown must BE the formula, not resemble it.
+
+    The five rows above are computed from a different set of facts than the
+    pillar and can never sum to it - which is why the frontend printed status
+    words plus a note conceding they do not add up. When the scorer passes its
+    own three inputs, score x weight reconstructs Structural Completeness to
+    the point.
+    """
+    parts = sq._structural_parts(100, 80, 60, ["Contact information"], [])
+    cats = sq._compute_category_breakdown({}, {}, structural_parts=parts)
+    sc = cats["structural_completeness"]
+
+    assert set(sc.keys()) == {"tier1", "tier2", "fill"}
+    assert sc["tier1"]["weight"] == 0.40
+    assert sc["tier2"]["weight"] == 0.35
+    assert sc["fill"]["weight"] == 0.25
+    assert sc["tier1"]["missing"] == ["Contact information"], (
+        "WHICH fact is missing must survive the change"
+    )
+
+    rebuilt = sum(r["score"] * r["weight"] for r in sc.values())
+    assert int(rebuilt) == int(100 * 0.40 + 80 * 0.35 + 60 * 0.25)
+
+
+def test_wi3_no_form_structural_drops_the_fill_row_and_rescales():
+    """C3 3.7: Tier 1 = 53.3%, Tier 2 = 46.7%, preserving the 40:35 ratio."""
+    parts = sq._structural_parts(100, 80, None)
+    cats = sq._compute_category_breakdown({}, {}, structural_parts=parts)
+    sc = cats["structural_completeness"]
+    assert set(sc.keys()) == {"tier1", "tier2"}, "no forms, no fill-rate row"
+    assert sc["tier1"]["weight"] == 0.533
+    assert sc["tier2"]["weight"] == 0.467
+    assert round(sc["tier1"]["weight"] + sc["tier2"]["weight"], 3) == 1.0
 
 
 # ── WI-4: property breakdown shows 2 client-approved sub-rows ────────────────

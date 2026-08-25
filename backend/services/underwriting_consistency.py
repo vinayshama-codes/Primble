@@ -594,6 +594,36 @@ def unresolved_withheld_keys(uw_result: Optional[dict],
             out.append(key)
     return sorted(set(out))
 
+
+def unresolved_conflict_keys(uw_result: Optional[dict],
+                             confirmations: Optional[dict]) -> List[str]:
+    """Fact keys the documents still disagree about and nobody has confirmed.
+
+    The SUPERSET of `unresolved_withheld_keys`: same review_required test, same
+    confirmation test, but WITHOUT the `CONFLICT_WITHHOLD_KEYS` membership
+    filter - which is currently empty, because Brent ruled (Q4 / D16,
+    2026-08-21) that a cross-document conflict STAMPS its suggested value
+    rather than shipping an owned blank.
+
+    That ruling settles what gets PRINTED. C3 3.8 asks a different question
+    about the same fact: *"Conflicting fields should not receive full
+    completed-field credit."* The two do not conflict - the value is stamped
+    (D16) and its fill-rate weight is reduced (3.8) - but the withhold list
+    cannot answer it, because it is deliberately empty. Hence this function.
+
+    Never use it to decide whether to blank a field. That is D16's job and it
+    says no.
+    """
+    confirmed = set((confirmations or {}).keys())
+    out = []
+    for f in (uw_result or {}).get("fields") or []:
+        if not isinstance(f, dict):
+            continue
+        key = f.get("fact_key")
+        if key and f.get("review_required") and key not in confirmed:
+            out.append(key)
+    return sorted(set(out))
+
 # Keys excluded from the crude cross-doc conflict detectors so this engine is
 # the single source of truth for them (prevents un-normalized false positives).
 RECONCILABLE_FIELD_KEYS = frozenset(RECONCILABLE_FIELDS.keys())

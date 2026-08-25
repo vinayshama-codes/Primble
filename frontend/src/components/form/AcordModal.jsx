@@ -2572,6 +2572,11 @@ const AcordModal = forwardRef(function AcordModal({
   };
   const closeProv = () => setProvCard(null);
   const [dismissedRecs, setDismissedRecs] = useState(new Set());
+  // Owner request 2026-08-26: a dismissal or an answer re-runs scoring server
+  // side and the number can take a few seconds to move. With no indicator the
+  // producer cannot tell "still working" from "nothing happened" - which is
+  // exactly how a genuinely broken credit went unnoticed for three test runs.
+  const [scoreRecalcBusy, setScoreRecalcBusy] = useState(false);
   const [dismissedRecDetails, setDismissedRecDetails] = useState(new Map());
   // rec_id -> the value the producer previously submitted, used to prefill a card
   // that has just been reopened so they can edit rather than retype it.
@@ -2770,7 +2775,13 @@ const AcordModal = forwardRef(function AcordModal({
   // Everything the producer has reviewed - dismissed AND answered. Answered recs
   // used to live only in SidePanelRec's local state, so they reappeared as open on
   // every reload with the value already written; they are now server-backed.
-  const loadDismissedRecs = async (sid) => {
+  // `justDismissedId` is the id the caller has ALREADY applied optimistically.
+  // This function replaces the dismissed set wholesale from the server, so when
+  // the reviewed list has not caught up the local entry was wiped and the card
+  // reappeared as open while showing nowhere in Reviewed. Keeping the one id the
+  // caller names is safe: reopen removes its id AFTER this runs and never passes
+  // one, so nothing can be resurrected.
+  const loadDismissedRecs = async (sid, justDismissedId = null) => {
     if (!sid) return;
     try {
       const r = await fetch(`${API_BASE}/api/audit/reviewed/${sid}`, { credentials: "include" });
@@ -2796,8 +2807,20 @@ const AcordModal = forwardRef(function AcordModal({
           impact:  answered ? 0 : (hasReason ? rec.score_impact : 0),
         });
       }
-      setDismissedRecs(new Set(next.keys()));
-      setDismissedRecDetails(next);
+      const ids = new Set(next.keys());
+      if (justDismissedId) ids.add(justDismissedId);
+      setDismissedRecs(ids);
+      // Keep whatever we already knew about the just-dismissed rec (its reason
+      // and credited points) if the server has not returned it yet - otherwise
+      // the Reviewed row renders with no reason and no badge.
+      setDismissedRecDetails(prev => {
+        if (justDismissedId && !next.has(justDismissedId) && prev.has(justDismissedId)) {
+          const merged = new Map(next);
+          merged.set(justDismissedId, prev.get(justDismissedId));
+          return merged;
+        }
+        return next;
+      });
     } catch { /* non-fatal */ }
   };
 
@@ -4427,6 +4450,7 @@ const AcordModal = forwardRef(function AcordModal({
         };
       });
     }
+    setScoreRecalcBusy(true);
     try {
       const res = await fetch(`${API_BASE}/api/audit/dismiss`, {
         method: "POST",
@@ -4479,16 +4503,46 @@ const AcordModal = forwardRef(function AcordModal({
       } else if (data.new_package_sqs_score != null) {
         setPackageSqs(prev => {
           if (!prev) return prev;
+          // The CREDIT has to travel with the new score, or the How line reads
+          // "81 earned = 85" - a sum that does not add up, which is exactly the
+          // defect this whole panel exists to remove. Patching only the headline
+          // left `credits` at 0 and the trace stale. Reported live, 2026-08-26.
+          const credited = data.credits_total ?? prev.credits_applied ?? 0;
+          const prevTrace = prev.score_trace;
           return {
             ...prev,
             package_sqs_score: data.new_package_sqs_score,
             tier: data.new_package_tier ?? prev.tier,
+            credits_applied: credited,
+            ...(prevTrace ? {
+              score_trace: {
+                ...prevTrace,
+                arithmetic: {
+                  ...prevTrace.arithmetic,
+                  credits: credited,
+                  displayed: data.new_package_sqs_score,
+                  // The backend is the authority on both, and it now returns
+                  // them; fall back to what we already had for older payloads.
+                  raw: data.package_raw ?? prevTrace.arithmetic?.raw,
+                  ceiling: data.package_ceiling ?? prevTrace.arithmetic?.ceiling,
+                },
+              },
+            } : {}),
           };
         });
       }
-      // Refresh dismissed panel from DB so it persists across reloads
-      loadDismissedRecs(sessionId);
-    } catch (_) {}
+      // Refresh the dismissed panel from the DB so it survives a reload - but
+      // pass the id we just dismissed. This function REPLACES the set with the
+      // server's reviewed list, so when that list has not caught up the
+      // optimistic entry was wiped and the card sprang back into the open list
+      // while showing nowhere in Reviewed. Reported live, 2026-08-26.
+      await loadDismissedRecs(sessionId, id);
+    } catch (_) {
+    } finally {
+      // `finally`, so a failed request can never leave the panel spinning - a
+      // stuck indicator is a worse lie than no indicator.
+      setScoreRecalcBusy(false);
+    }
   };
 
   const _runPreflightThenDownload = async (downloadFn) => {
@@ -6585,10 +6639,59 @@ const AcordModal = forwardRef(function AcordModal({
                             <span style={{ fontWeight: 700, color: "#475569", minWidth: 44, flexShrink: 0 }}>Score</span>
                             <span style={{ color: "#94a3b8", lineHeight: 1.4 }}>Weighted sum of the 6 pillars - not a plain average. Weights shown as (%) on each row below.</span>
                           </div>
-                          {/* Category-label explainer shown once here, not repeated under each pillar. */}
-                          <div style={{ color: "#94a3b8", lineHeight: 1.4, marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.09)", fontStyle: "italic" }}>
-                            Labels show how complete each category is based on available information. The overall pillar score may also include data quality, conflicts, and validation rules.
-                          </div>
+                          {/* C3 Desired Outcome: Raw SQS -> Ceiling -> Displayed SQS, on screen.
+                              The backend has returned raw_sqs_score / cap_applied / cap_reason /
+                              credits_applied since 2026-08-16 and nothing rendered any of them, so
+                              a held score was indistinguishable from a genuinely low one. This
+                              block replaces an italic note that used to concede the sub-rows "may
+                              also include data quality, conflicts, and validation rules" - written
+                              because they could not reconstruct the pillar. They can now. */}
+                          {(() => {
+                            const tr = packageSqs.score_trace?.arithmetic;
+                            const raw = tr?.raw ?? packageSqs.raw_sqs_score;
+                            if (raw == null) return null;
+                            const credits = tr?.credits ?? packageSqs.credits_applied ?? 0;
+                            const ceiling = tr?.ceiling ?? packageSqs.cap_applied ?? null;
+                            const reason  = tr?.ceiling_reason ?? packageSqs.cap_reason ?? "";
+                            const shown   = packageSqs.package_sqs_score;
+                            // A ceiling that sits ABOVE the score is not holding
+                            // anything. Saying "held at 85 = 81" reads as though it
+                            // did, and 81 is neither held nor equal to 85 - the same
+                            // failure as a breakdown that does not add up, in one
+                            // sentence. The ceiling is only NEWS when it BINDS.
+                            const binds = ceiling != null && (raw + credits) > ceiling;
+                            return (
+                              <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(0,0,0,0.09)", display: "flex", flexDirection: "column", gap: 2 }}>
+                                <div style={{ display: "flex", gap: 6 }}>
+                                  <span style={{ fontWeight: 700, color: "#475569", minWidth: 44, flexShrink: 0 }}>How</span>
+                                  {scoreRecalcBusy ? (
+                                    <span style={{ color: "#6366f1", lineHeight: 1.4, fontWeight: 600 }}>
+                                      Recalculating the score…
+                                    </span>
+                                  ) : (
+                                  <span style={{ color: "#475569", lineHeight: 1.4, display: "inline-flex", alignItems: "center", gap: 3, flexWrap: "wrap" }}>
+                                    <span>
+                                      {raw} earned{credits > 0 ? ` + ${credits} credited` : ""}
+                                      {binds ? `, held at ${ceiling}` : ""} = <b>{shown}</b>
+                                    </span>
+                                    {!binds && ceiling != null && (
+                                      <InfoTip text={`A ceiling of ${ceiling} applies while warnings are open, but this submission scores below it, so it is not holding the score down. Clearing the warnings would not raise the number by itself.`} />
+                                    )}
+                                    {ceiling == null && (
+                                      <InfoTip text="No hard stops and no warnings, so no ceiling applies." />
+                                    )}
+                                  </span>
+                                  )}
+                                </div>
+                                {!scoreRecalcBusy && binds && reason && (
+                                  <div style={{ display: "flex", gap: 6 }}>
+                                    <span style={{ fontWeight: 700, color: "#475569", minWidth: 44, flexShrink: 0 }}>Why</span>
+                                    <span style={{ color: "#b45309", lineHeight: 1.4 }}>{reason}</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 18 }}>
                           {Object.entries(packageSqs.pillars || {}).map(([key, val]) => {
@@ -6612,7 +6715,21 @@ const AcordModal = forwardRef(function AcordModal({
                                 <span style={{ color: "#000", display: "inline-flex", alignItems: "center", gap: 3 }}>
                                   {hasCats && <span style={{ display: "inline-block", width: 9, fontSize: 7, color: "#94a3b8", transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>▶</span>}
                                   {PACKAGE_PILLAR_LABELS[key] || key}
-                                  <InfoTip text={`Weight: ${SQS_WEIGHTS[key] || 0}% of the package score.`} />
+                                  {/* EFFECTIVE weight, not the nominal one. With Umbrella
+                                      Not Applicable the other five rescale, so Structural is
+                                      27.8% of the score and not 25% - the hardcoded table
+                                      below printed 25% and could not know. Falls back to the
+                                      nominal figure for payloads written before score_trace. */}
+                                  <InfoTip text={(() => {
+                                    const row = (packageSqs.score_trace?.pillars || []).find(p => p.pillar === key);
+                                    if (!row) return `Weight: ${SQS_WEIGHTS[key] || 0}% of the package score.`;
+                                    if (row.not_applicable) return "Not applicable to this submission, so it is removed from the score and the other pillars carry more weight.";
+                                    const eff = Math.round(row.effective_weight * 1000) / 10;
+                                    const nom = Math.round(row.nominal_weight * 100);
+                                    return eff === nom
+                                      ? `Weight: ${nom}% of the package score. Scored ${row.score}, contributing ${row.contribution} points.`
+                                      : `Weight: ${eff}% of the package score (${nom}% nominal, rescaled because another pillar is Not Applicable). Scored ${row.score}, contributing ${row.contribution} points.`;
+                                  })()} />
                                 </span>
                                 {isNA
                                   ? <span title="No umbrella in this submission" style={{ fontWeight: 700, color: "#94a3b8", fontSize: 9 }}>N/A</span>
@@ -6624,13 +6741,41 @@ const AcordModal = forwardRef(function AcordModal({
                               {expanded && hasCats && (
                                 <div style={{ margin: "4px 0 6px 12px", display: "flex", flexDirection: "column", gap: 3 }}>
                                   {Object.entries(cats).map(([ck, cv]) => {
-                                    // Status word instead of a raw % so users don't try to
-                                    // average sub-rows into the weighted pillar headline.
+                                    // A row that carries its own WEIGHT is one of the pillar's
+                                    // real inputs (C3): score x weight, and the rows sum to the
+                                    // pillar exactly, so the arithmetic is shown. Rows without a
+                                    // weight are descriptive detail computed from other facts -
+                                    // they never summed to the headline, which is why they show a
+                                    // completeness word instead of a number that invites addition.
                                     const comp = catCompleteness(cv?.score);
+                                    const weighted = typeof cv?.weight === "number";
+                                    // A deduction bucket also reconstructs its pillar exactly
+                                    // (pillar = 100 minus the sum of these), so show what it
+                                    // actually took. Without the number the only visible
+                                    // difference between "charged here" and "not charged" is
+                                    // one adjective - Strong versus Complete - which explains
+                                    // nothing to the producer asking why.
+                                    const deducted = typeof cv?.deducted === "number" ? cv.deducted : null;
                                     return (
                                       <div key={ck} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 9.5, gap: 8 }}>
-                                        <span style={{ color: "#475569" }}>{cv?.label || ck}</span>
-                                        <span style={{ color: comp.color, fontWeight: 700, whiteSpace: "nowrap" }}>{comp.label}</span>
+                                        <span style={{ color: "#475569", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                                          {cv?.label || ck}
+                                          {/* The arithmetic lives in the tooltip, not on the row
+                                              (owner, 2026-08-25). The reconciliation is the point,
+                                              not the clutter: hover to see score x weight, or what
+                                              a bucket deducted. */}
+                                          {weighted && (
+                                            <InfoTip text={`${Math.round(cv.weight * 100)}% of this pillar. ${cv.score}% x ${Math.round(cv.weight * 100)}% = ${cv.contribution} points. The rows add up to the pillar score.`} />
+                                          )}
+                                          {!weighted && deducted !== null && (
+                                            <InfoTip text={deducted > 0
+                                              ? `Deducted ${deducted} points from this pillar. The pillar is 100 minus every bucket's deduction.`
+                                              : "Nothing deducted from this pillar by this category."} />
+                                          )}
+                                        </span>
+                                        {(weighted || deducted !== null)
+                                          ? <span style={{ color: barColor(cv.score), fontWeight: 700, whiteSpace: "nowrap" }}>{cv.score}%</span>
+                                          : <span style={{ color: comp.color, fontWeight: 700, whiteSpace: "nowrap" }}>{comp.label}</span>}
                                       </div>
                                     );
                                   })}

@@ -413,6 +413,35 @@ value. An offline probe proves the FUNCTION, never the SEAM around it.
 
 ## Critical Issues & Roadmap
 
+### SQS Scoring Integrity & Critical-Field Weighting (client section 3) - SHIPPED 2026-08-25
+**The client's ask was TRACEABILITY, not a better number:** *"Every material score
+should be traceable through: Canonical Fact -> Validation Rule -> Pillar -> Raw SQS
+-> Ceiling -> Displayed SQS."* Read `v1-20AUG.md` **C3-A / C3-B / C3-C / C3-D**
+before touching any scoring path - C3-D is the shipped change, C3-B carries the
+spec quotes that decide scope, and the assumption register is in C3-A.
+
+**What moved:** Structural blend 35/30/35 -> **40/35/25** (SUBMISSION ONLY); no-form
+rescale -> 53.3/46.7; Tier 2 cut to the client's six general-business fields
+(payroll and the three WC fields moved to the Exposure / ACORD 130 rules);
+Not Applicable now leaves the Tier 2 DENOMINATOR; all four fill-rate rules;
+credits de-duplicated per fact and re-applied on the field-edit rebuild; the
+dec-page Tier 1 exemption narrowed to producer name on an ONLY-dec-page package.
+`sqs_service.build_score_trace` emits the ledger on both the package and every
+form, and `tests/test_c3_sqs_integrity.py` fails the build if it stops adding up.
+
+**Three things to know before changing this area:**
+1. **Per-form Structural is NOT the 40/35/25 blend and must not become it.** The
+   spec prints both formulas side by side (sections 3.1 and 10); 3.2 modifies only
+   the submission one. `calculate_sqs`'s `tier2_score` parameter is dead BY DESIGN.
+2. **`ENABLE_CLASSIFICATION_SUGGESTIONS` is OFF** (C3 3.13). The Figure 20 NAICS
+   chips had already been dark since 2026-08-12 - `suggestions` renders only in
+   `ClientQuestionnaire.jsx` and NAICS moved to the producer audience that day.
+   `naics_suggester` is intact; one env var restores it for Section 19.
+3. **Scores moved in both directions** and Brent has not seen the live numbers yet
+   (D6). Dec-page-led packages lose up to 40 Tier 1 points; WC accounts, double-
+   counted facts and conflicted/N-A fill rates all gain.
+
+
 ### Answer Interpretation - SHIPPED 2026-08-24, with TWO KNOWN GAPS
 **`services/answer_semantics.py` is the ONE door for interpreting anything a
 human types** (producer recommendation cards, inline hard-stop / warning

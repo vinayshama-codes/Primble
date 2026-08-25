@@ -63,11 +63,48 @@ def test_the_harvester_sees_the_ternary_form():
 
 
 def test_every_emitted_label_has_a_weight():
-    """A label with no weight scores 0.0 silently. That is the ai_verified bug."""
-    missing = sorted(_harvest_labels() - set(CONFIDENCE_SCORE))
+    """A label with no weight scores 0.0 silently. That is the ai_verified bug.
+
+    C3 3.8 (2026-08-25) added a SECOND legitimate destination for a label:
+    `FILL_RATE_EXCLUDED_LABELS`, whose members are dropped from the fill rate
+    entirely rather than weighted. `not_applicable` lives there because
+    *"Not Applicable fields must not reduce fill rate"* - a 0.00 weight would
+    still sit in the denominator and drag the average down, which is the defect
+    rather than the fix.
+
+    The invariant is unchanged and still bites: a label must be DELIBERATELY
+    placed in one of the two, and a new one in neither still fails the build.
+    """
+    from services.sqs_service import FILL_RATE_EXCLUDED_LABELS
+    accounted = set(CONFIDENCE_SCORE) | set(FILL_RATE_EXCLUDED_LABELS)
+    missing = sorted(_harvest_labels() - accounted)
     assert missing == [], (
         f"per-field confidence label(s) assigned in the fill layer but absent "
-        f"from sqs_service.CONFIDENCE_SCORE - they score ZERO: {missing}")
+        f"from BOTH sqs_service.CONFIDENCE_SCORE and FILL_RATE_EXCLUDED_LABELS "
+        f"- they score ZERO: {missing}")
+    assert not (set(CONFIDENCE_SCORE) & set(FILL_RATE_EXCLUDED_LABELS)), (
+        "a label is either weighted or excluded, never both - being in the "
+        "weight table would invite someone to 'simplify' the exclusion away"
+    )
+
+
+def test_c3_38_fill_rate_rules():
+    """The four C3 3.8 rules, each pinned to its measured before-value."""
+    from services.sqs_service import confidence_fill_rate as _f
+
+    # 1. Not Applicable must not reduce the fill rate. Measured before: 75.
+    assert _f({"a": "Acme", "b": "N/A"},
+              {"a": "filled", "b": "not_applicable"}) == 100
+    # 2. A conflicting field does not get full completed-field credit.
+    assert _f({"a": "Acme"}, {"a": "conflicted"}) < _f({"a": "Acme"}, {"a": "filled"})
+    # 3. Suggested / unverified never equals Source Verified or User Confirmed.
+    assert CONFIDENCE_SCORE["ai_verified"] < CONFIDENCE_SCORE["filled"]
+    assert CONFIDENCE_SCORE["low_confidence"] < CONFIDENCE_SCORE["client_arq"]
+    # 4. An Explicit No is a valid completed response. Measured before: 0.
+    assert _f({"a": "None"}, {"a": "explicit_no"}) == 100
+    # ...but ONLY via the label. A stringified Python None is still not credit -
+    # that is why the emptiness test excludes the string in the first place.
+    assert _f({"a": "None"}, {"a": "filled"}) == 0
 
 
 def test_a_document_verified_ai_value_outscores_an_unverified_guess():

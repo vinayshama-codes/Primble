@@ -220,7 +220,41 @@ def test_no_suggestion_means_no_hint_override():
 # Wiring into question generation
 # ---------------------------------------------------------------------------
 
-def test_attach_enriches_naics_question():
+@pytest.fixture
+def suggestions_on(monkeypatch):
+    """Turn the V1 kill switch back on for the tests that prove the machinery.
+
+    C3 3.13 (2026-08-25) made `ENABLE_CLASSIFICATION_SUGGESTIONS` default OFF -
+    "do not generate a classification recommendation in V1", with classification
+    assistance deferred to Section 19. The enrichment itself must keep working,
+    or Section 19 inherits dead code, so these tests flip the flag rather than
+    being deleted.
+    """
+    import config.settings as _settings
+    monkeypatch.setattr(_settings, "ENABLE_CLASSIFICATION_SUGGESTIONS", True,
+                        raising=False)
+    return True
+
+
+def test_suggestions_are_off_by_default_in_v1():
+    """C3 3.13: no classification recommendation is generated in V1.
+
+    Verified with the flag at its shipped default, so this fails the build if
+    someone flips it on without a product decision.
+    """
+    from config.settings import ENABLE_CLASSIFICATION_SUGGESTIONS
+    from services.arq_service import _attach_classification_suggestions
+    assert ENABLE_CLASSIFICATION_SUGGESTIONS is False, (
+        "C3 3.13 defers classification assistance to Section 19"
+    )
+    qs = [{"field_name": "naics_code", "question": "NAICS?", "hint": "old hint"}]
+    _attach_classification_suggestions(
+        qs, {"operations_description": "residential roofing contractor"})
+    assert "suggestions" not in qs[0], "no candidates may be generated in V1"
+    assert qs[0]["hint"] == "old hint", "the hint must not be rewritten either"
+
+
+def test_attach_enriches_naics_question(suggestions_on):
     from services.arq_service import _attach_classification_suggestions
     qs = [{"field_name": "naics_code", "question": "NAICS?", "hint": "old hint"}]
     _attach_classification_suggestions(qs, {"operations_description": "residential roofing contractor"})
@@ -228,7 +262,7 @@ def test_attach_enriches_naics_question():
     assert "238160" in qs[0]["hint"]
 
 
-def test_attach_resolves_via_canonical_key():
+def test_attach_resolves_via_canonical_key(suggestions_on):
     from services.arq_service import _attach_classification_suggestions
     qs = [{"field_name": "ACORD_125_x", "_canonical_key": "sic_code", "question": "SIC?", "hint": "h"}]
     _attach_classification_suggestions(qs, {"operations_description": "residential roofing contractor"})

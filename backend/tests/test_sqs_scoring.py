@@ -748,9 +748,10 @@ def test_multi_form_package_pillars_computed_independently():
         _PARITY_FACTS, _PARITY_FLAGS, [], [])[0]
     assert p["property_integrity"] == sq._calculate_cope_score(_PARITY_FACTS, _PARITY_FLAGS)
     assert p["umbrella_limit_adequacy"] == sq._calculate_umbrella_adequacy(_PARITY_FACTS, _PARITY_FLAGS)
-    # Structural pillar is the package's own blend: tier1*0.35 + tier2*0.30 +
-    # confidence_fill_rate_avg*0.35. The third component is the average
-    # confidence_fill_rate (% of ALL form fields filled) across generated forms —
+    # Structural pillar is the package's own blend. C3 3.2 (2026-08-25) moved it
+    # from 35/30/35 to tier1*0.40 + tier2*0.35 + confidence_fill_rate_avg*0.25,
+    # so the underlying submission facts outweigh form population. The third
+    # component is the average confidence_fill_rate across generated forms —
     # NOT the per-form structural_completeness checklist score. This ensures the
     # package P1 uses a genuinely different signal from the form P1, preventing
     # convergence when the structural checklist fields happen to all be present.
@@ -760,7 +761,7 @@ def test_multi_form_package_pillars_computed_independently():
     fill_rate_avg = int(
         (f125["confidence_fill_rate"] + f130["confidence_fill_rate"]) / 2
     )
-    expected_p1 = int(tier1_score * 0.35 + tier2_score * 0.30 + fill_rate_avg * 0.35)
+    expected_p1 = int(tier1_score * 0.40 + tier2_score * 0.35 + fill_rate_avg * 0.25)
     assert p["structural_completeness"] == expected_p1, (
         f"package structural must be the tier1/tier2/confidence-fill-rate blend "
         f"{expected_p1}, got {p['structural_completeness']}"
@@ -1079,19 +1080,64 @@ def test_check_tier2_sic_satisfies_industry_code():
     assert score_sic == score_naics
 
 
-def test_check_tier2_wc_fields_excluded_when_no_wc():
-    # Without WC coverage the 3 WC fields must not penalise the submission.
-    base_no_wc = {f: "x" for f in sq.TIER2_FIELDS if f not in sq._TIER2_WC_FIELDS and f != "naics_code"}
-    base_no_wc["sic_code"] = "1521"
-    score, missing = sq.check_tier2(base_no_wc, flags={"has_workers_comp": False})
-    assert score == 100
-    assert not missing
+def test_tier2_carries_no_wc_or_payroll_field_at_all():
+    """C3 3.5 / 3.14 (2026-08-25) SUPERSEDES the old has_workers_comp gate.
 
-    # With WC coverage the WC fields enter the denominator; missing them lowers the score.
-    score_wc, missing_wc = sq.check_tier2(base_no_wc, flags={"has_workers_comp": True})
-    assert score_wc < 100
-    assert any("wc" in m.lower() or "xmod" in m.lower() or "payroll" in m.lower() or "officer" in m.lower()
-               for m in missing_wc)
+    This test used to assert the opposite: that the three WC fields ENTER the
+    Tier 2 denominator when WC coverage is present. The client removed them
+    from Structural outright - *"This prevents WC-specific information from
+    penalizing non-WC submissions and places the requirements closer to the
+    exposure they describe"* - so the gate has nothing left to gate and the
+    `flags` argument no longer changes the answer at all. Their scoring homes
+    are now the Exposure payroll bucket and the ACORD 130 checklist.
+    """
+    removed = {"total_payroll", "wc_xmod", "wc_payroll_period",
+               "wc_officer_exclusions", "prior_carrier", "num_claims"}
+    assert removed.isdisjoint(sq.TIER2_FIELDS), (
+        "C3 3.5 / 3.14 and C2 2.7 / 2.8 removed these from Structural Tier 2"
+    )
+    assert set(sq.TIER2_FIELDS) == {
+        "fein", "operations_description", "total_revenue",
+        "num_employees", "years_in_business", "naics_code",
+    }, "3.5 lists exactly six V1 Tier 2 fields"
+
+    base = {f: "x" for f in sq.TIER2_FIELDS if f != "naics_code"}
+    base["sic_code"] = "1521"        # SIC satisfies the classification item
+    # A complete submission reaches 100 whether or not it carries WC, because
+    # no WC fact is scored here any more.
+    for wc in (False, True):
+        score, missing = sq.check_tier2(base, flags={"has_workers_comp": wc})
+        assert (score, missing) == (100, []), f"has_workers_comp={wc}"
+
+
+def test_tier2_removes_not_applicable_from_the_denominator():
+    """C3 3.6: *"Not Applicable fields are removed from the denominator."*
+
+    Removal is NOT the same arithmetic as counting the field as answered -
+    six fields with one N/A and one genuinely missing is 100 - 100/5 = 80,
+    where counting it present would give 100 - 100/6 = 83.
+    """
+    from services.answer_semantics import build_fact_envelope, interpret_answer
+
+    facts = {f: "x" for f in sq.TIER2_FIELDS}
+    facts["fein"] = build_fact_envelope(
+        "fein", interpret_answer("fein", "N/A"), "producer", "filled")
+    del facts["years_in_business"]
+
+    score, missing = sq.check_tier2(facts, flags={})
+    assert score == 80, f"expected the N/A out of the denominator, got {score}"
+    assert missing == ["Years in business"]
+
+
+def test_tier2_every_field_not_applicable_scores_100_not_zero():
+    """Nothing is owed, so nothing is missing - never a divide-by-zero or a 0."""
+    from services.answer_semantics import build_fact_envelope, interpret_answer
+
+    facts = {
+        f: build_fact_envelope(f, interpret_answer(f, "N/A"), "producer", "filled")
+        for f in list(sq.TIER2_FIELDS) + ["sic_code"]
+    }
+    assert sq.check_tier2(facts, flags={}) == (100, [])
 
 
 # ── §6.3 robustness: LLM narrative-component profile ──────────────────────────

@@ -446,6 +446,28 @@ TIER1_FIELDS = {
 }
 TIER1_CONTACT = ("contact_name", "contact_phone", "contact_email")
 
+# Client C3 3.5 (2026-08-25): Tier 2 is GENERAL business / submission
+# information only - "not Loss History or WC-specific information". Six fields,
+# exactly as the client lists them.
+#
+# REMOVED, and where each one's scoring now lives:
+#   prior_carrier, num_claims  - C2 2.7 / 2.8 (2026-08-24) -> Loss History
+#       (calculate_p4_loss_history), which understands applicability and
+#       new-venture status; keeping them here docked a legitimate new venture
+#       for history it cannot have.
+#   total_payroll, wc_xmod, wc_payroll_period, wc_officer_exclusions - C3 3.14
+#       -> the WC / Exposure rules. Payroll is scored by
+#       _calculate_exposure_consistency's "WC coverage with no payroll" bucket;
+#       X-mod, payroll period and officer exclusions are scored by the ACORD 130
+#       per-form checklist in calculate_sqs, which is exactly the client's own
+#       reasoning: "places the requirements closer to the exposure they
+#       describe". A GL-only submission is no longer marked down for Workers
+#       Comp data it can never have.
+#
+# THESE FIELDS ARE STILL ASKED FOR. Removal from the SCORE is not removal from
+# the questionnaire - question_classifier pins them by name in IMPORTANT_FIELDS
+# precisely so this change cannot silently stop us collecting them. See
+# tests/test_c3_sqs_integrity.py::test_tier2_removals_are_still_asked_for.
 TIER2_FIELDS = {
     "fein":                   "FEIN / Tax ID",
     "operations_description": "Operations description",
@@ -453,39 +475,48 @@ TIER2_FIELDS = {
     "num_employees":          "Number of employees",
     "years_in_business":      "Years in business",
     "naics_code":             "NAICS / industry code",
-    "total_payroll":          "Annual payroll",
-    # Client C2 2.7 / 2.8 (2026-08-24): prior_carrier and num_claims are
-    # REMOVED from Structural Completeness. Their scoring home is Loss History
-    # (calculate_p4_loss_history), where applicability and new-venture status
-    # are handled correctly; keeping them here double-counted one gap in two
-    # pillars and docked a legitimate new venture for history it cannot have.
-    # Spec ACORD 130: X-mod, payroll period, owner/officer exclusions are required for WC.
-    "wc_xmod":                "WC experience modification factor (X-mod)",
-    "wc_payroll_period":      "WC payroll period",
-    "wc_officer_exclusions":  "WC owner/officer inclusion/exclusion",
 }
 
 
 # ── Tier checks ───────────────────────────────────────────────────────────────
 
 def producer_fields_exempt(flags: dict | None) -> bool:
-    """True when the producer's OWN details must not be scored as missing.
+    """True when PRODUCER NAME must not be scored as a missing Tier 1 field.
 
-    A declarations page is issued by the CARRIER. It does not print the
-    producing agency's name or the applicant's contact details, so counting
-    them as gaps marks a submission down for something its document type can
-    never carry.
+    A declarations page is issued by the CARRIER, so it does not print the
+    producing agency's name. Counting it as a gap marks a submission down for
+    something its document type can never carry.
 
     ONE definition, because there were two. `check_tier1` (which the PACKAGE
     score uses) applied this exemption; `calculate_sqs`'s ACORD 125 checklist
     kept its own copy of the same six checks and did not. Measured on a live
     dec-page session 2026-08-17: answering `contact_name` moved ACORD 125 from
     63 to 68 while the package sat unmoved at 68, because the two scorers
-    disagreed about whether contact information was required at all. Same fact,
-    same session, two rules. The recommendation is still RAISED either way - we
-    still want the contact details - it just stops being a score penalty.
+    disagreed about what a submission owed. The recommendation is still RAISED
+    either way - we still want the details - it just stops being a penalty.
+
+    ── C3 3.3, 2026-08-25: TWO corrections, both narrowing this exemption ──
+    Client 3.3 and `SQS_Scoring_Specification` section 3.1 use the identical
+    sentence: *"Producer name is not required when the ONLY source document is
+    a declarations page."* Two ways this function was wider than either
+    document allowed, worth up to 40 Tier 1 points on a dec-page-led package:
+
+    1. It keyed on `_doc_type`, which `extraction_pipeline` sets from the
+       PRIMARY document. A package of dec page + application + loss run was
+       exempted even though the application carries the producer's name.
+       It now requires `_only_dec_page`, set only when EVERY active document in
+       the package is a declarations page.
+    2. It also waived CONTACT INFORMATION. Neither document grants that -
+       producer name is the only Tier 1 exemption either one lists. The contact
+       waiver was engineering-added. `check_tier1` and the ACORD 125 checklist
+       both stop applying it (see their call sites).
+
+    Legacy sessions written before `_only_dec_page` existed have no such key and
+    therefore stop being exempt on their next recalculation. That is the
+    conforming behaviour and it lowers those scores - see v1-20AUG.md C3-C /
+    D6, the scores-move-before-Brent-sees-it rule.
     """
-    return (flags or {}).get("_doc_type") == "dec_page"
+    return (flags or {}).get("_only_dec_page") is True
 
 
 def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
@@ -497,53 +528,86 @@ def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
             missing.append("Proposed effective date")
         return len(missing) == 0, missing
     missing = []
-    skip_producer_fields = producer_fields_exempt(flags)
+    skip_producer_name = producer_fields_exempt(flags)
     for field, label in TIER1_FIELDS.items():
-        if skip_producer_fields and field == "producer_name":
+        if skip_producer_name and field == "producer_name":
             continue
+        # C3 3.4: "Not Applicable fields are removed rather than treated as
+        # missing." `_answered` already returns True for a not_applicable state,
+        # so an N/A requirement contributes no -20 - which is the same score a
+        # removal produces, because Tier 1 deducts per MISSING item rather than
+        # dividing by a denominator. Verified equivalent; no change needed here.
+        #
         # ANSWERED, not "has a value": a human answering "there is none" has
         # answered (Brent 2026-08-24) and must not be counted as a gap.
         if not _answered(facts, field):
             missing.append(label)
-    if not skip_producer_fields and not any(_answered(facts, f) for f in TIER1_CONTACT):
+    # C3 3.3 (2026-08-25): contact information is required on EVERY submission.
+    # It used to be waived alongside producer name on a dec page; neither the
+    # client's 3.3 nor spec section 3.1 grants that. See producer_fields_exempt.
+    if not any(_answered(facts, f) for f in TIER1_CONTACT):
         missing.append("Contact information")
     return len(missing) == 0, missing
 
 
-# WC-specific Tier 2 fields. These are mechanical ACORD 130 requirements, not
-# part of the client's Underwriting Information spec (Revenue, Payroll, Employees,
-# Years in Business, Operations Description, FEIN, NAICS). They must only count
-# toward the Underwriting Profile denominator when WC coverage is actually present
-# - otherwise every GL-only / non-WC submission takes a ~25-point structural
-# penalty for fields that can never apply to it.
-_TIER2_WC_FIELDS = ("wc_xmod", "wc_payroll_period", "wc_officer_exclusions")
+def _tier2_not_applicable(facts: dict, field: str) -> bool:
+    """Is this Tier 2 field Not Applicable to THIS submission?
+
+    C3 3.6: *"Not Applicable fields are removed from the denominator."* Removal
+    and "counted as answered" are NOT the same arithmetic, which is why this
+    exists rather than leaning on `_answered`. With six fields, one N/A and one
+    genuinely missing: counted-as-answered gives 100 - 1x(100/6) = 83; removed
+    from the denominator gives 100 - 1x(100/5) = 80. The client asked for 80.
+
+    Reads the fact's own `value_state` through `fact_state`, the one owner of
+    that axis - never a second local table of "which fields can be N/A".
+    Fail-open: if the state cannot be read the field stays in the denominator,
+    so a fact we cannot classify is never silently excused.
+    """
+    try:
+        from services.fact_state import is_not_applicable
+        return is_not_applicable(facts, field)
+    except Exception:                                          # noqa: BLE001
+        return False
 
 
 def check_tier2(facts: dict, flags: dict | None = None) -> Tuple[int, List[str]]:
+    """C3 3.5 / 3.6 - Tier 2 = six general business facts, equally weighted.
+
+    `flags` is retained in the signature (five call sites pass it) but is no
+    longer read: it used to gate the three WC fields on `has_workers_comp`, and
+    C3 3.14 removed those fields from Tier 2 outright, so the gate has nothing
+    left to gate. Kept rather than removed so no caller has to change.
+    """
     # The industry-classification requirement is satisfied by EITHER a NAICS or a
-    # SIC code (Beta Report §10 lists both as readiness items and notes they are
-    # mapped flexibly). A submission carrying a SIC code but no NAICS is now
-    # credited (previously it was penalised), and when both are absent the gap is
-    # surfaced as one combined "NAICS or SIC" item rather than ignoring SIC.
-    #
-    # WC-specific fields are excluded from both the missing list AND the
-    # denominator when the submission has no Workers Comp coverage, so a complete
-    # non-WC submission can reach 100 (previously capped at ~75).
-    has_wc = bool((flags or {}).get("has_workers_comp"))
-    fields = {
-        f: lbl for f, lbl in TIER2_FIELDS.items()
-        if has_wc or f not in _TIER2_WC_FIELDS
-    }
+    # SIC code (client 3.13: "NAICS or SIC"; spec section 3.1 lists them as
+    # interchangeable). A submission carrying a SIC code but no NAICS is
+    # credited, and when both are absent the gap is surfaced as one combined
+    # "NAICS or SIC" item rather than ignoring SIC.
     missing: List[str] = []
-    for field, label in fields.items():
+    applicable = 0
+    for field, label in TIER2_FIELDS.items():
         if field == "naics_code":
+            # N/A only when BOTH keys are N/A - either one satisfies the
+            # requirement, so either one being merely absent is not N/A.
+            if (_tier2_not_applicable(facts, "naics_code")
+                    and _tier2_not_applicable(facts, "sic_code")):
+                continue
+            applicable += 1
             if not (_answered(facts, "naics_code") or _answered(facts, "sic_code")):
                 missing.append("NAICS or SIC industry code")
             continue
+        if _tier2_not_applicable(facts, field):
+            continue                       # 3.6: removed from the denominator
+        applicable += 1
         # ANSWERED, not "has a value" - see check_tier1.
         if not _answered(facts, field):
             missing.append(label)
-    score = max(0, round(100 - len(missing) * (100 / len(fields))))
+    if applicable <= 0:
+        # Every field N/A. Nothing is owed, so nothing is missing: 100, not a
+        # division by zero and not a 0 that would read as a total failure.
+        return 100, []
+    score = max(0, round(100 - len(missing) * (100 / applicable)))
     return score, missing
 
 
@@ -1912,12 +1976,30 @@ CONFIDENCE_SCORE = {
     "ai_high":          0.85,    # fact-level label (extraction); never a field label today
     "ai_low":           0.50,    # fact-level label (extraction); never a field label today
     "low_confidence":   0.50,    # the field label pdf_service actually emits for unverified AI
+    # ── C3 3.8 (2026-08-25). Written by pdf_service.apply_fact_state_
+    # confidence_labels, which reads each box back to its SOURCE FACT. ───────
+    # A recorded Explicit No is a COMPLETED response, not an empty box - the
+    # client's own wording. It scores like any other answered fact.
+    "explicit_no":      1.00,
+    # A value the documents still disagree about STAMPS (Brent Q4 / D16) but
+    # must not read as fully complete. Half credit: present and usable, not
+    # settled. This number is OURS, like the 0.85 / 0.50 above - 3.8 says
+    # "should not receive full completed-field credit" and sets no figure.
+    "conflicted":       0.50,
     # Empty / required-but-missing fields contribute nothing. Both gate labels
     # are listed EXPLICITLY so that 0.00 is a decision, not a `.get` default.
     "missing_required":      0.00,
     "missing_required_gate": 0.00,   # ACORD 125/126 "started row" sibling gate
     None:                    0.00,
 }
+
+# C3 3.8: *"Not Applicable fields must not reduce fill rate."* Not a zero
+# weight - an EXCLUSION. A zero would still sit in the denominator and drag the
+# average down, which is the defect this closes rather than a fix for it.
+# Deliberately NOT a key in CONFIDENCE_SCORE: the label never reaches the
+# weighted sum, and giving it a weight there would invite someone to "simplify"
+# the exclusion away.
+FILL_RATE_EXCLUDED_LABELS = frozenset({"not_applicable"})
 
 
 def confidence_fill_rate(mapped_data: dict, confidence_dict: dict) -> int:
@@ -1928,12 +2010,29 @@ def confidence_fill_rate(mapped_data: dict, confidence_dict: dict) -> int:
     ENGINEERING DEFAULT, not a client decision - see the note on
     ``CONFIDENCE_SCORE``. Denominator is the count of *filled* fields so the
     score reflects the average confidence of what was filled, not how big the
-    template happens to be.
+    template happens to be. C3 3.8 keeps that design deliberately - *"Do not
+    redesign the full confidence-weighting algorithm in this V1 pass"* - and
+    changes only which fields COUNT:
+
+      * Not Applicable  - excluded outright, numerator and denominator.
+        Measured before this: one good field scored 100, and the same form plus
+        one box holding the literal ``"N/A"`` scored 75.
+      * Explicit No     - counted as filled. Measured before this: a box
+        holding ``"None"`` scored 0, because the emptiness test below treats
+        that string as empty. The LABEL is what rescues it, never the string,
+        so a stringified Python ``None`` is still not credited.
+      * Conflicting     - counted, at the reduced ``conflicted`` weight.
     """
-    filled_items = [
-        field for field, val in mapped_data.items()
-        if val is not None and str(val).strip() not in ("", "null", "None")
-    ]
+    filled_items = []
+    for field, val in mapped_data.items():
+        label = confidence_dict.get(field)
+        if label in FILL_RATE_EXCLUDED_LABELS:
+            continue                       # 3.8: cannot reduce the fill rate
+        if label == "explicit_no":
+            filled_items.append(field)     # 3.8: a valid completed response
+            continue
+        if val is not None and str(val).strip() not in ("", "null", "None"):
+            filled_items.append(field)
     filled_count = len(filled_items)
     if filled_count == 0:
         return 0
@@ -2638,28 +2737,51 @@ def _calculate_exposure_consistency(
     }
 
     # ── GL: class codes vs operations (L90, L92) ─────────────────────────────
+    #
+    # C3 (owner ruling, 2026-08-25): the two "operations description is MISSING"
+    # deductions that used to live here are GONE. `operations_description` is an
+    # explicit C3 3.5 Tier 2 field, so its absence is already scored in
+    # Structural Completeness; charging it again here punished one gap twice -
+    # the exact thing the client's Current Problem list asks us to be able to
+    # rule out ("whether a deduction is being counted more than once").
+    #
+    # What REMAINS here is not the same measurement, and must not be removed:
+    #   * missing CLASS CODES (-20) is a different fact, scored nowhere else;
+    #   * the MISMATCH (-15) requires operations_description to be PRESENT, so
+    #     it can never fire on the same condition Tier 2 is charging for. It is
+    #     a consistency check, which is what this pillar is for.
     if flags.get("has_general_liability"):
         gl_codes = _fv(facts, "gl_class_codes_by_location")
         codes_present = bool(gl_codes) and not (isinstance(gl_codes, list) and not gl_codes)
         if not codes_present:
             ded["operations_description"] += 20
-        else:
-            if not _fv(facts, "operations_description"):
-                ded["operations_description"] += 10
-            elif _is_ops_class_code_mismatch(facts, flags, "gl"):
-                ded["operations_description"] += 15  # GL class code does not match operations description
+        elif _is_ops_class_code_mismatch(facts, flags, "gl"):
+            ded["operations_description"] += 15  # GL class code does not match operations description
         if not _fv(facts, "gl_limits") and not _fv(facts, "gl_each_occurrence"):
             ded["coverage_information"] += 8
-    else:
-        # No GL - standalone operations description missing deduction
-        if not _fv(facts, "operations_description"):
-            ded["operations_description"] += 10
 
     # ── Payroll / revenue exposure base (L41, L121) ──────────────────────────
-    has_payroll = bool(_fv(facts, "total_payroll") or _fv(facts, "wc_payroll"))
-    has_revenue = bool(_fv(facts, "total_revenue"))
-    if not (has_payroll or has_revenue):
-        ded["payroll_employee_information"] += 15
+    #
+    # C3 (owner ruling, 2026-08-25): the flat -15 for "no payroll AND no
+    # revenue anywhere" is GONE, and this is the more delicate of the two
+    # de-duplications, so the reasoning is recorded in full.
+    #
+    # `total_revenue` is an explicit C3 3.5 Tier 2 field, so its absence is
+    # already scored in Structural. The -15 charged it a second time. But the
+    # same deduction was also the ONLY place PAYROLL was scored once C3 3.14
+    # removed `total_payroll` from Tier 2 - so deleting it naively would have
+    # left payroll scored nowhere at all, contradicting 3.14's own instruction
+    # that these fields are *"handled through WC/Exposure rules instead"*.
+    #
+    # Resolved by giving each fact exactly one home, which is what the client's
+    # own principle asks for:
+    #   * revenue  -> Structural Tier 2, and only there;
+    #   * payroll  -> the WC bucket immediately below ("WC coverage with no
+    #     payroll", -12), plus the "GL coverage detected but no revenue or
+    #     payroll found" warning in evaluate_stops, which is a CEILING and not a
+    #     deduction (3.9 and spec section 7 both keep those separate).
+    # A GL-only account is revenue-rated and a WC account is payroll-rated, so
+    # neither loses a check that was ever meaningful for it.
 
     # ── Revenue-to-payroll outlier detection ─────────────────────────────────
     # Client examples that MUST flag: $10M revenue with $25K payroll (ratio
@@ -3359,6 +3481,7 @@ def _compute_category_breakdown(
     conf_rate:   Optional[int] = None,
     exposure_subscores: Optional[Dict[str, int]] = None,
     doc_types: Optional[set] = None,
+    structural_parts: Optional[List[dict]] = None,
 ) -> Dict[str, Dict[str, dict]]:
     """
     Display breakdown nested under the 6 SQS pillars.
@@ -3508,13 +3631,27 @@ def _compute_category_breakdown(
     # When the package scorer passes the real per-bucket scores, render THOSE so
     # the expandable detail equals the inputs that produced the pillar headline.
     # Labels match client-approved naming exactly.
+    # C3 Desired Outcome: the Exposure buckets DO reconstruct their pillar
+    # exactly - the headline is 100 minus the sum of what each bucket deducted -
+    # so each row carries `deducted` and the panel can show the arithmetic
+    # instead of a completeness word. Without it the only visible difference
+    # between "this fact was charged here" and "it was not" is one adjective:
+    # the S4 double-count fix moved the Payroll/Employee bucket from 77 to 92,
+    # which reads as "Strong" versus "Complete" and proves nothing to anyone.
+    def _exp_cat(key: str, label: str) -> dict:
+        _s = int((exposure_subscores or {}).get(key, 0))
+        return {"score": _s, "status": _sc_status(_s), "label": label,
+                "deducted": max(0, 100 - _s)}
+
     if exposure_subscores:
         _exp_cats = {
-            "operations_description":       _cat(exposure_subscores.get("operations_description", 0),      _sc_status(exposure_subscores.get("operations_description", 0)),      "Operations"),
-            "coverage_information":         _cat(exposure_subscores.get("coverage_information", 0),         _sc_status(exposure_subscores.get("coverage_information", 0)),         "Coverage Info"),
-            "payroll_employee_information": _cat(exposure_subscores.get("payroll_employee_information", 0), _sc_status(exposure_subscores.get("payroll_employee_information", 0)), "Payroll/Employee"),
-            "revenue_sales_information":    _cat(exposure_subscores.get("revenue_sales_information", 0),    _sc_status(exposure_subscores.get("revenue_sales_information", 0)),    "Revenue/Sales"),
-            "cross_document_consistency":   _cat(exposure_subscores.get("cross_document_consistency", 0),   _sc_status(exposure_subscores.get("cross_document_consistency", 0)),   "Cross-Document Consistency"),
+            k: _exp_cat(k, lbl) for k, lbl in (
+                ("operations_description",       "Operations"),
+                ("coverage_information",         "Coverage Info"),
+                ("payroll_employee_information", "Payroll/Employee"),
+                ("revenue_sales_information",    "Revenue/Sales"),
+                ("cross_document_consistency",   "Cross-Document Consistency"),
+            )
         }
     else:
         _exp_cats = {
@@ -3525,14 +3662,46 @@ def _compute_category_breakdown(
             "cross_document_consistency":   _cat(xd_s,  xd_st,                                                          "Cross-Document Consistency"),
         }
 
-    return {
-        "structural_completeness": {
+    # ── Structural Completeness sub-rows - C3, 2026-08-25 ───────────────────
+    # These ARE the pillar's formula now: multiply each row's score by its
+    # weight and the rows sum to Structural Completeness exactly.
+    #
+    # They replace five rows (Applicant Info, Entity Info, Effective Date
+    # Consistency, Policy Term Consistency, Supporting Documentation) that were
+    # computed from a DIFFERENT set of facts than the pillar and could never
+    # reconstruct it - while this function's own docstring claimed they "ARE the
+    # P1 formula" and took `tier1_score` / `tier2_score` as arguments it never
+    # read. The frontend had already worked around it, rendering status words
+    # instead of numbers with a note conceding the rows do not add up. That
+    # workaround is what C3's Current Problem list is describing.
+    #
+    # Nothing is lost: WHICH Tier 1 / Tier 2 fact is missing rides on each row's
+    # `missing` list and on the structural_completeness recommendations.
+    if structural_parts:
+        _structural_cats = {
+            p["key"]: {
+                "score":   p["score"],
+                "status":  _sc_status(p["score"]),
+                "label":   p["label"],
+                "weight":  p["weight"],
+                "contribution": p["contribution"],
+                "missing": p.get("missing") or [],
+            }
+            for p in structural_parts
+        }
+    else:
+        # Legacy callers that pass no parts (and stored payloads) keep a
+        # meaningful, if coarser, Structural detail rather than an empty panel.
+        _structural_cats = {
             "applicant_information":      _cat(app_score,       _sc_status(app_score),       "Applicant Info"),
             "entity_information":         _cat(entity_score,    _sc_status(entity_score),    "Entity Info"),
             "effective_date_consistency": _cat(eff_score,       eff_st,                      "Effective Date Consistency"),
             "policy_term_consistency":    _cat(pol_score,       pol_st,                      "Policy Term Consistency"),
             "supporting_documentation":   _cat(supp_doc_score,  _sc_status(supp_doc_score),  "Supporting Documentation"),
-        },
+        }
+
+    return {
+        "structural_completeness": _structural_cats,
         "exposure_consistency": _exp_cats,
         "property_integrity": {
             "cope_info":     _cat(cope_info_score, cope_info_st, "COPE Info"),
@@ -3914,6 +4083,80 @@ SPEC_PILLAR_WEIGHTS = {
     "narrative_quality":       0.10,    # ACORD 101 clarity
 }
 
+# ── Structural Completeness blend - SUBMISSION SCORE ONLY ────────────────────
+# Client C3 3.2 (2026-08-25), superseding the spec's 35 / 30 / 35:
+#
+#     Structural = Tier 1 x 40% + Tier 2 x 35% + Form Fill Rate x 25%
+#
+# His reason, verbatim: *"The existing Structural formula gives 35% of the
+# Structural pillar to ACORD form fill rate. That makes the submission score
+# more dependent on form completion than we want long term."*
+#
+# THIS IS THE SUBMISSION FORMULA AND NOTHING ELSE. `SQS_Scoring_Specification`
+# states both formulas side by side twice - section 3.1 (*"Submission level:
+# Structural = ..."* then *"Individual form scores use that form's own
+# checklist"*) and section 10's scope table - and 3.2 modifies only the
+# submission line. Under the precedence rule an unmodified rule stays
+# authoritative, so per-form Structural REMAINS that form's own ACORD checklist
+# minus the OCR penalty. Do not "unify" the two: they are deliberately different,
+# which is also why `calculate_sqs`'s `tier2_score` parameter is unread.
+_W_TIER1 = 0.40
+_W_TIER2 = 0.35
+_W_FILL  = 0.25
+
+# C3 3.7 - no ACORD forms generated: drop Form Fill Rate and rescale the other
+# two, "preserving the 40:35 relationship". The client states the results
+# himself (53.3% / 46.7%); they are DERIVED here rather than typed so the two
+# can never disagree if the ratio above ever moves.
+_W_NOFORM_TIER1 = round(_W_TIER1 / (_W_TIER1 + _W_TIER2), 3)   # 0.533
+_W_NOFORM_TIER2 = round(_W_TIER2 / (_W_TIER1 + _W_TIER2), 3)   # 0.467
+
+# Labels carry no percentage: the WEIGHT is a field on the row, because 3.7's
+# no-form case rescales it and a label baked with "40%" would then be a lie.
+_STRUCTURAL_PART_LABELS = {
+    "tier1": "Core Application (Tier 1)",
+    "tier2": "Underwriting Profile (Tier 2)",
+    "fill":  "Form Fill Rate",
+}
+
+
+def _structural_parts(tier1_score: int, tier2_score: int,
+                      fill_rate: Optional[int],
+                      tier1_missing: Optional[List[str]] = None,
+                      tier2_missing: Optional[List[str]] = None) -> List[dict]:
+    """The three components behind Structural Completeness, with real weights.
+
+    THE SCORER'S OWN INPUTS, not a display-side reconstruction. Multiply each
+    row's score by its weight and the three sum to the pillar - which is what
+    C3's Desired Outcome asks for and what the previous five sub-rows could
+    never do, because they were computed from a different set of facts.
+
+    `fill_rate=None` is C3 3.7's no-forms case: the row is dropped and the
+    other two carry the rescaled 53.3 / 46.7 weights.
+    """
+    if fill_rate is None:
+        w1, w2, wf = _W_NOFORM_TIER1, _W_NOFORM_TIER2, 0.0
+    else:
+        w1, w2, wf = _W_TIER1, _W_TIER2, _W_FILL
+    parts = [
+        {"key": "tier1", "label": _STRUCTURAL_PART_LABELS["tier1"],
+         "score": int(tier1_score), "weight": w1,
+         "contribution": round(int(tier1_score) * w1, 2),
+         "missing": list(tier1_missing or [])},
+        {"key": "tier2", "label": _STRUCTURAL_PART_LABELS["tier2"],
+         "score": int(tier2_score), "weight": w2,
+         "contribution": round(int(tier2_score) * w2, 2),
+         "missing": list(tier2_missing or [])},
+    ]
+    if fill_rate is not None:
+        parts.append({
+            "key": "fill", "label": _STRUCTURAL_PART_LABELS["fill"],
+            "score": int(fill_rate), "weight": wf,
+            "contribution": round(int(fill_rate) * wf, 2),
+            "missing": [],
+        })
+    return parts
+
 def _weighted_pillar_sum(pillars: Dict[str, Optional[float]],
                          weights: Dict[str, float]) -> int:
     """Weighted pillar sum with GENERIC Not-Applicable rescaling (client C2
@@ -3931,6 +4174,107 @@ def _weighted_pillar_sum(pillars: Dict[str, Optional[float]],
         return 0
     scale = 1.0 / total_w
     return int(sum(v * weights[k] * scale for k, v in active.items()))
+
+
+def effective_pillar_weights(pillars: Dict[str, Optional[float]],
+                             weights: Dict[str, float]) -> Dict[str, float]:
+    """The weight each pillar ACTUALLY carried, after Not-Applicable rescaling.
+
+    A pillar's nominal weight is only its real weight when nothing is N/A. With
+    Umbrella removed, Structural is not 25% of the score - it is 25/90 = 27.8%.
+    Anything that PRINTS a weight has to print this one, or it tells the user a
+    number that does not reconcile with the arithmetic in front of them.
+
+    Derived from the same two lines `_weighted_pillar_sum` uses, so the two can
+    never disagree.
+    """
+    active = {k: v for k, v in pillars.items() if v is not None and k in weights}
+    total_w = sum(weights[k] for k in active)
+    if not active or total_w <= 0:
+        return {}
+    return {k: round(weights[k] / total_w, 5) for k in active}
+
+
+def build_score_trace(
+    pillars: Dict[str, Optional[float]],
+    weights: Dict[str, float],
+    raw_uncapped: int,
+    cap_applied: Optional[int],
+    cap_reason: Optional[str],
+    displayed: int,
+    credits_applied: int = 0,
+    structural_parts: Optional[List[dict]] = None,
+    exposure_subscores: Optional[Dict[str, int]] = None,
+) -> dict:
+    """The audit ledger behind one score. C3's Desired Outcome, made a value.
+
+    The client's ask, verbatim: *"Every material score should be traceable
+    through: Canonical Fact -> Validation Rule -> Pillar -> Raw SQS -> Ceiling
+    -> Displayed SQS."* Before this, three of those five arrows existed only in
+    somebody's head - `_compute_category_breakdown` rendered five Structural
+    sub-rows that were computed from a different set of facts than the pillar
+    itself, took `tier1_score` and `tier2_score` as arguments and read NEITHER,
+    and the frontend hid the sub-row numbers with a note admitting they do not
+    add up.
+
+    THIS OBJECT IS EMITTED BY THE SCORER, NOT RECONSTRUCTED FOR DISPLAY. That
+    is the whole point: a second computation "for the panel" is how the panel
+    and the score drift apart again, which is the defect being closed. The
+    build asserts `reconciles` in tests/test_c3_sqs_integrity.py, so if any
+    pillar ever stops adding up, the build fails rather than the producer
+    finding out.
+
+    Shape:
+      pillars[]        one row per pillar: score, nominal and EFFECTIVE weight,
+                       and the points it actually contributed
+      structural[]     the Tier 1 / Tier 2 / Form Fill Rate split behind P1
+      exposure[]       the five Exposure buckets and what each deducted
+      arithmetic       raw -> credits -> ceiling -> displayed, in that order
+      reconciles       do the contributions sum to the raw score?
+    """
+    eff = effective_pillar_weights(pillars, weights)
+    rows: List[dict] = []
+    for key, score in pillars.items():
+        if key not in weights:
+            continue
+        if score is None:
+            rows.append({
+                "pillar": key, "score": None,
+                "nominal_weight": weights[key], "effective_weight": 0.0,
+                "contribution": 0.0, "not_applicable": True,
+            })
+            continue
+        _eff = eff.get(key, 0.0)
+        rows.append({
+            "pillar": key, "score": int(score),
+            "nominal_weight": weights[key],
+            "effective_weight": _eff,
+            "contribution": round(float(score) * _eff, 2),
+            "not_applicable": False,
+        })
+
+    _sum = sum(r["contribution"] for r in rows)
+    exposure_rows = [
+        {"bucket": k, "score": v, "deducted": max(0, 100 - int(v))}
+        for k, v in sorted((exposure_subscores or {}).items())
+    ]
+    return {
+        "pillars": rows,
+        "structural": list(structural_parts or []),
+        "exposure": exposure_rows,
+        "arithmetic": {
+            "weighted_sum":   round(_sum, 2),
+            "raw":            int(raw_uncapped),
+            "credits":        int(credits_applied or 0),
+            "ceiling":        cap_applied,
+            "ceiling_reason": cap_reason,
+            "displayed":      int(displayed),
+        },
+        # `int()` truncation in _weighted_pillar_sum means the float sum sits
+        # within 1 point above the integer raw - never below, never further.
+        "reconciles": abs(_sum - int(raw_uncapped)) < 1.0,
+        "weights_version": "c3_40_35_25",
+    }
 
 
 # ── Score caps and credits ───────────────────────────────────────────────────
@@ -4020,6 +4364,41 @@ def final_score_with_credits(
     total = int(raw_uncapped or 0) + int(credits_total or 0)
     total = max(0, min(100, total))
     return total if cap is None else min(total, int(cap))
+
+
+def apply_credits_to_score(sqs: Optional[dict], credits_total: int,
+                           cap: Optional[int], score_key: str) -> Optional[dict]:
+    """THE ONE DOOR for putting earned credits onto an already-computed score.
+
+    A credit changes a score WITHOUT re-running the scorer, so nothing forces
+    the score's own trace to keep up. Four call sites each patched
+    `<score_key>` and `credits_applied` and left `score_trace.arithmetic`
+    holding the scorer's original `credits: 0` - so the How line rendered
+    **"81 earned = 85"**, a sum that does not add up, in the one panel built
+    specifically to make the arithmetic reconcile.
+
+    Measured live 2026-08-26: dismissing produced a correct
+    *"81 earned + 6 credited, held at 85 = 85"*, and then editing any field put
+    it straight back to "81 earned = 85" - because the edit path rebuilds the
+    score (fresh trace, credits 0) and re-applies the credit afterwards.
+
+    Every path that credits a score calls this, so the headline and the trace
+    can never again disagree. Returns `sqs` for chaining; a dict with no
+    `raw_sqs_score` (a legacy payload) is returned untouched rather than
+    guessed at.
+    """
+    if not isinstance(sqs, dict) or sqs.get("raw_sqs_score") is None:
+        return sqs
+    credits_total = int(credits_total or 0)
+    displayed = final_score_with_credits(sqs["raw_sqs_score"], credits_total, cap)
+    sqs[score_key] = displayed
+    sqs["credits_applied"] = credits_total
+    trace = sqs.get("score_trace")
+    if isinstance(trace, dict) and isinstance(trace.get("arithmetic"), dict):
+        trace["arithmetic"]["credits"] = credits_total
+        trace["arithmetic"]["displayed"] = displayed
+        trace["arithmetic"]["ceiling"] = cap
+    return sqs
 
 
 def _present_doc_types(session_data: dict) -> set:
@@ -4234,17 +4613,25 @@ def calculate_package_sqs(
     ]
     if _form_fill_rates:
         _fill_avg = int(sum(_form_fill_rates) / len(_form_fill_rates))
-        p1 = int(tier1_score * 0.35 + tier2_score * 0.30 + _fill_avg * 0.35)
+        p1 = int(tier1_score * _W_TIER1 + tier2_score * _W_TIER2
+                 + _fill_avg * _W_FILL)
+        _p1_parts = _structural_parts(tier1_score, tier2_score, _fill_avg,
+                                      tier1_missing, tier2_missing)
     elif mapped_data:
-        # Spec 35/30/35: with no per-form structural score, the confidence fill rate
-        # IS the Form Fill Quality component, carried at the same 35% weight.
+        # Forms WERE generated (mapped_data only exists after form fill), we just
+        # have no per-form result rows - so the fill component still applies and
+        # the confidence fill rate IS it.
         conf_rate = confidence_fill_rate(mapped_data, confidence_dict or {})
-        p1 = int(tier1_score * 0.35 + tier2_score * 0.30 + conf_rate * 0.35)
+        p1 = int(tier1_score * _W_TIER1 + tier2_score * _W_TIER2
+                 + conf_rate * _W_FILL)
+        _p1_parts = _structural_parts(tier1_score, tier2_score, conf_rate,
+                                      tier1_missing, tier2_missing)
     else:
-        # No Form Fill Quality signal at all (lite path, no mapped data): drop that
-        # 35% component and keep the remaining two in their spec 35:30 ratio
-        # (0.35/0.65 and 0.30/0.65) so the proportion stays client-approved.
-        p1 = int(tier1_score * 0.538 + tier2_score * 0.462)
+        # C3 3.7 - no ACORD forms generated: drop the Form Fill Rate component
+        # and rescale the other two proportionally, preserving the 40:35 ratio.
+        p1 = int(tier1_score * _W_NOFORM_TIER1 + tier2_score * _W_NOFORM_TIER2)
+        _p1_parts = _structural_parts(tier1_score, tier2_score, None,
+                                      tier1_missing, tier2_missing)
 
     # P2 - Exposure Consistency
     _cross = list(cross_issues or [])
@@ -4445,6 +4832,29 @@ def calculate_package_sqs(
         conf_rate=_conf_rate_breakdown,
         exposure_subscores=_exposure_subscores,
         doc_types=_present_types,
+        structural_parts=_p1_parts,
+    )
+    # C3 Desired Outcome - the ledger behind this number, emitted by the scorer
+    # that produced it. `credits_applied` is 0 here by design: credits are added
+    # by the caller (audit_routes / recalculate_session_scores / update_pdf),
+    # which rewrites `arithmetic.credits` and `arithmetic.displayed` when it
+    # does. See build_score_trace.
+    _score_trace = build_score_trace(
+        pillars={
+            "structural_completeness": p1,
+            "exposure_consistency":    p2,
+            "property_integrity":      p3,
+            "loss_history_alignment":  p4,
+            "umbrella_limit_adequacy": p5,
+            "narrative_quality":       p6,
+        },
+        weights=SPEC_PILLAR_WEIGHTS,
+        raw_uncapped=raw_uncapped,
+        cap_applied=cap_applied,
+        cap_reason=cap_reason,
+        displayed=raw,
+        structural_parts=_p1_parts,
+        exposure_subscores=_exposure_subscores,
     )
     # Inject computed P4/P5/P6 into the loss/umbrella/narrative sub-rows
     _category_breakdown["loss_history_alignment"]["loss_history"]["score"] = p4
@@ -4526,6 +4936,9 @@ def calculate_package_sqs(
         "category_breakdown":    _category_breakdown,
         "narrative_components":  _narrative_components,
         "loss_run_match":        _loss_run_match,
+        # C3 Desired Outcome: Canonical Fact -> Validation Rule -> Pillar ->
+        # Raw SQS -> Ceiling -> Displayed SQS, as data rather than as folklore.
+        "score_trace":           _score_trace,
         # Why the tier is what it is - which identifiers matched, which did
         # not, and any producer-facing note (DBA, FEIN-with-different-name).
         "loss_run_match_detail": _loss_run_detail,
@@ -4569,11 +4982,15 @@ def calculate_package_sqs_spec_compliant(
     tier1_ok, tier1_missing = check_tier1(facts, flags)
     tier2_score, tier2_missing = check_tier2(facts, flags)
     conf_rate = confidence_fill_rate(mapped_data or {}, confidence_dict or {})
-    # Spec 35/30/35: Core Application / Underwriting Profile / Form Fill Quality.
+    # C3 3.2 40/35/25: Core Application / Underwriting Profile / Form Fill Rate.
+    # Reads the same three constants as calculate_package_sqs - this function is
+    # retained for imports only (see tests/test_sqs_scoring_fixes_20260816.py),
+    # and a second hand-typed copy of the blend is exactly how the two would
+    # drift the day someone did start calling it again.
     p1 = int((
-        (100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)) * 0.35 +
-        tier2_score * 0.30 +
-        conf_rate * 0.35
+        (100 if tier1_ok else max(0, 100 - len(tier1_missing) * 20)) * _W_TIER1 +
+        tier2_score * _W_TIER2 +
+        conf_rate * _W_FILL
     ))
 
     # P2: Exposure Consistency (class codes, payroll alignment)
@@ -4822,6 +5239,15 @@ def _measure_recommendation_impacts(
         if not isinstance(declared, (int, float)) or isinstance(declared, bool):
             continue
 
+        # A card the scorer has already declared UNSCORED is worth zero, exactly,
+        # and no fallback may raise it. The three refusals below are built around
+        # "a simulation showing no movement might mean our probe was the wrong
+        # shape" - true in general, and wrong here, because the emitter knows the
+        # check was excluded from the pillar in the first place.
+        if rec.get("unscored"):
+            out[id(rec)] = (0, True)
+            continue
+
         # A card with no single answerable field cannot be simulated - nothing to
         # fill - but it must STILL be bounded. Measured on a live session
         # 2026-08-17: once the producer attested, the follow-up card ("attach
@@ -4949,6 +5375,13 @@ def calculate_sqs(
         # package scorers cannot disagree about what a submission owes (see
         # producer_fields_exempt). An exempt check is still REPORTED as missing -
         # we still want the detail - it just stops docking the pillar.
+        #
+        # C3 3.3 (2026-08-25): CONTACT INFORMATION is no longer exempt on either
+        # scorer. Client 3.3 and spec section 3.1 both waive producer name only,
+        # and only when the ONLY source document is a declarations page. This
+        # line and `check_tier1` must always move together - they are the two
+        # copies of one rule, and the 2026-08-17 defect was exactly them
+        # disagreeing.
         _prod_exempt = producer_fields_exempt(flags)
         _checks = [
             # (label, fact key for the card, present?, counts toward the score?)
@@ -4962,22 +5395,34 @@ def calculate_sqs(
              bool(_fv(facts, "lines_of_business")), True),
             ("contact info",      "contact_name",
              bool(_fv(facts, "contact_name") or _fv(facts, "contact_phone")
-                  or _fv(facts, "contact_email")), not _prod_exempt),
+                  or _fv(facts, "contact_email")), True),
             ("producer name",     "producer_name",
              bool(_fv(facts, "producer_name")),     not _prod_exempt),
+            # NOTE: the 4th element is `scored`. An UNSCORED check still raises
+            # its card (we want the detail) but must advertise ZERO points - see
+            # `unscored` on the recommendation below.
         ]
         chks = [ok for _l, _f, ok, scored in _checks if scored]
         struct = int(sum(chks) / len(chks) * 100) if chks else 100
-        missing = [(l, f) for l, f, ok, _scored in _checks if not ok]
-        for label, field_name in missing:
+        missing = [(l, f, sc) for l, f, ok, sc in _checks if not ok]
+        for label, field_name, _scored in missing:
             recommendations.append({
                 "rec_id": f"rec_{field_name}",
                 "field": field_name,
                 "component": "structural_completeness",
                 "message": f"ACORD 125 missing: {label}",
                 "type": "missing_field",
-                "score_impact": 15 if field_name in TIER1_FIELDS else 8,
+                "score_impact": 0 if not _scored else (
+                    15 if field_name in TIER1_FIELDS else 8),
                 "priority": 1 if field_name in TIER1_FIELDS else 2,
+                # An exempt check is still ASKED FOR and worth exactly ZERO. Say
+                # so, so `_measure_recommendation_impacts` cannot fall back to a
+                # typed literal: its "no movement measured" branch cannot tell a
+                # genuine zero from a probe of the wrong shape, so on a
+                # dec-page-only submission the exempt producer-name card
+                # advertised "up to +5 pts" while the pillar it belongs to could
+                # not move at all. Live on S1, 2026-08-25.
+                "unscored": not _scored,
             })
 
     elif fid == "ACORD_126":
@@ -5809,12 +6254,28 @@ def calculate_sqs(
         "ok" if narrative_score >= 70 else ("partial" if narrative_score >= 40 else "insufficient")
     )
 
+    # C3 Desired Outcome, per FORM as well as per submission (owner ruling
+    # 2026-08-25: "for both per form score as well as package wherever
+    # applicable"). `structural_parts` is deliberately absent here: per-form
+    # Structural is that form's own ACORD checklist, not the Tier 1 / Tier 2 /
+    # fill blend - spec sections 3.1 and 10 both state the two formulas side by
+    # side, and C3 3.2 modifies only the submission one.
+    _score_trace = build_score_trace(
+        pillars=breakdown,
+        weights=weights,
+        raw_uncapped=raw_uncapped,
+        cap_applied=cap_applied,
+        cap_reason=cap_reason,
+        displayed=raw_score,
+    )
+
     return {
         "sqs_score":           raw_score,
         # Cap audit trail (2026-08-16) - see calculate_package_sqs for the rule.
         "raw_sqs_score":       raw_uncapped,
         "cap_applied":         cap_applied,
         "cap_reason":          cap_reason,
+        "score_trace":         _score_trace,
         "tier":                tier,
         "tier_color":          tc,
         "grade":               _grade_label,   # from the shared tier ladder

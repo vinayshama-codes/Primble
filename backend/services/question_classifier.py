@@ -140,11 +140,11 @@ try:  # pragma: no cover - exercised at import in the running app
     _TIER2 = set(TIER2_FIELDS.keys())
 except Exception:  # pragma: no cover - safety fallback if import graph changes
     _TIER1 = {"producer_name", "applicant_name", "mailing_address",
-              "effective_date", "lines_of_business"}
+              "effective_date", "lines_of_business", "entity_type"}
     _TIER1_CONTACT = {"contact_name", "contact_phone", "contact_email"}
-    _TIER2 = {"fein", "entity_type", "operations_description", "total_revenue",
-              "prior_carrier", "num_employees", "years_in_business",
-              "naics_code", "num_claims", "total_payroll"}
+    # Mirrors sqs_service.TIER2_FIELDS as of C3 3.5 (2026-08-25).
+    _TIER2 = {"fein", "operations_description", "total_revenue",
+              "num_employees", "years_in_business", "naics_code"}
 
 # Critical = SQS tier-1 essentials a client can answer. `producer_name` is a
 # tier-1 SCORING field but it is the agency's own name — a producer-side item,
@@ -152,9 +152,26 @@ except Exception:  # pragma: no cover - safety fallback if import graph changes
 # the producer audience by the producer-pattern rule below.
 CRITICAL_FIELDS = (_TIER1 | _TIER1_CONTACT) - {"producer_name"}
 
+# Fields C3 3.5 / 3.14 and C2 2.7 / 2.8 removed from Structural Tier 2 but which
+# a client must STILL be asked for. Removing a field from the SCORE must never
+# remove it from the QUESTIONNAIRE - they answer different questions ("does this
+# gap cost points?" versus "do we need this to write the risk?").
+#
+# Measured 2026-08-25 before this line existed: simulating the 3.14 removal
+# dropped `total_payroll`, `wc_payroll_period` and `wc_officer_exclusions` to
+# audience=internal / priority=suppressed - i.e. Primble would have silently
+# stopped asking anyone for annual payroll. `wc_xmod` survived only because it
+# already appeared by name in the literal set below.
+# Pinned by name, and guarded by
+# tests/test_c3_sqs_integrity.py::test_tier2_removals_are_still_asked_for.
+_SCORE_REMOVED_STILL_ASKED = {
+    "total_payroll", "wc_xmod", "wc_payroll_period", "wc_officer_exclusions",
+    "prior_carrier", "num_claims",
+}
+
 # Important = SQS tier-2 fields + the core coverage limits/exposures that move
 # the per-line and package scores even though they aren't structural tier-1.
-IMPORTANT_FIELDS = _TIER2 | {
+IMPORTANT_FIELDS = _TIER2 | _SCORE_REMOVED_STILL_ASKED | {
     "gl_limits", "gl_each_occurrence", "gl_aggregate", "gl_deductible",
     "umbrella_limit", "umbrella_sir", "auto_liability_limit",
     "wc_payroll", "wc_class_codes", "wc_xmod",

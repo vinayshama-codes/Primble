@@ -4810,32 +4810,139 @@ def _umbrella_period_is_current(facts: dict) -> bool:
 # SQS pillars, warnings and the picker keep reading it; only the stamped
 # output is withheld. Both stamping doors are covered - the Pass-1 substring
 # rules here, and the alias bridge via the form's own alias map.
-def _resolve_conflicted_fact_blank(field_name: str, facts: dict):
-    keys = (facts or {}).get("_uw_conflicted_keys") or ()
-    if not keys:
-        return _SCHED_SKIP
-    keyset = set(keys)
+def source_fact_for_field(field_name: str, facts: dict,
+                          form_id: str = "") -> Optional[str]:
+    """The canonical fact a DETERMINISTICALLY-stamped field came from, or None.
+
+    Both stamping doors, in the order they run, so the answer matches whatever
+    actually filled the box: the Pass-1 substring rules (`_ACORD_FIELD_RULES`,
+    first-match-wins exactly like the stamping loop) and then the Pass-1.5 alias
+    bridge (`alias map -> canonical -> CANONICAL_TO_EXTRACTION`).
+
+    Returns None for a gap-filled box, and that is correct rather than a gap:
+    a value the model produced has no source fact, so it can be neither "in
+    conflict with the documents" nor "a recorded explicit No". Those questions
+    only have meaning for a value that came from a fact.
+
+    Extracted from `_resolve_conflicted_fact_blank`, which was the only caller
+    and now calls this. One resolver, so the conflict withhold (D16) and the
+    fill-rate credit rules (C3 3.8) can never disagree about where a box came
+    from.
+    """
+    if not field_name:
+        return None
     for pattern, fact_key in _ACORD_FIELD_RULES:
         if pattern in field_name:
-            if fact_key in keyset:
-                logger.info(
-                    "conflict-withhold: %s left blank - fact %r has an "
-                    "unresolved cross-document conflict", field_name, fact_key)
-                return None
-            break                     # first-match-wins, mirroring the rules loop
-    form_id = str((facts or {}).get("_form_id") or "")
+            return fact_key           # first-match-wins, mirroring the rules loop
+    form_id = str(form_id or (facts or {}).get("_form_id") or "")
     if form_id:
         try:
             from services.alias_stamper import _ALIAS_MAPS, CANONICAL_TO_EXTRACTION
             canonical = (_ALIAS_MAPS.get(form_id) or {}).get(field_name)
-            if canonical and CANONICAL_TO_EXTRACTION.get(canonical) in keyset:
-                logger.info(
-                    "conflict-withhold: %s left blank - alias canonical %r "
-                    "bridges to a conflicted fact", field_name, canonical)
-                return None
+            if canonical:
+                return CANONICAL_TO_EXTRACTION.get(canonical)
         except Exception:                                 # noqa: BLE001
             pass
+    return None
+
+
+def _resolve_conflicted_fact_blank(field_name: str, facts: dict):
+    keys = (facts or {}).get("_uw_conflicted_keys") or ()
+    if not keys:
+        return _SCHED_SKIP
+    fact_key = source_fact_for_field(field_name, facts)
+    if fact_key and fact_key in set(keys):
+        logger.info(
+            "conflict-withhold: %s left blank - fact %r has an unresolved "
+            "cross-document conflict", field_name, fact_key)
+        return None
     return _SCHED_SKIP
+
+
+def apply_fact_state_confidence_labels(form_id: str, facts: dict, mapped: dict,
+                                       confidence: dict) -> dict:
+    """C3 3.8 - three of the four fill-rate rules, applied per FIELD.
+
+    The fill rate is computed per FORM FIELD; the states that decide these
+    rules live per FACT. `source_fact_for_field` is the bridge, so this reads
+    each deterministically-stamped box back to the fact that filled it and
+    relabels it:
+
+      * source fact NOT APPLICABLE   -> ``not_applicable``
+        3.8: *"Not Applicable fields must not reduce fill rate."* Measured
+        2026-08-25 BEFORE this existed: a form with one good field scored 100,
+        and the same form plus one box holding the literal string ``"N/A"``
+        scored 75 - the N/A was counted as a filled field at low confidence
+        and dragged the average down. `confidence_fill_rate` now drops this
+        label from the calculation entirely, numerator AND denominator.
+      * source fact EXPLICIT NO      -> ``explicit_no``
+        3.8: *"Explicit No may count as a valid completed response when the
+        underlying field legitimately allows a negative answer."* Measured
+        before: a box holding ``"None"`` scored **0**, because
+        `confidence_fill_rate`'s emptiness test treats the string "None" as
+        empty. Gated on the FACT's state rather than on the string, so a
+        stringified Python ``None`` - the reason that test exists - is still
+        not credited.
+      * source fact in unresolved conflict -> ``conflicted``
+        3.8: *"Conflicting fields should not receive full completed-field
+        credit."* The value still STAMPS (Brent Q4 / D16); only its weight
+        drops.
+
+    3.8's remaining rule - *"Suggested/unverified values should not be treated
+    as equivalent to Source Verified or User Confirmed"* - was already true and
+    is untouched: `ai_verified` 0.85 and `low_confidence` 0.50 both sit below
+    `filled` / `client_arq` 1.00, and Brent confirmed those weights on
+    2026-08-24 ("those assignments will do for now").
+
+    Additive and fail-open: a field with no resolvable source fact, or a fact
+    in any other state, keeps the label it already had. Never blanks a value -
+    this function only ever writes to `confidence`.
+    """
+    if not isinstance(confidence, dict) or not isinstance(mapped, dict):
+        return confidence
+    try:
+        from services.fact_state import (
+            EXPLICIT_NO, NOT_APPLICABLE, value_state_of,
+        )
+    except Exception:                                          # noqa: BLE001
+        return confidence
+
+    conflicted = set((facts or {}).get("_uw_conflict_keys") or ())
+    _state_cache: dict = {}
+    relabelled = {"not_applicable": 0, "explicit_no": 0, "conflicted": 0}
+
+    for field in list(confidence):
+        # Only boxes that actually carry something, and only ones the
+        # deterministic doors filled - a gap-filled guess has no source fact.
+        raw = mapped.get(field)
+        fact_key = source_fact_for_field(field, facts, form_id)
+        if not fact_key:
+            continue
+        if fact_key not in _state_cache:
+            try:
+                _state_cache[fact_key] = value_state_of(facts, fact_key)
+            except Exception:                                  # noqa: BLE001
+                _state_cache[fact_key] = ""
+        state = _state_cache[fact_key]
+
+        if state == NOT_APPLICABLE:
+            confidence[field] = "not_applicable"
+            relabelled["not_applicable"] += 1
+        elif state == EXPLICIT_NO:
+            confidence[field] = "explicit_no"
+            relabelled["explicit_no"] += 1
+        elif fact_key in conflicted and raw is not None and str(raw).strip():
+            confidence[field] = "conflicted"
+            relabelled["conflicted"] += 1
+
+    if any(relabelled.values()):
+        logger.info(
+            "fill-rate labels (form=%s): %d not_applicable (excluded), "
+            "%d explicit_no (full credit), %d conflicted (reduced credit)",
+            form_id or "unknown", relabelled["not_applicable"],
+            relabelled["explicit_no"], relabelled["conflicted"],
+        )
+    return confidence
 
 
 # ── Coverage a document DECLARES ABSENT never fills a form row (2026-08-15) ──
@@ -19497,6 +19604,10 @@ def map_facts_to_form(
     confidence = apply_acord125_missing_field_highlights(form_id, facts, mapped, confidence)
     confidence = apply_acord126_missing_field_highlights(form_id, facts, mapped, confidence)
     confidence = apply_acord140_missing_field_highlights(form_id, facts, mapped, confidence)
+    # C3 3.8 - runs LAST so it sees the final label for every box. Not
+    # Applicable / Explicit No / conflicting are properties of the SOURCE FACT,
+    # which outrank a label derived from how the box was filled.
+    confidence = apply_fact_state_confidence_labels(form_id, facts, mapped, confidence)
 
     # Fill-rate denominator excludes non-fillable fields (signatures, premiums,
     # rate codes) so the reported coverage is meaningful.

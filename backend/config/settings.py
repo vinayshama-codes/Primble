@@ -181,6 +181,21 @@ ENABLE_PRODUCER_ANSWERS: bool = os.getenv("ENABLE_PRODUCER_ANSWERS", "true").low
 # restore the legacy per-field questions.
 ENABLE_SCHEDULE_CAPTURE: bool = os.getenv("ENABLE_SCHEDULE_CAPTURE", "true").lower() == "true"
 
+# NAICS / SIC classification suggestions (Figure 20 chips). OFF for V1.
+# Client C3 3.13 (2026-08-25) on a missing classification code: "route to
+# producer; do not ask the client; do not generate a classification
+# recommendation in V1", with "Classification assistance is addressed
+# separately in Section 19" for V2.
+#
+# This flag makes an ALREADY-DARK feature deliberate. `suggestions` is rendered
+# only by ClientQuestionnaire.jsx, and NAICS/SIC moved to the PRODUCER audience
+# on 2026-08-12, so the chips have not reached a screen since - we simply kept
+# computing them. `services/naics_suggester.py` and its tests are untouched;
+# set ENABLE_CLASSIFICATION_SUGGESTIONS=true to bring the whole feature back for
+# Section 19. See v1-20AUG.md C3-D (finding F7).
+ENABLE_CLASSIFICATION_SUGGESTIONS: bool = (
+    os.getenv("ENABLE_CLASSIFICATION_SUGGESTIONS", "false").lower() == "true")
+
 # Client questionnaire answer vs source document (V1 plan C1 F7, client rule
 # 1.5 "Client Answer Conflicts With Source: do not automatically overwrite the
 # source value. Create a conflict and route it to the producer."). When true, an
