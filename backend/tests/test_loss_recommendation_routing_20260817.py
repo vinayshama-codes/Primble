@@ -231,22 +231,68 @@ def _validate(field, answer):
     return _validate_producer_answer(field, answer)
 
 
-def test_words_are_rejected_from_a_year_count():
-    """The literal reported value. It used to sail through and become 0."""
-    ok, msg = _validate("loss_history_years", "no losses")
-    assert ok is False
-    assert msg, "a rejection must tell the producer what was expected"
+def test_text_never_silently_becomes_a_number():
+    """The protection that actually matters, and the reason this file exists.
+
+    2026-08-24: the answer path gained a semantic layer
+    (`services/answer_semantics`), so the REJECTION list changed shape - words
+    that carry a real meaning are now understood instead of refused. What must
+    never change is the defect this file was written for: text silently
+    becoming a bogus 0 that reads like data. An answer of "no losses" is now
+    recorded as an explicit ABSENCE (empty value + `value_state:
+    explicit_no`), never as a fabricated year count."""
+    from services.answer_semantics import ABSENCE, interpret_answer
+    interp = interpret_answer("loss_history_years", "no losses")
+    assert interp.intent == ABSENCE
+    assert interp.value == "", "must never fabricate a number from words"
+    assert interp.answered, "it IS an answer - just not a quantity"
+
+
+@pytest.mark.parametrize("field,answer,expected", [
+    # Understood now: a number written in words is still a number.
+    ("loss_history_years", "five", "5"),
+    ("num_employees", "about 12", "12"),
+    ("total_revenue", "$2M", "2000000"),
+    ("total_revenue", "2 million", "2000000"),
+])
+def test_meaningful_answers_are_understood_not_refused(field, answer, expected):
+    from services.answer_semantics import interpret_answer
+    assert interpret_answer(field, answer).value == expected
+    ok, _ = _validate(field, answer)
+    assert ok is True, f"{field} should understand {answer!r}"
+
+
+@pytest.mark.parametrize("field,answer", [
+    # "How many claims?" -> "none" is a real answer (zero), not a type error.
+    ("num_claims", "none"),
+    ("loss_history_years", "no losses"),
+    # A sole proprietor legitimately has no EIN.
+    ("fein", "None"),
+])
+def test_an_absence_is_an_answer_not_a_type_error(field, answer):
+    """Brent 2026-08-24: "we can't treat 'N/A' as '0'. These are not the
+    same." An absence is accepted, stored with no value, and counts as
+    answered - so it is neither penalised as a gap nor mistaken for data."""
+    from services.answer_semantics import fact_answered, interpret_answer
+    interp = interpret_answer(field, answer)
+    assert interp.accepted and interp.value == ""
+    assert fact_answered({"value": "", "value_state": interp.value_state})
+    ok, _ = _validate(field, answer)
+    assert ok is True
 
 
 @pytest.mark.parametrize("field,bad", [
-    ("loss_history_years", "five"),
-    ("loss_history_years", "no losses"),
-    ("num_claims", "none"),
-    ("fein", "no losses"),
+    ("loss_history_years", "don't know"),
+    ("num_claims", "TBD"),
+    ("total_revenue", "will confirm"),
+    ("effective_date", "not sure yet"),
 ])
-def test_type_mismatches_are_refused(field, bad):
-    ok, _ = _validate(field, bad)
-    assert ok is False, f"{field} should not accept {bad!r}"
+def test_non_answers_are_refused_at_the_door(field, bad):
+    """A NON-answer must never become data. Measured 2026-08-24: "N/A" typed
+    into every Tier-2 field scored a perfect 100 before this gate existed."""
+    ok, msg = _validate(field, bad)
+    assert ok is False, f"{field} must not accept {bad!r}"
+    assert msg, "a rejection must tell the producer what was expected"
 
 
 @pytest.mark.parametrize("field,good", [

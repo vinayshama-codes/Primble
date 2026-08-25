@@ -348,3 +348,44 @@ def carriers_same_family(a: Any, b: Any) -> bool:
         if ta == tb or ta <= tb or tb <= ta:
             return True                   # truncation / missing suffix
     return False
+
+
+def is_declared_trade_name(value, docs, ctx=None) -> bool:
+    """Is ``value`` a trade name the APPLICANT declared, rather than a rival
+    identity?
+
+    BRENT RULING 2026-08-24 (Q3a): a loss run issued to the insured's declared
+    DBA belongs to that insured. The loss-run matcher honours it, but every
+    OTHER site that compares applicant names must honour it too, or one package
+    asserts both "Matched on: dba name" and "Applicant name differs across
+    documents" - which is exactly what the S6 live run produced twice, from two
+    different engines (2026-08-25).
+
+    BOTH halves are required, and the second is what makes it safe:
+      * some document declares ``value`` as its ``dba_name``, AND
+      * that same document gives a DIFFERENT legal name.
+    A DBA is very often a prefix of the legal name ("Orbin" for "Orbin
+    Contracting LLC"), so matching the DBA alone would swallow the legal name
+    itself and silence a genuine two-company conflict.
+
+    ONE OWNER (decision D3): every caller asks here. Fail-open - an error means
+    "not a trade name", i.e. today's behaviour.
+    """
+    try:
+        v = str(value or "").strip()
+        if not v:
+            return False
+        for d in (docs or []):
+            f = (d or {}).get("facts") or {}
+            dba = f.get("dba_name")
+            legal = f.get("applicant_name")
+            dba = dba.get("value") if isinstance(dba, dict) else dba
+            legal = legal.get("value") if isinstance(legal, dict) else legal
+            if not dba or not legal:
+                continue
+            if (values_agree("applicant_name", v, dba, ctx)
+                    and not values_agree("applicant_name", v, legal, ctx)):
+                return True
+        return False
+    except Exception:                                         # noqa: BLE001
+        return False

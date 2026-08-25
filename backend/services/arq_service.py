@@ -610,6 +610,41 @@ def _attach_producer_labels(questions: List[dict]) -> None:
             q["producer_label"] = ""
 
 
+def _attach_answer_options(questions: List[dict]) -> int:
+    """Turn a still-free-text question into a choice list when its fact has a
+    knowable answer set (`services.answer_options`).
+
+    Only questions still typed "text" / a typed input are touched - a curated
+    `select` that already carries its own options (the No-Known-Losses control,
+    the marketing reason) is left exactly as it is, because those ARE the
+    catalogue's source. Returns how many gained choices.
+    """
+    n = 0
+    try:
+        from services.answer_options import is_multi_select, options_for
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("answer options unavailable: %s", exc)
+        return 0
+    for q in questions:
+        try:
+            if q.get("options"):
+                continue                       # already a curated choice list
+            if (q.get("field_type") or "text") in ("schedule", "checkbox", "select"):
+                continue
+            key = q.get("_canonical_key") or _canonical_key(q.get("field_name") or "")
+            opts = options_for(key) if key else None
+            if not opts:
+                continue
+            q["options"] = opts
+            q["field_type"] = "multiselect" if is_multi_select(key) else "select"
+            n += 1
+        except Exception:                                     # noqa: BLE001
+            continue
+    if n:
+        logger.info("ARQ: %d question(s) upgraded from free text to a choice list", n)
+    return n
+
+
 def _attach_input_types(questions: List[dict]) -> None:
     """Upgrade `field_type` from plain "text" to a structured type, in place.
 
@@ -2695,6 +2730,9 @@ async def generate_arq_questions(
     # Figure 20: business-specific NAICS / SIC candidates. Same placement
     # constraint again - resolves against `_canonical_key`.
     _attach_classification_suggestions(questions, facts)
+    # Owner 2026-08-24: offer the choices wherever the answer set is knowable,
+    # so a closed question is never a free-text box. Same placement constraint.
+    _attach_answer_options(questions)
 
     # C2 2.10: state-driven loss-question gating - one rule for all inject sites.
     questions = _apply_loss_state_question_gate(
@@ -2840,6 +2878,9 @@ def generate_arq_questions_from_facts(
     # Figure 20: business-specific NAICS / SIC candidates. Same placement
     # constraint again - resolves against `_canonical_key`.
     _attach_classification_suggestions(questions, facts)
+    # Owner 2026-08-24: offer the choices wherever the answer set is knowable,
+    # so a closed question is never a free-text box. Same placement constraint.
+    _attach_answer_options(questions)
 
     # C2 2.10: state-driven loss-question gating (facts-only path: no doc list).
     questions = _apply_loss_state_question_gate(
@@ -3660,11 +3701,23 @@ async def apply_arq_answers_to_session(
         # facts-driven scorers (root cause of "score didn't change", §6.2).
         canon = _canonical_key(field_name)
         if canon and not canon.startswith("_"):
-            facts[canon] = {
-                "value":      str(new_val),
-                "confidence": "client_arq",
-                "source":     "client_arq",
-            }
+            # Same interpretation door as the producer path - a client can type
+            # "None" or "not sure" just as easily. See answer_semantics.
+            try:
+                from services.answer_semantics import (
+                    build_fact_envelope, interpret_answer,
+                )
+                _ci = interpret_answer(canon, str(new_val))
+                facts[canon] = build_fact_envelope(
+                    canon, _ci, "client_arq", "client_arq")
+            except Exception as _cse:                         # noqa: BLE001
+                logger.warning("client answer interpretation skipped for %s (%s)",
+                               canon, _cse)
+                facts[canon] = {
+                    "value":      str(new_val),
+                    "confidence": "client_arq",
+                    "source":     "client_arq",
+                }
             # Stamp this canonical answer into EVERY generated form whose schema
             # carries it under an ACORD field name. Curated client questions and
             # every `_maybe_inject_*` / coverage-guarantee question key on a
@@ -3954,12 +4007,24 @@ async def apply_producer_answer_to_session(
     flags_changed = False
     updated: List[str] = []
 
-    # Producer-provenance fact. Distinct source from client_arq; same 1.00 weight.
-    facts[canon] = {
-        "value":      new_val,
-        "confidence": "filled",
-        "source":     "producer",
-    }
+    # Producer-provenance fact. Distinct source from client_arq; same 1.00
+    # weight. The VALUE is what the answer MEANS (services/answer_semantics):
+    # a canonicalized value, or an empty value carrying `value_state:
+    # explicit_no` when the producer answered "there is none" - which reads as
+    # ANSWERED for completeness but as NO VALUE for every semantic check, so
+    # "None" can neither be penalised as a gap nor mistaken for a carrier name.
+    # The producer's own words survive on the envelope as `answer_text`.
+    try:
+        from services.answer_semantics import build_fact_envelope, interpret_answer
+        _interp = interpret_answer(canon, new_val)
+        facts[canon] = build_fact_envelope(canon, _interp, "producer", "filled")
+    except Exception as _ase:                                 # noqa: BLE001
+        logger.warning("answer interpretation skipped for %s (%s)", canon, _ase)
+        facts[canon] = {
+            "value":      new_val,
+            "confidence": "filled",
+            "source":     "producer",
+        }
 
     # Stamp the confirmed value into every generated form whose schema carries it
     # (same deterministic engine used by the initial fill and the ARQ apply path).

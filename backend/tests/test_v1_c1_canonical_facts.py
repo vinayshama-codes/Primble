@@ -600,22 +600,46 @@ class TestLossRunIdentity:
                 _doc("loss_run", {"applicant_name": self.APPLICANT, "policy_number": "6E74002 26"}, "lr.pdf")]
         assert self._tier(docs) == "strong"
 
-    def test_dba_keeps_the_specs_tier_and_adds_a_note(self):
-        """Q3a is open: engineering default is the spec's own verdict plus a
-        producer-facing note, never an invented tier."""
+    def test_a_declared_dba_plus_the_ein_is_a_verified_match(self):
+        """Q3a CLOSED by Brent 2026-08-24: "Treat it as a verified match if the
+        DBA is listed by the applicant and the EIN matches."
+
+        Was pinned to `no_match` while the question was open; that default is
+        now overruled, so this test asserts the RULING. The declared-DBA
+        requirement is the guard and is pinned separately below."""
         docs = [_doc("dec_page", {"applicant_name": self.APPLICANT, "dba_name": "Orbin Roofing", "fein": "84-2210987"}),
                 _doc("loss_run", {"applicant_name": "Orbin Roofing", "fein": "84-2210987"}, "lr.pdf")]
         d = self._detail(docs)
-        assert d["tier"] == "no_match"
+        assert d["tier"] == "strong"
         assert "dba_name" in d["matched_on"]
+
+    def test_a_dba_with_no_identifier_is_not_promoted(self):
+        """The ruling is DBA *plus* an identifier - a trade name on its own
+        falls to the ordinary name-only tier and keeps the producer note."""
+        docs = [_doc("dec_page", {"applicant_name": self.APPLICANT, "dba_name": "Orbin Roofing"}),
+                _doc("loss_run", {"applicant_name": "Orbin Roofing"}, "lr.pdf")]
+        d = self._detail(docs)
+        assert d["tier"] == "possible"
         assert any("trade name" in n for n in d["notes"])
 
-    def test_fein_match_with_a_different_name_is_noted(self):
+    def test_a_trade_name_the_applicant_never_declared_is_still_no_match(self):
+        """The load-bearing guard on Q3a: only a DBA the APPLICANT'S OWN
+        documents state can promote a run. Without it the ruling would degrade
+        into "any unfamiliar name matches"."""
+        docs = [_doc("dec_page", {"applicant_name": self.APPLICANT}),
+                _doc("loss_run", {"applicant_name": "Orbin Roofing"}, "lr.pdf")]
+        assert self._tier(docs) == "no_match"
+
+    def test_fein_match_with_a_different_name_is_a_probable_match(self):
+        """Q3b CLOSED by Brent 2026-08-24: "Treat it as a probable match and ask
+        for confirmation of the prior name or entity relationship." Was pinned
+        to `no_match` while the question was open."""
         docs = [_doc("dec_page", {"applicant_name": self.APPLICANT, "fein": "84-2210987"}),
                 _doc("loss_run", {"applicant_name": "Totally Other Co", "fein": "84-2210987"}, "lr.pdf")]
         d = self._detail(docs)
-        assert d["tier"] == "no_match"
-        assert any("FEIN matches" in n for n in d["notes"])
+        assert d["tier"] == "moderate"
+        assert any("tax ID matches" in n for n in d["notes"])
+        assert "name" not in d["matched_on"], "the NAME is still not a match"
 
     def test_a_genuinely_different_insured_is_no_match(self):
         docs = [_doc("dec_page", {"applicant_name": self.APPLICANT}),
@@ -677,11 +701,23 @@ class TestLossRunIdentity:
 
     def test_a_different_entity_TYPE_is_not_a_name_variation(self):
         """LLC vs Company are different legal entities, not a formatting
-        difference - consistent with test_llc_vs_inc_is_a_different_entity."""
+        difference - consistent with test_llc_vs_inc_is_a_different_entity.
+
+        That guarantee is unchanged and is what this test protects: the NAME
+        never matches. What changed (Brent, Q3b, 2026-08-24) is the tier such a
+        run lands in - a shared tax ID now makes it a probable match with a
+        confirmation note, which is precisely his "entity relationship" case."""
         docs = [_doc("dec_page", {"applicant_name": self.APPLICANT, "fein": "84-2210987"}),
                 _doc("loss_run", {"applicant_name": "Orbin Contracting Company",
                                   "fein": "84-2210987"}, "lr.pdf")]
-        assert self._tier(docs) == "no_match"
+        d = self._detail(docs)
+        assert "name" not in d["matched_on"], "LLC vs Company must never read as one name"
+        assert d["tier"] == "moderate"
+        assert any("tax ID matches" in n for n in d["notes"])
+        # And with no identifier to lean on, it is still no match at all.
+        bare = [_doc("dec_page", {"applicant_name": self.APPLICANT}),
+                _doc("loss_run", {"applicant_name": "Orbin Contracting Company"}, "lr.pdf")]
+        assert self._tier(bare) == "no_match"
 
     def test_calculate_sqs_exposes_the_detail(self):
         import inspect

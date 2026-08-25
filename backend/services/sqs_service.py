@@ -501,10 +501,11 @@ def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
     for field, label in TIER1_FIELDS.items():
         if skip_producer_fields and field == "producer_name":
             continue
-        val = _fv(facts, field)
-        if not val or (isinstance(val, list) and not val):
+        # ANSWERED, not "has a value": a human answering "there is none" has
+        # answered (Brent 2026-08-24) and must not be counted as a gap.
+        if not _answered(facts, field):
             missing.append(label)
-    if not skip_producer_fields and not any(_fv(facts, f) for f in TIER1_CONTACT):
+    if not skip_producer_fields and not any(_answered(facts, f) for f in TIER1_CONTACT):
         missing.append("Contact information")
     return len(missing) == 0, missing
 
@@ -536,10 +537,11 @@ def check_tier2(facts: dict, flags: dict | None = None) -> Tuple[int, List[str]]
     missing: List[str] = []
     for field, label in fields.items():
         if field == "naics_code":
-            if not (_fv(facts, "naics_code") or _fv(facts, "sic_code")):
+            if not (_answered(facts, "naics_code") or _answered(facts, "sic_code")):
                 missing.append("NAICS or SIC industry code")
             continue
-        if not _fv(facts, field):
+        # ANSWERED, not "has a value" - see check_tier1.
+        if not _answered(facts, field):
             missing.append(label)
     score = max(0, round(100 - len(missing) * (100 / len(fields))))
     return score, missing
@@ -1481,6 +1483,34 @@ def check_doc_consistency(docs: List[dict], confirmed_keys=None) -> List[str]:
         return len(unique) > 1
 
     applicant_raw = _raw("applicant_name")
+    # BRENT RULING 2026-08-24 (Q3a), enforced here too - found on the S6 live
+    # run 2026-08-25. A loss run issued to the insured's DECLARED trade name is
+    # the same insured, and the loss-run matcher already scores it as a
+    # verified match. This checker did not know that, so the same package
+    # simultaneously read "Matched on: dba name, fein, policy number" AND
+    # "Applicant name differs across documents" - a HARD STOP capping the whole
+    # submission at 60 for a name the applicant declared themselves.
+    #
+    # Drop only values that match a DBA the package's OWN documents state, and
+    # only while some other value survives to compare - so a genuinely
+    # different third party still conflicts, and a package whose ONLY name is
+    # a trade name is left exactly as it was.
+    # A value is a TRADE NAME (and so not a rival identity) only when some
+    # document declares it as a DBA *and* that same document gives a different
+    # legal name for the insured. Both halves are required: a DBA is very often
+    # a prefix of the legal name ("Orbin" for "Orbin Contracting LLC"), so
+    # matching the DBA alone would drop the legal name itself and silence a
+    # genuine conflict - caught by
+    # test_doc_consistency_messages_have_no_code_or_list_leak.
+    try:
+        from services.fact_comparison import is_declared_trade_name
+        if len(applicant_raw) > 1:
+            _kept = [v for v in applicant_raw
+                     if not is_declared_trade_name(v, docs, _pkg_ctx)]
+            if _kept:
+                applicant_raw = _kept
+    except Exception:                                         # noqa: BLE001
+        pass
     if "applicant_name" in confirmed_keys:
         pass  # resolved via the Data Consistency picker — no longer a hard stop
     elif _conflicts("applicant_name", applicant_raw):
@@ -2126,14 +2156,24 @@ def calculate_p4_loss_history(
       floors - a score already below stays its own value.
     """
     from services.loss_history_state import (
+        BAND_ESTABLISHING, BAND_YOUNG, loss_history_not_applicable,
         loss_runs_pending_stated, new_venture_applicable, new_venture_confirmed,
-        no_runs_available_stated, parse_loss_run_status,
+        no_runs_available_stated, parse_loss_run_status, previously_uninsured,
         prior_carrier_applicable, prior_claims_exist, prior_operations_evidence,
+        years_in_business_band,
     )
     years    = _resolve_loss_history_years(facts)
     age_days = _loss_run_age_days(facts)          # None when recency is UNVERIFIED
-    has_carrier = bool(_fv(facts, "prior_carrier"))
-    carrier_applicable = prior_carrier_applicable(facts, flags)
+    has_carrier = bool(_fv(facts, "prior_carrier")) and not previously_uninsured(facts)
+    carrier_applicable = prior_carrier_applicable(facts, flags, has_loss_run_doc)
+    # BRENT RULING 2026-08-24: what loss evidence is reasonable depends on how
+    # long the business has operated. `_band_score` picks the row for the
+    # current band; the 5+ / unknown column is the client's own 2.5 table,
+    # unchanged, so nothing moves on a package whose years we cannot read.
+    _band = years_in_business_band(facts)
+
+    def _band_score(establishing: int, established: int) -> int:
+        return establishing if _band == BAND_ESTABLISHING else established
 
     # Fix: also read the actual canonical alias key (fixes dead-key bug §6.4).
     # Use _attested_true so a stored "No"/"false"/"0" is NOT misread as attested.
@@ -2173,14 +2213,24 @@ def calculate_p4_loss_history(
             )
         return capped, out_msgs
 
-    # ── Client 2.2: verified new venture -> the pillar is Not Applicable ─────
-    # Producer-confirmed AND uncontradicted by positive evidence of prior
-    # operations. Returns None; every weighted sum goes through
+    # ── No loss history to evaluate -> the pillar is Not Applicable ──────────
+    # Client 2.2 (producer-confirmed New Venture) OR Brent's 2026-08-24 ruling
+    # that a 0-1 year business "will not have loss runs because the business is
+    # too young" - the correction to treating a legitimate "none exist" as
+    # nothing provided. Both need an affirmative answer AND no evidence of
+    # prior operations. Returns None; every weighted sum goes through
     # _weighted_pillar_sum, which removes the pillar and rescales the rest.
-    if new_venture_applicable(facts, flags, has_loss_run_doc):
+    if loss_history_not_applicable(facts, flags, has_loss_run_doc):
+        if new_venture_applicable(facts, flags, has_loss_run_doc):
+            return None, [
+                "New Venture confirmed - no prior operations, so Loss History is "
+                "Not Applicable and removed from the score (remaining pillars "
+                "rescale proportionally)."
+            ]
         return None, [
-            "New Venture confirmed - no prior operations, so Loss History is "
-            "Not Applicable and removed from the score (remaining pillars "
+            "Business has under a year of operating history and reports no "
+            "known losses - there are no loss runs to obtain, so Loss History "
+            "is Not Applicable and removed from the score (remaining pillars "
             "rescale proportionally)."
         ]
     if new_venture_confirmed(facts, flags):
@@ -2243,7 +2293,12 @@ def calculate_p4_loss_history(
         match_credit = {"moderate": 42, "possible": 35, "no_match": 15, "no_loss_run": 50}
         credit = match_credit.get(loss_run_match, 50)
         if loss_run_match == "moderate":
-            recs.append("Loss run ownership partially verified - name and address match but FEIN/policy number not confirmed")
+            # Deliberately does NOT name which identifiers matched: `moderate`
+            # now has TWO causes (name+address, and Brent's Q3b tax-ID-matches-
+            # but-name-differs), and the old wording asserted the first one on
+            # both - factually backwards on the S7 live run. The precise reason
+            # is already on the Loss History panel as a match note.
+            recs.append("Loss run ownership partially verified - confirm the run belongs to this insured (see the note on the Loss History panel)")
         elif loss_run_match == "possible":
             recs.append("Loss run ownership could not be fully verified - name matches but FEIN/policy number not confirmed")
         elif loss_run_match == "no_match":
@@ -2279,14 +2334,28 @@ def calculate_p4_loss_history(
             or _attested_true(_fv(facts, "no_prior_losses"))
             or _attested_true(_fv(facts, "loss_history_no_prior_losses_indicator"))
         )
+        # BRENT 2026-08-24: for a business of 1-5 years "a satisfactory answer
+        # would be 'no known losses' ... to get through a submission, though
+        # the submission would likely not bind without them"; at 5+ years
+        # "loss runs are pretty much required", which is the client's own 2.5
+        # value (60 / 40) left untouched. Ordering inside every band still
+        # holds 2.5's rule that attestation > pending > narrative mention.
         if _user_attested:
+            if _band == BAND_ESTABLISHING:
+                return _result(85, [
+                    "No Known Losses (attested by user) - satisfactory for a "
+                    "business of this age, though a carrier will usually ask "
+                    "for loss runs before binding."
+                ])
             return _result(60, ["No Known Losses (attested by user) - attach loss runs or a signed no-known-loss letter to fully confirm"])
-        return _result(40, ["No Known Losses (stated in narrative) - confirm with the insured, or attach loss runs or a signed no-known-loss letter to corroborate the statement"])
+        return _result(_band_score(60, 40), ["No Known Losses (stated in narrative) - confirm with the insured, or attach loss runs or a signed no-known-loss letter to corroborate the statement"])
     elif loss_runs_pending_stated(facts, flags):
         # Client 2.5: pending evidence is useful workflow context but is NOT
-        # stronger than an actual attestation (was 70; now 50 < attested 60).
-        # Known prior claims + runs pending also lands here at 50.
-        return _result(50, ["Loss runs requested / pending - update score when received"])
+        # stronger than an actual attestation. BRENT 2026-08-24: for a 1-5 year
+        # business, runs ordered through a loss-run service are a satisfactory
+        # answer too - so the band lifts it toward, but never to, the
+        # attestation's 85. Known prior claims + runs pending also lands here.
+        return _result(_band_score(70, 50), ["Loss runs requested / pending - update score when received"])
     elif prior_claims_exist(facts, flags):
         # Client 2.5: known prior claims + no runs and no pending evidence = 25
         # until meaningful loss evidence or status is provided. Checked before
@@ -2298,10 +2367,14 @@ def calculate_p4_loss_history(
             "they have been requested."
         ])
     elif no_runs_available_stated(facts):
-        # Client 2.9 state. No score is defined for it in 2.5, so it takes the
-        # Nothing Provided 25 unless an attestation (above) already earned 60.
-        # Flagged for Brent - see v1-20AUG.md Q11.
-        return _result(25, [
+        # Client 2.9 state; 2.5 gives it no number. BRENT 2026-08-24 corrected
+        # the shipped default: *"we can't treat 'N/A' as '0'"*. A business of
+        # 1-5 years reporting that no runs exist is a workflow answer, not an
+        # absence of evidence, so it scores with the other paperwork-status
+        # answers rather than at the Nothing Provided floor. At 5+ years runs
+        # are required, so the floor still applies. Under a year it never
+        # reaches here - the Not Applicable gate above takes it.
+        return _result(_band_score(50, 25), [
             "No loss runs are available for this account - ask the insured to "
             "attest No Known Losses, or record known claims, to firm up the "
             "loss history.",
@@ -2339,7 +2412,12 @@ def calculate_p4_loss_history(
     # (name + address) = partial deduction; possible (name only) = larger deduction.
     if loss_run_match == "moderate":
         base_score = max(0, base_score - 8)
-        recs.append("Loss run ownership partially verified - name and address match but FEIN/policy number not confirmed")
+        # Same wording as the Path B copy below, and for the same reason:
+        # `moderate` has TWO causes since Brent's Q3b ruling, so the message
+        # must not assert either one. The S7 live run showed this THIRD copy
+        # still printing "name and address match" on a run whose FEIN matched
+        # and whose name did not - backwards.
+        recs.append("Loss run ownership partially verified - confirm the run belongs to this insured (see the note on the Loss History panel)")
     elif loss_run_match == "possible":
         base_score = max(0, base_score - 15)
         recs.append("Loss run ownership could not be fully verified - name matches but FEIN/policy number not confirmed")
@@ -3115,6 +3193,7 @@ LOSS_HISTORY_STATE_LABELS: Dict[str, str] = {
     "loss_history_pending_validation": "Loss history pending validation",
     # C2 (2026-08-24) states.
     "new_venture_not_applicable":      "Not applicable - new venture, no prior operations",
+    "no_operating_history_not_applicable": "Not applicable - under a year in business, no losses to report",
     "no_loss_runs_available":          "No loss runs available",
     "prior_claims_exist":              "Prior claims known - loss runs not provided",
 }
@@ -3161,6 +3240,7 @@ _LOSS_STATE_TO_CLIENT: Dict[str, str] = {
     "loss_history_conflicting":        "losses_extracted",
     # C2 (2026-08-24) states.
     "new_venture_not_applicable":      "not_applicable",
+    "no_operating_history_not_applicable": "not_applicable",
     "no_loss_runs_available":          "unknown",
     "prior_claims_exist":              "unknown",
 }
@@ -3198,11 +3278,15 @@ def _get_loss_history_state(
     # pillar is Not Applicable (same gate the scorer consults, so state and
     # score can never disagree).
     from services.loss_history_state import (
-        new_venture_applicable, no_runs_available_stated,
-        parse_loss_run_status, prior_claims_exist,
+        loss_history_not_applicable, new_venture_applicable,
+        no_runs_available_stated, parse_loss_run_status, prior_claims_exist,
     )
-    if new_venture_applicable(facts, flags, has_loss_run_doc):
-        return "new_venture_not_applicable"
+    if loss_history_not_applicable(facts, flags, has_loss_run_doc):
+        # Both N/A routes share one label family so the pillar row and the
+        # score can never disagree about why the pillar is absent.
+        return ("new_venture_not_applicable"
+                if new_venture_applicable(facts, flags, has_loss_run_doc)
+                else "no_operating_history_not_applicable")
 
     # Conflict (single source of truth shared with the P4 score): a no-loss
     # attestation contradicted by ACTUAL loss-run claims.
@@ -3294,7 +3378,9 @@ def _compute_category_breakdown(
     ci = cross_issues or []
 
     def _ok(key: str) -> bool:
-        return bool(_fv(facts, key))
+        # ANSWERED, not "has a value": an explicit "there is none" is an
+        # answer and must not read as an incomplete category.
+        return _answered(facts, key)
 
     def _conflict_in(field: str) -> bool:
         return any(
@@ -5679,6 +5765,13 @@ def calculate_sqs(
     # first. The previous "-priority" inverted this and sorted priority-2 items
     # ABOVE priority-1 (critical recommendations sank to the bottom).
     recommendations.sort(key=lambda r: (r.get("priority", 99), -r.get("score_impact", 0)))
+    # Give every answerable card the same choices the questionnaire offers -
+    # a closed question must never be a bare text box (owner 2026-08-24).
+    try:
+        from services.answer_options import attach_answer_controls
+        attach_answer_controls(recommendations)
+    except Exception as _aoe:                                 # noqa: BLE001
+        logger.warning("answer controls not attached to recommendations: %s", _aoe)
     risk_drivers = [
         {"component": k.replace("_", " ").title(), "score": v}
         for k, v in sorted(
@@ -5907,13 +6000,31 @@ _EMPTY_VALUES = {"", "null", "none", "[]", "{}"}
 
 
 def _fact_is_filled(val) -> bool:
-    if isinstance(val, dict) and "value" in val:
-        val = val["value"]
-    if val is None:
-        return False
-    if isinstance(val, list):
-        return len(val) > 0
-    return str(val).strip().lower() not in _EMPTY_VALUES
+    """DID THEY ANSWER? - not "is there a value".
+
+    Delegates to `answer_semantics.fact_answered`, so a human answer of "there
+    is none" / "not applicable" counts as ANSWERED and is never scored as a
+    gap (Brent 2026-08-24: *"we can't treat 'N/A' as '0'"*), while a
+    non-answer never reaches the facts at all. Falls back to the original
+    emptiness test if the module is unavailable.
+    """
+    try:
+        from services.answer_semantics import fact_answered
+        return fact_answered(val)
+    except Exception:                                         # noqa: BLE001
+        if isinstance(val, dict) and "value" in val:
+            val = val["value"]
+        if val is None:
+            return False
+        if isinstance(val, list):
+            return len(val) > 0
+        return str(val).strip().lower() not in _EMPTY_VALUES
+
+
+def _answered(facts: dict, key: str) -> bool:
+    """Completeness predicate: did this fact get an answer, from a document or
+    a person? Reads the RAW envelope (not `_fv`) so `value_state` survives."""
+    return _fact_is_filled((facts or {}).get(key))
 
 
 def calculate_sqs_from_facts(

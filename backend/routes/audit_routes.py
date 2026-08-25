@@ -473,6 +473,29 @@ def _validate_producer_answer(field: str, answer: str) -> tuple:
         return False, "Please enter an answer."
     if len(text) > 2000:
         return False, "Answer is too long."
+
+    # ── What does the answer MEAN? (services/answer_semantics) ──────────────
+    # One door for every human answer. It refuses a NON-answer ("TBD", "don't
+    # know") at the gate rather than letting it become data - measured
+    # 2026-08-24, "N/A" in every Tier-2 field scored a perfect 100 - and it
+    # accepts a real answer of "there is none", which per Brent is a legitimate
+    # answer and not a gap. Everything below then validates the CANONICAL value
+    # ("five" -> "5", "$2M" -> "2000000"), so the existing type checks see a
+    # normalized string and a real answer is never refused for its phrasing.
+    try:
+        from services.answer_semantics import (
+            ABSENCE, NOT_APPLICABLE, interpret_answer,
+        )
+        interp = interpret_answer(field, text)
+        if not interp.accepted:
+            return False, interp.message
+        if interp.intent in (ABSENCE, NOT_APPLICABLE):
+            return True, ""          # a real answer; nothing to type-check
+        text = interp.value or text
+    except Exception as _ase:                                 # noqa: BLE001
+        logger.warning("answer interpretation skipped (%s) - falling back to "
+                       "type validation only", _ase)
+
     f = (field or "").lower()
     if any(t in f for t in ("percent", "pct", "coinsurance", "itv")):
         ok, msg = validate_percent(text, "Percentage")
@@ -856,26 +879,55 @@ def _issues_bound_to_fact(sess: dict, fact: str) -> dict:
     return out
 
 
-def _trade_off_note(introduced: dict, open_facts: list, applied_field: str) -> str:
+def _trade_off_note(introduced: dict, open_facts: list, applied_field: str,
+                    facts: dict | None = None) -> str:
     """One sentence naming what the applied value just raised, and - when the
     remedy is an input already on screen - how to close it without leaving.
 
     OWNER (2026-08-14): "entering an expiration that misaligns with the
     umbrella's 07/15/2026 should tell you so in the modal, instead of silently
     trading one issue for another. That's the loop you've been stuck in."
+
+    NAMES ONLY WHAT IS STILL MISSING (fix 2026-08-25, live run S10). It used to
+    exclude just the ONE field this request applied, so a producer who filled
+    Building Value and BPP Value in one go was told to "fill in Occupancy Type
+    / Construction Type / **Property Bpp Value**" - a field they had already
+    filled - and the re-apply then refused with "Enter at least one value".
+    A prompt that asks for something already provided is a dead end: the
+    producer reads it as the form not registering their input.
+
+    `facts` is the POST-apply session state, so "still missing" is judged
+    against what is actually on file now - which also covers a value that
+    arrived from a document or another field in the same batch, not just this
+    request's own write.
     """
     if not introduced:
         return ""
-    from services.issue_registry import RESOLUTION_MAP  # noqa: F401  (import guard)
     msgs = sorted(introduced)
     head = msgs[0]
     more = f" (and {len(msgs) - 1} more)" if len(msgs) > 1 else ""
     note = f"Applied - but it raised a new issue{more}: {head}"
+
+    def _still_missing(f: str) -> bool:
+        if f == applied_field:
+            return False
+        if facts is None:
+            return True                      # no session state - keep prior behaviour
+        try:
+            from services.sqs_service import _fact_is_filled
+            return not _fact_is_filled(facts.get(f))
+        except Exception:                                     # noqa: BLE001
+            return True
+
     here = [f for f in (introduced.get(head) or [])
-            if f in (open_facts or []) and f != applied_field]
+            if f in (open_facts or []) and _still_missing(f)]
     if here:
         labels = " / ".join(f.replace("_", " ").title() for f in here)
         note += f"  You can settle it here - fill in {labels} above and apply again."
+    else:
+        # Nothing left to type on THIS screen. Say so plainly rather than
+        # implying there is - the producer resolves it from the panel.
+        note += "  Resolve it from the validation panel when you are ready."
     return note
 
 
@@ -1076,7 +1128,10 @@ async def resolve_issue(
         try:
             _after = _issues_bound_to_fact(sess, _log_field)
             _introduced = {m: f for m, f in _after.items() if m not in _before}
-            _note = _trade_off_note(_introduced, _open_facts, _log_field)
+            # POST-apply facts, so "still missing" is judged against what is
+            # actually on file now - never asking for a value already provided.
+            _note = _trade_off_note(_introduced, _open_facts, _log_field,
+                                    facts=(sess.get("facts") or {}))
             if _note:
                 logger.info(
                     f"resolve_issue: trade-off surfaced session={req.session_id} "

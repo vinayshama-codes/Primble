@@ -155,7 +155,7 @@ Source documents this plan is built against. Read the relevant one before starti
 | # | Item | Status | Notes |
 |---|------|--------|-------|
 | C1 | Data Consistency, Canonical Facts & Normalization | **In progress - 6 clauses complete, 2 partial, all remaining gaps are Brent's** | **Updated 2026-08-24 (C1-Q FIX 10).** 1.3 / 1.6 / 1.7 / 1.8 complete - 1.3's "No subcontracting" now reaches `explicit_no` via a schema-derived, self-verifying mechanism (FIX 10), not a third hand-typed case; "No Property coverage" stays `not_applicable`, a genuine box-choice question for Brent, not an engineering gap. **1.1 / 1.2 complete on everything engineering can decide** (C1b closed D-1); account/entity scope axis deliberately not built - zero reported defect, owner-confirmed unnecessary. **1.5 blocked only on Brent** (Suggested-vs-Verified scoring). 1.4 correct but unconsumed by scoring - same Brent item. Open for Brent: Q3a/Q3b, Q8, Q9 (Q10 CLOSED) - **all four are carried by the Loss History chat's list in `20Aug_questions_brent.md`** (consolidated 2026-08-24: every Data Consistency question turned out to be the same decision the Loss History list already asks - the DBA/FEIN tiers ARE Loss History scoring, prior carrier feeds its -10, and the AI weights are SQS. Section 1 has NO question of its own left). BI=Building wrong test DELETED 2026-08-24 (C1-R). Q5 closed 2026-08-24, was stale. **Independent audit 2026-08-24 (C1-R) executed every clause: 1.1 / 1.2 / 1.3 / 1.6 / 1.7 / 1.8 COMPLETE, 1.4 / 1.5 complete on facts, blocked on Q9 for scoring** |
-| C2 | Loss History - Scoring, Evidence & Questionnaire Logic | **DONE - LIVE-VERIFIED 2026-08-24 (C2-A..C2-D); only Brent rulings open (Q11-Q13)** | One state owner (`services/loss_history_state.py`); client tables 2.1-2.11 implemented verbatim (freq/ratio advisory-only, new-venture N/A + generic pillar rescaling via `_weighted_pillar_sum`, Path A/B/C revised numbers, strong pin terminal at 60, prior_carrier/num_claims out of Structural, 2.6 Data Consistency routing, state-gated questionnaire). Identity matcher was already DONE under C1/F4. Read the C2-A session entry at the end of this file BEFORE touching any loss-history code |
+| C2 | Loss History - Scoring, Evidence & Questionnaire Logic | **CLOSED 2026-08-25 (C2-A..C2-M). All 11 clauses + all 7 Brent rulings, live-verified over six runs. Nothing open.** | One state owner (`services/loss_history_state.py`); client tables 2.1-2.11 implemented verbatim (freq/ratio advisory-only, new-venture N/A + generic pillar rescaling via `_weighted_pillar_sum`, Path A/B/C revised numbers, strong pin terminal at 60, prior_carrier/num_claims out of Structural, 2.6 Data Consistency routing, state-gated questionnaire). Identity matcher was already DONE under C1/F4. **Brent ruled on all seven open questions 2026-08-24 (C2-E): DBA+EIN = verified match, EIN+unknown-name = probable match, prior-carrier-from-dec DECLINED, AI weights confirmed, and TWO corrections to what C2-A shipped - the years-in-business ladder ("we can't treat N/A as 0") and previously-uninsured vs missing prior carrier.** Read C2-A then C2-E at the end of this file BEFORE touching any loss-history code |
 | C3 | SQS Scoring Integrity & Critical-Field Weighting | Not started | **F-1 (invented GL class codes) found live 2026-08-22 - see C1-N.** Needs a verified-source gate on NAIC / GL class code / payment plan / policy premium / policy number. Also inherits from C1: `CONFIDENCE_SCORE` still keys on `confidence`; switching it to `evidence_state` (ai_high = suggested) is a score change for Brent |
 | C4 | Contextual Questionnaire Logic | Not started | |
 | C1c | **Route `submission_integrity.py` through the one door** | **Done** | LIVE RUN 2026-08-21: it still reports "Multiple distinct policy numbers found", "Location address differs", "Operations descriptions differ" on a clean multi-policy package. It is the SIXTH comparison site and does not use `fact_comparison` |
@@ -2939,21 +2939,21 @@ Principle 7 applies.
 |----|----------|----------|--------|--------|
 | ~~Q1~~ | ~~Three rows or one?~~ **CLOSED 2026-08-21, not a product question.** Client 1.5: *"retain each under its correct scope"* - retain means show. Three read-only rows, one per policy, shipped in C1-D | - | 2026-08-20 | Answered by the spec |
 | ~~Q2~~ | ~~Do we hold a contradicting client answer for the agent?~~ **ANSWERED 2026-08-21: YES** - *"implement this behaviour properly."* Already built (F7 + C1-D); now the ruled default. See D17 | - | 2026-08-20 | **Brent: yes, hold and let the agent pick** |
-| Q3a | Loss run filed under the DBA, FEIN matches: what tier? **Measured cost of the default (2026-08-21): 5 clean years scores `strong`=100 / `moderate`=92 / `possible`=85 / `no_match`=**25** on the Loss History pillar (`_LOSS_NO_MATCH_CAP`). So "no credit" is a 75-point swing on that pillar, not a nudge.** Engineering default stays `no_match` + the note `NOTE_DBA`, rendered on the Loss History card. **C1-R 2026-08-24: the first draft asked Brent to split "DBA matches the declared DBA" from "trading name only on the loss run" - the second is NOT detectable (`loss_run_identity` only knows DBAs from `pkg["dba"]`; an unseen name is indistinguishable from a different company), so it IS Q3b. Client doc now recommends: a match against a DECLARED DBA is a name match and the normal tiers apply. Implementation if accepted: `dba_ok` joins `name_ok` in the tier branch** | F4 row 4 | 2026-08-20 | |
-| Q3b | Loss run where FEIN matches but the legal NAME does not (name change, merger): what tier? Client spec only lists name+FEIN. Same default (`no_match`, same 100->25 swing) and the note `NOTE_FEIN_NAME_DIFFERS`, rendered on the Loss History card. **C1-R: client doc recommends 92 + keep the note (a 9-digit FEIN is unique per entity and survives a name change; the name cannot be corroborated)** | F4 | 2026-08-21 | |
+| Q3a | Loss run filed under the DBA, FEIN matches: what tier? **Measured cost of the default (2026-08-21): 5 clean years scores `strong`=100 / `moderate`=92 / `possible`=85 / `no_match`=**25** on the Loss History pillar (`_LOSS_NO_MATCH_CAP`). So "no credit" is a 75-point swing on that pillar, not a nudge.** Engineering default stays `no_match` + the note `NOTE_DBA`, rendered on the Loss History card. **C1-R 2026-08-24: the first draft asked Brent to split "DBA matches the declared DBA" from "trading name only on the loss run" - the second is NOT detectable (`loss_run_identity` only knows DBAs from `pkg["dba"]`; an unseen name is indistinguishable from a different company), so it IS Q3b. Client doc now recommends: a match against a DECLARED DBA is a name match and the normal tiers apply. Implementation if accepted: `dba_ok` joins `name_ok` in the tier branch** | F4 row 4 | 2026-08-20 | **BRENT 2026-08-24: verified match.** *"Treat it as a verified match if the DBA is listed by the applicant and the EIN matches."* SHIPPED (C2-E): a declared-DBA name is a name match; ordinary tiers follow |
+| Q3b | Loss run where FEIN matches but the legal NAME does not (name change, merger): what tier? Client spec only lists name+FEIN. Same default (`no_match`, same 100->25 swing) and the note `NOTE_FEIN_NAME_DIFFERS`, rendered on the Loss History card. **C1-R: client doc recommends 92 + keep the note (a 9-digit FEIN is unique per entity and survives a name change; the name cannot be corroborated)** | F4 | 2026-08-21 | **BRENT 2026-08-24: probable match.** *"Treat it as a probable match and ask for confirmation of the prior name or entity relationship."* SHIPPED (C2-E): `moderate` + confirmation note |
 | ~~Q6~~ | ~~Bare "Liability" = General Liability?~~ **CLOSED 2026-08-21.** The client already answered it in 1.7, which lists **Liability** in the General Liability family. Code was already correct; asking would have been asking him to re-answer his own spec | - | 2026-08-21 | Answered by the spec |
 | ~~Q4~~ | ~~Blank box or best guess when two documents disagree?~~ **ANSWERED 2026-08-21: patch the suggested value.** `CONFLICT_WITHHOLD_KEYS` emptied; conflict still shown and confirmable in Data Consistency. See D16 and C1-F | - | 2026-08-20 | **Brent: patch the suggested value** |
 | ~~Q7~~ | ~~Client answers lost on a pipeline re-run - needs a precedence ruling.~~ **CLOSED AND FIXED 2026-08-21 (C1-D).** The precedence framing was wrong: a re-run reads the SAME documents, so no rival value can appear. Restore when silent or agreeing; hold (rule 1.5) when they disagree. No product decision required | - | 2026-08-21 | Answered by the spec |
-| Q8 | On a RENEWAL, is the carrier named on the uploaded dec page the PRIOR carrier? Deriving it would stop asking the client (Brent's Q1 principle), but it is only true when the uploaded dec is the EXPIRING policy - a renewal quote from a new carrier names the incoming one. Engineering will not guess (Principle 7). **C1-R 2026-08-24: the first draft's proposed rule ("term ENDS when the new term starts") was CIRCULAR - on a renewal the new term start is DERIVED from the expiring expiration (`_route_renewal_dates`). The checkable rule the code already uses for dates is "the uploaded term has ALREADY ENDED"; the client doc now proposes extending exactly that to the carrier. Second correction: on a multi-policy package there is no scalar `carrier_name` (D-1 Layer 1) - carriers live per line in `_scoped`, and ACORD 125's prior-carrier section is per line, so the derivation must be PER LINE, not into one `prior_carrier` box** | C1 / C4 | 2026-08-21 | |
+| Q8 | On a RENEWAL, is the carrier named on the uploaded dec page the PRIOR carrier? Deriving it would stop asking the client (Brent's Q1 principle), but it is only true when the uploaded dec is the EXPIRING policy - a renewal quote from a new carrier names the incoming one. Engineering will not guess (Principle 7). **C1-R 2026-08-24: the first draft's proposed rule ("term ENDS when the new term starts") was CIRCULAR - on a renewal the new term start is DERIVED from the expiring expiration (`_route_renewal_dates`). The checkable rule the code already uses for dates is "the uploaded term has ALREADY ENDED"; the client doc now proposes extending exactly that to the carrier. Second correction: on a multi-policy package there is no scalar `carrier_name` (D-1 Layer 1) - carriers live per line in `_scoped`, and ACORD 125's prior-carrier section is per line, so the derivation must be PER LINE, not into one `prior_carrier` box** | C1 / C4 | 2026-08-21 | **BRENT 2026-08-24: DECLINED.** *"That's not really how brokers work. For now, skip shortcut and ask client. We'll pull something more concrete together with if/and/or."* Nothing built; keep asking the client. He will bring rules later |
 | ~~Q5~~ | ~~The 125 doc says a narrative "no known losses" must not be treated as verified history. Today it earns the same tier as a signed attestation (60, not the 100 year-tier). Is attestation-tier acceptable, or must a narrative score lower?~~ **CLOSED 2026-08-24, was already stale when raised.** Verified against the live `calculate_p4_loss_history`: `_user_attested` -> 60, narrative-only (`narrative_states_no_losses` with no attestation flag) -> **45**, both distinct from `no_match`'s 25. The split already existed, per the function's own `§6.4` comment citing the client's approved scoring table - Q5's premise ("today it earns the same tier") was wrong when written; nobody had re-checked the code before drafting it. Not sent to Brent (kept out of `20Aug_questions_brent.md`), to avoid asking him to re-answer something already decided | C2 | 2026-08-20 | Answered already, by the original spec |
-| Q9 | **The 0.85 / 0.50 confidence weights were NEVER the client's - the code claimed they were.** `sqs_service.CONFIDENCE_SCORE`'s comment read *"per spec (producer=1.00, AI-high=0.85, AI-low=0.50)"* and `confidence_fill_rate`'s docstring said *"Spec: ..."*. **Both false, verified 2026-08-24 (C1-R): `SQS_Scoring_Specification.docx.pdf` extracted in full (24,689 chars) and searched - `0.85` and `0.50` appear ZERO times.** The spec requires only a *"confidence-weighted"* fill rate and never sets weights. Comments corrected; the ask to Brent is reframed from "change your numbers" to "you never set these". **C1-S (same day): the `ai_high` 0.85 this row worried about is NEVER assigned to a form field - the field label is `ai_verified`, and it was MISSING from the table, scoring 0.00. FIXED at 0.85 (see C1-S). Q9 now asks Brent for the weight of a Suggested value that IS on the page (0.85, shipped) vs one that is NOT (0.50), plus Derived = 1.00.** **A "Suggested" value scores the same as a Source Verified one.** `services.fact_state` writes the client's four-level evidence axis correctly on every fact, but `sqs_service.CONFIDENCE_SCORE` still keys on the older `confidence` tag - an AI-suggested value scores `ai_high`=0.85, identical whether or not it was ever confirmed. Not fixed unilaterally: switching the read moves EVERY historical score. Client 1.4/1.5's own rule ("a Suggested material value should not silently become Source Verified") is unmet in SCORING specifically, though the fact-level labelling is correct. **C1-R: the first draft asked for ONE Suggested weight - wrong, because `ai_high` (0.85) AND `ai_low` (0.50) both map to `suggested`, so one number collapses two tiers. Client doc now asks for Suggested-high / Suggested-low (recommends 0.70 / 0.40) and proposes Derived = 1.00. Also NOT a one-line switch: `CONFIDENCE_SCORE` is per FORM FIELD (`confidence_dict` from `pdf_service`), `evidence_state` is per FACT - needs the field -> source-fact map. Ship for new sessions only (D6)** | C1 / C3 | 2026-08-24 | |
+| Q9 | **The 0.85 / 0.50 confidence weights were NEVER the client's - the code claimed they were.** `sqs_service.CONFIDENCE_SCORE`'s comment read *"per spec (producer=1.00, AI-high=0.85, AI-low=0.50)"* and `confidence_fill_rate`'s docstring said *"Spec: ..."*. **Both false, verified 2026-08-24 (C1-R): `SQS_Scoring_Specification.docx.pdf` extracted in full (24,689 chars) and searched - `0.85` and `0.50` appear ZERO times.** The spec requires only a *"confidence-weighted"* fill rate and never sets weights. Comments corrected; the ask to Brent is reframed from "change your numbers" to "you never set these". **C1-S (same day): the `ai_high` 0.85 this row worried about is NEVER assigned to a form field - the field label is `ai_verified`, and it was MISSING from the table, scoring 0.00. FIXED at 0.85 (see C1-S). Q9 now asks Brent for the weight of a Suggested value that IS on the page (0.85, shipped) vs one that is NOT (0.50), plus Derived = 1.00.** **A "Suggested" value scores the same as a Source Verified one.** `services.fact_state` writes the client's four-level evidence axis correctly on every fact, but `sqs_service.CONFIDENCE_SCORE` still keys on the older `confidence` tag - an AI-suggested value scores `ai_high`=0.85, identical whether or not it was ever confirmed. Not fixed unilaterally: switching the read moves EVERY historical score. Client 1.4/1.5's own rule ("a Suggested material value should not silently become Source Verified") is unmet in SCORING specifically, though the fact-level labelling is correct. **C1-R: the first draft asked for ONE Suggested weight - wrong, because `ai_high` (0.85) AND `ai_low` (0.50) both map to `suggested`, so one number collapses two tiers. Client doc now asks for Suggested-high / Suggested-low (recommends 0.70 / 0.40) and proposes Derived = 1.00. Also NOT a one-line switch: `CONFIDENCE_SCORE` is per FORM FIELD (`confidence_dict` from `pdf_service`), `evidence_state` is per FACT - needs the field -> source-fact map. Ship for new sessions only (D6)** | C1 / C3 | 2026-08-24 | **BRENT 2026-08-24: confirmed as-is.** *"Those assignments will do for now."* 1.00 / 0.85 / 0.50 stand; the `ai_verified` 0.00 defect fix (C1-S) is the only movement |
 | ~~Q10~~ | ~~**"No Property coverage" - Explicit No or Not Applicable?**~~ **CLOSED 2026-08-24 (C1-R), not a product question - same precedent as Q6.** The client ALREADY answered it: 1.3 lists "No Property coverage" under Explicit No in his own words, so asking would be asking him to re-answer his own spec. And on inspection the two readings do not even compete: his example is about the coverage **LINE**; our `not_applicable` is on the **FIELDS UNDER** the line. Different objects. We simply record no state on the line object at all today - only `denied_lines()` knows. **Build it to match his wording (line = `explicit_no`, fields stay `not_applicable`); do not ask.** Removed from `20Aug_questions_brent.md`. The line-level envelope is NOT yet built - owner's call on when it ships. Original text: Client 1.3 lists it as an Explicit No example; a declared-absent coverage line currently records as `not_applicable` instead. Functionally near-identical downstream (neither is asked about, neither penalises fill rate) - a labelling/audit-trail question, not a behaviour bug. Both readings are defensible; not decided unilaterally. **C1-R: client doc now RECOMMENDS instead of coin-flipping: the coverage LINE is `explicit_no`, the fields under it are `not_applicable` - the two do not compete. Verified 2026-08-24: all 26 property-line facts resolve `not_applicable` on a declared-absent line. If accepted, the only engineering add is a per-line envelope so the audit export shows the line itself as `explicit_no` (today only `denied_lines()` knows)** | C1 | 2026-08-24 | |
-| Q11 | **"No Loss Runs Available" is a 2.9 STATE but 2.5 gives it no SCORE.** Shipped default: 25 alone (the Nothing Provided value), 60 when paired with a no-loss attestation - fails toward no invented credit. One-line swap in `calculate_p4_loss_history` when Brent rules | C2 | 2026-08-24 | |
-| Q12 | **"Fully valued" requires claim statuses/financials to be READABLE, but no deduction is defined when years parse and statuses don't** - and extraction has no per-claim readability signal to check. Shipped default: no separate deduction (the other three fully-valued components each have their own). A real signal means an extraction-schema change (improving-ll.md rule applies) | C2 | 2026-08-24 | |
-| Q13 | **An ESTABLISHED business that never carried insurance** ("None" to prior carrier): is prior carrier "applicable"? 2.3 only exempts New Venture, so the -10 applies today. Defensible (no prior coverage on an operating business IS an underwriting gap) but the client never said it | C2 | 2026-08-24 | |
+| Q11 | **"No Loss Runs Available" is a 2.9 STATE but 2.5 gives it no SCORE.** Shipped default: 25 alone (the Nothing Provided value), 60 when paired with a no-loss attestation - fails toward no invented credit. One-line swap in `calculate_p4_loss_history` when Brent rules | C2 | 2026-08-24 | **BRENT 2026-08-24: our default was WRONG.** *"we can't treat 'N/A' as '0' ... If 'no known losses', check against the number of years in business."* SHIPPED (C2-E) as the years-in-business ladder. The 1-5 band's exact numbers are our derivation, flagged to him |
+| Q12 | **"Fully valued" requires claim statuses/financials to be READABLE, but no deduction is defined when years parse and statuses don't** - and extraction has no per-claim readability signal to check. Shipped default: no separate deduction (the other three fully-valued components each have their own). A real signal means an extraction-schema change (improving-ll.md rule applies) | C2 | 2026-08-24 | **BRENT 2026-08-24: confirmed, V2.** *"Good ... V2 - Adding it would mean reading claim-by-claim details from every carrier's layout."* No V1 deduction |
+| Q13 | **An ESTABLISHED business that never carried insurance** ("None" to prior carrier): is prior carrier "applicable"? 2.3 only exempts New Venture, so the -10 applies today. Defensible (no prior coverage on an operating business IS an underwriting gap) but the client never said it | C2 | 2026-08-24 | **BRENT 2026-08-24: our default was wrong.** *"the applicant would be 'previously uninsured', which is very different from 'missing prior carrier' ... there probably shouldn't be a deduction here for now."* SHIPPED (C2-E): the -10 now needs positive evidence prior coverage existed |
 
 **`20Aug_questions_brent.md` at the repo root is the ONE client-facing list: Q3a, Q3b, Q8,
-Q9 and the C2 items Q11-Q13** (Q10 closed) - written for Brent, not for engineering.
+Q9** (Q10 closed; the C2 items Q11-Q13 were ANSWERED 2026-08-24 - see "BRENT'S RULINGS - ALL CLOSED" below) - written for Brent, not for engineering.
 **Consolidated 2026-08-24:** the Data Consistency and Loss History chats had each drafted
 the same four decisions; the Loss History wording is the one kept (it owns the pillar
 those decisions score), so Section 1 no longer has a section of its own in the doc. (The earlier
@@ -3068,8 +3068,9 @@ here, learned again the expensive way.
 **Precedence applied (owner instruction, this session):** the client's C2 document
 overrides `SQS_Scoring_Specification.docx.pdf` where they conflict; the spec stays
 authoritative where C2 is silent. Engineering added no scoring/questionnaire rule
-outside the two documents - every unspecified point ships on a flagged default
-(Q11-Q13) that fails toward "no invented credit".
+outside the two documents - every unspecified point shipped on a flagged default
+(Q11-Q13) that failed toward "no invented credit". **All three were answered by
+Brent on 2026-08-24 and are now implemented - see the rulings section below.**
 
 **Problem.** Client: Loss History spans document recognition, insured matching,
 claim years, valuation dates, prior carrier, questionnaire, structural
@@ -3191,7 +3192,7 @@ not submission quality.
 **Known / deliberately not done.**
 - Q11 (No Runs Available score), Q12 (statuses-unreadable deduction + the
   missing extraction signal), Q13 (never-insured established business) - shipped
-  on flagged defaults, one-line swaps when Brent rules.
+  on flagged defaults - ALL THREE ANSWERED 2026-08-24 and implemented (C2-E).
 - Q3a/Q3b (DBA / FEIN-name tiers) unchanged - already with Brent; they slot into
   the SAME tier table when ruled.
 - `loss_integrity_coefficient` (sqs_service) has ZERO callers - dead code,
@@ -3333,3 +3334,779 @@ the toast counts globally and is not a C2 decision.
 reversible via its Reopen button. The free-text answer box accepting arbitrary
 text for a contact field is a pre-existing validation looseness, noted for C3
 (verified-source gate work), not fixed here.
+
+### C2-E BRENT'S RULINGS APPLIED - Q3a / Q3b / Q8 / Q9 / Q11 / Q12 / Q13 ALL CLOSED (2026-08-24)
+
+Brent answered every open Loss History question in one pass, before testing.
+His replies are quoted verbatim in the code at each decision point. Two were
+confirmations, four changed behaviour, and **one was a correction to what C2-A
+shipped** - recorded as such rather than quietly folded in.
+
+| # | Ruling (verbatim) | What changed |
+|---|---|---|
+| Q3a DBA | *"Treat it as a verified match if the DBA is listed by the applicant and the EIN matches. That is enough to confirm the loss runs belong to the insured."* | A name matching a DBA **the applicant declared** is now a name match, and the ordinary tiers follow: DBA + FEIN/policy = `strong`, DBA + address = `moderate`, DBA alone = `possible` (note retained). `pkg["dba"]` only ever holds DBAs the package's own NON-loss-run documents state, so a trade name appearing solely on the run can never be promoted - test-pinned |
+| Q3b FEIN, unknown name | *"Treat it as a probable match and ask for confirmation of the prior name or entity relationship."* | `no_match` -> **`moderate`**, note reworded to carry the confirmation ask |
+| Q8 prior carrier from the dec | *"That's not really how brokers work. For now, skip shortcut and ask client. We'll pull something more concrete together with if/and/or."* | **Do not build it.** Nothing was built, so nothing to revert - Q8 closes as declined, and he will bring rules later |
+| Q9 AI weights | *"Those assignments will do for now."* | 1.00 / 0.85 / 0.50 confirmed, no change |
+| Q11 + the "N/A is not 0" correction | *"we can't treat 'N/A' as '0'. These are not the same. 'No known losses' is a legitimate answer ... If 'no known losses', check against the number of years in business."* 0-1 yr: *"will not have loss runs because the business is too young"*; 1-5 yr: *"a satisfactory answer would be 'no known losses' (or 'loss runs pending' ...) to get through a submission, though the submission would likely not bind without them"*; 5+ yr: *"loss runs are pretty much required"* | **The years-in-business ladder** (below). C2-A's "no runs available scores 25 like nothing provided" was WRONG and is corrected |
+| Q12 unreadable claim details | *"Good ... V2"* | Confirmed: no deduction in V1; the per-claim extraction work is V2 backlog |
+| Q13 never-insured business | *"Somewhat incorrect. To be safe, there probably shouldn't be a deduction here for now ... the applicant would be 'previously uninsured', which is very different from 'missing prior carrier'."* Example: a solo owner adding WC for the first time | **The -10 now requires positive evidence that prior coverage existed** |
+
+**The years-in-business ladder.** `years_in_business_band()` in
+`loss_history_state.py`; the 5+ / unknown column IS the client's own 2.5 table,
+untouched, so a package whose years we cannot read scores exactly as it did.
+
+| State | 0-1 yr | 1-5 yr | 5+ yr / unknown |
+|---|---|---|---|
+| No known losses attested | **Not Applicable** | **85** | 60 |
+| Loss runs requested / pending | **Not Applicable** | **70** | 50 |
+| No loss runs available | **Not Applicable** | **50** | 25 |
+| "No losses" in narrative only | **Not Applicable** | **60** | 40 |
+| Nothing said at all | 25 | 25 | 25 |
+
+Three properties, all test-pinned:
+* **Silence never buys N/A.** The 0-1 row requires an affirmative answer
+  (attestation, pending, or "none available"); a blank questionnaire on a
+  young business still scores 25. Blank-over-wrong survives the ruling.
+* **The same contradiction guard as 2.2.** A loss-run document, a named prior
+  carrier, recorded claims or a renewal flag all block the N/A, so a wrong
+  `years_in_business` cannot silently delete 15% of the score.
+* **2.5's ordering holds inside every band** - attestation > pending >
+  narrative > nothing - asserted parametrically across all three bands.
+
+**Prior carrier: three states, not two.** `prior_carrier_applicable()` now
+returns False for a confirmed new venture, for an applicant who answered
+"None" (`previously_uninsured()` - the curated question already invites exactly
+that answer), AND when nothing in the package evidences that prior coverage
+existed. The -10 survives only where a prior policy demonstrably existed (a
+renewal, prior-policy facts, or uploaded loss runs) and the carrier is still
+absent - which is the literal meaning of MISSING, and exactly Brent's
+distinction.
+
+**Blast radius.** Scores rise for: young businesses with a no-loss answer (now
+N/A), 1-5 year businesses on any no-loss/pending/none-available answer,
+DBA-filed loss runs (25 -> up to 100), FEIN-matched runs with an unexplained
+name (25 -> 92 on Path A / 42 on Path B), and previously-uninsured or
+new-business applicants (no -10). Nothing falls. 5+ year and unknown-years
+packages are byte-identical to C2-A unless they carried one of the two
+identity cases.
+
+- files: `loss_run_identity.py` (tiers + note), `loss_history_state.py`
+  (bands, `previously_uninsured`, `prior_coverage_evidence`,
+  `loss_history_not_applicable`), `sqs_service.py` (ladder, carrier gate, N/A
+  routing, labels), `AcordModal.jsx` (one new state label + provenance row).
+- tests: +13 in `test_loss_history_c2.py` (64 total), each quoting the ruling
+  it pins, plus the negative controls - trade-name-only-on-the-run stays
+  no_match, silence still scores 25, a contradicted young business still
+  scores, and the band ordering holds parametrically.
+- suite result: **3950 passed / 4 failed -> 3 of those 4 were STALE TESTS, now
+  corrected.** `test_v1_c1_canonical_facts.TestLossRunIdentity` pinned the
+  pre-ruling defaults - one of them says so in its own docstring (*"Q3a is
+  open: engineering default is the spec's own verdict"*). The TEST was wrong,
+  not the code: Brent closed Q3a/Q3b, so `no_match` is no longer the answer.
+  Rewritten to assert the RULINGS, and each kept its protective intent:
+  `test_a_different_entity_TYPE_is_not_a_name_variation` still proves LLC vs
+  Company never reads as one NAME (only the tier moved), and two new guards pin
+  that a DBA with no identifier stays `possible` and a trade name the applicant
+  never declared stays `no_match`. **Confirming re-run after the corrections:
+  3955 passed / 1 failed** - the single pre-existing
+  `test_arq_acord125_missing_only` (`test_normalization` was fixed elsewhere
+  this session, so the baseline is now ONE). Zero regressions.
+
+**Fixture set extended for the rulings** (`test_data_c2_loss/`, 16 PDFs):
+S6 = loss run under a DECLARED DBA with a matching tax ID (expect `strong`,
+100); S7 = tax ID matches, insured name is a former name found nowhere else in
+the package (expect `moderate`, 92, confirmation note); S8 = a 3-year-old
+business with zero loss documents (25, and 85 once attested - where a 5+ year
+business reaches only 60); S9 = loss runs with no prior carrier named anywhere
+(90, and 100 once the card is answered "None"). The generator self-checks the
+properties each scenario depends on - S6's DBA must be on the applicant's own
+paper, S7's former name must NOT be, S9 must name no carrier, S8 must carry no
+loss vocabulary - so a fixture defect fails at generation instead of mid-run.
+**Expected numbers were produced by running the real scorer against each
+scenario's fact shape, not estimated** - but that is a FUNCTION probe, not a
+SEAM probe (D22): only the live upload proves extraction feeds it correctly.
+
+**Still open, and only these:** nothing on Loss History. Brent's "We'll pull
+something more concrete together with if/and/or" on prior carrier (Q8) is a
+future input from him, not a blocker. The 1-5 band's exact numbers (85 / 70 /
+50 / 60) are OUR derivation from his structure using values already in his own
+spec - flagged to him as an assumption, not presented as his ruling.
+
+### C2-F FREE-TEXT ANSWERS - the producer card is a TEXT BOX, not a select (2026-08-24)
+
+**Owner's question, and it was right:** *"if user types something different than
+this but it means same will it also be applicable ... just in case if you have
+hardcoded it."* Probed all four C2 parsers against the phrasings a real
+producer would type. Four genuine holes, all fixed:
+
+| Field | Answer that SILENTLY did nothing | Now |
+|---|---|---|
+| Attestation | **"None"**, "Nil", "Nothing", "Zero claims", "0 claims", "loss free", "claims-free", "clean loss history" | attests |
+| Prior carrier | "First time buying insurance", "No prior coverage - new to insurance", "Never carried insurance" | previously uninsured |
+| Loss-run status | "Ordered", "We have ordered them", "awaiting receipt", "in progress", "expected next week", "Carrier cannot provide them" | pending / no-runs |
+| New venture | "brand new operation", "just started trading", "newly formed" | confirms |
+
+**Why this mattered.** The client questionnaire offers a two-option SELECT, so
+it was safe. The producer's recommendation card is a free-text box - and the
+round-3 run showed the owner typing a curated option string by hand. Anyone
+typing the obvious one-word answer ("None") got no score movement and no
+explanation, which reads as the feature being broken.
+
+**The fix reuses the door that already exists.** Free text now routes through
+`normalization.detect_no_loss_assertion` - the SAME detector the ACORD
+LossHistory checkbox and the narrative scan use - so the three surfaces cannot
+disagree, and its threshold guard comes along free. A second phrase list would
+have been a fifth comparison site.
+
+**A pre-existing bug found by the probe and fixed:** `attested_true("no losses
+exceed $10,000")` returned **True** - a THRESHOLD statement (losses exist, none
+above a cap) read as an attestation. `detect_no_loss_assertion` has always
+refused it, but the loose legacy fallback (`"no " in s and "loss" in s`)
+re-admitted it underneath. Same guard now applies to the fallback.
+
+**Two deliberate NON-changes, both the safe direction:**
+* A bare **"No"** still does NOT attest. On this fact it carries the legacy
+  meaning *"no, we HAVE had losses"*; inverting it would silently re-label every
+  answer stored before the curated wording shipped. Test-pinned both ways.
+* A bare **"new business"** does NOT confirm a new venture. On an ACORD
+  submission that is the TRANSACTION TYPE - a 20-year-old company changing
+  carriers is "new business" too - and reading it as a new VENTURE would remove
+  the pillar for an established insured. Unrecognised text returns None, which
+  scores normally.
+
+- files: `services/loss_history_state.py` (all four parsers).
+- tests: +59 parametrised cases in `test_loss_history_c2.py` (132 total),
+  including the negative controls - real carrier names never read as
+  "uninsured", threshold statements never attest, and "No loss runs have been
+  REQUESTED" reads as an availability answer rather than pending (ordering).
+- suite result: PENDING-AT-WRITE.
+
+**Standing lesson:** every one of these parsers was written against the curated
+option text and tested against it. The option text is what the QUESTIONNAIRE
+sends; the CARD sends prose. Any future two-state answer needs both paths
+tested, or a select on the card - which is the better structural fix and is
+noted for C4.
+
+### C2-G ANSWER SEMANTICS - one deterministic door for every human answer (2026-08-24)
+**Priority:** V1-CRITICAL (scoring integrity)
+**Principle(s) touched:** 3 (absence is not evidence), 6 (auditability)
+
+**Owner's instruction:** *"check this over all such cases, including all
+recommendations / hard stops / warnings that user answers ... build it so it can
+judge the MEANING rather than depending on hardcoded fixed answers, and remember
+the user can answer in any manner."*
+
+**The measured defect, and it was worse than synonyms.** Typing **"N/A" into
+every Tier-2 field scored 100** - identical to a fully answered submission.
+"unknown" for sprinklers / roof year / fire class still scored COPE at 80.
+Meanwhile a legitimate **"None" scored as a GAP**, because "none" sits in
+`_EMPTY_VALUES`. Both directions wrong from ONE root cause: *"what is the
+value?"* and *"did they answer?"* were the same test, `bool(value)`.
+
+**Root cause.** Three different meanings collapsed into one stored string:
+
+| Meaning | Example | Was | Now |
+|---|---|---|---|
+| VALUE | "Travelers" | stored | stored (canonicalized) |
+| ABSENCE - a real answer | "None", "never had coverage" | penalised as a gap | `value=""` + `explicit_no`, **counts as answered** |
+| NON-ANSWER | "TBD", "don't know", "N/A"* | **counted as filled data** | refused at the gate, never stored |
+
+\* "N/A" is `not_applicable` - an ANSWER, per Brent (*"we can't treat 'N/A' as
+'0'. These are not the same."*). Only genuine uncertainty is refused.
+
+**Fix - `services/answer_semantics.py`, the ONE door.** Every path a human
+answer can take now goes through it: the producer recommendation card, inline
+issue/hard-stop/warning resolution (`RESOLUTION_MAP` field mode - 39 facts) and
+the client questionnaire.
+
+**Why this is not a list of accepted answers.** It encodes **how English
+expresses four ideas**, applied identically to all 175 facts - adding a fact
+needs no entry here, which is the test of whether it generalises:
+negative existence / uncertainty / inapplicability / affirmation-denial. What a
+given field ACCEPTS comes from the field's OWN declaration
+(`arq_service._FIELD_INPUT_TYPE` first, then the registry's format hint), never
+from a per-field synonym list.
+
+**Precedence is where meaning is actually judged** - a keyword scan cannot do
+any of these, and each is test-pinned:
+* uncertainty BEFORE negation - *"no idea"* contains "no" but means unknown
+* a parseable value BEFORE negation - *"0"* employees is a VALUE, not an absence
+* negation needs SCOPE - carrier *"Nationwide"* is never read as "no", and a
+  long descriptive sentence containing *"do not perform work above three
+  stories"* stays a value
+* NEGATIVE-POLARITY facts invert it - on `loss_history_no_prior_losses_
+  indicator` the fact's own NAME asserts an absence, so "None" FILLS it.
+  Detected from the key's shape, so a future `no_known_subcontractors` works
+  the day it is added; the existing readers (`attested_true`) are untouched.
+
+**Numbers and dates however a person writes them:** "five"/"twelve"/"twenty
+five", "about 12", "~9", "$2M"/"2m"/"2mm"/"2 million"/"1.5k"/"3bn",
+"2,000,000", "July 15 2026"/"15 July 2026"/"2026-07-15". Language-level
+parsing, so it serves every numeric and date fact at once.
+
+**NO LLM - owner's call, and the reasons that matter are not tokens.** A
+classification call is ~0.03% of a submission's measured LLM spend. The real
+costs are (a) an interactive click waiting on a round trip and (b) a scoring
+input that could differ between two runs of the same answer.
+`unresolved_answers()` logs every answer the deterministic rules could not
+read, so coverage is MEASURED rather than assumed - if that log fills with real
+phrasings we extend the rules with evidence.
+
+**Three real bugs found in my own code by the existing suite - all fixed:**
+1. **Identifier codes were numerically coerced.** `fein "84-2210987"` became
+   `84` and was then refused by its own validator. An identifier is a STRING of
+   digits, not a quantity; `code` is now a kind that is never coerced.
+2. **The documented monetary leniency broke.** "Not covered" / "Waived" /
+   "Statutory" / "See schedule" were refused. An amount answer with NO digits
+   is legitimate descriptive data (mirrors `pdf_service._rejects_declared_
+   type`'s permissive-by-default rule); only an answer that HAS digits and
+   still will not parse is refused. Extended to percent-typed boxes too, which
+   is what the earthquake-deductible case exposed.
+3. **A malformed number was silently truncated.** "12.34.56" became `12`. The
+   leading-number path now requires the remainder to be prose.
+
+**Blast radius.** `check_tier1`, `check_tier2` and the category-breakdown `_ok`
+now ask ANSWERED (`_answered`) instead of HAS-A-VALUE; `_fact_is_filled`
+delegates to `fact_answered`. Value-semantics reads are untouched and still see
+an empty value for an absence - so `has_carrier`-style checks stay correct
+while completeness stops penalising a legitimate "none". Every wiring point is
+wrapped so a failure falls back to today's behaviour.
+
+**Scores move BOTH ways, which is Brent's distinction working:** UP where a
+legitimate "None" was penalised; DOWN where "TBD"/"N/A" was credited as data.
+D6 applies - tell Brent before he sees it.
+
+- files: NEW `services/answer_semantics.py`; wired in `routes/audit_routes.py`
+  (`_validate_producer_answer`), `services/arq_service.py` (both apply paths),
+  `services/sqs_service.py` (`_fact_is_filled`, `_answered`, `check_tier1`,
+  `check_tier2`, `_ok`).
+- tests: NEW `tests/test_answer_semantics.py` (141), plus the reshaped
+  `test_loss_recommendation_routing_20260817.py` - its old cases pinned
+  "reject words", which the semantic layer deliberately replaces with
+  "understand words"; the protection that MATTERS (text never silently
+  becoming a bogus 0) is now asserted directly.
+- suite result: **4030 passed / 1 failed** - the single pre-existing
+  `test_arq_acord125_missing_only`. Zero regressions.
+
+**Known / deliberately not done.**
+* Extraction can still write "N/A" into a fact - this closes the HUMAN answer
+  path, which is where the reported problem lives. An extraction-side pass
+  would be a separate, prompt-touching change (improving-ll.md rule).
+* The producer card is still a free-text box. A select on two-state answers
+  would make a wrong answer structurally impossible; noted for C4 as the
+  better fix, not bolted on here.
+
+### C2-H ANSWER OPTIONS - offer the choices wherever the answer set is knowable (2026-08-24)
+**Priority:** V1-CRITICAL (answer quality)
+
+**Owner's instruction:** *"Look for every answer that we are expecting, we need
+to give all possible option that a user can think of answering"* - modelled on
+the dismiss-reason dropdown (screenshot: every realistic reason, ending in
+**Other**). Free typing stays for *"names, phone, email, amounts, dates, codes,
+percentages"*.
+
+**Why a dropdown beats a text box here.** C2-G taught the lesson: understanding
+prose will always be a rearguard action. The real fix is not to ASK for prose
+when the answer set is knowable. C2-G stays underneath as the safety net for
+"Other", for legacy stored answers, and for extraction - the two are
+complementary, not alternatives.
+
+**The full surface, measured, not guessed: 90 answerable facts** across
+recommendations, hard stops and soft stops (`RESOLUTION_MAP` field mode + the
+loss rec table + Tier 1/2 + every `"field":` a scorer emits + the questionnaire
+map). **69 stay free text / typed; 20 now offer choices.**
+
+**`services/answer_options.py`** is the catalogue. Three rules every list follows:
+1. **The option TEXT is the stored value** - no hidden codes, no mapping table
+   to drift (the contract `_NO_LOSS_OPTIONS` has proven since 2026-08-17).
+2. **Every list ends with "Other"**, which drops to free text. The only two
+   exceptions are the genuinely binary questions (attestation, new venture) -
+   "Other" on "have you had claims, yes or no?" would be nonsense.
+3. **Options read as an ANSWER a person gives**, never a schema token.
+
+Lists added: entity type (13), lines of business (15, multi), construction type
+(ISO's six classes), occupancy (17), valuation method, sprinkler, ISO protection
+class 1-10, period of restoration, agreed value, GL form type, umbrella
+follow-form, vehicles-return, WC officer exclusions, additional insureds
+(multi), covered-auto symbols (multi). The auto symbols are **read from
+`services/auto_symbols.py`** - ACORD's own tooltip wording, harvested in the
+2026-08-07 work - so the dropdown can never drift from the definitions the
+validators reason over. The five option sets that already existed
+(`_NO_LOSS_OPTIONS`, `_CARRIER_MARKETING_OPTIONS`, `_FOLLOW_FORM_OPTIONS`,
+`NEW_VENTURE_OPTIONS`, `LOSS_RUN_STATUS_OPTIONS`) are REFERENCED, never copied.
+
+**Where a dropdown would be WRONG, and is deliberately not offered.** Carrier
+names, class codes and NAICS/SIC have universes in the thousands and change
+constantly - forcing a list makes "Other" the usual answer, which is worse than
+typing. Those keep free text (NAICS already has the Figure 20 suggester chips:
+suggest, never constrain).
+
+**One hazard found and closed while building it.** Options such as *"No - all
+owners and officers are included"* and *"Not stated - underwriter review
+recommended"* were being re-read by C2-G as an ABSENCE and a NON-ANSWER. An
+option chosen from the field's own list is BY DEFINITION a value, so
+`interpret_answer` now matches the fact's declared options FIRST and returns
+the catalogue's exact wording. `test_every_option_round_trips_as_its_own_value`
+pins all 20 lists - a reworded option that stops reading back as itself fails
+the build.
+
+**Wired at three points**, each additive and exception-wrapped:
+* `sqs_service.calculate_sqs` - every answerable recommendation card now ships
+  `answer_options` / `answer_control` / `answer_multi`.
+* `arq_service._attach_answer_options` - both question generators; a curated
+  `select` that already carries its own options is left untouched.
+* `AcordModal` - the producer card renders a choice list when the card carries
+  options, with "Other" revealing free text (the same control the dismiss
+  reasons have used all along), and falls back to today's text box otherwise.
+
+- files: NEW `services/answer_options.py`; `services/answer_semantics.py`
+  (declared-option match), `services/sqs_service.py`, `services/arq_service.py`,
+  `frontend/src/components/form/AcordModal.jsx`.
+- tests: NEW `tests/test_answer_options.py` (102) - round-trip on every option,
+  an escape on every list, normalizer survival (entity types must not collapse
+  onto one canonical token; RCV/ACV must still resolve), the loss controls still
+  driving the pillar, and the negative controls that keep names/amounts/dates/
+  codes OUT of dropdowns.
+- suite result: **4273 passed / 1 failed** - the single pre-existing
+  `test_arq_acord125_missing_only`. Zero regressions.
+
+**Known / deliberately not done.**
+* The inline ResolutionModal (hard stop / warning "Open to fix") still renders
+  its own inputs; it should read `control_for()` the same way. Same metadata,
+  one more render site - next increment.
+* `prior_carrier` is the one hybrid worth building later: free text, but with
+  an explicit "none - previously uninsured" choice, since that state cannot be
+  expressed by typing a carrier name. C2-G understands it as prose today.
+
+### C2-I HARD / SOFT STOPS GET THE CHOICES TOO + TWO STANDING GAPS (2026-08-24)
+
+**The gap C2-H left, now closed.** Recommendation cards gained answer choices,
+but a hard stop or warning resolved inline renders through a DIFFERENT path -
+`ResolutionModal`, driven by `resolution.facts` - and it was still drawing a
+bare *"Type the correct value..."* box for every fact. Fixed at
+`issue_registry._copy_resolution`, the ONE function every resolution is copied
+through (RESOLUTION_MAP, tier-1, legacy message fallback), so no render path
+can be missed. `_tier1_resolution` was returning `_r_field(...)` directly and
+bypassing it - now routed through the same door. Each fact carries
+`{control, options, multi}`; the modal renders a select when options exist,
+with "Other" revealing free text.
+
+Verified live-shape: `minimum_viable_cope_missing` now offers occupancy (17)
+and construction (6) as lists with the two values as typed money inputs;
+`carrier_grade_cope_incomplete` offers sprinkler (3) and protection class
+(1-10) as lists with year built / roof year typed.
+
+- tests: +3 in `test_answer_options.py` - every field-mode resolution in
+  RESOLUTION_MAP carries controls (25+ checked), tier-1 does too, and the COPE
+  hard stop offers the real lists while amounts stay typed.
+- suite: **4276 passed / 1 failed** (the pre-existing one). Zero regressions.
+- fixture: `test_data_c2_loss/10A_property_dec_incomplete_cope.pdf` - a
+  property submission with deliberately incomplete COPE, because none of the
+  loss scenarios carry property coverage and the richest dropdowns were
+  therefore untestable.
+
+---
+
+## STANDING GAPS - ANSWER INTERPRETATION (opened 2026-08-24, C2-G..C2-I)
+
+**Read this before assuming the answer path is airtight.** Two things are
+knowingly NOT covered. Both are real, both are cheap to forget, and neither is
+a reason to distrust what shipped - they bound it.
+
+### GAP 1 - extraction writes facts WITHOUT interpretation
+
+`answer_semantics` sits on the HUMAN answer path only: the producer card, the
+inline hard-stop / warning resolution, and the client questionnaire. **The
+extraction pipeline writes `facts[key]` directly.** So if the LLM extracts the
+literal string `"N/A"`, `"unknown"` or `"TBD"` out of a document, it is stored
+as a VALUE and counts as data everywhere - exactly the defect C2-G measured on
+the human path (typing "N/A" into every Tier-2 field scored 100).
+
+* **Why it was left:** the reported problem was the human path, and closing the
+  extraction side means either a post-merge normalisation pass over every fact
+  or a prompt change - the latter is an `improving-ll.md` event with a cost and
+  a cache-invalidation cost. Not something to bolt onto this arc.
+* **The cheap version if it ever bites:** run `interpret_answer` over merged
+  facts at the end of `merge_facts` and demote UNKNOWN intents to
+  `value_state: not_stated` WITHOUT touching the stored value. Deterministic,
+  no prompt change, no LLM cost.
+* **How you would notice:** a submission scoring far better than its documents
+  justify, with fields whose displayed value reads "N/A" or "unknown".
+
+### GAP 2 - `unresolved_answers()` must be WATCHED, not assumed
+
+The owner declined an LLM interpretation layer (2026-08-24) on latency and
+determinism grounds, not cost. `answer_semantics._record_unreadable` is what
+keeps that decision honest: **every answer the deterministic rules could not
+read is logged** (INFO, `answer_semantics: could not read ...`), and
+`unresolved_answers()` returns the last 200.
+
+* **That log is the evidence base for extending the rules.** If it stays empty,
+  the deterministic approach is proven. If it fills with real phrasings, we
+  extend the patterns WITH EVIDENCE instead of guessing - or revisit the LLM
+  decision with data.
+* **Nobody is watching it yet.** There is no dashboard, no alert, no periodic
+  review. It is an in-memory list that dies with the process.
+* **The cheap version:** persist it, or grep production logs for
+  `answer_semantics: could not read` after a week of real use and read what
+  comes back.
+
+### C2-J FOURTH LIVE RUN (S1-S10) - 7 PASS, 3 REAL BUGS, ALL FIXED (2026-08-25)
+
+Owner ran all ten scenarios. **Every Brent ruling scored correctly**; the three
+failures were all in the SEAM around the scorer, which is the D22 lesson again.
+
+| # | Result |
+|---|---|
+| S1 | **PASS** 60, "Loss runs match insured", matched name/fein/policy |
+| S2 | **PASS** 85, advisories with NO points chip, carrier note gone (C2-C fix live) |
+| S3 | **PASS** 45 capped, Conflicting, DC warning on the Review screen |
+| S4 | **PASS** all three flows - run a N/A, run b N/A (the years-band ruling), run c 25 + the availability select |
+| S5 | **PASS** 50 |
+| S6 | Pillar **100** with **"Matched on: dba name, fein, policy number"** - Brent's Q3a ruling works - **but a HARD STOP capped the package at 60** (BUG 2) |
+| S7 | Pillar **92**, "probable match" note verbatim - Q3b works - hard stop correct here (see below), **but the card text was backwards** (BUG 3) |
+| S8 | **PASS** 25 -> 85 |
+| S9 | **BUG 1** - answered "no", then "none", nothing moved (76 -> 76 in the logs) |
+| S10 | Dropdowns confirmed live on both loss cards ("Select an answer..."); COPE hard stop + 4 cross-form issues fired. One modal defect (below) |
+
+**BUG 1 - MINE, and the exact class the owner warned about.** C2-G started
+storing an absence as an EMPTY value carrying `value_state: explicit_no`.
+C2-E's `previously_uninsured()` still read the value TEXT, found `""`, returned
+False - so the -10 stayed and the producer's answer visibly did nothing. **Two
+mechanisms I built in the same session disagreed about where the meaning
+lives.** Fixed: the state is authoritative, checked before the text. Verified
+across "no" / "none" / "None" / "never had coverage" / "N/A" -> 90 -> 100, and
+a named carrier still reads as insured.
+
+**BUG 2 - the DBA ruling was being undone one layer up.** The loss-run matcher
+scored S6 exactly as Brent ruled, while `check_doc_consistency` raised
+*"Applicant name differs across documents: CASCADE FREIGHT INC, CF Logistics"*
+- a HARD STOP capping the submission at 60 for a trade name **the applicant
+declared on their own application**. One package asserting both things at once.
+Fixed in the name-conflict collector.
+
+**The first version of that fix was wrong and the suite caught it.** Dropping
+any value that matches a declared DBA also dropped the LEGAL name, because a
+DBA is usually a prefix of it ("Orbin" for "Orbin Contracting LLC") - which
+silenced a genuine two-company conflict
+(`test_doc_consistency_messages_have_no_code_or_list_leak`). The correct rule
+needs BOTH halves: a value is a trade name only when some document declares it
+as a DBA **and that same document gives a different legal name**. Negative
+controls pinned: a real third party still hard-stops.
+
+**S7's hard stop is CORRECT and was left alone.** Brent ruled the SCORE is a
+probable match (92); he did not rule the identity conflict away, and the spec
+lists *"Applicant legal name differs across uploaded documents"* as a
+cross-document hard stop. Both are true at once by design - test-pinned so
+nobody "fixes" it later.
+
+**BUG 3 - the `moderate` card asserted the wrong identifiers.** It read *"name
+and address match but FEIN/policy number not confirmed"* on S7, where the FEIN
+DID match and the name did not - backwards. `moderate` now has two causes
+(name+address, and Brent's Q3b), so the message names neither; the panel note
+carries the specific reason. Routing phrase preserved.
+
+- tests: +6 in `test_loss_history_c2.py` (138), each driving the live scenario.
+- suite: **4282 passed / 1 failed** (the pre-existing one). Zero regressions.
+
+**STILL OPEN - S10 ResolutionModal follow-up (not fixed, reported).** Applying
+a value that raises a NEW issue shows *"You can settle it here - fill in
+Occupancy Type / Construction Type / Property Bpp Value above and apply
+again"*, but the modal's input list does NOT refresh to the new issue's facts -
+only the original two were rendered - and the submit then errors *"Enter at
+least one value."* The message names fields the form does not show. Pre-existing
+in the follow-up flow (`ResolutionModal`), unrelated to the answer-controls
+work, and it is a dead end for the producer. Next increment.
+
+### C2-K THE RESOLUTION FOLLOW-UP DEAD END - ROOT CAUSE AND FIX (2026-08-25)
+
+**Reported (S10 live run):** applying Building Value + BPP Value on the
+Minimum-Viable-COPE modal returned *"You can settle it here - fill in Occupancy
+Type / Construction Type / **Property Bpp Value** above and apply again"*, and
+the re-apply then refused with *"Enter at least one value."* A dead end.
+
+**ROOT CAUSE - a remediation list that never checks what is already provided.**
+`audit_routes._trade_off_note` built its "fill in ..." list as
+*the new issue's facts ∩ the facts on this screen, minus the ONE field this
+request applied*. Two consequences, and the second is the dead end:
+1. The producer applies several fields; each is a separate POST, so only the
+   LAST is excluded - every other field they just filled is still named. Hence
+   "Property Bpp Value", which they had entered seconds earlier.
+2. Being told to fill something already filled, the natural move is to press
+   Apply again without typing. `applyField` only submits TOUCHED fields (a
+   deliberate rule - see its comment), `touched` is cleared when the note
+   shows, so nothing is submitted and the modal answers "Enter at least one
+   value." **The message asked for work that was already done, then punished
+   doing nothing.**
+
+**Fix - name only what is STILL MISSING, judged against the post-apply session
+facts.** `_trade_off_note` now takes the session's facts and filters through
+`_fact_is_filled`, so it reflects what is genuinely on file - which also covers
+a value that arrived from a document or an earlier field in the same batch,
+not just this request's own write. And because `_fact_is_filled` is
+answered-aware since C2-G, a producer who answered **"None"** is not asked
+again either. When nothing on the screen is still missing it stops promising a
+fix it cannot deliver and says *"Resolve it from the validation panel when you
+are ready."*
+
+**Second half - the form was stale while being told to "apply again".** The
+modal held its pre-apply snapshot, so the values that had just landed were not
+visible. `ResolutionModal` now re-reads the session (`prefillNonce`) when a
+follow-up note appears. `touched` still clears, which is correct: only a fresh
+edit should re-submit.
+
+**Checked for the same class elsewhere, as asked.** The pre-form screen's
+"Needs client input" list comes from `check_tier2`, which C2-G already routed
+through the answered-aware predicate - so an absence answer no longer appears
+there as a gap. The other remediation strings (`minimum_viable_cope_missing`
+etc.) compute their "missing:" list inside the rule from live facts, so they
+cannot name a satisfied field. `_trade_off_note` was the one builder that
+enumerated facts WITHOUT consulting them.
+
+**A brittle test corrected, not worked around.**
+`test_the_note_is_advisory_and_never_fails_the_write` asserted on a fixed
+±400-character window around the call; adding two lines pushed the "non-fatal"
+guard out of view and failed a test whose subject had not changed. Rescoped to
+the ENCLOSING try/except and strengthened (the guard must also never re-raise,
+or the successful write would be lost).
+
+- files: `routes/audit_routes.py` (`_trade_off_note` + its call site),
+  `frontend/src/components/form/ResolutionModal.jsx` (prefill refresh).
+- tests: +5 in `test_issue_resolution.py` including the S10 literal case, the
+  nothing-left-to-fill case, and the absence-counts-as-provided case.
+- suite: **4287 passed / 1 failed** (the pre-existing one). Zero regressions.
+
+### C2-L FIFTH LIVE RUN - the SECOND and THIRD copies (2026-08-25)
+
+S9 passed. S10's follow-up note is fixed (the modal now shows Occupancy and
+Construction as dropdowns with the two amounts pre-filled). S6 and S7 each
+exposed **another copy of the thing I had just fixed** - the defect signature
+this codebase keeps producing.
+
+**S6 - the DBA ruling was enforced in ONE engine, and the package immediately
+raised the same hard stop from the OTHER.** C2-J fixed
+`sqs_service.check_doc_consistency`; the live run then produced *"Applicant /
+Named Insured: documents disagree (CASCADE FREIGHT INC, CF Logistics)"* from
+`underwriting_consistency` - the Data Consistency reconciler, a completely
+separate path. Same question, two engines, one fixed.
+
+**Fixed by giving the rule ONE OWNER**, not by patching the second site:
+`fact_comparison.is_declared_trade_name(value, docs, ctx)` now holds it (the
+same door decision D3 made for every other comparison), and BOTH sites ask it -
+`check_doc_consistency` and a new `_drop_declared_trade_names` filter in
+`underwriting_consistency`, built on the existing `_drop_foreign_line_values`
+pattern. `test_the_trade_name_rule_has_exactly_one_owner` pins the rule
+directly, including the prefix guard ("Orbin" must never swallow "Orbin
+Contracting LLC"), and the negative control now asserts on BOTH engines.
+
+**S7 - a THIRD copy of the backwards message.** C2-J replaced two occurrences
+of *"name and address match but FEIN/policy number not confirmed"*; a third
+lived on the Path A insured-match adjustment and was what the live run
+actually printed. Now grep-guarded:
+`test_no_copy_of_the_backwards_moderate_message_survives` asserts the wording
+exists NOWHERE in `sqs_service`, so a future copy fails the build rather than
+surfacing on a client screen.
+
+**Standing lesson, third time in this arc.** Fixing the site that produced the
+symptom is not fixing the defect. Both of these were found only because the
+owner re-ran the same scenario after the "fix" - `replace_all` reported success
+on two matches while a third existed, and one engine went quiet while its twin
+kept talking. **Grep for the rule, not for the message; and when two subsystems
+answer the same question, give the answer one owner.**
+
+- files: `services/fact_comparison.py` (new `is_declared_trade_name`),
+  `services/underwriting_consistency.py` (`_drop_declared_trade_names`),
+  `services/sqs_service.py` (uses the shared rule; third message copy).
+- tests: +4 in `test_loss_history_c2.py` (142) - both engines, both directions,
+  the prefix guard, and the grep guard.
+- suite: **4291 passed / 1 failed** (the pre-existing one). Zero regressions.
+
+### C2-M SIXTH LIVE RUN - S6 AND S7 CONFIRMED, C2 CLOSED (2026-08-25)
+
+| # | Before | After | Verdict |
+|---|---|---|---|
+| S6 | form 60 D / package 60, "Hard stops need attention" | **form 83 B / package 80, NO hard stop**, Loss History 100, "Matched on: dba name, fein, policy number" | **PASS** - both engines now honour Brent's Q3a ruling |
+| S7 | card read "name and address match but FEIN/policy number not confirmed" | card reads **"confirm the run belongs to this insured (see the note on the Loss History panel)"**; Loss History 92; the hard stop correctly REMAINS | **PASS** |
+
+Package arithmetic re-derived by hand from the observed pillars, both exact:
+S6 `(80*.25 + 72*.25 + 100*.15 + 100*.15 + 40*.10) / 0.90 = 80`.
+S7 raw `(74*.25 + 72*.25 + 100*.15 + 92*.15 + 40*.10) / 0.90 = 77`, displayed
+**60** under the applicant-name hard stop - the ceiling working exactly as the
+owner's rule requires (raw preserved, only the display capped).
+
+**Score movement to tell Brent:** a package whose loss run is filed under the
+insured's declared DBA was losing **20 points** to a false identity hard stop
+(60 -> 80 on this fixture). Add it to the D6 list alongside the other C2
+movements.
+
+**C2 IS CLOSED.** All eleven clauses (2.1-2.11) implemented, all seven of
+Brent's rulings applied, and every one verified on the live application across
+six runs. Nothing in the Loss History workstream is open. The remaining
+follow-ups are logged elsewhere and are not C2: the two STANDING GAPS on
+answer interpretation (extraction-side values, and watching
+`unresolved_answers()`), and the ResolutionModal control parity noted in C2-H.
+
+---
+
+## BRENT'S RULINGS - ALL CLOSED (received 2026-08-24, live-verified 2026-08-25)
+
+**Read this before reopening anything in Loss History.** Brent answered every
+outstanding question in one reply, before testing. Each is recorded verbatim,
+with where it lives in code and how it was proven. Nothing here is awaiting a
+decision.
+
+| # | Brent, verbatim | What it means in code | Proven by |
+|---|---|---|---|
+| 1 | *"DBA + matching EIN: Good suggestion. Treat it as a verified match if the DBA is listed by the applicant and the EIN matches. That is enough to confirm the loss runs belong to the insured."* | A name matching a DBA **the applicant declared** is a name match; the ordinary tiers follow (`loss_run_identity`). The rule that decides "is this the insured's own trade name?" has ONE owner, `fact_comparison.is_declared_trade_name` | **S6 live:** Loss History **100**, *"Matched on: dba name, fein, policy number"*, form 83 / package 80 |
+| 2 | *"Matching EIN + unknown name: Treat it as a probable match and ask for confirmation of the prior name or entity relationship. The EIN match is strong evidence, but the unexplained name should still be verified."* | `no_match` -> **`moderate`** (92 on a clean 5-year run), plus a note carrying the confirmation ask | **S7 live:** Loss History **92**, note printed verbatim, *"Matched on: fein, policy number"* |
+| 3 | *"Prior carrier: That's not really how brokers work. For now, skip shortcut and ask client. We'll pull something more concrete together with if/and/or."* | **Do not build it.** Nothing was ever built, so nothing to revert - we keep asking the client. Q8 closes as DECLINED; he will bring rules later | n/a - nothing shipped |
+| 4 | *"AI confidence: Those assignments will do for now."* | 1.00 / 0.85 / 0.50 stand unchanged. The only movement is the separate `ai_verified` 0.00 defect fix (C1-S) | n/a - no change |
+| 5 | *"we can't treat 'N/A' as '0' ... 'No known losses' is a legitimate answer ... If 'no known losses', check against the number of years in business."* 0-1 yr *"too young"*; 1-5 yr *"a satisfactory answer"*; 5+ yr *"loss runs are pretty much required"* | **The years-in-business ladder** (`loss_history_state.years_in_business_band`). This CORRECTED what C2-A shipped | **S4 live:** run a and run b both -> **N/A**. **S8 live:** 25 -> **85** on a 3-year business |
+| 6 | *"Good. When a loss run's years are readable but the claim statuses and amounts aren't, we don't deduct anything extra for that. V2 - Adding it would mean reading claim-by-claim details from every carrier's layout"* | Confirmed: no V1 deduction. The per-claim extraction work is **V2 backlog**, not a gap | n/a - confirmed as shipped |
+| 7 | *"Somewhat incorrect ... there probably shouldn't be a deduction here for now ... the applicant would be 'previously uninsured', which is very different from 'missing prior carrier'."* | The -10 now needs POSITIVE evidence that prior coverage existed (a renewal, prior-policy facts, or uploaded runs), and an applicant who answers "None" is `previously_uninsured` and never deducted | **S9 live:** answering the card **None** moved Loss History **90 -> 100** |
+
+### The ladder his ruling 5 produced
+
+The 5+ / unknown column IS the client's own 2.5 table, untouched - so a package
+whose years cannot be read scores exactly as it did before.
+
+| State | 0-1 yr | 1-5 yr | 5+ yr / unknown |
+|---|---|---|---|
+| No known losses attested | **Not Applicable** | **85** | 60 |
+| Loss runs requested / pending | **Not Applicable** | **70** | 50 |
+| No loss runs available | **Not Applicable** | **50** | 25 |
+| "No losses" in narrative only | **Not Applicable** | **60** | 40 |
+| Nothing said at all | 25 | 25 | 25 |
+
+Three properties, all test-pinned: **silence never buys N/A** (the 0-1 row needs
+an affirmative answer); **the same contradiction guard as 2.2** blocks the N/A
+when a loss run, prior carrier, claims or a renewal flag says otherwise; and
+**2.5's ordering holds inside every band** (attestation > pending > narrative >
+nothing).
+
+### What his ruling 7 does and does NOT model - stated honestly
+
+Brent's example is *"a solo-owner adding employees for the first time ... adding
+a new line for workers comp"*. Both readings of that example are covered by the
+single `prior_carrier` fact:
+* a business with **no prior insurance at all** answers "None" -> previously
+  uninsured -> no deduction;
+* a business that **already carries GL** and is adding WC names its GL prior
+  carrier -> the fact is filled -> no deduction either way.
+
+**Not modelled:** prior carrier PER LINE of business. There is one
+`prior_carrier` fact (plus `wc_prior_carrier`), not one per line, so Primble
+cannot express "has a GL carrier, none for WC". No reported defect needs it, and
+Brent's own example does not - but if the per-line prior-carrier work he
+mentioned ("something more concrete together with if/and/or") lands, this is the
+fact model it would change.
+
+### The exact numbers that are OURS, not his
+
+Ruling 5 gave the STRUCTURE (three bands, what is satisfactory in each) but no
+numbers. The 1-5 column above - 85 / 70 / 60 / 50 - is our derivation, built
+only from values already in his own 2.5 table. Flagged to him as an assumption
+in `20Aug_questions_brent.md`, not presented as his ruling. If he moves them it
+is a one-line change per row in `calculate_p4_loss_history`.
+
+### Score movements to tell Brent (D6)
+
+| What | Direction |
+|---|---|
+| Loss run filed under the insured's declared DBA - a false identity hard stop was costing **20 points** (S6: package 60 -> 80) | UP |
+| Tax-ID-matched run with an unexplained name (25 -> 92) | UP |
+| 1-2 years of real loss runs (40 -> 70); 3-4 years (80 -> 85) | UP |
+| Matched runs with a missing or stale valuation date (45 / 35 -> 60) | UP |
+| Accounts previously docked for claim frequency or loss ratio (up to 40 points back) | UP |
+| Businesses under a year old, and previously-uninsured applicants | UP |
+| Prior carrier and claim count no longer double-counted in Structural Completeness | UP |
+| Loss runs merely requested / pending (70 -> 50) | DOWN |
+| "No losses" in prose with no attestation (45 -> 40) | DOWN |
+
+---
+
+## Session 2026-08-25 - C3 SQS Scoring Integrity & Critical-Field Weighting
+
+### C3-A Full audit of section 3 - ANALYSIS COMPLETE, NOT YET FIXED (2026-08-25)
+**Priority:** V1-CRITICAL
+**Principle(s) touched:** 1 (one canonical fact), 6 (preserve provenance), 7 (unknown edge
+cases default to producer review)
+
+**The client's ask is traceability, not a better number.** Section 3's Desired Outcome is
+one sentence: every material score must be traceable through
+`Canonical Fact -> Validation Rule -> Pillar -> Raw SQS -> Ceiling -> Displayed SQS`.
+The formula changes (3.2, 3.5-3.7, 3.14) are mechanical. The audit below is what has to be
+true before any of them can be verified.
+
+#### What was found (measured, not reasoned)
+
+| # | Finding | Evidence |
+|---|---|---|
+| F1 | **The on-screen breakdown is not the formula.** `_compute_category_breakdown` takes `tier1_score` and `tier2_score` and reads NEITHER. Its own docstring claims the Structural sub-rows "ARE the P1 formula". They are not - it renders five unrelated rows computed from a different set of facts | `sqs_service.py:3351`; grep of the function body returns the two parameter lines and nothing else |
+| F2 | **The audit trail already exists and is invisible.** `raw_sqs_score`, `cap_applied`, `cap_reason`, `credits_applied` are all returned by the scorer. **Zero** references anywhere in `frontend/src` | grep |
+| F3 | **`producer_fields_exempt` is wider than 3.3 allows.** 3.3 waives producer name "when the ONLY source document is a declarations page". The flag is set from the PRIMARY document, so a dec page + application + loss run package still waives producer name AND contact - 40 points of Tier 1 forgiveness on a submission that has the producer's name available | `extraction_pipeline.py:450` - `mflags["_doc_type"] = primary.get("doc_type", "unknown")` |
+| F4 | **The questionnaire misreports SQS impact in BOTH directions.** Live `classify_question`: `naics_code` gives `sqs: False, points: 0` while it is 1/6 of Tier 2. `total_payroll` / `wc_xmod` / `wc_payroll_period` / `wc_officer_exclusions` give `sqs: True, points: 8`, a number derived from `TIER2_FIELDS` membership - which flips to 0/False the moment 3.14 removes them, while payroll still moves Exposure by up to 27 | executed against the live classifier |
+| F5 | **A producer field edit destroys earned dismissal credits.** 3.11 requires credits to survive recalculation. `form_routes.update_pdf` (3.10's "field edit" / "form edit" trigger) rebuilds every score and never calls `active_score_credits`. Only `recalculate_session_scores` re-applies them | grep: `active_score_credits` has zero call sites in `routes/form_routes.py` |
+| F6 | **`physical_address` is asked of NOBODY.** The classifier returns `audience: internal, suppressed: true`, yet its absence raises a soft warning that caps the package at 85 on any property or multi-location account. It IS resolvable from the issue card, so not a dead end | `question_classifier` executed; `issue_registry.py:308` `_r_field("physical_address")` |
+| F7 | **The Figure 20 NAICS suggestion chips are ALREADY DARK in production.** `suggestions` is rendered ONLY by `ClientQuestionnaire.jsx`. `naics_code` is producer-audience + suppressed, and `isClientFacing = bucket === "client" && !suppressed`, so the question never reaches the component that draws the chips. The feature went dark on 2026-08-12 when NAICS was re-routed to the producer; nobody noticed because the tests only cover generation | grep: `suggestions` appears in `ClientQuestionnaire.jsx` only |
+| F8 | **`tier2_score` is a dead parameter in the per-form scorer.** Threaded through five call sites into `calculate_sqs` and never read. Per-form Structural is a hand-written per-form checklist instead - so "Structural Completeness" means two different things on one screen | grep of `calculate_sqs`'s body |
+
+#### The double-count claim, measured precisely
+
+An earlier draft of this audit named four fields. **Two of them were wrong and are corrected
+here** - the discipline being that a double-count claim has to name the second deduction,
+not assume it.
+
+| Fact | Structural Tier 2 | Exposure Consistency | Field-level stop | Verdict |
+|---|---|---|---|---|
+| `total_payroll` | yes (until 3.14) | -15 (no payroll/revenue), -12 (WC) | "Workers Comp detected but payroll is missing" | **Triple counted today. 3.14 fixes it** |
+| `total_revenue` | yes | -15, shared with payroll | "GL coverage detected but no revenue or payroll found" | **Still triple counted after 3.14. NOT named by the client** |
+| `operations_description` | yes | -10 (or masked by the -20 class-code branch) | none | **Still double counted after 3.14. NOT named by the client** |
+| `num_employees` | yes | the +8 fires when employees ARE present with no WC - a coverage-gap check, not a completeness one | none | **NOT double counted.** Earlier claim withdrawn |
+| `naics_code` | yes | only via `_is_ops_class_code_mismatch`, which needs a code to be present | `validate_naics_code` fires only on a MALFORMED code, never on a missing one | **NOT double counted.** Earlier claim withdrawn |
+| `fein`, `years_in_business` | yes | none | none | clean |
+
+**Two fields remain genuinely double counted after the client's own removals, and he named
+neither.** Principle 7 and the precedence note say the same thing: do not invent the rule.
+Measure it, report it, let product decide. See Q14.
+
+#### Owner rulings received 2026-08-25
+
+| Ruling | Effect |
+|---|---|
+| **"All the things mentioned are for both per form score as well as package wherever applicable"** | Section 3 is NOT package-only. Per-form Structural becomes the same Tier 1 x 40 / Tier 2 x 35 / that form's own fill rate x 25 blend. This RESTORES the intent of `tier2_score` (F8, the dead parameter) and collapses the two rival meanings of "Structural Completeness" into one. The per-form checklists survive as RECOMMENDATION sources; they stop being the score |
+| **"Form fill rate and quality fill rate ... keep them disabled but still apply changes to them"** | `SHOW_COMPLETION_METRICS` stays `false` in `AcordModal.jsx`. The underlying numbers still change. Do not re-enable the section as a side effect of the reweight |
+
+#### ASSUMPTION REGISTER - C3
+
+Every one of these is a place where the client's document does not say, and engineering
+chose. Listed so a later chat argues with the assumption rather than rediscovering it.
+
+| ID | Assumption | Basis | If wrong |
+|----|-----------|-------|----------|
+| **A1** | 3.2's 40/35/25 applies to per-form Structural as well as package | **CLOSED by owner 2026-08-25** - a ruling now, not an assumption | - |
+| **A2** | A fact may deduct inside a pillar AND independently trigger a ceiling. That is not double counting | 3.9 preserves the ceilings verbatim and adds *"Individual pillar deductions continue to reflect the volume/severity of underlying issues"* | the ceiling model collapses into the pillar model - a far larger rewrite than section 3 describes |
+| **A3** | Double counts NOT named in 3.5 / 3.14 stay exactly as they are. Engineering reports them (Q14), never removes them | Precedence note: no new scoring rules without product approval. Principle 7 | `total_revenue` and `operations_description` keep costing a submission twice |
+| **A4** | The dec-page **contact-information** waiver survives as an APPLICABILITY removal under 3.4 ("Not Applicable fields are removed rather than treated as missing"), even though 3.3 names only producer name | 3.4's applicability language; the waiver is existing behaviour and the plan does not modify it | Tier 1 gets stricter on dec-page-only submissions and those scores drop 20 |
+| **A5** | Brent's 1.00 / 0.85 / 0.50 confidence weights stand | Ruling 4, 2026-08-24 (*"Those assignments will do for now"*); the master plan sets no numbers and 3.8 forbids the redesign | every fill rate in the system moves |
+| **A6** | Credit MAGNITUDES are untouched. Only stacking, retirement and survival are fixed | 3.11: *"Retain the existing V1 recommendation-credit mechanism unless separately revised"* | package credits keep being a number measured against a FORM's scale |
+| **A7** | A captured `locations` schedule carrying the address satisfies 3.12's physical-address requirement | 3.12: *"It becomes applicable when the exposure requires it"* - if the schedule already carries it, the exposure's requirement is met | more 85 ceilings than the client expects on property accounts |
+| **A8** | "Form Fill Rate" in 3.2 IS the existing `confidence_fill_rate`, denominator unchanged | 3.8: *"Continue using the current confidence-weighted fill-rate implementation"* + *"Do not redesign the full confidence-weighting algorithm in this V1 pass"* | See Q15. The denominator counts ONLY FILLED fields, so it is an average confidence, not a fill rate, and 3.8's *"Not Applicable fields must not reduce fill rate"* is already a no-op |
+| **A9** | Adding auto garaging as a physical-address trigger is authorised, because 3.12 names it as an example | 3.12's own example list | a new warning fires on auto accounts that did not have one |
+| **A10** | The per-form checklists keep emitting their recommendations after they stop being the score | otherwise ~30 form-specific recommendation cards vanish silently | the producer loses the form-specific gap cards |
+| **A11** | The OCR-confidence penalty (up to -30 on per-form Structural) survives the reweight | the plan does not mention it; unmodified existing rules remain authoritative | per-form Structural moves again |
+
+#### Questions raised for product
+
+* **Q14** - `total_revenue` and `operations_description` are still double counted after the
+  client's own removals. Same treatment, or leave them? Engineering will not decide it.
+* **Q15** - the fill-rate denominator. 3.8's first bullet only bites if the denominator
+  contains unfilled fields; ours contains only filled ones. Confirm ours stands (the bullet
+  is a no-op) or he wants filled / applicable, which is the redesign the same section forbids.
+* **Q16** - **F7 is a regression to disclose, not a question to ask.** The Figure 20 chips he
+  praised have been dark since 2026-08-12. 3.13 now says leave classification assistance to
+  V2 / Section 19, so the correct V1 action is to leave them dark and TELL him - D6 applies,
+  because he will otherwise discover a praised feature is gone.
+
+**Known / deliberately not done.** Nothing shipped in this entry. No code changed.

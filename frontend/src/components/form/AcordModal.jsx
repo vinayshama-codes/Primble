@@ -145,6 +145,7 @@ const LOSS_STATE_PROV = {
   loss_history_conflicting:       { direction: "reduced",  rule: "A no-loss statement is contradicted by actual loss-run claims.", remediation: "Reconcile the attestation with the loss runs before submission." },
   loss_history_pending_validation:{ direction: "info",     rule: "Loss runs parsed but ownership not fully verified.", remediation: "Confirm ownership with a FEIN or policy number." },
   new_venture_not_applicable:     { direction: "info",     rule: "Verified new venture - no prior operations exist, so Loss History is removed from the score and the remaining pillars rescale.", remediation: "No action needed. If prior operations actually existed, correct the New Venture answer." },
+  no_operating_history_not_applicable: { direction: "info", rule: "Under a year in business with no known losses - there are no loss runs to obtain, so Loss History is removed from the score and the remaining pillars rescale.", remediation: "No action needed. If the business is older than it appears, correct the years-in-business figure." },
   no_loss_runs_available:         { direction: "reduced",  rule: "The insured reports no loss runs are available - scored as no loss evidence until something stronger arrives.", remediation: "Ask the insured to attest No Known Losses, or record known claims." },
   prior_claims_exist:             { direction: "reduced",  rule: "Prior claims are known but no loss runs are on file.", remediation: "Request loss runs from the prior carrier, or record that they have been requested." },
 };
@@ -278,6 +279,7 @@ const LOSS_HISTORY_STATE_LABEL = {
   loss_history_conflicting:       "Conflicting - attested no losses but loss runs show claims",
   loss_history_pending_validation: "Loss history pending validation",
   new_venture_not_applicable:      "Not applicable - new venture",
+  no_operating_history_not_applicable: "Not applicable - under a year in business",
   no_loss_runs_available:          "No loss runs available",
   prior_claims_exist:              "Prior claims known - runs not provided",
 };
@@ -1678,12 +1680,19 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
   const dismissReasonValue = reason === "Other"
     ? (otherReason.trim() ? `Other: ${otherReason.trim()}` : "")
     : reason;
+  // A closed question is offered as a choice list (backend `answer_options`)
+  // instead of a bare text box. "Other" reveals free text, exactly like the
+  // dismiss-reason control above - so an unusual answer is never trapped.
+  const answerOptions = (isObj && Array.isArray(rec.answer_options)) ? rec.answer_options : null;
+  const answerValue = (answerOptions && reason === "Other")
+    ? otherReason.trim()
+    : reason;
 
   const submitAnswer = async () => {
     if (busy) return;
     setErrMsg(""); setBusy(true);
     let out;
-    try { out = await onAnswer(rec, reason); }
+    try { out = await onAnswer(rec, answerValue); }
     catch (_) { out = { ok: false }; }
     finally { setBusy(false); }
     if (out?.ok) setResult(out.impact || { status: "user_provided_only" });
@@ -1710,6 +1719,30 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
         <>
           <div style={{ marginTop: 7, display: "flex", gap: 5, alignItems: "center" }}>
             {answerable ? (
+              answerOptions ? (
+                <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+                  <select
+                    value={reason}
+                    onChange={e => { setReason(e.target.value); if (errMsg) setErrMsg(""); }}
+                    disabled={busy}
+                    style={{ fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", background: "#fff", minWidth: 0 }}
+                  >
+                    <option value="">Select an answer…</option>
+                    {answerOptions.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                  {reason === "Other" && (
+                    <input
+                      placeholder="Type your answer…"
+                      value={otherReason}
+                      onChange={e => { setOtherReason(e.target.value); if (errMsg) setErrMsg(""); }}
+                      onKeyDown={e => { if (e.key === "Enter") submit(); }}
+                      disabled={busy}
+                      autoFocus
+                      style={{ fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
+                    />
+                  )}
+                </div>
+              ) : (
               <input
                 placeholder="Type your answer…"
                 value={reason}
@@ -1718,6 +1751,7 @@ function SidePanelRec({ rec, index, sqsScore, onDismiss, onAnswer, initialValue 
                 disabled={busy}
                 style={{ flex: 1, fontSize: 10, padding: "3px 7px", border: "1px solid #e2e8f0", borderRadius: 5, outline: "none", fontFamily: "inherit", minWidth: 0 }}
               />
+              )
             ) : (
               <select
                 value={reason}

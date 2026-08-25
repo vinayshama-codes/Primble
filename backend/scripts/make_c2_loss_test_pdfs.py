@@ -17,6 +17,12 @@ Scenario -> the one C2 behaviour it proves live
     S4  Path C nothing = 25 + New Venture flow               -> 25 -> N/A (rescale)
     S5  Pending = 50 (was 70)                                -> pillar 50
 
+BRENT'S RULINGS 2026-08-24 (C2-E) - four more scenarios:
+    S6  Loss run under a DECLARED DBA, tax ID matches        -> verified, 100
+    S7  Tax ID matches, insured name is a former name        -> probable, 92
+    S8  3-year-old business, no loss documents at all        -> 25 -> 85 attested
+    S9  Loss runs but NO prior carrier named                 -> 90 -> 100 on "None"
+
 Design notes (same rules as make_v1_c1_test_pdfs.py)
 ----------------------------------------------------
 * Real text via reportlab - extractable by pdfplumber, no OCR dependency.
@@ -90,6 +96,29 @@ def _para(c, y, text):
     c.setFont("Helvetica", 9)
     c.drawString(1 * inch, y, text)
     return y - 0.19 * inch
+
+
+def _claim_table(c, y, rows, valued_label=None):
+    """Standard claim-detail block. Kept in one place so every loss run carries
+    the same classification signals (CLAIM NUMBER / DATE OF LOSS / Total
+    Incurred), which is what `classify_document` scores on."""
+    y = _head(c, y, "CLAIM DETAIL")
+    c.setFont("Helvetica-Bold", 8.5)
+    cols = [1.0, 2.15, 3.35, 5.15, 6.05, 6.85]
+    for x, h in zip(cols, ["DATE OF LOSS", "CLAIM NUMBER", "DESCRIPTION",
+                           "PAID", "RESERVED", "STATUS"]):
+        c.drawString(x * inch, y, h)
+    y -= 0.20 * inch
+    c.setFont("Helvetica", 8)
+    total = 0
+    for r in rows:
+        for x, v in zip(cols, r):
+            c.drawString(x * inch, y, v)
+        total += int(str(r[3]).replace("$", "").replace(",", ""))
+        y -= 0.185 * inch
+    y = _row(c, y - 0.1 * inch, "Total Incurred", f"${total:,}")
+    y = _row(c, y, "Number of Claims", str(len(rows)))
+    return y
 
 
 def _dec_common(c, y, name, addr, fein, ops, revenue, payroll, employees,
@@ -334,6 +363,208 @@ def s5_dec(path):
     c.save()
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# BRENT'S RULINGS (C2-E) - S6 to S9
+# ═════════════════════════════════════════════════════════════════════════════
+
+# S6 - loss run under a DECLARED trade name, tax ID matches -> verified match
+S6_NAME = "CASCADE FREIGHT INC"
+S6_DBA = "CF Logistics"
+S6_FEIN = "45-3310886"
+S6_FEIN_PLAIN = "453310886"
+S6_POL = "CFI-GLF-4417"
+S6_CARRIER = "Granite State Mutual Insurance Company"
+S6_PRIOR = "Northshore Indemnity Company"
+S6_VAL = _d(14)
+S6_START = (TODAY - timedelta(days=14 + round(5 * 365.25))).strftime("%m/%d/%Y")
+
+
+def s6_application(path):
+    c = canvas.Canvas(path, pagesize=LETTER)
+    y = _page(c, "COMMERCIAL INSURANCE APPLICATION",
+              "Applicant Information Section")
+    y = _dec_common(c, y, S6_NAME, "410 Harbor Industrial Way, Tacoma, WA 98421",
+                    S6_FEIN, "Regional freight and drayage services",
+                    "$5,100,000", "$2,050,000", "24", S6_CARRIER, S6_POL)
+    y = _row(c, y, "DBA", S6_DBA)
+    y = _row(c, y, "Prior Carrier", S6_PRIOR)
+    y = _row(c, y, "Business Start Date", (TODAY - timedelta(days=round(8 * 365.25))).strftime("%m/%d/%Y"))
+    c.showPage()
+    c.save()
+
+
+def s6_loss_run(path):
+    """Issued to the TRADE NAME the applicant declared, with a matching tax ID.
+    Brent: "Treat it as a verified match." Expect strong -> 5 readable years,
+    currently valued, prior carrier named = 100."""
+    c = canvas.Canvas(path, pagesize=LETTER)
+    y = _page(c, "LOSS RUN REPORT",
+              f"Prepared by {S6_PRIOR} - Valuation Date {S6_VAL}")
+    y = _row(c, y, "Insured", S6_DBA)
+    y = _row(c, y, "FEIN", S6_FEIN_PLAIN)
+    y = _row(c, y, "Policy Number", S6_POL)
+    y = _row(c, y, "Period Covered", f"{S6_START} to {S6_VAL}  (5 years)")
+    _claim_table(c, y, [
+        (_d(300), "CF-4411", "Trailer door struck loading dock", "$5,600", "$0", "Closed"),
+        (_d(880), "CF-4180", "Cargo water damage in transit", "$12,400", "$0", "Closed"),
+    ])
+    c.showPage()
+    c.save()
+
+
+# S7 - tax ID matches, insured name is a FORMER name -> probable match
+S7_NAME = "MERIDIAN FABRICATION LLC"
+S7_FORMER = "Northbridge Metalworks Corp"
+S7_FEIN = "36-7742119"
+S7_POL = "MFB-GLM-2290"
+S7_CARRIER = "Lakeshore Standard Insurance Company"
+S7_PRIOR = "Keystone Mutual Insurance Company"
+S7_VAL = _d(20)
+S7_START = (TODAY - timedelta(days=20 + round(5 * 365.25))).strftime("%m/%d/%Y")
+
+
+def s7_application(path):
+    c = canvas.Canvas(path, pagesize=LETTER)
+    y = _page(c, "COMMERCIAL INSURANCE APPLICATION",
+              "Applicant Information Section")
+    y = _dec_common(c, y, S7_NAME, "88 Foundry Street, Erie, PA 16507",
+                    S7_FEIN, "Custom metal fabrication and welding",
+                    "$4,400,000", "$1,760,000", "19", S7_CARRIER, S7_POL)
+    y = _row(c, y, "Prior Carrier", S7_PRIOR)
+    y = _row(c, y, "Business Start Date", (TODAY - timedelta(days=round(11 * 365.25))).strftime("%m/%d/%Y"))
+    c.showPage()
+    c.save()
+
+
+def s7_loss_run(path):
+    """The tax ID matches; the insured name on the run appears NOWHERE in the
+    package (it is the company's former name). Brent: "a probable match ... ask
+    for confirmation of the prior name or entity relationship."
+    Expect moderate -> 100 base - 8 = 92, plus the confirmation note."""
+    c = canvas.Canvas(path, pagesize=LETTER)
+    y = _page(c, "LOSS RUN REPORT",
+              f"Prepared by {S7_PRIOR} - Valuation Date {S7_VAL}")
+    y = _row(c, y, "Insured", S7_FORMER)
+    y = _row(c, y, "FEIN", S7_FEIN)
+    y = _row(c, y, "Policy Number", S7_POL)
+    y = _row(c, y, "Period Covered", f"{S7_START} to {S7_VAL}  (5 years)")
+    _claim_table(c, y, [
+        (_d(520), "NB-8802", "Weld spatter ignited adjacent material", "$16,900", "$0", "Closed"),
+    ])
+    c.showPage()
+    c.save()
+
+
+# S8 - a 3-year-old business with no loss documents at all -> the ladder
+S8_NAME = "ALDERGROVE DESIGN BUILD LLC"
+S8_FEIN = "27-5518840"
+S8_POL = "ADB-GLA-6620"
+S8_CARRIER = "Beacon Harbor Insurance Company"
+
+
+def s8_application(path):
+    """Three years of operating history, zero loss information. Brent: at 1-5
+    years "a satisfactory answer would be no known losses". Expect 25 before
+    the questionnaire and 85 once the insured attests - where a 5+ year
+    business would only reach 60. Carries no loss vocabulary at all."""
+    c = canvas.Canvas(path, pagesize=LETTER)
+    y = _page(c, "COMMERCIAL INSURANCE APPLICATION",
+              "Applicant Information Section")
+    y = _dec_common(c, y, S8_NAME, "1204 Cedar Mill Road, Bend, OR 97701",
+                    S8_FEIN, "Residential design and build contracting",
+                    "$1,300,000", "$540,000", "7", S8_CARRIER, S8_POL)
+    y = _row(c, y, "Transaction Type", "New Business")
+    y = _row(c, y, "Business Start Date",
+             (TODAY - timedelta(days=round(3 * 365.25) + 40)).strftime("%m/%d/%Y"))
+    c.showPage()
+    c.save()
+
+
+# S9 - loss runs present, NO prior carrier named anywhere -> "None" answer
+S9_NAME = "PIONEER GLASSWORKS LLC"
+S9_FEIN = "91-3320774"
+S9_POL = "PGW-GLP-8830"
+S9_CARRIER = "Summit Ridge Insurance Company"
+S9_VAL = _d(16)
+S9_START = (TODAY - timedelta(days=16 + round(5 * 365.25))).strftime("%m/%d/%Y")
+
+
+def s9_application(path):
+    c = canvas.Canvas(path, pagesize=LETTER)
+    y = _page(c, "COMMERCIAL INSURANCE APPLICATION",
+              "Applicant Information Section")
+    y = _dec_common(c, y, S9_NAME, "3300 Kiln Avenue, Toledo, OH 43604",
+                    S9_FEIN, "Architectural glass fabrication and installation",
+                    "$2,700,000", "$1,100,000", "15", S9_CARRIER, S9_POL)
+    y = _row(c, y, "Business Start Date",
+             (TODAY - timedelta(days=round(6 * 365.25))).strftime("%m/%d/%Y"))
+    c.showPage()
+    c.save()
+
+
+def s9_loss_run(path):
+    """Five readable years, strong match, but NO prior carrier stated anywhere
+    in the package - so the -10 applies (loss runs prove coverage existed).
+    Answering the prior-carrier card with "None" makes the applicant
+    PREVIOUSLY UNINSURED, and Brent's ruling removes the deduction: 90 -> 100."""
+    c = canvas.Canvas(path, pagesize=LETTER)
+    y = _page(c, "LOSS RUN REPORT", f"Valuation Date {S9_VAL}")
+    y = _row(c, y, "Insured", S9_NAME)
+    y = _row(c, y, "FEIN", S9_FEIN)
+    y = _row(c, y, "Policy Number", S9_POL)
+    y = _row(c, y, "Period Covered", f"{S9_START} to {S9_VAL}  (5 years)")
+    _claim_table(c, y, [
+        (_d(610), "PG-3301", "Glass panel dropped during install", "$7,300", "$0", "Closed"),
+    ])
+    c.showPage()
+    c.save()
+
+
+# S10 - a PROPERTY submission whose COPE is incomplete, so the hard stop and
+# the carrier-grade warning both fire and their "Open to fix" modals can be
+# checked. The loss scenarios carry no property coverage, so COPE never fires
+# on them and the richest dropdowns (occupancy 17, construction 6, protection
+# class 1-10, valuation, period of restoration) were untestable until now.
+S10_NAME = "STILLWATER PROPERTIES LLC"
+S10_FEIN = "26-8814402"
+S10_POL = "SWP-PRP-9910"
+S10_CARRIER = "Beacon Harbor Insurance Company"
+
+
+def s10_property_dec(path):
+    """Deliberately INCOMPLETE COPE: an address and a building value, but no
+    occupancy, no construction type, no year built, no roof year, no sprinkler
+    status, no protection class, no valuation method, and Business Income with
+    no period of restoration. Every one of those is a dropdown now."""
+    c = canvas.Canvas(path, pagesize=LETTER)
+    y = _page(c, "COMMERCIAL PROPERTY DECLARATIONS", "Policy Declarations")
+    y = _row(c, y, "Named Insured", S10_NAME)
+    y = _row(c, y, "Mailing Address", "1400 Millrace Road, Stillwater, MN 55082")
+    y = _row(c, y, "FEIN", S10_FEIN)
+    y = _row(c, y, "Entity Type", "Limited Liability Company")
+    y = _row(c, y, "Description of Operations", "Commercial property rental and management")
+    y = _row(c, y, "Annual Gross Sales", "$1,850,000")
+    y = _row(c, y, "Total Annual Payroll", "$430,000")
+    y = _row(c, y, "Number of Employees", "6")
+    y = _row(c, y, "Business Start Date",
+             (TODAY - timedelta(days=round(12 * 365.25))).strftime("%m/%d/%Y"))
+
+    y = _head(c, y, "COVERAGE - COMMERCIAL PROPERTY")
+    y = _row(c, y, "Carrier", S10_CARRIER)
+    y = _row(c, y, "Policy Number", S10_POL)
+    y = _row(c, y, "Policy Period", f"{EFF} to {EXP}")
+    y = _head(c, y, "SCHEDULED LOCATION 1")
+    y = _row(c, y, "Location Address", "1400 Millrace Road, Stillwater, MN 55082")
+    y = _row(c, y, "Building Limit", "$2,400,000")
+    y = _row(c, y, "Business Personal Property Limit", "$310,000")
+    y = _row(c, y, "Business Income Limit", "$500,000")
+    y = _para(c, y - 0.05 * inch,
+              "Construction, occupancy, protection and valuation details are "
+              "not stated on this declarations page.")
+    c.showPage()
+    c.save()
+
+
 def s5_cover_letter(path):
     c = canvas.Canvas(path, pagesize=LETTER)
     y = _page(c, "SUBMISSION COVER LETTER",
@@ -384,11 +615,24 @@ def _verify(files: dict) -> None:
         elif hits:
             errs.append(f"{fname} accidentally contains a no-loss phrase {hits} "
                         "- this silently changes the scoring path")
-    t4 = _pdf_text(files["4A_application_only.pdf"]).lower()
-    for word in ("loss", "claim"):
-        if word in t4:
-            errs.append(f"S4 application mentions {word!r} - it must carry zero "
-                        "loss-history signal")
+    for _blank in ("4A_application_only.pdf", "8A_application_3yr.pdf"):
+        txt = _pdf_text(files[_blank]).lower()
+        for word in ("loss", "claim"):
+            if word in txt:
+                errs.append(f"{_blank} mentions {word!r} - it must carry zero "
+                            "loss-history signal")
+    # S6's ruling only holds because the DBA is on the APPLICANT's own paper.
+    if S6_DBA.lower() not in _pdf_text(files["6A_application_with_dba.pdf"]).lower():
+        errs.append("S6 application no longer declares the DBA - the ruling it "
+                    "tests requires the applicant to have declared it")
+    # S7's former name must appear ONLY on the loss run.
+    if S7_FORMER.lower() in _pdf_text(files["7A_application.pdf"]).lower():
+        errs.append("S7 former name leaked into the application - it must be "
+                    "unknown to the package for the ruling to apply")
+    # S9 must name no prior carrier anywhere, or the "None" flow is untestable.
+    for _f in ("9A_application.pdf", "9B_loss_run.pdf"):
+        if "prior carrier" in _pdf_text(files[_f]).lower():
+            errs.append(f"{_f} names a prior carrier - S9 requires none")
     t1_full = _pdf_text(files["1B_loss_run_no_dates.pdf"])
     for token in ("CLAIM NUMBER", "Total Incurred"):
         if token.lower() not in t1_full.lower():
@@ -412,19 +656,33 @@ select **ACORD 125 only**, generate, then read the results in the review screen:
 * **Data Consistency / issues**: the validation & issues area (S3 only).
 * **Client questionnaire**: the "Send to Client" question list (S1, S4).
 
-| # | Upload | Expect | Old system said |
+Every number below was produced by running the REAL scorer against the fact
+shape each package should extract to - not estimated.
+
+| # | Upload | Expect | Previously |
 |---|--------|--------|-----------------|
 | S1 | 1A + 1B | Loss History **60**, state "Loss runs match insured", Matched on: name, fein, policy number. Card says pinned at 60 / confirm claim years. **NO prior-carrier card, NO valuation-date deduction.** ARQ does NOT ask "how many years of claims history can you provide" | 45 (unknown-date -15) |
-| S2 | 2A + 2B | Loss History **85** exactly. TWO cards prefixed "Underwriting advisory (no score effect)" (frequency + loss ratio). State "Loss data reconciled" | 50 (80 +10 carrier -25 freq -15 ratio) |
-| S3 | 3A + 3B | Loss History **45** (capped), state "Conflicting". A conflict card ("reconcile before submission") AND a Data Consistency advisory ("held at 45"). ARQ offers the explain-the-discrepancy question | 45 cap existed; the DC card is NEW |
-| S4 | 4A only | Loss History **25**, state "No loss information provided". TWO cards: the attestation card AND "confirm New Venture status". **Then**: answer the New Venture card with `Yes` -> pillar shows **N/A**, package score recomputes (loss AND umbrella both N/A -> the remaining four pillars rescale), ARQ list drops prior-carrier / claim-count / years questions | No New Venture concept at all |
+| S2 | 2A + 2B | Loss History **85** exactly. TWO cards prefixed "Underwriting advisory (no score effect)" (frequency + loss ratio), each with NO points chip. State "Loss data reconciled" | 50 |
+| S3 | 3A + 3B | Loss History **45** (capped), state "Conflicting". A conflict card AND, on the pre-form Review screen, a Data Consistency warning ("held at 45") | 45 cap; DC card added |
+| S4 | 4A only | Loss History **25**, state "No loss information provided". Two cards: attestation + "confirm New Venture status" | no New Venture concept |
 | S5 | 5A + 5B | Loss History **50**, state "Loss runs requested / pending" | 70 |
+| **S6** | 6A + 6B | **100**, tier `strong`, **Matched on: dba_name, fein, policy number**. The run is issued to the trade name "CF Logistics" that the application itself declares | 25 (was `no_match`) |
+| **S7** | 7A + 7B | **92**, tier `moderate`, note: *"tax ID matches ... Confirm the prior name or the entity relationship"*. The run's insured name appears nowhere else in the package | 25 (was `no_match`) |
+| **S8** | 8A only | **25** at first. Answer the attestation "No - no claims or losses in the past 5 years" -> **85**, because the business is 3 years old. (A 5+ year business answering identically reaches only 60 - that is the ladder working) | 60 flat, no age awareness |
+| **S9** | 9A + 9B | **90** with a "Prior carrier name missing" card. Answer that card with **None** -> **100**: the applicant is previously uninsured, not missing a carrier | 90, no way to clear it |
+| **S10** | 10A only | Not a loss test - this one checks the **hard stop and warning** controls. Select **ACORD 140** as well as 125. Expect a "Minimum Viable COPE incomplete" HARD STOP and a "Carrier-Grade COPE incomplete" WARNING. Click **Open to fix** on each: occupancy, construction, sprinkler, protection class, valuation and period of restoration are now **dropdowns**; building value and year built stay typed inputs | every one was a bare text box |
 
-S4 second path (fresh session, optional): instead of New Venture, answer the
-attestation card / client question "No - no claims or losses in the past 5
-years" -> pillar 60. Then (third path, optional) answer "Yes - we have had
-claims or losses" -> pillar 25 and the ARQ gains the NEW loss-run availability
-select ("Have loss runs been requested, or are any available to upload?").
+S4's three answer flows (each on a FRESH session):
+* **New Venture = Yes** -> pillar **N/A**, package rescales (loss AND umbrella
+  both N/A), loss questions disappear from the client list.
+* **"No - no claims or losses in the past 5 years"** -> pillar **N/A**, state
+  *"Not applicable - under a year in business"*. **This is new**: S4's own
+  application dates the business 60 days ago, so it falls in Brent's 0-1 year
+  band - a business too young to have loss runs is no longer scored as if it
+  withheld them. It scored 60 before his ruling.
+* **"Yes - we have had claims or losses"** -> **25**, state "Prior claims known
+  - runs not provided", and the client list gains the availability select
+  ("Have loss runs been requested, or are any available to upload?").
 
 What to send back per scenario: the Loss History pillar number, the state label,
 the Matched-on line (S1/S2/S3), and which cards you saw. Screenshots beat prose.
@@ -435,6 +693,13 @@ Caveats
 * S1 depends on the model NOT inventing claim years; if S1 shows a state of
   "Loss data reconciled" the model hallucinated dates - send the extracted
   facts and we adjust the fixture, not the code.
+* S4 / S8 / S9 depend on `years_in_business` being derived from the printed
+  business start date. If a score comes back on the wrong rung of the ladder,
+  check that figure on the review screen FIRST - the band, not the scorer, is
+  the likely culprit.
+* S6 depends on the DBA being extracted from the application. If the tier
+  comes back `no_match`, look at whether `dba_name` was captured before
+  suspecting the ruling logic.
 """
 
 
@@ -450,6 +715,14 @@ def main():
         ("4A_application_only.pdf", s4_application),
         ("5A_dec_page.pdf", s5_dec),
         ("5B_cover_letter.pdf", s5_cover_letter),
+        ("6A_application_with_dba.pdf", s6_application),
+        ("6B_loss_run_under_dba.pdf", s6_loss_run),
+        ("7A_application.pdf", s7_application),
+        ("7B_loss_run_former_name.pdf", s7_loss_run),
+        ("8A_application_3yr.pdf", s8_application),
+        ("9A_application.pdf", s9_application),
+        ("9B_loss_run.pdf", s9_loss_run),
+        ("10A_property_dec_incomplete_cope.pdf", s10_property_dec),
     )
     files = {}
     for name, fn in plan:

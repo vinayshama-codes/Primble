@@ -3507,3 +3507,42 @@ surviving (class codes and their classification wording, both occurrence limits,
 all four policy numbers, both carriers, the applicant, the package premium). That
 filter was built, measured and then removed with the revert. Rebuild it from
 LLMcall1-promptChange.md §40 rather than from scratch.
+
+---
+
+## C51 - Extraction writes facts WITHOUT answer interpretation (open, 2026-08-24)
+
+Not a cost item - a correctness boundary that touches this file because closing
+it the thorough way means a PROMPT change.
+
+`services/answer_semantics.py` (shipped 2026-08-24) interprets everything a
+HUMAN types - producer recommendation cards, inline hard-stop / warning
+resolution, the client questionnaire - so that "None" reads as an answered
+absence and "TBD" is refused rather than stored as data. Measured defect it
+closed: typing "N/A" into every Tier-2 field scored **100**, identical to a
+fully answered submission.
+
+**The extraction path is NOT covered.** `merge_facts` writes `facts[key]`
+directly from the model's output, so an LLM that extracts the literal string
+`"N/A"`, `"unknown"`, `"TBD"` or `"not provided"` out of a document has that
+stored as a VALUE, and every completeness read counts it as real data.
+
+**Two ways to close it, and the cheap one does NOT touch a prompt:**
+1. **Deterministic post-merge pass (preferred).** Run `interpret_answer` over
+   the merged facts at the end of `merge_facts`; where the intent is UNKNOWN,
+   set `value_state: not_stated` and leave the stored value alone. No prompt
+   change, no extra call, no cache invalidation, no token cost. The only risk
+   is a false demotion, which fails toward "ask the client", the safe direction.
+2. **Prompt change** telling the extractor to emit null rather than a
+   placeholder string. Cleaner at source, but it invalidates the extraction
+   cache and moves `PROMPT_VERSION` / `SCHEMA_VERSION` - i.e. a full re-extract
+   for every cached session. Do not do this casually; see the v14 note above for
+   what a version bump costs.
+
+**Related, and also open:** the owner declined an LLM layer for interpreting
+free-text ANSWERS (latency and determinism, not tokens - a classification call
+is ~0.03% of a submission's spend). `answer_semantics.unresolved_answers()`
+logs every answer the deterministic rules could not read, which is the evidence
+base for revisiting that decision. **Nobody is watching that log.** Grep for
+`answer_semantics: could not read` before concluding the deterministic approach
+is sufficient.

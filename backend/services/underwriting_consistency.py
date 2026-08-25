@@ -927,6 +927,38 @@ def _humanize(fact_key: str) -> str:
     return fact_key.replace("_", " ").strip().title() or fact_key
 
 
+def _drop_declared_trade_names(fact_key: str, values: List[dict],
+                               docs: List[dict]) -> List[dict]:
+    """Remove candidates that are the insured's own DECLARED trade name.
+
+    BRENT RULING 2026-08-24 (Q3a) - enforced here after the S6 live run
+    (2026-08-25) showed a package asserting BOTH "Matched on: dba name, fein,
+    policy number" AND an applicant-name hard stop, from two different engines.
+    A loss run issued to the DBA the applicant declared is the same insured,
+    not a rival answer.
+
+    The rule itself lives in ``fact_comparison.is_declared_trade_name`` so this
+    is not a second copy of it. Fail-open, and never returns an empty list.
+    """
+    if fact_key != "applicant_name" or len(values) < 2:
+        return values
+    try:
+        from services.fact_comparison import is_declared_trade_name
+        kept = [g for g in values
+                if not is_declared_trade_name(g.get("display"), docs)]
+        if kept and len(kept) < len(values):
+            logger.info(
+                "underwriting: %s - dropped %d candidate(s) that are the "
+                "applicant's own declared trade name, not a rival identity",
+                fact_key, len(values) - len(kept))
+            return kept
+        return values
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning(
+            "underwriting: trade-name filter failed for %s - %s", fact_key, exc)
+        return values
+
+
 def _drop_foreign_line_values(fact_key: str, values: List[dict]) -> List[dict]:
     """Remove candidates that name a DIFFERENT coverage line than this fact.
 
@@ -1682,6 +1714,8 @@ def assess_underwriting_consistency(
         # the field: if EVERY candidate is foreign we have no basis to prefer
         # one, so all are kept and the row renders as it does today.
         values = _drop_foreign_line_values(fact_key, values)
+        # A declared DBA is the insured's own name, never a rival one.
+        values = _drop_declared_trade_names(fact_key, values, docs)
         # A per-class rating basis is not a rival to the package total. Runs
         # with the other mis-extraction filters, BEFORE any grouping decision:
         # these are not rival answers, so they must never reach the point where

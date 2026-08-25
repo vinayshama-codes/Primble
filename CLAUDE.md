@@ -413,6 +413,35 @@ value. An offline probe proves the FUNCTION, never the SEAM around it.
 
 ## Critical Issues & Roadmap
 
+### Answer Interpretation - SHIPPED 2026-08-24, with TWO KNOWN GAPS
+**`services/answer_semantics.py` is the ONE door for interpreting anything a
+human types** (producer recommendation cards, inline hard-stop / warning
+resolution, client questionnaire). It separates two questions that used to be
+one `bool(value)` test: *"what is the value?"* and *"did they answer?"* An
+absence ("None", "never had coverage") is an ANSWER with no value; a non-answer
+("TBD", "don't know") is refused at the gate and never stored. Measured before
+the fix: typing "N/A" into every Tier-2 field scored **100**, while a
+legitimate "None" scored as a **gap** - both directions wrong.
+**`services/answer_options.py`** is the companion: 20 facts now offer choice
+lists (each ending in "Other"), so a closed question is never a free-text box.
+Deliberately NO LLM - owner's call on latency and determinism, not cost.
+Full detail in `v1-20AUG.md` entries C2-G / C2-H / C2-I.
+
+**GAP 1 - extraction is NOT covered.** These modules sit on the human answer
+path only. `merge_facts` writes `facts[key]` directly, so an LLM-extracted
+literal `"N/A"` / `"unknown"` still counts as data. Closing it means a
+post-merge normalisation pass (deterministic, cheap) or a prompt change (an
+`improving-ll.md` event). Symptom to watch for: a submission scoring better
+than its documents justify, with fields displaying "N/A".
+
+**GAP 2 - the fall-through log is not being watched.** Because there is no LLM
+layer, `answer_semantics.unresolved_answers()` (and the INFO log line
+`answer_semantics: could not read ...`) is the ONLY evidence of whether the
+deterministic rules are missing real phrasings. It is in-memory, dies with the
+process, and nobody reviews it. **Grep production logs for that string before
+concluding free-text handling is complete** - an empty log proves the approach,
+a full one is the data for extending it.
+
 **TL;DR of the 2026-07-16 Yes/No evidence-gate work (read the full entries below before touching
 this area again):**
 1. ACORD 126/140/25 schemas had every field tooltip truncated to 80 chars — compliance

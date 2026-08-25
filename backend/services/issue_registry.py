@@ -238,7 +238,29 @@ def _copy_resolution(res: dict) -> dict:
     Latent since the feature shipped - test_resolution_for_returns_a_copy only
     reassigned a scalar key, which a shallow copy does isolate. Found by the
     legacy-rule guard tests (2026-08-08) and fixed here, for every mode."""
-    return {k: (list(v) if isinstance(v, list) else v) for k, v in res.items()}
+    out = {k: (list(v) if isinstance(v, list) else v) for k, v in res.items()}
+    # Owner 2026-08-24: a hard stop or warning resolved inline must offer the
+    # same choices a recommendation card does - the ResolutionModal used to
+    # render a bare "Type the correct value..." box for every fact. Attached
+    # HERE because every resolution (RESOLUTION_MAP, tier-1, legacy fallback)
+    # is copied through this one function, so no render path can be missed.
+    if out.get("mode") == "field" and out.get("facts") and "controls" not in out:
+        try:
+            from services.answer_options import (
+                control_for, is_multi_select, options_for,
+            )
+            controls = {}
+            for fact in out["facts"]:
+                entry = {"control": control_for(fact)}
+                opts = options_for(fact)
+                if opts:
+                    entry["options"] = opts
+                    entry["multi"] = is_multi_select(fact)
+                controls[fact] = entry
+            out["controls"] = controls
+        except Exception:                                     # noqa: BLE001
+            pass
+    return out
 
 
 def _r_schedule(schedule_key: str) -> dict:
@@ -480,7 +502,10 @@ def _tier1_label_to_facts() -> Dict[str, tuple]:
 
 def _tier1_resolution(label: str) -> Optional[dict]:
     facts = _tier1_label_to_facts().get(label)
-    return _r_field(*facts) if facts else None
+    # Through _copy_resolution so a tier-1 fix gets the same answer choices
+    # every other field-mode resolution does (controls are attached there, the
+    # one function every resolution passes through).
+    return _copy_resolution(_r_field(*facts)) if facts else None
 
 
 # Prefix rules for the dynamically-generated codes (one per fact/field, so

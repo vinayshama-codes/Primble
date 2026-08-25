@@ -45,6 +45,7 @@ door (the rule ``fact_comparison`` owns is "are these the same fact?").
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 NEW_VENTURE_FIELD = "new_venture_indicator"
@@ -117,6 +118,32 @@ def _to_float(v: Any) -> Optional[float]:
 _TRUTHY_TOKENS = {"yes", "true", "1", "y", "no prior losses", "no losses", "no claims"}
 _FALSY_TOKENS = {"no", "false", "0", "n", ""}
 
+# Short answers that unambiguously mean "nothing to report" on a loss question.
+# Exact match only: as a SUBSTRING several of these appear inside sentences that
+# mean the opposite ("nothing was closed without payment").
+_NOTHING_ANSWERS = frozenset({
+    "none", "nil", "nothing", "zero", "none known", "none reported",
+    "nothing to report", "none to report", "no losses to report",
+    "no claims to report", "n/a - none", "none at all",
+})
+
+# The applicant stating they DID have losses. Checked only AFTER the no-loss
+# detector, so a negated form ("we have had no claims") is never caught here.
+_HAD_LOSSES_RE = re.compile(
+    r"\b(have had|has had|we had|there (?:have been|were|was)|"
+    r"filed (?:a|an|\d)|open claim)", re.I)
+
+# "zero claims" / "0 losses" - a count of nothing, written out.
+_ZERO_COUNT_RE = re.compile(r"\b(?:zero|0)\s+(?:prior\s+)?(?:claims?|losses|loss)\b", re.I)
+
+# THRESHOLD statements: "no losses exceed $10,000" means losses EXIST but none
+# cross a cap - the opposite of an attestation. `detect_no_loss_assertion`
+# already refuses these, but the loose legacy fallback below ("no " + "loss")
+# would happily re-admit them, so the same guard has to apply there. This word
+# list mirrors normalization._NO_LOSS_QUALIFIERS.
+_THRESHOLD_RE = re.compile(
+    r"\b(exceed|exceeding|over|above|in excess|greater than|more than)\b", re.I)
+
 
 def attested_true(value) -> bool:
     """Safely interpret an attestation value as a boolean.
@@ -125,6 +152,16 @@ def attested_true(value) -> bool:
     (any non-empty string is truthy in Python). For an evidence field - where a
     stored "No" must mean *not* attested - we parse the token explicitly and only
     fall back to Python truthiness for non-string values (e.g. a real bool/int).
+
+    FREE TEXT (2026-08-24): the questionnaire offers a two-option select, but the
+    producer's recommendation card is a plain text box, so real answers arrive as
+    "None", "Zero claims", "loss free", "clean loss history". Those are routed
+    through ``normalization.detect_no_loss_assertion`` - the SAME detector the
+    ACORD checkbox and the narrative scan already use, so the three surfaces can
+    never disagree, and its threshold guard ("no losses exceed $10,000") comes
+    along for free. A bare "No" is deliberately NOT attested: on this fact it
+    carries the legacy meaning "no, we have had losses", and inverting it would
+    silently re-label every stored answer.
     """
     if value is None:
         return False
@@ -137,8 +174,25 @@ def attested_true(value) -> bool:
         return False
     if s in _TRUTHY_TOKENS:
         return True
-    # Unknown free text on a no-loss indicator: a phrase that mentions "no" loss
-    # counts as attested; anything else is treated as not-attested (conservative).
+    stripped = s.strip(" .!,;:-")
+    # 1. The canonical no-loss phrase detector (handles loss-free, claims-free,
+    #    clean loss history, no known/reported losses, and negated sentences).
+    try:
+        from services.normalization import detect_no_loss_assertion
+        if detect_no_loss_assertion(s):
+            return True
+    except Exception:                                         # noqa: BLE001
+        pass
+    # 2. Short "nothing to report" answers and written-out zero counts.
+    if stripped in _NOTHING_ANSWERS or _ZERO_COUNT_RE.search(s):
+        return True
+    # 3. An explicit statement that losses DID occur, or a threshold statement
+    #    ("no losses exceed $10,000" - losses exist, none above a cap), is
+    #    never an attestation.
+    if _HAD_LOSSES_RE.search(s) or _THRESHOLD_RE.search(s):
+        return False
+    # 4. Legacy fallback: a phrase mentioning "no" loss/claim counts as attested;
+    #    anything else is treated as not-attested (conservative).
     return ("no " in s and ("loss" in s or "claim" in s))
 
 
@@ -180,7 +234,17 @@ def new_venture_answer(value) -> Optional[bool]:
         return True
     if s.startswith("no") or s == "n":
         return False
-    if "new venture" in s or "no prior operations" in s:
+    # DELIBERATELY NOT LISTED: a bare "new business". On an ACORD submission
+    # that is the TRANSACTION TYPE (new business vs renewal), and a 20-year-old
+    # company moving carriers is "new business" too - reading it as a new
+    # VENTURE would wrongly remove the pillar for an established insured.
+    # Unrecognised text returns None, which scores the pillar normally: the
+    # safe direction, since only a positive answer can reach Not Applicable.
+    if any(p in s for p in (
+            "new venture", "no prior operations", "brand new", "newly formed",
+            "newly established", "just started", "just opened", "start-up",
+            "startup", "first year of operation", "no operating history",
+            "recently started", "recently formed", "no prior business")):
         return True
     return None
 
@@ -239,13 +303,162 @@ def new_venture_applicable(facts: dict, flags: dict,
     )
 
 
-def prior_carrier_applicable(facts: dict, flags: dict) -> bool:
-    """Client 2.3: prior carrier is expected context WHEN APPLICABLE; a
-    confirmed new venture has no prior carrier to name, so the missing -10
-    never applies to it (even while the confirmation is contradicted - the
-    contradiction is flagged separately and deducting too would double-punish
-    one uncertainty)."""
-    return not new_venture_confirmed(facts, flags)
+def loss_history_not_applicable(facts: dict, flags: dict,
+                                has_loss_run_doc: bool = False) -> bool:
+    """Every route to "there is no loss history to evaluate" - the ONE gate the
+    scorer, the display state and the questionnaire consult.
+
+    Two routes, both requiring the same contradiction guard:
+      * the producer confirms New Venture (client 2.2), or
+      * the business is 0-1 years old and says it has no known losses
+        (Brent 2026-08-24: *"0-1 years will not have loss runs because the
+        business is too young"*). A no-loss ANSWER is required - silence still
+        scores as no information, so a blank questionnaire can never buy its
+        way out of the pillar.
+    """
+    facts, flags = facts or {}, flags or {}
+    if new_venture_applicable(facts, flags, has_loss_run_doc):
+        return True
+    return (
+        too_young_for_loss_runs(facts, flags, has_loss_run_doc)
+        and (no_loss_attested_any(facts, flags) or no_runs_available_stated(facts)
+             or loss_runs_pending_stated(facts, flags))
+    )
+
+
+# Whole-answer forms of "there was no prior carrier". Exact match, because as
+# substrings these are too easy to hit inside a real carrier's name.
+_UNINSURED_ANSWERS = frozenset({
+    "none", "n/a", "na", "nil", "nothing", "no carrier", "first time",
+    "new coverage", "not insured", "uninsured",
+})
+# Phrases that carry the meaning wherever they appear in a longer answer
+# ("No prior coverage - this is their first policy").
+_UNINSURED_PHRASES = (
+    "no prior carrier", "no prior coverage", "no previous carrier",
+    "no previous coverage", "never insured", "never been insured",
+    "never carried", "never had insurance", "never had coverage",
+    "previously uninsured", "not previously insured", "first time buying",
+    "first policy", "first-time buyer", "new to insurance", "no expiring",
+)
+
+
+def previously_uninsured(facts: dict) -> bool:
+    """The applicant has affirmatively said they carried no prior coverage.
+
+    BRENT RULING 2026-08-24 (Q13): *"the applicant would be 'previously
+    uninsured', which is very different from 'missing prior carrier'."* The
+    curated question already invites the answer ("If none, write 'None'"), but
+    the producer's card is free text, so both the one-word answer and the
+    written-out one have to land - "None", "never insured", "No prior coverage
+    - new to insurance". Anything unrecognised reads as a real carrier name,
+    which is the safe direction: it keeps today's deduction rather than
+    silently waiving it.
+    """
+    raw = (facts or {}).get("prior_carrier")
+    # VALUE STATE FIRST (fix 2026-08-25, found on the S9 live run). Since
+    # `answer_semantics` shipped, an answer of "None" is stored as an EMPTY
+    # value carrying `value_state: explicit_no` - so reading the value text
+    # alone found "" and reported False, the -10 stayed, and the producer's
+    # answer visibly did nothing. The two mechanisms have to agree, and the
+    # state is the authoritative one.
+    if isinstance(raw, dict) and raw.get("value_state") in ("explicit_no", "not_applicable"):
+        return True
+    v = str(_fv(facts or {}, "prior_carrier") or "").strip().lower()
+    v = v.strip(" .!,;:-")
+    if not v:
+        return False
+    if v in _UNINSURED_ANSWERS:
+        return True
+    return any(p in v for p in _UNINSURED_PHRASES)
+
+
+def prior_coverage_evidence(facts: dict, flags: dict,
+                            has_loss_run_doc: bool = False) -> bool:
+    """POSITIVE evidence that prior coverage actually existed - the only state
+    in which a missing prior carrier is a GAP rather than a non-question."""
+    facts, flags = facts or {}, flags or {}
+    if has_loss_run_doc:
+        return True                     # runs exist, so a policy existed
+    if str(_fv(facts, "is_renewal") or "").strip().lower() in ("yes", "true", "renewal", "1", "y"):
+        return True                     # a renewal has an expiring policy by definition
+    if flags.get("is_renewal"):
+        return True
+    for key in ("prior_policy_number", "prior_effective_date", "prior_expiration_date",
+                "prior_carrier_naic"):
+        if _fv(facts, key):
+            return True
+    return False
+
+
+def prior_carrier_applicable(facts: dict, flags: dict,
+                             has_loss_run_doc: bool = False) -> bool:
+    """Client 2.3 "missing WHEN APPLICABLE", as refined by Brent 2026-08-24.
+
+    Three states, not two:
+      * confirmed new venture      -> never applicable (client 2.3)
+      * previously uninsured       -> never applicable. Brent's example: a
+        solo owner adding Workers Comp for the first time has no prior WC
+        carrier to name, and *"they wouldn't deserve a deduction"*.
+      * no evidence prior coverage existed -> not applicable either. *"To be
+        safe, there probably shouldn't be a deduction here for now."* The -10
+        survives only where the package itself shows a prior policy existed
+        (a renewal, prior-policy facts, or uploaded loss runs) and the carrier
+        is still absent - which is the literal meaning of MISSING.
+    """
+    if new_venture_confirmed(facts, flags):
+        return False
+    if previously_uninsured(facts):
+        return False
+    return prior_coverage_evidence(facts, flags, has_loss_run_doc)
+
+
+# ── Years in business -> what loss evidence is reasonable to expect ──────────
+# BRENT RULING 2026-08-24 (Q11 answered, and a correction to what shipped):
+# *"we can't treat 'N/A' as '0'. These are not the same. 'No known losses' is a
+# legitimate answer ... If 'no known losses', check against the number of years
+# in business."*
+#   0-1 years  "will not have loss runs because the business is too young"
+#   1-5 years  "a satisfactory answer would be 'no known losses' (or 'loss runs
+#              pending' ...) to get through a submission, though the submission
+#              would likely not bind without them, especially 3-5 years"
+#   5+ years   "loss runs are pretty much required"
+BAND_YOUNG = "young"            # <= 1 year: no operating history to run
+BAND_ESTABLISHING = "establishing"   # > 1 and < 5 years
+BAND_ESTABLISHED = "established"     # >= 5 years
+BAND_UNKNOWN = "unknown"        # no usable years figure - never assume one
+
+
+def years_in_business_band(facts: dict) -> str:
+    """The applicant's operating-history band, or BAND_UNKNOWN.
+
+    Unknown is a real answer, not a default to the strictest band: a missing
+    years figure must never manufacture a penalty (the blank-over-wrong rule).
+    """
+    raw = _fv(facts or {}, "years_in_business")
+    try:
+        years = float(str(raw).strip().replace(",", ""))
+    except (TypeError, ValueError):
+        return BAND_UNKNOWN
+    if years < 0:
+        return BAND_UNKNOWN
+    if years <= 1:
+        return BAND_YOUNG
+    if years < 5:
+        return BAND_ESTABLISHING
+    return BAND_ESTABLISHED
+
+
+def too_young_for_loss_runs(facts: dict, flags: dict,
+                            has_loss_run_doc: bool = False) -> bool:
+    """A business too young to have any loss history AND nothing in the package
+    contradicting that. Same contradiction guard as the producer-confirmed new
+    venture, because the claim being made is the same one: no operating history
+    exists, so there is no loss evidence to withhold."""
+    return (
+        years_in_business_band(facts) == BAND_YOUNG
+        and not new_venture_contradicted(facts, flags, has_loss_run_doc)
+    )
 
 
 # ── Loss-run status (pending / no runs available) ────────────────────────────
@@ -260,9 +473,18 @@ def parse_loss_run_status(value) -> Optional[str]:
     s = str(value).strip().lower()
     if not s:
         return None
-    if "no loss runs" in s or s in ("unavailable", "none available", "not available"):
+    # "No runs" FIRST: "no loss runs have been requested" is an availability
+    # answer, and testing "request" first would misread it as pending.
+    if any(p in s for p in (
+            "no loss run", "no runs", "none available", "not available",
+            "unavailable", "cannot provide", "can't provide", "unable to provide",
+            "do not exist", "don't exist", "none exist", "no records",
+            "will not be provided", "cannot obtain")):
         return "no_runs_available"
-    if "pending" in s or "request" in s or "will be uploaded" in s:
+    if any(p in s for p in (
+            "pending", "request", "order", "await", "in progress", "in process",
+            "will be uploaded", "will provide", "to follow", "on the way",
+            "chasing", "follow up", "expected")):
         return "pending"
     return None
 
@@ -319,7 +541,11 @@ def resolve_loss_history_state(facts: dict, flags: dict,
     attestation), then pending, then known claims, then availability, then
     the narrative shading, then nothing."""
     facts, flags = facts or {}, flags or {}
-    if new_venture_applicable(facts, flags, has_loss_run_doc):
+    # The client's own state name is "New Venture / NO PRIOR OPERATIONS", so a
+    # 0-1 year business reporting no known losses belongs to this same state -
+    # it is the second route to "there is no loss history to evaluate", and it
+    # must suppress the same questions.
+    if loss_history_not_applicable(facts, flags, has_loss_run_doc):
         return STATE_NEW_VENTURE
     if has_loss_run_doc:
         # A doc classified loss_run that only SAYS runs are pending (no years,

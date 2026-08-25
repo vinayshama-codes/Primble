@@ -23,11 +23,14 @@ THE TIERS are the client's, verbatim, and nothing else:
     no_match    the insured name on the run is a different entity
     no_loss_run no loss-run document in the package
 
-Two cases the client's spec does not cover are NOT decided here (Principle
-7): a run filed under the insured's DBA, and a run whose FEIN matches but
-whose legal name does not. Each keeps the tier the spec's own rules give it
-and adds a producer-facing NOTE, so the producer sees it and the score does
-not move on an invented rule. Open questions Q3a / Q3b in v1-20AUG.md.
+Two cases the client's spec did not cover were RULED ON by Brent 2026-08-24
+(Q3a / Q3b closed - see v1-20AUG.md C2-E):
+
+    DBA match          a name matching a DBA THE APPLICANT DECLARED is a name
+                       match; the ordinary tiers then apply (with a tax ID or
+                       policy number that is a verified `strong`)
+    FEIN, name unknown  `moderate` - "a probable match", plus a note asking the
+                       producer to confirm the prior name / entity relationship
 
 Scope (client 1.2): the run's policy number is matched against EVERY policy
 number the package evidences - each document's scalar AND every
@@ -57,8 +60,9 @@ _RANK = {STRONG: 4, MODERATE: 3, POSSIBLE: 2, NO_MATCH: 1}
 
 NOTE_DBA = ("Loss run appears to be filed under the insured's trade name (DBA) - "
             "confirm it belongs to this applicant.")
-NOTE_FEIN_NAME_DIFFERS = ("Loss run FEIN matches the applicant but the insured name "
-                          "differs - confirm ownership (name change or affiliate).")
+NOTE_FEIN_NAME_DIFFERS = ("Loss run tax ID matches the applicant but the insured name on "
+                          "it differs - probable match. Confirm the prior name or the "
+                          "entity relationship (name change, merger or affiliate).")
 NOTE_NO_NAME = "Loss run does not state an insured name - ownership cannot be verified."
 NOTE_CARRIER_DIFFERS = ("Carrier on the loss run does not match any carrier on the "
                         "package - confirm the run is for this account's policies.")
@@ -200,17 +204,32 @@ def match_loss_run_identity(
                 matched.insert(0, "name")
                 tier = STRONG if (fein_ok or pol_ok) else (MODERATE if addr_ok else POSSIBLE)
             elif dba_ok:
-                # Not a tier the client defined (Q3a). The spec's own rules
-                # give it no_match; the note is what makes it visible.
-                failed.insert(0, "name")
+                # BRENT RULING 2026-08-24 (Q3a CLOSED): "Treat it as a verified
+                # match if the DBA is listed by the applicant and the EIN
+                # matches. That is enough to confirm the loss runs belong to
+                # the insured." So a name matching a DBA THE APPLICANT
+                # DECLARED is a name match, and the ordinary tiers apply from
+                # there. `pkg["dba"]` only ever holds DBAs the package's own
+                # non-loss-run documents state, so this can never promote a
+                # trade name that appears solely on the loss run.
                 matched.insert(0, "dba_name")
-                tier = NO_MATCH
-                notes.append(NOTE_DBA)
+                tier = STRONG if (fein_ok or pol_ok) else (MODERATE if addr_ok else POSSIBLE)
+                if tier != STRONG:
+                    # Confirmed only by a trade name - the agent should still see it.
+                    notes.append(NOTE_DBA)
             else:
                 failed.insert(0, "name")
-                tier = NO_MATCH
                 if fein_ok:
-                    notes.append(NOTE_FEIN_NAME_DIFFERS)        # Q3b
+                    # BRENT RULING 2026-08-24 (Q3b CLOSED): "Treat it as a
+                    # probable match and ask for confirmation of the prior name
+                    # or entity relationship. The EIN match is strong evidence,
+                    # but the unexplained name should still be verified."
+                    # MODERATE (not STRONG): the identifier is proven, the name
+                    # is not - and the note carries the confirmation ask.
+                    tier = MODERATE
+                    notes.append(NOTE_FEIN_NAME_DIFFERS)
+                else:
+                    tier = NO_MATCH
 
         row = {"filename": d.get("filename") or "loss run", "tier": tier,
                "matched_on": matched, "failed_on": failed, "notes": notes}

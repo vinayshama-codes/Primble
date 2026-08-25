@@ -184,11 +184,20 @@ def test_several_introduced_issues_are_counted_not_dumped():
 
 def test_the_note_is_advisory_and_never_fails_the_write():
     """The value IS applied before this runs. A note failure must not turn a
-    successful resolve into an error."""
+    successful resolve into an error.
+
+    Scoped to the ENCLOSING try/except rather than a fixed character window
+    (2026-08-25): the window was +/-400 chars, so adding two lines to the call
+    pushed the guard out of view and failed a test whose subject had not
+    changed. A structural bound cannot rot that way."""
     _i = AUDIT.index("_note = _trade_off_note(")
-    _block = AUDIT[_i - 400:_i + 400]
-    assert "except Exception" in _block
-    assert "non-fatal" in _block
+    _try = AUDIT.rindex("try:", 0, _i)
+    _end = AUDIT.index("return JSONResponse", _i)
+    _block = AUDIT[_try:_end]
+    assert "except Exception" in _block, "the note call is not guarded"
+    assert "non-fatal" in _block, "the guard does not say it is non-fatal"
+    # And the guard must swallow, never re-raise, or the write is lost.
+    assert "raise" not in _block.split("except Exception")[1]
 
 
 def test_the_note_is_returned_to_the_modal():

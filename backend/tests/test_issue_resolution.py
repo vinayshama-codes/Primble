@@ -305,3 +305,64 @@ def test_resolution_does_not_change_issue_id():
     iss = _issue("hard_stop", "location_count_mismatch", "msg X", ["ACORD_140", "ACORD_125"])
     assert iss["issue_id"] == issue_id_for("msg X", ["ACORD_140", "ACORD_125"])
     assert "resolution" in iss  # sanity: this code does carry one
+
+
+# ── The follow-up note must never ask for a value already provided ──────────
+# LIVE RUN S10 (2026-08-25): filling Building Value and BPP Value in one go
+# produced "You can settle it here - fill in Occupancy Type / Construction Type
+# / Property Bpp Value above and apply again" - naming a field just filled -
+# and the re-apply then refused with "Enter at least one value." A prompt that
+# asks for something already provided is a dead end.
+
+_COPE_MSG = ("Property Minimum Viable COPE incomplete - missing: occupancy "
+             "type, construction type")
+_COPE_FACTS = ["occupancy_type", "construction_type",
+               "property_building_value", "property_bpp_value"]
+
+
+def _note(applied_field, facts):
+    from routes.audit_routes import _trade_off_note
+    return _trade_off_note({_COPE_MSG: _COPE_FACTS}, _COPE_FACTS,
+                           applied_field, facts=facts)
+
+
+def test_the_followup_note_names_only_still_missing_fields():
+    note = _note("property_building_value",
+                 {"property_building_value": "2400000",
+                  "property_bpp_value": "310000"})
+    assert "Occupancy Type" in note and "Construction Type" in note
+    assert "Bpp" not in note, "must not ask for a value already provided"
+
+
+def test_the_followup_note_stops_promising_a_fix_that_is_not_there():
+    """When nothing on this screen is still missing, say so - do not tell the
+    producer to 'fill in ... above' with nothing left to fill."""
+    note = _note("property_building_value", {
+        "property_building_value": "2400000", "property_bpp_value": "310000",
+        "occupancy_type": "Office", "construction_type": "Frame - wood construction",
+    })
+    assert "settle it here" not in note
+    assert "validation panel" in note
+
+
+def test_an_absence_answer_counts_as_provided_in_the_followup_note():
+    """A producer who answered "None" has ANSWERED (Brent 2026-08-24) - the
+    note must not turn round and ask for it again."""
+    note = _note("property_building_value", {
+        "property_building_value": "2400000", "property_bpp_value": "310000",
+        "occupancy_type": {"value": "", "value_state": "explicit_no"},
+        "construction_type": {"value": "", "value_state": "explicit_no"},
+    })
+    assert "settle it here" not in note
+
+
+def test_the_note_is_unchanged_when_no_session_facts_are_available():
+    """Fail-safe: with no post-apply state the prior behaviour stands rather
+    than silently dropping the guidance."""
+    note = _note("property_building_value", None)
+    assert "settle it here" in note
+
+
+def test_no_note_at_all_when_nothing_was_introduced():
+    from routes.audit_routes import _trade_off_note
+    assert _trade_off_note({}, _COPE_FACTS, "property_building_value", facts={}) == ""

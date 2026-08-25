@@ -48,6 +48,10 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
   // gates the field inputs behind a spinner until that value lands, instead of
   // flashing an empty box that fills a beat later (client #3).
   const [prefillLoading, setPrefillLoading] = useState(mode === 'field' || mode === 'narrative');
+  // Bumped after an apply that raised a follow-up, to re-read what is now on
+  // file. Without it the producer is asked to "apply again" while looking at
+  // the pre-apply snapshot (fix 2026-08-25, live run S10).
+  const [prefillNonce, setPrefillNonce] = useState(0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   // A value CAN apply cleanly and still raise something else - changing an
@@ -106,7 +110,7 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
       }
     })();
     return () => { alive = false; };
-  }, [mode, sessionId]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mode, sessionId, prefillNonce]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load the current schedule rows + column spec so the producer edits a
   // populated table, not a blank one.
@@ -196,6 +200,11 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
         applied.current = last;
         setNote(String(last.note));
         touched.current.clear();
+        // Re-read what is now on file so the inputs show the values that just
+        // landed instead of the pre-apply snapshot. Without this the producer
+        // is looking at a stale form while being asked to "apply again", which
+        // is the loop this note exists to end (fix 2026-08-25, live run S10).
+        setPrefillNonce((n) => n + 1);
         setBusy(false);
         return;
       }
@@ -288,12 +297,45 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
               {(resolution.facts || []).length > 1 && (
                 <div style={{ fontSize: 11.5, color: '#64748b' }}>Provide the correct value for whichever applies - you don't have to fill every field.</div>
               )}
-              {(resolution.facts || []).map((fact) => (
+              {(resolution.facts || []).map((fact) => {
+                // A closed question is offered as a choice list (backend
+                // `resolution.controls`), so a hard stop or warning is never
+                // resolved by guessing at wording. "Other" reveals free text.
+                const ctl = (resolution.controls || {})[fact] || {};
+                const opts = Array.isArray(ctl.options) ? ctl.options : null;
+                const picked = values[fact] || '';
+                const isOther = opts && picked === 'Other';
+                return (
                 <label key={fact} style={{ display: 'block' }}>
                   <span style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#334155', marginBottom: 5 }}>{humanizeFact(fact)}</span>
+                  {opts ? (
+                    <>
+                      <select
+                        style={inputStyle}
+                        value={isOther ? 'Other' : picked}
+                        disabled={busy}
+                        autoFocus={(resolution.facts || [])[0] === fact}
+                        onChange={(e) => { touched.current.add(fact); setValues((v) => ({ ...v, [fact]: e.target.value })); if (err) setErr(''); }}
+                        onFocus={() => { if (note) setNote(''); }}
+                      >
+                        <option value="">Select an answer...</option>
+                        {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                      {isOther && (
+                        <input
+                          style={{ ...inputStyle, marginTop: 6 }}
+                          placeholder="Type the correct value..."
+                          disabled={busy}
+                          autoFocus
+                          onChange={(e) => { touched.current.add(fact); setValues((v) => ({ ...v, [fact]: e.target.value })); if (err) setErr(''); }}
+                          onKeyDown={(e) => { if (e.key === 'Enter') applyField(); }}
+                        />
+                      )}
+                    </>
+                  ) : (
                   <input
                     style={inputStyle}
-                    value={values[fact] || ''}
+                    value={picked}
                     placeholder="Type the correct value..."
                     disabled={busy}
                     autoFocus={(resolution.facts || [])[0] === fact}
@@ -301,8 +343,10 @@ export default function ResolutionModal({ issue, sessionId, onApplied, onSetStat
                     onFocus={() => { if (note) setNote(''); }}
                     onKeyDown={(e) => { if (e.key === 'Enter') applyField(); }}
                   />
+                  )}
                 </label>
-              ))}
+                );
+              })}
             </div>
           )}
 
