@@ -1091,7 +1091,16 @@ def _owner_split_allowed(fact_key: str) -> bool:
         return True
 
 
-_COMPONENT_KINDS = frozenset({KIND_MONEY, KIND_COUNT, KIND_PERCENT})
+# The ONLY facts where a package figure is genuinely COMPOSED of line figures,
+# which is the sole thing `is_component_of` reasons about. Named rather than
+# derived from `value_kind`, because a kind is far too coarse: money admitted 75
+# facts and missed the one that mattered (see `_component_split_allowed`).
+# `total_policy_premium` is an extracted fact, not a FACT_REGISTRY entry, which
+# is precisely why the kind-based gate never covered it.
+_COMPONENT_FACTS = frozenset({
+    "total_policy_premium",
+})
+_COMPONENT_KINDS = frozenset({KIND_MONEY, KIND_COUNT, KIND_PERCENT})  # legacy, unused
 
 
 def _component_split_allowed(fact_key: str) -> bool:
@@ -1118,11 +1127,27 @@ def _component_split_allowed(fact_key: str) -> bool:
     page prints that same amount as the GL limit; `_owner_split_allowed` is the
     gate that was added then. `is_component_of` was left ungated. Both rules
     now have to say which FACTS they may speak about.
+
+    THIRD TIME, AND THE GATE IS NOW A NAMED LIST (C4-R, 2026-08-26).
+    Kind-based gating was still far too wide. Measured: `value_kind() in
+    _COMPONENT_KINDS` admitted **75 REGISTRY facts** - every limit, every
+    deductible, employee counts, percentages - none of which is a premium. The
+    one case the rule exists for, `total_policy_premium`, resolved correctly by
+    KEY SHAPE and keeps working; the defect was never exclusion, it was breadth.
+
+    The live defect (C4 test S5): two applications state Annual Gross Sales
+    $2,400,000 and $3,850,000. The verified index records the per-location class
+    exposure $3,850,000 as a LINE-level value and $2,400,000 as a PACKAGE-level
+    one, so `is_component_of` pronounced a genuine revenue disagreement "a piece
+    of the other" and folded it. The producer saw "All clear" - core principle 4
+    violated by the machinery built to reduce noise, for the third time.
+
+    A part/whole relationship between two candidate answers is REAL only where
+    the package figure is genuinely composed of line figures. That is premiums,
+    and nothing else on this schema: two documents each stating the insured's
+    revenue are RIVAL ANSWERS to one question, not a part and a whole.
     """
-    try:
-        return value_kind(fact_key) in _COMPONENT_KINDS
-    except Exception:                                        # pragma: no cover
-        return False
+    return fact_key in _COMPONENT_FACTS
 
 
 def equivalent_index(fact_key: str, values: Sequence[Any],

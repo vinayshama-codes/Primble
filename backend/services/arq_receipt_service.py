@@ -258,3 +258,45 @@ async def get_receipt_for_arq(arq_id: str, user_id: str) -> Optional[dict]:
     except Exception as ex:
         logger.error(f"ARQ receipt: fetch failed for arq_id={arq_id}: {ex}", exc_info=True)
         return None
+
+
+async def get_receipts_for_session(session_id: str, user_id: str) -> list:
+    """Every questionnaire receipt on one submission, decrypted, oldest first.
+
+    E&O 5.8: the audit export needs the client's answers WITH respondent
+    identity and timestamp. Same owner-scoped WHERE and same
+    unreadable-not-error decrypt handling as get_receipt_for_arq.
+    """
+    out: list = []
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT id, arq_id, session_id, client_name, client_email,
+                          payload, item_count, answered_count, not_sure_count,
+                          review_count, submitted_at, created_at
+                   FROM arq_receipts
+                   WHERE session_id=$1 AND user_id=$2
+                   ORDER BY created_at ASC""",
+                str(session_id), str(user_id),
+            )
+        for row in rows:
+            rec = dict(row)
+            try:
+                body = json.loads(decrypt_field(rec.pop("payload")))
+                rec["items"] = body.get("items", [])
+                rec["unreadable"] = False
+            except Exception as dec_ex:                        # noqa: BLE001
+                logger.error(
+                    "ARQ receipt: payload could not be decrypted for arq_id=%s (%s)",
+                    rec.get("arq_id"), dec_ex,
+                )
+                rec.pop("payload", None)
+                rec["items"] = []
+                rec["unreadable"] = True
+            out.append(rec)
+    except Exception as ex:                                    # noqa: BLE001
+        logger.error(
+            f"ARQ receipt: session fetch failed for session={session_id}: {ex}",
+            exc_info=True,
+        )
+    return out

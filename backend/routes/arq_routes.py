@@ -463,11 +463,21 @@ async def client_view(token: str, request: Request):
             if _sdef is None:
                 continue
             _rows, _ = schedule_capture.validate_rows(_lk, q.get("current_rows") or [])
+            # Master-plan 4.9 / core principle 5 (2026-08-26): a column flagged
+            # `producer_only` is stripped from the CLIENT's copy of the table.
+            # Covered-auto symbols are the live case - they are a producer
+            # decision with their own producer question, so showing the column
+            # here asked the insured to classify coverage. This is the ONLY
+            # place the flag is applied: the producer's own table (served whole
+            # by /generate), the pre-load endpoint and the stamping path all
+            # keep every column, so nothing the agency fills is lost.
+            _client_cols = [c for c in _sdef["columns"]
+                            if not (isinstance(c, dict) and c.get("producer_only"))]
             q_item.update({
                 "schedule_key":      _lk,
                 "schedule_label":    _sdef["label"],
                 "schedule_singular": _sdef["singular"],
-                "columns":           _sdef["columns"],
+                "columns":           _client_cols,
                 "dedup_keys":        _sdef["dedup_keys"],
                 "vin_decode":        bool(_sdef["vin_decode"]),
                 "row_capacity":      schedule_capture.ROW_CAPACITY,
@@ -1153,9 +1163,29 @@ async def save_session_schedule_route(
             400, f"Too many rows (max {schedule_capture.MAX_ROWS})",
         )
 
+    # E&O 5.9/5.11: schedule pre-load saves replaced facts[list_key] wholesale
+    # with no audit row at all until 2026-08-26. One row per save, summarized
+    # by row count (the rows themselves live in facts).
+    _prev_rows = (proc_session.get("facts") or {}).get(list_key)
+    if isinstance(_prev_rows, dict):
+        _prev_rows = _prev_rows.get("value")
+    _prev_n = len(_prev_rows) if isinstance(_prev_rows, list) else 0
+
     ok, result = await save_session_schedule(session_id, list_key, rows)
     if not ok:
         raise HTTPException(400, result.get("message", "Could not save schedule"))
+    try:
+        from services.audit_service import log_field_change
+        from services.sqs_service import SQS_MODEL_VERSION
+        await log_field_change(
+            session_id=session_id, user_id=str(current_user["id"]),
+            form_id=None, field_name=f"schedule::{list_key}", fact_key=list_key,
+            source="producer", previous_value=f"{_prev_n} row(s)",
+            new_value=f"{len(result.get('rows') or [])} row(s)",
+            confidence="filled", model_version=SQS_MODEL_VERSION,
+        )
+    except Exception as _se:
+        logger.warning(f"save_session_schedule_route: audit log failed: {_se}")
     return JSONResponse({"success": True, **result})
 
 

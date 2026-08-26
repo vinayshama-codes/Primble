@@ -313,6 +313,10 @@ async def run_extraction_pipeline(
             "doc_type_source":       classification.get("source"),
             "doc_type_confidence":   classification.get("confidence"),
             "doc_type_overridden":   False,
+            # E&O 5.2/5.3: per-document upload provenance. Set ONLY here (the
+            # one first-extraction path), so re-runs keep the original stamp.
+            "uploaded_at":           datetime.now(timezone.utc).isoformat(),
+            "uploaded_by":           str(user_id) if user_id is not None else "",
             "text":                  text,
             "facts":                 extracted.get("facts", {}),
             "flags":                 extracted.get("flags", {}),
@@ -1119,7 +1123,22 @@ async def _finalize_pipeline(
     # V1 plan C1 F5 (client 1.3 / 1.4): every envelope carries its value state
     # and evidence state, derived from signals already on it. Additive.
     try:
-        from services.fact_state import annotate_fact_states
+        from services.fact_state import (
+            annotate_fact_states, annotate_text_verification,
+        )
+        # BEFORE the state derivation, because it feeds it: a value the
+        # documents literally print becomes SOURCE VERIFIED rather than merely
+        # suggested, which is what makes the client's 4.1 Step 2 ("already
+        # canonically known - do not ask again") distinguishable from Step 3
+        # ("merely Suggested"). Deterministic, no LLM, and it can only ever ADD
+        # verification - see the four guards on the function.
+        try:
+            _tv = annotate_text_verification(merged_facts, active_docs)
+            if _tv:
+                logger.info("fact_state: %d fact(s) verified against the "
+                            "uploaded document text (source_verified)", _tv)
+        except Exception as _tvx:                             # noqa: BLE001
+            logger.warning("fact_state: text verification skipped - %s", _tvx)
         annotate_fact_states(merged_facts, mflags)
     except Exception as _sex:                                  # noqa: BLE001
         logger.warning("fact_state annotation skipped: %s", _sex)

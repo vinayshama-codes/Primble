@@ -376,7 +376,12 @@ async def download_pdf(
             user=fresh, action="download_draft", form_id=form_id, form_name=form_name,
             session_id=session_id, ip_address=request.client.host if request.client else None,
             sqs_score=_score_at_dl,
-            unresolved_issues={"override_reason": override_reason.strip(), "blocking_items": blocking_items},
+            # E&O 5.13: the draft payload used to REPLACE the open-items list
+            # with the override alone - the one download where preserving what
+            # was outstanding matters most recorded the least (2026-08-26).
+            unresolved_issues={"override_reason": override_reason.strip(),
+                               "blocking_items": blocking_items,
+                               "open_recommendations": unresolved_recs},
             file_checksum=package_checksum,
         )
     else:
@@ -389,6 +394,16 @@ async def download_pdf(
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
     })
+
+    # E&O 5.12: "package is downloaded" is its own snapshot trigger - always
+    # store the score the package shipped with.
+    try:
+        from services.audit_service import log_sqs_snapshot_if_changed
+        await log_sqs_snapshot_if_changed(
+            session_id, str(fresh.get("id") or "") or None,
+            proc_session.get("package_sqs"), "package_downloaded")
+    except Exception as _snap_ex:
+        logger.warning(f"download_pdf: sqs snapshot skipped: {_snap_ex}")
 
     # Package activity log (best-effort).
     try:
@@ -547,7 +562,11 @@ async def download_all(
             form_name=f"ZIP Bundle DRAFT ({len(generated)} forms + cover page)",
             session_id=session_id, ip_address=request.client.host if request.client else None,
             sqs_score=_avg_score,
-            unresolved_issues={"override_reason": override_reason.strip(), "blocking_items": blocking_items},
+            # E&O 5.13: keep the open-items list on the draft record too - the
+            # override payload used to replace it (2026-08-26).
+            unresolved_issues={"override_reason": override_reason.strip(),
+                               "blocking_items": blocking_items,
+                               "open_recommendations": unresolved_recs},
             file_checksum=package_checksum,
         )
     else:
@@ -562,6 +581,15 @@ async def download_all(
     await upd_processing_session(session_id, {
         "last_downloaded_at": datetime.now(timezone.utc).isoformat()
     })
+
+    # E&O 5.12: "package is downloaded" is its own snapshot trigger.
+    try:
+        from services.audit_service import log_sqs_snapshot_if_changed
+        await log_sqs_snapshot_if_changed(
+            session_id, str(fresh.get("id") or "") or None,
+            proc_session.get("package_sqs"), "package_downloaded")
+    except Exception as _snap_ex:
+        logger.warning(f"download_all: sqs snapshot skipped: {_snap_ex}")
 
     # Package activity log (best-effort).
     try:

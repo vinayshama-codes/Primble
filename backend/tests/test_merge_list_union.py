@@ -307,14 +307,41 @@ def test_no_non_quantity_fact_gets_the_component_rule(key):
         "for it, and the rule can only ever destroy a real conflict")
 
 
-@pytest.mark.parametrize("key", [
-    "total_policy_premium", "gl_each_occurrence", "umbrella_limit",
-    "total_payroll", "num_employees",
-])
-def test_a_quantity_still_gets_the_component_rule(key):
-    """The rule's own purpose must survive the gate."""
+@pytest.mark.parametrize("key", ["total_policy_premium"])
+def test_the_component_rule_survives_for_its_own_purpose(key):
+    """The rule's own purpose must survive the gate: a LINE premium IS part of
+    the PACKAGE premium, so `$2,991` and `$10,663` are not rivals."""
     from services.fact_equivalence import _component_split_allowed
     assert _component_split_allowed(key)
+
+
+@pytest.mark.parametrize("key", [
+    "gl_each_occurrence", "umbrella_limit", "total_payroll", "num_employees",
+    "total_revenue", "property_building_value", "gl_deductible",
+])
+def test_a_quantity_alone_does_not_get_the_component_rule(key):
+    """NARROWED 2026-08-26 on live evidence (C4 test S5). These were previously
+    asserted to GET the rule, on the premise that "quantity" was a sufficient
+    gate. It is not.
+
+    Two applications stated Annual Gross Sales $2,400,000 and $3,850,000. The
+    verified index recorded the per-location class exposure as a LINE-level
+    value and the other document's revenue as a PACKAGE-level one, so
+    `is_component_of` pronounced a genuine disagreement "a piece of the other"
+    and folded it. The producer screen read "All clear" - the third time a
+    context rule keyed on a value's characters silenced a real conflict.
+
+    Two candidate answers to the SAME fact are RIVALS. A part/whole reading is
+    real only where the package figure is genuinely composed of line figures,
+    which on this schema is premiums and nothing else. A per-class payroll
+    basis is already handled by
+    `underwriting_consistency._drop_class_exposure_candidates`, which requires
+    positive evidence from the package's own class schedule - not by this rule.
+    """
+    from services.fact_equivalence import _component_split_allowed
+    assert not _component_split_allowed(key), (
+        f"{key}: two documents stating different values for it are rival "
+        "answers, and this rule can only ever destroy that conflict")
 
 
 def test_a_policy_amount_is_money_and_a_policy_number_is_not():

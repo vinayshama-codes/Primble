@@ -298,10 +298,14 @@ _CLIENT_WHITELIST = {
     # candidates and now surfaces them to the PRODUCER, who is the person the
     # client says should own the answer.
     #
-    # gl_class_codes / wc_class_codes are LEFT whitelisted deliberately - the
-    # client named NAICS and SIC only, and these drive different questions.
-    # Same carrier-assigned argument arguably applies; flagged, not assumed.
-    "gl_class_codes", "gl_class_codes_by_location", "wc_class_codes",
+    # gl_class_codes / wc_class_codes / gl_class_codes_by_location REMOVED
+    # 2026-08-26. They were left whitelisted with the note "Same carrier-assigned
+    # argument arguably applies; flagged, not assumed" - the client has now named
+    # them explicitly in master-plan 4.4 ("Classification: NAICS, SIC, GL class
+    # codes, WC class codes") and in core principle 5 ("Do Not Ask the Client to
+    # Perform Insurance Classification"), so the flag is resolved. Routing now
+    # lives in `question_eligibility.INSURANCE_JUDGMENT_FACTS` rather than here,
+    # because a name-pattern cannot express "producer-only fact".
     # contact_name / contact_email are client-critical facts even when the raw
     # ACORD field that surfaces them is in the Producer section of the form
     # (Producer_ContactPerson_FullName / Producer_ContactPerson_Email). Without
@@ -625,6 +629,7 @@ def decorate_questions(
     present_fact_keys: Optional[set] = None,
     narrative_components: Optional[dict] = None,
     hard_stop_text: str = "",
+    facts: Optional[dict] = None,
 ) -> None:
     """Attach taxonomy fields to every question in-place.
 
@@ -639,6 +644,13 @@ def decorate_questions(
     answers (per `NARRATIVE_COMPONENT_QUESTION_KEYS`) is suppressed from the
     default client set and labelled "stated in narrative" instead of being
     re-asked (§6.3 item 2).
+
+    `facts` is the package's extracted facts. When supplied, the client's 4.1
+    question-eligibility flow runs as a FINAL overlay via
+    `services.question_eligibility` - the one door for "should we ask this, and
+    who?" (client master plan section 4, 2026-08-26). It is optional so every
+    existing caller keeps its exact behaviour until it opts in; omitting it
+    simply skips the state-driven pass.
     """
     present = present_fact_keys or set()
 
@@ -687,6 +699,23 @@ def decorate_questions(
         # if it didn't, the client still needs to answer it. NARRATIVE_CONTEXT_QUESTION_KEYS
         # is retained so the topic→field mapping remains available for future use,
         # but no overlay is applied here.
+
+    # ── Client 4.1 - the question-eligibility decision flow (2026-08-26) ──────
+    # Runs LAST, so it sees the fully-classified question and can only ever
+    # narrow it: move a client question to the producer, suppress an
+    # inapplicable one, or hold a conflicting fact for producer resolution. It
+    # never routes anything TO the client. Skipped entirely when the caller
+    # supplies no `facts`, which keeps every legacy call site byte-identical.
+    if facts is not None:
+        try:
+            from services.question_eligibility import apply_eligibility
+            apply_eligibility(questions, facts)
+        except Exception as exc:                              # noqa: BLE001
+            # Fail OPEN: a questionnaire that asks one question too many is
+            # recoverable; one that silently stops asking is not.
+            import logging
+            logging.getLogger(__name__).warning(
+                "question_classifier: eligibility overlay skipped - %s", exc)
 
 
 def apply_default_selection(questions: List[dict], cap: int = DEFAULT_SELECT_CAP) -> dict:

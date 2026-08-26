@@ -662,6 +662,33 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     # in the required-field set (pre-existing) but never had a data source,
     # so it stayed blank/yellow on every row. Sourced from the consolidated
     # list's own position, matching the row it's actually stamped into.
+    # ── The `Location_*` twin of the `CommercialStructure_*` family below ────
+    # ADDED 2026-08-26. ACORD 125/140/141 name the premises grid
+    # `CommercialStructure_PhysicalAddress_*`; ACORD **130, 133, 160 and 28**
+    # name the SAME concept `Location_PhysicalAddress_*`, and that spelling was
+    # never registered. Two consequences, both live:
+    #
+    #   1. STAMPING - a known `property_locations` list could never reach the
+    #      address boxes on those four forms. They fell through to gap fill.
+    #   2. QUESTIONS - the C4 live run (S2, ACORD 130) produced TWENTY ordinal
+    #      cards, "Please provide the complete address ... (1st location)"
+    #      through "(19th location)" - the exact explosion Figure 15 exists to
+    #      prevent. `binds_a_capturable_column` correctly reported that no real
+    #      column bound on that form, which was true and was the hole.
+    #
+    # Registering the family fixes both at the source rather than special-casing
+    # the questionnaire. Deliberately NOT registered from the same sweep, because
+    # they are not columns of the location TABLE: `Location_HighestFloorCount`,
+    # `Location_FullName`, `Location_TaxCode`, `Location_LocationDescription`,
+    # `Location_PrimaryPremisesIndicator`, `Location_Primary_PhoneNumber`.
+    "Location_ProducerIdentifier":                            _ScheduleDef("property_locations", "location_number"),
+    "Location_PhysicalAddress_LineOne":                       _ScheduleDef("property_locations", "address_line1"),
+    "Location_PhysicalAddress_LineTwo":                       _ScheduleDef("property_locations", "address_line2"),
+    "Location_PhysicalAddress_CityName":                      _ScheduleDef("property_locations", "address_city"),
+    "Location_PhysicalAddress_CountyName":                    _ScheduleDef("property_locations", "address_county"),
+    "Location_PhysicalAddress_StateOrProvinceCode":           _ScheduleDef("property_locations", "address_state"),
+    "Location_PhysicalAddress_PostalCode":                    _ScheduleDef("property_locations", "address_zip"),
+
     "CommercialStructure_Location_ProducerIdentifier":        _ScheduleDef("property_locations", "location_number"),
     "CommercialStructure_PhysicalAddress_LineOne":            _ScheduleDef("property_locations", "address_line1"),
     # Line-two was NOT bound, so it fell to gap fill, which re-wrote the unit
@@ -4926,6 +4953,20 @@ def apply_fact_state_confidence_labels(form_id: str, facts: dict, mapped: dict,
         state = _state_cache[fact_key]
 
         if state == NOT_APPLICABLE:
+            # THE FORM THE PRODUCER SELECTED OVERRIDES THE DOCUMENTS.
+            # `value_state_of` answers from `coverage_lines`, which on a renewal
+            # is the EXPIRING policy. Generating ACORD 140 IS the producer
+            # saying they are applying for property, so a declined line on the
+            # old dec page must not excuse this form's blank boxes - and must
+            # not make the ARQ scan skip them, which is how S7 run B shipped a
+            # 140 scoring 8/100 with no property question anywhere (2026-08-26).
+            try:
+                from services.fact_state import is_not_applicable_for
+                if not is_not_applicable_for(facts, fact_key,
+                                             [form_id] if form_id else None):
+                    continue
+            except Exception:                                  # noqa: BLE001
+                pass                       # fail to today's behaviour
             confidence[field] = "not_applicable"
             relabelled["not_applicable"] += 1
         elif state == EXPLICIT_NO:

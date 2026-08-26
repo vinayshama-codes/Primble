@@ -928,6 +928,17 @@ const isAgency = (q) => !isClientFacing(q) && !isNeverSend(q) && bucketOf(q) ===
 // suppressed client items (already answered / stated in narrative).
 const isUnderwriting = (q) => !isClientFacing(q) && !isNeverSend(q) && !isAgency(q);
 
+// Client master plan 4.1 (2026-08-26): why a question is the producer's rather
+// than the client's, in the client's own vocabulary. Keys match
+// `services/question_eligibility.py`'s REASON_* constants - keep the two in step.
+// No em-dashes in UI copy (project rule).
+const ARQ_ELIGIBILITY_META = {
+  insurance_judgment_producer:   { label: "Producer decision",  bg: "#fefce8", fg: "#854d0e", bd: "#fef08a" },
+  conflicting_route_to_producer: { label: "Conflict - resolve", bg: "#fef2f2", fg: "#991b1b", bd: "#fecaca" },
+  not_applicable:                { label: "Not applicable",     bg: "#f1f5f9", fg: "#475569", bd: "#cbd5e1" },
+  unable_to_determine:           { label: "Could not determine", bg: "#f5f3ff", fg: "#6d28d9", bd: "#ddd6fe" },
+};
+
 // TEMPORARILY HIDDEN (client request): the "Underwriting / Internal Review"
 // bucket in the Send-to-Client questionnaire. The bucket's markup is kept intact -
 // flip this back to true to re-introduce it exactly as it was. Do not delete it.
@@ -1221,6 +1232,15 @@ function ARQModal({ sessionId, token, questions, summary, onClose, onSuccess }) 
             {q.suggested && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#b45309", background: "#fffbeb", padding: "1px 6px", borderRadius: 10 }}>Suggested</span>}
             {/* §6.3 item 2/3 - the narrative already answers this, so it isn't auto-sent to the client */}
             {q.suppressed_reason === "stated_in_narrative" && <span style={{ fontSize: 9.5, fontWeight: 700, color: "#1d4ed8", background: "#eff6ff", padding: "1px 6px", borderRadius: 10 }}>Stated in narrative</span>}
+            {/* Client master plan 4.1 (2026-08-26) - say WHY an item sits in the
+                producer's list rather than the client's. Rendered here so it
+                shows in the Agency bucket today and is already correct when the
+                Underwriting bucket is un-hidden. */}
+            {ARQ_ELIGIBILITY_META[q.eligibility_reason] && (
+              <span style={{ fontSize: 9.5, fontWeight: 700, color: ARQ_ELIGIBILITY_META[q.eligibility_reason].fg, background: ARQ_ELIGIBILITY_META[q.eligibility_reason].bg, border: `1px solid ${ARQ_ELIGIBILITY_META[q.eligibility_reason].bd}`, padding: "1px 6px", borderRadius: 10 }}>
+                {ARQ_ELIGIBILITY_META[q.eligibility_reason].label}
+              </span>
+            )}
           </div>
           {/*
             Engineering note (Figure 14): the producer sees the rule-oriented
@@ -4629,8 +4649,25 @@ const AcordModal = forwardRef(function AcordModal({
     filled: "AI gap fill",
     ai_high: "AI extraction (high confidence)",
     ai_low: "AI extraction (low confidence)",
+    // C5 (2026-08-26): the enums below were real fact sources that fell
+    // through this map and printed raw (or "unspecified") in the E&O record.
+    dec_entry: "Extracted from a declarations/schedule entry (verified in document text)",
+    policy_doc_text: "Extracted from policy document text",
+    derived: "Derived from other captured values",
+    user_confirmed: "Confirmed by producer (Data Consistency)",
+    cross_form_conflict: "Producer resolution of a cross-form conflict",
+    manual: "Entered manually",
   };
   const _auditSource = (s) => (s ? (_AUDIT_SOURCE_LABEL[s] || s) : "unspecified");
+  // "Package Policy.pdf - page 14" / "COI.pdf (3 row(s))" - mirrors
+  // backend services/fact_lineage.format_source.
+  const _auditEvidence = (src) => {
+    if (!src) return "";
+    let label = src.filename || "(unnamed)";
+    if (src.page) label += ` - page ${src.page}`;
+    if (src.rows) label += ` (${src.rows} row(s))`;
+    return label;
+  };
 
   // E&O audit record (Figure 6 + client follow-up 2026-07-28): not pushed to
   // underwriters - a plain-text record the producer downloads on demand,
@@ -4679,6 +4716,41 @@ const AcordModal = forwardRef(function AcordModal({
         lines.push("  (none)");
       }
       lines.push("");
+      lines.push("QUESTIONS ANSWERED BY PRODUCER");
+      if (d.answered_recommendations?.length) {
+        for (const r of d.answered_recommendations) {
+          lines.push(`  - ${r.message || r.rec_id}`);
+          lines.push(`    Answer: ${r.producer_answer}`);
+          lines.push(`    Field: ${r.field || "-"}  |  Answered: ${r.answered_at || r.action_at || "(before answer timestamps were recorded)"}`);
+        }
+      } else {
+        lines.push("  (none)");
+      }
+      lines.push("");
+      lines.push("DATA CONSISTENCY RESOLUTIONS");
+      if (d.conflict_resolutions?.length) {
+        for (const c of d.conflict_resolutions) {
+          lines.push(`  - ${c.label || c.fact_key}`);
+          // "(was: X)" only when the confirmation actually changed the stored
+          // value - under D16 the suggested value stamps before confirmation,
+          // so confirming the suggestion prints an identical "was" (noise).
+          const _prevDiffers = c.previous_value && c.previous_value !== c.confirmed_value;
+          lines.push(`    Chosen: ${c.confirmed_value}${_prevDiffers ? `  (was: ${c.previous_value})` : ""}`);
+          if (Array.isArray(c.candidates) && c.candidates.length) {
+            lines.push("    Competing values:");
+            for (const cand of c.candidates) {
+              const srcs = (cand.sources || []).map(s => s.filename || s.doc_type || "").filter(Boolean).join(", ");
+              lines.push(`      * ${cand.value}${srcs ? `  [${srcs}]` : ""}`);
+            }
+          }
+          if (c.reason) lines.push(`    Conflict: ${c.reason}`);
+          if (c.note) lines.push(`    Note: ${c.note}`);
+          lines.push(`    Resolved: ${c.confirmed_at}`);
+        }
+      } else {
+        lines.push("  (none)");
+      }
+      lines.push("");
       lines.push("ISSUE STATUS OVERRIDES");
       if (d.issue_status_overrides?.length) {
         for (const s of d.issue_status_overrides) {
@@ -4709,6 +4781,7 @@ const AcordModal = forwardRef(function AcordModal({
         for (const doc of d.documents) {
           lines.push(`  - ${doc.filename || "(unnamed)"}`);
           lines.push(`    Identified as: ${doc.doc_type || "unknown"}${doc.confidence ? ` (confidence: ${doc.confidence})` : ""}`);
+          if (doc.uploaded_at) lines.push(`    Uploaded: ${doc.uploaded_at}`);
           if (doc.overridden) lines.push("    Document type was manually corrected by the user");
           if (doc.excluded) lines.push("    Excluded from extraction");
         }
@@ -4725,7 +4798,32 @@ const AcordModal = forwardRef(function AcordModal({
         lines.push("");
         for (const f of d.inputs) {
           lines.push(`  - ${f.fact}: ${f.value}`);
-          lines.push(`    Source: ${_auditSource(f.source || f.confidence)}`);
+          // A structured fact carries no envelope, so its source enum is
+          // empty - but when document evidence was recovered for it, the
+          // honest label is the ingestion method, never "unspecified"
+          // (client 5.6: that word is the reported defect).
+          const _srcEnum = f.source || f.confidence;
+          lines.push(`    Source: ${_srcEnum ? _auditSource(_srcEnum) : (Array.isArray(f.sources) && f.sources.length ? "AI extraction from document" : "unspecified")}`);
+          // C5: Document + Page lineage (client 5.5) - every supporting
+          // document, never just the first (5.4).
+          if (Array.isArray(f.sources) && f.sources.length) {
+            lines.push(`    Evidence: ${f.sources.map(_auditEvidence).filter(Boolean).join("; ")}`);
+          }
+          if (f.display_state) {
+            lines.push(`    State: ${f.display_state}${f.value_state ? ` (${f.value_state} / ${f.evidence_state || "-"})` : ""}`);
+          }
+          if (f.derivation && f.derivation.rule) {
+            const ins = Array.isArray(f.derivation.inputs) ? f.derivation.inputs.join(", ") : "";
+            lines.push(`    Derived by rule: ${f.derivation.rule}${ins ? `  (inputs: ${ins})` : ""}`);
+          }
+          if (Array.isArray(f.scope) && f.scope.length) {
+            lines.push(`    Scope: ${f.scope.map(s => {
+              const parts = [];
+              if (s.line || s.line_printed) parts.push(`line=${s.line_printed || s.line}`);
+              if (s.policy_number) parts.push(`policy=${s.policy_number}`);
+              return `${s.value}${parts.length ? ` [${parts.join(", ")}]` : ""}`;
+            }).join("; ")}`);
+          }
         }
       } else {
         lines.push("  (none available - session data may have been cleared by the retention policy)");
@@ -4734,12 +4832,111 @@ const AcordModal = forwardRef(function AcordModal({
       lines.push("MODIFICATION HISTORY");
       if (d.field_modifications?.length) {
         for (const m of d.field_modifications) {
-          lines.push(`  - ${m.field_name}${m.form_id ? ` (${m.form_id})` : ""}`);
+          lines.push(`  - ${m.field_name}${m.form_id ? ` (${m.form_id})` : ""}${m.fact_key && m.fact_key !== m.field_name ? `  [fact: ${m.fact_key}]` : ""}`);
           lines.push(`    ${m.previous_value ? `"${m.previous_value}"` : "(blank)"} -> ${m.new_value ? `"${m.new_value}"` : "(blank)"}`);
           lines.push(`    Changed by: ${_auditSource(m.source)}  |  ${m.changed_at}`);
         }
       } else {
         lines.push("  (no modifications recorded)");
+      }
+      lines.push("");
+      lines.push("VALUES SEEN AND REFUSED");
+      if (d.rejected_facts?.length) {
+        for (const rj of d.rejected_facts) {
+          lines.push(`  - ${rj.fact}`);
+          lines.push(`    Refused because: ${rj.reason}`);
+        }
+      } else {
+        lines.push("  (none)");
+      }
+      lines.push("");
+      lines.push("CLIENT QUESTIONNAIRE ANSWERS");
+      if (d.client_receipts?.length) {
+        for (const rc of d.client_receipts) {
+          lines.push(`  - Submitted by: ${rc.client_name || "(client)"}${rc.client_email ? ` <${rc.client_email}>` : ""}  |  ${rc.submitted_at || rc.created_at}`);
+          lines.push(`    ${rc.answered_count ?? "?"} answered, ${rc.not_sure_count ?? 0} marked not sure, ${rc.review_count ?? 0} for review (of ${rc.item_count ?? "?"} asked)`);
+          if (rc.unreadable) {
+            lines.push("    (answer detail exists but could not be decrypted with the current key)");
+          } else if (Array.isArray(rc.items)) {
+            for (const it of rc.items) {
+              const v = it.value === null || it.value === undefined || it.value === "" ? "(no answer)" : String(it.value);
+              lines.push(`      * ${it.question || it.field_name}: ${v.length > 200 ? v.slice(0, 200) + "…" : v}`);
+            }
+          }
+        }
+      } else {
+        lines.push("  (no questionnaire submitted)");
+      }
+      lines.push("");
+      lines.push("=".repeat(70));
+      lines.push("PART 3 - SCORING AND DOWNLOADS");
+      lines.push("=".repeat(70));
+      lines.push("");
+      lines.push("SCORE HISTORY");
+      if (d.sqs_snapshots?.length) {
+        for (const sn of d.sqs_snapshots) {
+          const sig = sn.event_data?.signature || {};
+          // "held at" only when the cap actually binds the displayed score;
+          // a cap sitting above the earned score is in effect but not
+          // holding anything down ("score 70, held at 85" read as nonsense
+          // on the 2026-08-26 live run).
+          let ceil = "";
+          if (sig.ceiling) {
+            const binding = sig.displayed_sqs != null && Number(sig.displayed_sqs) >= Number(sig.ceiling);
+            const reason = sig.ceiling_reason ? ` (${sig.ceiling_reason})` : "";
+            ceil = binding ? `, held at ${sig.ceiling}${reason}` : `, cap ${sig.ceiling} in effect${reason}`;
+          }
+          lines.push(`  - ${sn.created_at}  score ${sig.displayed_sqs ?? "-"} (raw ${sig.raw_sqs ?? "-"})${ceil}`);
+          lines.push(`    Trigger: ${sn.event_data?.trigger || "-"}`);
+        }
+      } else {
+        lines.push("  (no score snapshots recorded for this session)");
+      }
+      lines.push("");
+      lines.push("DOWNLOADS");
+      if (d.package_downloads?.length) {
+        for (const dl of d.package_downloads) {
+          lines.push(`  - ${dl.timestamp}  ${dl.action}${dl.form_id ? `  (${dl.form_id})` : ""}`);
+          if (dl.sqs_score_at_download !== null && dl.sqs_score_at_download !== undefined) {
+            lines.push(`    Score at download: ${dl.sqs_score_at_download}`);
+          }
+          if (dl.file_checksum) lines.push(`    File checksum: ${dl.file_checksum}`);
+          const u = dl.unresolved_issues;
+          if (Array.isArray(u) && u.length) {
+            lines.push(`    Open items at download (${u.length}):`);
+            for (const it of u) lines.push(`      * ${it.message || it.rec_id || String(it)}`);
+          } else if (u && typeof u === "object" && (u.blocking_items || u.override_reason)) {
+            if (u.override_reason) lines.push(`    Override reason: ${u.override_reason}`);
+            if (Array.isArray(u.blocking_items) && u.blocking_items.length) {
+              lines.push(`    Blocking items overridden (${u.blocking_items.length}):`);
+              for (const b of u.blocking_items) lines.push(`      * ${b.message || b.reason || String(b)}`);
+            }
+            if (Array.isArray(u.open_recommendations) && u.open_recommendations.length) {
+              lines.push(`    Open items at download (${u.open_recommendations.length}):`);
+              for (const it of u.open_recommendations) lines.push(`      * ${it.message || it.rec_id || String(it)}`);
+            }
+          } else if (Array.isArray(u)) {
+            lines.push("    No open items at download.");
+          }
+        }
+      } else {
+        lines.push("  (no downloads recorded)");
+      }
+      lines.push("");
+      lines.push("EVENT LOG");
+      if (d.audit_events?.length) {
+        for (const ev of d.audit_events) {
+          if (ev.event_type === "sqs_snapshot") continue; // rendered above
+          const data = ev.event_data || {};
+          let extra = "";
+          if (ev.event_type === "documents_uploaded") extra = ` (${data.document_count} document(s), ${data.facts_extracted} value(s) captured)`;
+          else if (ev.event_type === "client_answers_applied") extra = ` (${data.fields_changed} field(s) changed${data.held_for_producer ? `, ${data.held_for_producer} held for producer` : ""})`;
+          else if (ev.event_type === "recommendation_reopened") extra = ` (${data.rec_id}; prior action: ${data.prior_action || "-"} at ${data.prior_action_at || "-"})`;
+          else if (ev.event_type === "issue_reopened") extra = data.rule_code ? ` (${data.rule_code})` : "";
+          lines.push(`  - ${ev.created_at}  ${ev.event_type}${extra}`);
+        }
+      } else {
+        lines.push("  (no events recorded - session predates the event log)");
       }
       lines.push("");
       lines.push("=".repeat(70));
@@ -5701,10 +5898,16 @@ const AcordModal = forwardRef(function AcordModal({
                 <div className="tier2-header"><span className="tier2-label">Submission Readiness</span><span className="tier2-score" style={{ color: barColor(tier2Score) }}>{tier2Score}%</span></div>
                 <div className="metric-bar"><div className="metric-fill" style={{ width: `${tier2Score}%`, background: barColor(tier2Score) }} /></div>
                 {/* Single line, no "Missing" vs "Needs client input" split (client
-                    feedback: the two-line version was confusing). Every field this
-                    check tracks ends up asked via the client questionnaire if the
-                    document doesn't have it, so one label covers all of them. */}
-                {tier2Missing.length > 0 && <div className="tier2-missing">Needs client input: {tier2Missing.join(" · ")}</div>}
+                    feedback: the two-line version was confusing).
+                    RELABELLED 2026-08-26 (C4 test S5): the old copy read "Needs
+                    client input", and its comment claimed every field here "ends
+                    up asked via the client questionnaire". That stopped being
+                    true - NAICS and SIC are producer-only under master-plan 4.4
+                    and core principle 5, so the banner was telling the producer
+                    to go and ask the insured for a classification code Primble
+                    now deliberately routes to the agency. "Still needed" is
+                    accurate for both audiences and keeps the one-line format. */}
+                {tier2Missing.length > 0 && <div className="tier2-missing">Still needed: {tier2Missing.join(" · ")}</div>}
               </div>
             )}
             {/* Submission Integrity status (Beta Report §4.1): advisory banner for

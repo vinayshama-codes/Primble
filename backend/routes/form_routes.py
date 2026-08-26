@@ -402,6 +402,30 @@ async def upload_declaration(
         # can be traced to the warning that prompted it.
         await log_integrity_assessed(sid, str(current_user["id"]), integrity)
 
+        # E&O 5.11: the upload + extraction event, durably - the chain the
+        # audit record reconstructs starts here ("what information existed").
+        try:
+            from services.audit_service import log_audit_event
+            await log_audit_event(
+                sid, str(current_user["id"]), "documents_uploaded",
+                {"documents": [
+                    {"doc_id": d.get("doc_id"), "filename": d.get("filename"),
+                     "doc_type": d.get("doc_type"),
+                     "doc_type_confidence": d.get("doc_type_confidence")}
+                    for d in (processed_docs or [])
+                ],
+                 "document_count": len(processed_docs or []),
+                 # Non-empty values only, so this agrees with the "N value(s)
+                 # captured" count the record itself prints (raw key count
+                 # includes every empty slot - live run showed 184 vs 47).
+                 "facts_extracted": sum(
+                     1 for _v in (merged_facts or {}).values()
+                     if _v not in (None, "", [], {})
+                 )},
+            )
+        except Exception as _up_ev_ex:
+            logger.warning(f"upload event log failed: {_up_ev_ex}")
+
         if _job_id:
             await _queue.update_status(_job_id, STATUS_COMPLETED, result={"session_id": sid})
 
@@ -773,9 +797,22 @@ async def document_reclassify(
                 user_id=str(current_user["id"]),
             )
             try:
-                await upd_processing_session(result["session_id"], {"package_sqs": package_sqs})
+                await upd_processing_session(result["session_id"], {
+                    "package_sqs": package_sqs,
+                    **({"sqs_history": package_sqs.get("sqs_history")}
+                       if isinstance(package_sqs, dict) and package_sqs.get("sqs_history") else {}),
+                })
             except Exception as _persist_ex:
                 logger.warning(f"reclassify persist package_sqs failed: {_persist_ex}")
+            # E&O 5.12: a reclassification that moved the score is a snapshot
+            # trigger like any other material change.
+            try:
+                from services.audit_service import log_sqs_snapshot_if_changed
+                await log_sqs_snapshot_if_changed(
+                    result["session_id"], str(current_user["id"]),
+                    package_sqs, "document_reclassified")
+            except Exception as _snap_ex:
+                logger.warning(f"reclassify: sqs snapshot skipped: {_snap_ex}")
     except Exception as _sqs_ex:
         logger.warning(f"reclassify readiness recompute failed: {_sqs_ex}")
 
@@ -919,6 +956,8 @@ async def underwriting_confirm_value(
         # the prior evidence.
         candidates=result.get("_pre_confirm_candidates"),
         reason=result.get("_pre_confirm_reason"),
+        # E&O 5.10: the producer's own optional resolution note.
+        note=getattr(req, "note", None),
     )
 
     integrity = result.get("integrity") or {}
@@ -1325,9 +1364,23 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
 
         # Persist so the async (202) refetch path and page reloads can recover it.
         try:
-            await upd_processing_session(req.session_id, {"package_sqs": package_sqs})
+            await upd_processing_session(req.session_id, {
+                "package_sqs": package_sqs,
+                # Explicit key engages session_repository's append-only
+                # sqs_history merge - see the note on the update_pdf persist.
+                **({"sqs_history": package_sqs.get("sqs_history")}
+                   if isinstance(package_sqs, dict) and package_sqs.get("sqs_history") else {}),
+            })
         except Exception as _persist_ex:
             logger.warning(f"persist package_sqs failed: {_persist_ex}")
+
+        # E&O 5.12: the first scoring snapshot of the package.
+        try:
+            from services.audit_service import log_sqs_snapshot_if_changed
+            await log_sqs_snapshot_if_changed(
+                req.session_id, str(current_user["id"]), package_sqs, "form_generated")
+        except Exception as _snap_ex:
+            logger.warning(f"select_forms_bulk: sqs snapshot skipped: {_snap_ex}")
 
         # Package activity log (best-effort; never blocks generation): record the
         # "forms generated" and "SQS scored" events for the navbar Activity Log.
@@ -1698,7 +1751,20 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             val_str = str(new_val).strip() if new_val is not None else ""
             for pattern, fact_key in _ACORD_FIELD_RULES:
                 if fact_key and not fact_key.startswith("_") and pattern in pdf_field:
-                    updated_facts[fact_key] = val_str if val_str not in ("", "null", "None") else None
+                    # E&O 5.9 (2026-08-26): a producer edit keeps a provenance
+                    # ENVELOPE, never a bare string. The bare string destroyed
+                    # source/confidence, made the fact print "Source:
+                    # unspecified" in the audit record, and defeated every
+                    # reader that keys on source - sqs_service's expired-term
+                    # check explicitly wants producer-typed dates recognized
+                    # by `source` and could not see them. The before/after pair
+                    # is preserved in field_source_audit below; the fact holds
+                    # the CURRENT value, history lives in the append-only log.
+                    updated_facts[fact_key] = (
+                        {"value": val_str, "confidence": "filled",
+                         "source": "producer"}
+                        if val_str not in ("", "null", "None") else None
+                    )
                     break
 
         # Re-evaluate stops against the LATEST facts so SQS can actually improve
@@ -1830,13 +1896,22 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             prev_str = str(prev_val).strip() if prev_val is not None else ""
             if new_str == prev_str:
                 continue
+            # E&O 5.9: record the CANONICAL fact this edit landed on, so the
+            # modification log joins back to the facts. Before 2026-08-26
+            # fact_key was a copy of the PDF field name and the join was
+            # impossible.
+            _canon_key = None
+            for _pat, _fk in _ACORD_FIELD_RULES:
+                if _fk and not _fk.startswith("_") and _pat in field_name:
+                    _canon_key = _fk
+                    break
             try:
                 await log_field_change(
                     session_id=req.session_id,
                     user_id=str(current_user["id"]),
                     form_id=form_id,
                     field_name=field_name,
-                    fact_key=field_name,
+                    fact_key=_canon_key or field_name,
                     source="producer",
                     previous_value=prev_str or None,
                     new_value=new_str,
@@ -1987,9 +2062,24 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             "hard_stops": fresh_hard_stops,
             "soft_stops": fresh_soft_stops,
             "package_sqs": pkg_sqs,
+            # The scorer appends to sqs_history and returns it inside
+            # package_sqs, but session_repository's append-only merge only
+            # runs when the key is passed EXPLICITLY - no caller ever did, so
+            # the history was always one entry and delta_this_session was
+            # permanently 0 (found 2026-08-26 during the C5 audit work).
+            **({"sqs_history": pkg_sqs.get("sqs_history")}
+               if isinstance(pkg_sqs, dict) and pkg_sqs.get("sqs_history") else {}),
             "cross_issues_last": _display_cross,
             "underwriting_stamp_consistency": _stamp_check,
         })
+
+        # E&O 5.12: snapshot the score when a field edit materially moved it.
+        try:
+            from services.audit_service import log_sqs_snapshot_if_changed
+            await log_sqs_snapshot_if_changed(
+                req.session_id, str(current_user["id"]), pkg_sqs, "form_edited")
+        except Exception as _snap_ex:
+            logger.warning(f"update_pdf: sqs snapshot skipped: {_snap_ex}")
 
         # Refresh field-QA advisories after the edit so a fixed field stops being
         # flagged and a newly-introduced mismatch is caught. Advisory; gated off.

@@ -117,6 +117,14 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
                                    # the purge-surviving dec_states_payroll_basis
                                    # fact on post-generation recalcs - same answer
                                    # both sides of the purge by construction
+        # audit_service (C5, 2026-08-26). Runs AFTER generation (the E&O export
+        # is on-demand) but is an EXCLUSION, not a consumer: the export's
+        # captured-inputs loop SKIPS the `dec_page_entries` key so the internal
+        # index never renders as a junk "[N row(s) captured] / Source:
+        # unspecified" row. When the purge has already deleted the key the skip
+        # is a no-op. Nothing here reads the entries' content, so the purge
+        # stays safe.
+        "audit_service.py",
     }
     unexpected = [h for h in hits if h.split(":")[0] not in known_files]
     assert not unexpected, (

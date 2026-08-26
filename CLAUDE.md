@@ -1962,6 +1962,12 @@ Both exist in the repo but neither runs automatically at startup (confirmed: onl
 `init_db()` is called from `main.py`) — they are legacy/inactive paths. Adding a
 column there will not reach a real deployment.
 
+## Working Rules (owner)
+
+- **Do NOT create Artifacts unless explicitly asked.** Deliver findings, audits, reports
+  and plans as plain chat text, or as a repo file when asked for one. No published
+  artifact pages by default, however long or detailed the review is.
+
 ## UI / Copy Rules
 
 - **No em-dashes (`—`) in UI text.** Use a plain hyphen-minus (`-`) instead. This applies to all labels, titles, banners, tooltips, and inline copy throughout the frontend.

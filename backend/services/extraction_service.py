@@ -7093,7 +7093,12 @@ def _backfill_empty_facts_from_entries(facts: dict, entries: List[dict]) -> None
         entry = next(iter(by_value.values()))
         facts[key] = {"value": entry["value"], "confidence": "ai_low",
                       "source": "dec_entry", "evidence_state": "source_verified",
-                      "verified_in_text": True}
+                      "verified_in_text": True,
+                      # E&O 5.7: what produced this - the printed entry itself.
+                      "derivation": {"rule": "dec_entry_backfill",
+                                     "inputs": ["dec_page_entries"],
+                                     "entry_label": str(entry.get("label") or "")[:80],
+                                     "entry_owner": entry.get("owner")}}
         filled += 1
         logger.info(
             "dec_entries BACKFILL fact=%s value=%r from label=%r owner=%s - "
@@ -7644,7 +7649,11 @@ def _backfill_is_renewal(mf: dict, full_text: str) -> None:
     m = _RENEWAL_TEXT_RE.search(full_text or "")
     if not m:
         return
-    mf["is_renewal"] = {"value": "yes", "confidence": "filled", "source": "dec_entry"}
+    mf["is_renewal"] = {"value": "yes", "confidence": "filled", "source": "dec_entry",
+                        # E&O 5.7: derived from the document's own printed phrase.
+                        "derivation": {"rule": "renewal_phrase_in_document_text",
+                                       "inputs": [],
+                                       "matched_text": m.group(0)[:80]}}
     logger.info(
         "is_renewal BACKFILL value='yes' - the document prints %r; extraction "
         "merged the fact empty, which left the renewal date routing and the "
@@ -7705,7 +7714,10 @@ def _backfill_billing_plan(facts: dict, full_text: str) -> None:
                 "ambiguous, leaving blank")
         return
     facts["billing_plan"] = {"value": stated[0], "confidence": "ai_low",
-                             "source": "dec_entry"}
+                             "source": "dec_entry",
+                             # E&O 5.7: closed-vocabulary scan of the document.
+                             "derivation": {"rule": "billing_vocabulary_in_document_text",
+                                            "inputs": []}}
     logger.info(
         "billing_plan BACKFILL value=%r - extraction merged this fact empty; "
         "the document prints the method verbatim (closed two-value vocabulary)",
@@ -8129,6 +8141,10 @@ def _derive_years_in_business(mf: dict) -> None:
             "confidence": "deterministic",
             "source": "derived",
             "evidence_state": "derived",
+            # E&O 5.7: the rule and its input facts, on the envelope itself -
+            # "Source: derived does not explain how the value was produced."
+            "derivation": {"rule": "years_since_business_start_date",
+                           "inputs": ["business_start_date"]},
         }
         logger.info(
             "derived years_in_business=%s from business_start_date=%r - the "
@@ -8213,11 +8229,20 @@ def _route_renewal_dates(mf: dict) -> None:
                 prop_exp = exp_d + timedelta(days=_term_days)
         except ValueError:
             pass
+    # E&O 5.7's own worked example is exactly this value: "Proposed Effective
+    # Date ... Derivation: Prior expiration date + renewal routing rule".
     mf["effective_date"] = {"value": prop_eff.strftime("%m/%d/%Y"),
-                            "confidence": "low_confidence", "source": "derived"}
+                            "confidence": "low_confidence", "source": "derived",
+                            "derivation": {
+                                "rule": "renewal_routing_prior_expiration",
+                                "inputs": ["prior_expiration_date", "is_renewal"]}}
     if prop_exp is not None:
         mf["expiration_date"] = {"value": prop_exp.strftime("%m/%d/%Y"),
-                                 "confidence": "low_confidence", "source": "derived"}
+                                 "confidence": "low_confidence", "source": "derived",
+                                 "derivation": {
+                                     "rule": "renewal_routing_prior_term_length",
+                                     "inputs": ["prior_effective_date",
+                                                "prior_expiration_date"]}}
     else:
         mf.pop("expiration_date", None)
         _record_fact_rejection(

@@ -27,6 +27,7 @@ SQS_RECOMMENDATION_AUDIT_STATEMENTS = [
         sqs_score_at_action       INTEGER,
         override_reason           TEXT,
         producer_answer           TEXT,
+        answered_at               TEXT,
         model_version             TEXT NOT NULL,
         UNIQUE(session_id, rec_id)
     )
@@ -43,6 +44,36 @@ SQS_RECOMMENDATION_AUDIT_STATEMENTS = [
     # silently land in the download-audit and cover-page Red Flags sets.
     # ALTER as well as the CREATE above, so existing databases pick it up on restart.
     "ALTER TABLE sqs_recommendation_audit ADD COLUMN IF NOT EXISTS producer_answer TEXT",
+    # E&O 5.8: when the producer typed the answer. presented_at is INSERT-only,
+    # so an answer landing via the upsert's UPDATE branch had no timestamp of
+    # its own until this column (2026-08-26).
+    "ALTER TABLE sqs_recommendation_audit ADD COLUMN IF NOT EXISTS answered_at TEXT",
+]
+
+# E&O append-only event history (client section 5.11 / 5.12, 2026-08-26).
+# One row per meaningful package event that has no durable table of its own
+# (upload, extraction, client answers applied, retractions, reopens with the
+# prior state they would otherwise erase) plus the SQS scoring snapshots of
+# 5.12 (event_type='sqs_snapshot', written only when the score, a pillar, or
+# the ceiling actually changed - never per invisible recalculation).
+# INSERT-only by design: nothing in the APPLICATION may UPDATE or DELETE here.
+# Lifecycle is owned solely by scheduler_service.run_audit_log_retention,
+# which sweeps rows older than AUDIT_EVENTS_RETENTION_DAYS (default 180,
+# floored at 180 - owner ruling 2026-08-26, Q18: the E&O record is kept for
+# 6 months).
+AUDIT_EVENT_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS audit_events (
+        id          TEXT PRIMARY KEY,
+        session_id  TEXT NOT NULL,
+        user_id     TEXT,
+        event_type  TEXT NOT NULL,
+        event_data  JSONB,
+        created_at  TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_audit_events_session ON audit_events(session_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_events_type    ON audit_events(event_type)",
 ]
 
 DOWNLOAD_AUDIT_STATEMENTS = [
@@ -137,7 +168,8 @@ UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS = [
         previous_value  TEXT,
         confirmed_at  TEXT NOT NULL,
         candidates    JSONB,
-        reason        TEXT
+        reason        TEXT,
+        note          TEXT
     )
     """,
     # V1 plan C1 F10 (client 1.5 "Producer Resolution ... must not delete the
@@ -146,6 +178,9 @@ UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS = [
     # databases pick the columns up via the ALTER list in config/database.py.
     "ALTER TABLE underwriting_confirmation_audit ADD COLUMN IF NOT EXISTS candidates JSONB",
     "ALTER TABLE underwriting_confirmation_audit ADD COLUMN IF NOT EXISTS reason TEXT",
+    # E&O 5.10 "any resolution note": the producer's OWN optional free text,
+    # distinct from `reason` (the comparator's statement of the conflict).
+    "ALTER TABLE underwriting_confirmation_audit ADD COLUMN IF NOT EXISTS note TEXT",
     "CREATE INDEX IF NOT EXISTS idx_uw_confirm_session ON underwriting_confirmation_audit(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_uw_confirm_user    ON underwriting_confirmation_audit(user_id)",
 ]
@@ -299,6 +334,10 @@ class UnderwritingConfirmRequest(BaseModel):
     session_id: str
     fact_key: str
     value: str
+    # E&O 5.10 "any resolution note": optional producer free text, stored on
+    # the confirmation audit row. The UI may or may not offer it; the backend
+    # retains it whenever sent.
+    note: Optional[str] = None
 
 
 class ClientAnswerResolveRequest(BaseModel):

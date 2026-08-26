@@ -138,6 +138,17 @@ async def _dump(session_id: str, as_json: bool):
     print(f"\n4. WITHHELD (unresolved, stamped blank)")
     print("-" * 78)
     print("  " + (", ".join(facts.get("_uw_conflicted_keys") or []) or "(none)"))
+    # BOTH keys, because they answer different questions and are one character
+    # apart. `_uw_conflicted_keys` = value withheld from the form (normally
+    # EMPTY by Brent's D16 ruling). `_uw_conflict_keys` = every fact the
+    # documents still disagree about, and THE ONE that drives
+    # `fact_state.value_state == conflicting` and the producer "Conflict -
+    # resolve" routing. A conflict that is detected in section 6 below but
+    # absent here never reached the session, which is a persistence problem,
+    # not a detection one - that distinction cost a full live test round.
+    print("\n4b. CONFLICTED (_uw_conflict_keys) - drives value_state=conflicting")
+    print("-" * 78)
+    print("  " + (", ".join(facts.get("_uw_conflict_keys") or []) or "(none)"))
     if private:
         print("  other private keys: " + ", ".join(sorted(private)))
 
@@ -172,6 +183,100 @@ async def _dump(session_id: str, as_json: bool):
     res = assess_underwriting_consistency(active, facts, s.get("uw_confirmations") or {})
     rows = [f for f in res.get("fields") or [] if f.get("status") == "conflict"]
     print(f"  {len(rows)} conflict row(s), {len(active)} active document(s)\n")
+
+    # EVERY assessed row, not just the conflicts. Printing conflicts alone
+    # cannot distinguish "the engine never looked at this field" from "it
+    # looked and called it consistent" - and those need opposite fixes. That
+    # ambiguity cost a full live test round on 2026-08-26 (C4 test S5).
+    # ── 6b. WHICH STEP COLLAPSES THE GROUPS ─────────────────────────────
+    # Ten offline replays failed to reproduce a live collapse (C4-P). When the
+    # harness and production disagree that many times, stop rebuilding the
+    # harness and instrument the real thing: every group-reducing step inside
+    # `assess_underwriting_consistency` is wrapped here and reports what it did
+    # to the REAL session data. Dev-only, restored in a finally block.
+    print("\n6b. GROUP-REDUCING STEPS - which one collapses a field, on real data")
+    print("-" * 78)
+    import services.underwriting_consistency as _uc
+    _wrapped = ("_drop_foreign_line_values", "_drop_declared_trade_names",
+                "_drop_class_exposure_candidates", "_merge_equivalent_value_groups")
+    _orig = {n: getattr(_uc, n) for n in _wrapped}
+    _events = []
+
+    def _wrap(name, fn):
+        def inner(fact_key, values, *a, **kw):
+            before = [str(g.get("display")) for g in (values or [])]
+            out = fn(fact_key, values, *a, **kw)
+            after = [str(g.get("display")) for g in (out or [])]
+            if len(after) != len(before):
+                _events.append((fact_key, name, before, after))
+            return out
+        return inner
+
+    try:
+        for _n in _wrapped:
+            setattr(_uc, _n, _wrap(_n, _orig[_n]))
+        _uc.assess_underwriting_consistency(
+            active, facts, s.get("uw_confirmations") or {})
+    except Exception as _iex:                                 # noqa: BLE001
+        print(f"  instrumentation run failed: {_iex}")
+    finally:
+        for _n, _f in _orig.items():
+            setattr(_uc, _n, _f)
+
+    if _events:
+        for fk, name, before, after in _events:
+            print(f"  {fk}: {name}")
+            print(f"     before {len(before)}: {before}")
+            print(f"     after  {len(after)}: {after}")
+    else:
+        print("  no step reduced any field's group count - if a field still shows")
+        print("  ONE group for two differing values, they were never two groups,")
+        print("  which points at the grouping key itself (see the norm= line above).")
+
+    _conf = s.get("uw_confirmations") or {}
+    print(f"  confirmations on file: "
+          f"{', '.join(sorted(_conf)) if _conf else '(none)'}")
+    # Per-VALUE-GROUP source counts, and the per-DOCUMENT value the engine
+    # actually reads. A row showing ONE group when two documents plainly hold
+    # different values has exactly two explanations, and only this tells them
+    # apart: either each document contributed and the groups were merged
+    # afterwards (an equivalence/normalisation defect), or one document never
+    # contributed at all (a gating or data-shape defect). Guessing between them
+    # burned four rounds on 2026-08-26.
+    from services.underwriting_consistency import _fv as _uw_fv
+    print(f"  every assessed field ({len(res.get('fields') or [])}):")
+    for f in res.get("fields") or []:
+        key = str(f.get("fact_key"))
+        vals = " | ".join(
+            f"{v.get('display')}<-{len(v.get('sources') or [])}src"
+            for v in (f.get("values") or []))
+        print(f"     {key:32} {str(f.get('status')):12} "
+              f"review={str(f.get('review_required')):5} [{vals}]")
+        # The value AND its normalized grouping key. `groups` is keyed on the
+        # normalized string, so two documents holding different values that
+        # normalize to the SAME key silently become one group carrying two
+        # sources - which reads identically to "they agreed". This is the last
+        # step between reading a value and deciding there is no conflict, and
+        # it was the only one not visible anywhere.
+        from services.underwriting_consistency import (
+            _normalize as _uw_norm, RECONCILABLE_FIELDS as _RF,
+        )
+        _kind = (_RF.get(key) or {}).get("kind", "identity")
+        per_doc = []
+        for i, d in enumerate(active):
+            _v = _uw_fv(d.get("facts") or {}, key)
+            try:
+                _n = _uw_norm(_v, _kind, key) if _v is not None else None
+            except Exception as _nx:                          # noqa: BLE001
+                _n = f"<error {_nx}>"
+            per_doc.append(f"{(d.get('filename') or i)}={_v!r} -> norm={_n!r}")
+        print(f"         kind={_kind}; engine reads per-doc: {'; '.join(per_doc)}")
+    _assessed = {f.get("fact_key") for f in res.get("fields") or []}
+    from services.underwriting_consistency import RECONCILABLE_FIELDS
+    _never = sorted(set(RECONCILABLE_FIELDS) - _assessed)
+    print(f"  reconcilable fields NEVER assessed ({len(_never)}): "
+          f"{', '.join(_never[:12])}{' …' if len(_never) > 12 else ''}")
+    print()
     for f in rows:
         print(f"  * {f['label']}  [{f['fact_key']}]  kind={f['kind']} "
               f"confidence={f.get('confidence')}")

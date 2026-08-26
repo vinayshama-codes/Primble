@@ -12,7 +12,7 @@ from models.schemas import (
     SQS_RECOMMENDATION_AUDIT_STATEMENTS, FIELD_SOURCE_AUDIT_STATEMENTS,
     DOWNLOAD_AUDIT_STATEMENTS, SUBMISSION_INTEGRITY_AUDIT_STATEMENTS,
     UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS, MARKETING_REASON_AUDIT_STATEMENTS,
-    SUBMISSION_ISSUE_STATUS_STATEMENTS,
+    SUBMISSION_ISSUE_STATUS_STATEMENTS, AUDIT_EVENT_STATEMENTS,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ async def init_audit_tables() -> None:
             + UNDERWRITING_CONFIRMATION_AUDIT_STATEMENTS
             + MARKETING_REASON_AUDIT_STATEMENTS
             + SUBMISSION_ISSUE_STATUS_STATEMENTS
+            + AUDIT_EVENT_STATEMENTS
         ):
             try:
                 await conn.execute(stmt)
@@ -383,11 +384,15 @@ async def mark_recommendation_resolved(
             updated = await conn.execute(
                 """
                 UPDATE sqs_recommendation_audit
-                   SET action='resolved', action_at=$3, sqs_score_at_action=$4
+                   SET action='resolved', action_at=$3, sqs_score_at_action=$4,
+                       -- E&O 5.11: a manual resolve names its actor; the
+                       -- auto-resolve pass passes NULL and the COALESCE keeps
+                       -- the presented user, exactly as before.
+                       user_id=COALESCE($5, user_id)
                  WHERE session_id=$1 AND rec_id=$2
                    AND (action IS NULL OR action = 'downloaded_anyway')
                 """,
-                session_id, rec_id, now, sqs_score_at_action,
+                session_id, rec_id, now, sqs_score_at_action, user_id,
             )
             if updated and updated.rsplit(" ", 1)[-1] != "0":
                 return True
@@ -448,6 +453,9 @@ async def mark_recommendation_dismissed(
                     SET action='dismissed', action_at=EXCLUDED.action_at,
                         sqs_score_at_action=EXCLUDED.sqs_score_at_action,
                         override_reason=EXCLUDED.override_reason,
+                        -- E&O 5.9: the row must name who DISMISSED, not who it
+                        -- was presented to (presentation seeds the row first).
+                        user_id=COALESCE(EXCLUDED.user_id, sqs_recommendation_audit.user_id),
                         -- Associate the dismissed rec with the form it was DISMISSED
                         -- on (EXCLUDED), falling back to the presented form_id only
                         -- when the dismiss carried none. Multi-form recs (e.g.
@@ -633,10 +641,17 @@ async def mark_recommendation_answer_recorded(
                 INSERT INTO sqs_recommendation_audit (
                     id, session_id, user_id, form_id, rec_id, field,
                     recommendation_type, component, message, score_impact,
-                    presented_at, model_version, producer_answer
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                    presented_at, model_version, producer_answer, answered_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                 ON CONFLICT (session_id, rec_id) DO UPDATE
                     SET producer_answer = EXCLUDED.producer_answer,
+                        -- E&O 5.8: the answer's own timestamp and actor. Before
+                        -- 2026-08-26 an answer landing via this UPDATE branch
+                        -- carried NO timestamp (presented_at is INSERT-only) and
+                        -- kept the PRESENTED user - an answer that never closed
+                        -- its gap was permanently untimed.
+                        answered_at = EXCLUDED.answered_at,
+                        user_id = COALESCE(EXCLUDED.user_id, sqs_recommendation_audit.user_id),
                         field   = COALESCE(sqs_recommendation_audit.field,   EXCLUDED.field),
                         form_id = COALESCE(EXCLUDED.form_id, sqs_recommendation_audit.form_id),
                         score_impact = COALESCE(sqs_recommendation_audit.score_impact,
@@ -652,7 +667,7 @@ async def mark_recommendation_answer_recorded(
                 # the rec_id rather than violating the constraint.
                 message or rec_id,
                 score_impact,
-                now, model_version, producer_answer,
+                now, model_version, producer_answer, now,
             )
         logger.info(f"Recorded producer answer for rec {rec_id} (session {session_id})")
         return True
@@ -700,7 +715,8 @@ async def get_recommendation_audit_row(session_id: str, rec_id: str) -> Optional
         async with get_pool().acquire() as conn:
             row = await conn.fetchrow(
                 """SELECT rec_id, form_id, field, message, score_impact, component,
-                          override_reason, producer_answer, action, action_at
+                          override_reason, producer_answer, action, action_at,
+                          sqs_score_at_action, answered_at
                    FROM sqs_recommendation_audit
                    WHERE session_id=$1 AND rec_id=$2""",
                 session_id, rec_id,
@@ -779,6 +795,226 @@ async def get_field_change_log(session_id: str) -> List[dict]:
         return []
 
 
+# ── E&O append-only event history + SQS snapshots (client 5.11 / 5.12) ────────
+# audit_events is INSERT-only. Nothing here or anywhere else may UPDATE or
+# DELETE a row - that property is what makes it usable as history (5.11), and
+# the reopen paths rely on it to preserve the state their table UPDATE erases.
+
+# ASYNC-SAFE
+async def log_audit_event(
+    session_id: str,
+    user_id: Optional[str],
+    event_type: str,
+    event_data: Optional[dict] = None,
+) -> bool:
+    """Append one meaningful package event. Best-effort like every audit write:
+    a failed row must never block the action it records - but it is logged with
+    the traceback (D35)."""
+    try:
+        async with get_pool().acquire() as conn:
+            await conn.execute(
+                """INSERT INTO audit_events
+                   (id, session_id, user_id, event_type, event_data, created_at)
+                   VALUES ($1,$2,$3,$4,$5::jsonb,$6)""",
+                f"evt_{uuid.uuid4().hex}",
+                session_id, user_id, event_type,
+                json.dumps(event_data or {}, default=str),
+                datetime.now(timezone.utc).isoformat(),
+            )
+        return True
+    except Exception as ex:
+        logger.error(f"Failed to log audit event {event_type} for {session_id}: {ex}",
+                     exc_info=True)
+        return False
+
+
+# ASYNC-SAFE
+async def get_audit_events(session_id: str,
+                           event_type: Optional[str] = None) -> List[dict]:
+    """Chronological event history for one session, oldest first."""
+    try:
+        async with get_pool().acquire() as conn:
+            if event_type:
+                rows = await conn.fetch(
+                    """SELECT event_type, user_id, event_data, created_at
+                       FROM audit_events
+                       WHERE session_id=$1 AND event_type=$2
+                       ORDER BY created_at ASC""",
+                    session_id, event_type,
+                )
+            else:
+                rows = await conn.fetch(
+                    """SELECT event_type, user_id, event_data, created_at
+                       FROM audit_events
+                       WHERE session_id=$1
+                       ORDER BY created_at ASC""",
+                    session_id,
+                )
+        out = []
+        for r in rows:
+            d = dict(r)
+            if isinstance(d.get("event_data"), str):
+                try:
+                    d["event_data"] = json.loads(d["event_data"])
+                except Exception:                              # noqa: BLE001
+                    pass
+            out.append(d)
+        return out
+    except Exception as ex:
+        logger.error(f"Failed to get audit events: {ex}")
+        return []
+
+
+def _snapshot_signature(package_sqs: Optional[dict]) -> dict:
+    """The exact fields 5.12 says a new snapshot must be triggered by: raw SQS,
+    displayed SQS, every pillar score, applied ceiling, ceiling reason. Pure -
+    reads the scorer's own output (D33: never recomputed for display)."""
+    p = package_sqs or {}
+    pillars = p.get("pillars") or {}
+    # The same cap prints with or without the appended remediation sentence
+    # (" Fix: ...") depending on which path rendered it. The SUBSTANCE of the
+    # 5.12 trigger is the cap and its cause - live run 2026-08-26 showed the
+    # suffix alone fabricating a "ceiling reason changed" snapshot.
+    reason = p.get("cap_reason")
+    if isinstance(reason, str):
+        reason = reason.split(" Fix:")[0].strip()
+    return {
+        "raw_sqs":        p.get("raw_sqs_score"),
+        "displayed_sqs":  p.get("package_sqs_score"),
+        "pillars":        {k: pillars.get(k) for k in sorted(pillars)},
+        "ceiling":        p.get("cap_applied"),
+        "ceiling_reason": reason,
+    }
+
+
+def _snapshots_differ(a: Optional[dict], b: Optional[dict]) -> bool:
+    """True when any 5.12 trigger fires between two signatures - a score moved,
+    a pillar moved, a ceiling appeared/disappeared or changed its reason."""
+    return (a or {}) != (b or {})
+
+
+# ASYNC-SAFE
+async def log_sqs_snapshot_if_changed(
+    session_id: str,
+    user_id: Optional[str],
+    package_sqs: Optional[dict],
+    trigger: str,
+) -> bool:
+    """5.12: store a scoring snapshot when the score MATERIALLY changed, never
+    per invisible recalculation. ``trigger='package_downloaded'`` always
+    snapshots (a download is its own trigger in 5.12's list). The snapshot
+    body is the scorer's emitted trace, per D33."""
+    if not isinstance(package_sqs, dict) or not package_sqs:
+        return False
+    sig = _snapshot_signature(package_sqs)
+    try:
+        if trigger != "package_downloaded":
+            prior = await get_audit_events(session_id, event_type="sqs_snapshot")
+            if prior:
+                last = (prior[-1].get("event_data") or {}).get("signature")
+                if not _snapshots_differ(last, sig):
+                    return False
+        return await log_audit_event(
+            session_id, user_id, "sqs_snapshot",
+            {
+                "signature":         sig,
+                "trigger":           trigger,
+                "tier":              package_sqs.get("tier"),
+                "calculation_stage": package_sqs.get("calculation_stage"),
+                "weights_version":   package_sqs.get("weights_version"),
+                "score_trace":       package_sqs.get("score_trace"),
+            },
+        )
+    except Exception as ex:
+        logger.error(f"SQS snapshot failed for {session_id}: {ex}", exc_info=True)
+        return False
+
+
+# ASYNC-SAFE
+async def get_producer_answers(session_id: str) -> List[dict]:
+    """Every value a producer typed on a recommendation card (5.8), whatever
+    its current action state - including answered-but-still-open rows, which
+    get_reviewed_recommendations deliberately excludes."""
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT rec_id, form_id, field, message, producer_answer,
+                          answered_at, action, action_at, user_id
+                   FROM sqs_recommendation_audit
+                   WHERE session_id=$1 AND producer_answer IS NOT NULL
+                   ORDER BY COALESCE(answered_at, presented_at) ASC""",
+                session_id,
+            )
+        return [dict(r) for r in rows]
+    except Exception as ex:
+        logger.error(f"Failed to get producer answers: {ex}")
+        return []
+
+
+# ASYNC-SAFE
+async def get_underwriting_confirmations(session_id: str) -> List[dict]:
+    """Every Data Consistency resolution on this submission (5.10): chosen
+    value, prior value, all competing candidates with their per-document
+    sources, actor, timestamp, conflict reason, optional producer note.
+    The table existed since C1; this is its FIRST reader - the evidence was
+    stored and unreachable until the E&O export gained this section."""
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT fact_key, label, confirmed_value, previous_value,
+                          confirmed_at, candidates, reason, note, user_id
+                   FROM underwriting_confirmation_audit
+                   WHERE session_id=$1
+                   ORDER BY confirmed_at ASC""",
+                session_id,
+            )
+        out = []
+        for r in rows:
+            d = dict(r)
+            if isinstance(d.get("candidates"), str):
+                try:
+                    d["candidates"] = json.loads(d["candidates"])
+                except Exception:                              # noqa: BLE001
+                    d["candidates"] = []
+            out.append(d)
+        return out
+    except Exception as ex:
+        logger.error(f"Failed to get underwriting confirmations: {ex}")
+        return []
+
+
+# ASYNC-SAFE
+async def get_package_download_log(session_id: str) -> List[dict]:
+    """Every download of this package from acord_audit_log (5.13): action,
+    form, timestamp, the score at download, the file checksum, and the FULL
+    list of open items recorded server-side at that moment. This table was
+    written on every download since the feature shipped and never read by the
+    E&O export - the record printed a count while the list sat here."""
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT action, form_id, form_name, timestamp,
+                          sqs_score_at_download, unresolved_issues, file_checksum
+                   FROM acord_audit_log
+                   WHERE session_id=$1 AND action LIKE 'download%'
+                   ORDER BY timestamp ASC""",
+                session_id,
+            )
+        out = []
+        for r in rows:
+            d = dict(r)
+            if isinstance(d.get("unresolved_issues"), str):
+                try:
+                    d["unresolved_issues"] = json.loads(d["unresolved_issues"])
+                except Exception:                              # noqa: BLE001
+                    pass
+            out.append(d)
+        return out
+    except Exception as ex:
+        logger.error(f"Failed to get package download log: {ex}")
+        return []
+
+
 # Max characters of any single fact value rendered into the export. Long
 # narrative facts (operations descriptions, remarks) are truncated rather than
 # dropped - the record is meant to show WHAT was captured and from WHERE, not
@@ -786,7 +1022,7 @@ async def get_field_change_log(session_id: str) -> List[dict]:
 _EXPORT_VALUE_MAX = 300
 
 
-def _flatten_fact(key: str, raw) -> Optional[dict]:
+def _flatten_fact(key: str, raw, facts: Optional[dict] = None) -> Optional[dict]:
     """Normalize one entry of the session `facts` dict into a flat
     {fact/value/source/confidence} row for the audit export.
 
@@ -796,6 +1032,12 @@ def _flatten_fact(key: str, raw) -> Optional[dict]:
     by row count rather than dumped, since each row is itself a dict and the
     detail already lives in the generated forms. Returns None for empty facts
     so the export shows what WAS captured, not a wall of blanks.
+
+    ``facts`` (the whole dict) is passed through to ``derive_states`` - without
+    it the conflicting / not_applicable / unable_to_determine branches can
+    never fire (they read the ``_uw_conflict_keys`` / denied-lines /
+    ``_rejected_facts`` sidecars), which silently reduced the state axes to
+    two values in every export before 2026-08-26.
     """
     if isinstance(raw, dict) and "value" in raw:
         value = raw.get("value")
@@ -808,7 +1050,7 @@ def _flatten_fact(key: str, raw) -> Optional[dict]:
     # never disagree with the session.
     try:
         from services.fact_state import derive_states, display_state
-        _st = derive_states(key, raw)
+        _st = derive_states(key, raw, facts)
     except Exception:                                         # noqa: BLE001
         _st = {}
 
@@ -836,6 +1078,22 @@ def _flatten_fact(key: str, raw) -> Optional[dict]:
         if _st.get("evidence_actor"):
             row["evidence_actor"] = _st["evidence_actor"]
         row["display_state"] = display_state(_st.get("value_state"), _st.get("evidence_state"))
+    # E&O 5.7: how a derived value was produced - rule + input facts, written
+    # onto the envelope by the deriving code itself.
+    if isinstance(raw, dict) and isinstance(raw.get("derivation"), dict):
+        row["derivation"] = raw["derivation"]
+    # D19's scoped store: LOB / policy scope for this fact where recorded.
+    try:
+        scoped = (facts or {}).get("_scoped") or {}
+        entries = scoped.get(key)
+        if isinstance(entries, list) and entries:
+            row["scope"] = [
+                {"value": str(e.get("value") or "")[:80],
+                 **{k: v for k, v in (e.get("scope") or {}).items() if v}}
+                for e in entries[:6] if isinstance(e, dict)
+            ]
+    except Exception:                                         # noqa: BLE001
+        pass
     return row
 
 
@@ -863,30 +1121,105 @@ async def get_audit_trail_export(session_id: str) -> dict:
     """
     marketing_reason = await get_marketing_reason(session_id)
     dismissed = await get_dismissed_recommendations(session_id)
+    answered = [r for r in await get_producer_answers(session_id)
+                if r.get("action") != "dismissed"]
     issue_statuses = [s for s in await get_issue_statuses(session_id) if s.get("reason")]
     downloads = await get_download_audit_log(session_id)
     field_changes = await get_field_change_log(session_id)
+    conflict_resolutions = await get_underwriting_confirmations(session_id)
+    package_downloads = await get_package_download_log(session_id)
+    events = await get_audit_events(session_id)
+    sqs_snapshots = [e for e in events if e.get("event_type") == "sqs_snapshot"]
 
     documents: List[dict] = []
     inputs: List[dict] = []
     generated_forms: List[str] = []
+    rejected_facts: List[dict] = []
+    client_receipts: List[dict] = []
     try:
         from repositories.session_repository import get_processing_session
         session = await get_processing_session(session_id)
-        for d in (session.get("doc_summary") or []):
+        facts = session.get("facts") or {}
+        # A retention-tombstoned session ({"purged": true, ...}) has no inputs
+        # to list - without this guard the tombstone's own keys would render
+        # as fact rows.
+        if facts.get("purged") is True:
+            facts = {}
+        docs = session.get("docs") or []
+
+        # 5.2 Source Document Record - from the documents the session actually
+        # stores. The old read of `doc_summary` was a key that only ever
+        # existed in HTTP responses and was never persisted, so SOURCE
+        # DOCUMENTS printed "(none recorded)" on EVERY export since the
+        # feature shipped. `doc_summary` remains as the legacy fallback for
+        # any old session that might carry it.
+        for d in (docs or session.get("doc_summary") or []):
             documents.append({
                 "filename":   d.get("filename") or "",
+                "doc_id":     d.get("doc_id") or "",
                 "doc_type":   d.get("doc_type_label") or d.get("doc_type") or "",
                 "confidence": d.get("doc_type_confidence") or "",
                 "classified_by": d.get("doc_type_source") or "",
                 "overridden": bool(d.get("doc_type_overridden")),
                 "excluded":   bool(d.get("excluded")),
+                "uploaded_at": d.get("uploaded_at") or session.get("created_at") or "",
+                "uploaded_by": d.get("uploaded_by") or session.get("user_id") or "",
             })
-        for key, raw in sorted((session.get("facts") or {}).items()):
-            row = _flatten_fact(key, raw)
+
+        # 5.3-5.6 fact-level lineage: rejoin each merged fact against every
+        # document's OWN extraction and page-marked text. Computed, not
+        # stored - both sides of the join already live on the session.
+        doc_index = []
+        try:
+            from services.fact_lineage import build_doc_index, sources_for_fact
+            doc_index = build_doc_index(docs)
+        except Exception as _lx:                              # noqa: BLE001
+            logger.warning(f"Audit export: lineage index unavailable: {_lx}",
+                           exc_info=True)
+
+        for key, raw in sorted(facts.items()):
+            # Private sidecars (_scoped, _uw_conflict_keys, ...) and the
+            # internal dec index are machinery, not captured inputs - before
+            # 2026-08-26 they rendered as junk rows like "_scoped:
+            # [structured value] / Source: unspecified".
+            if key.startswith("_") or key == "dec_page_entries":
+                continue
+            # A BARE Python boolean is pipeline bookkeeping by construction
+            # (dec_states_payroll_basis, renewal_dates_routed): extraction
+            # wraps every real boolean answer in an envelope as the string
+            # "True"/"False" (_annotate_facts), so a bare bool can only have
+            # been written by internal code. Live run 2026-08-26: these
+            # rendered as 'True / Source: unspecified' - the exact junk-row
+            # class the client reported.
+            if isinstance(raw, bool):
+                continue
+            row = _flatten_fact(key, raw, facts)
             if row:
+                if doc_index:
+                    try:
+                        row["sources"] = sources_for_fact(key, raw, doc_index)
+                    except Exception:                          # noqa: BLE001
+                        row["sources"] = []
                 inputs.append(row)
+
+        # "What remained unresolved": values seen and REFUSED, with the reason
+        # the pipeline recorded when it refused them.
+        rej = facts.get("_rejected_facts")
+        if isinstance(rej, dict):
+            rejected_facts = [{"fact": k, "reason": str(v)[:300]}
+                              for k, v in sorted(rej.items())]
+
         generated_forms = sorted((session.get("generated_forms") or {}).keys())
+
+        # 5.8: the client's questionnaire answers with respondent identity and
+        # timestamp, from the immutable encrypted receipts.
+        try:
+            from services.arq_receipt_service import get_receipts_for_session
+            owner = str(session.get("user_id") or "")
+            if owner:
+                client_receipts = await get_receipts_for_session(session_id, owner)
+        except Exception as _rx:                              # noqa: BLE001
+            logger.warning(f"Audit export: receipts unavailable: {_rx}")
     except Exception as ex:
         logger.warning(f"Audit export: session detail unavailable for {session_id}: {ex}")
 
@@ -894,11 +1227,18 @@ async def get_audit_trail_export(session_id: str) -> dict:
         "session_id": session_id,
         "marketing_reason": marketing_reason,
         "dismissed_recommendations": dismissed,
+        "answered_recommendations": answered,
         "issue_status_overrides": issue_statuses,
         "download_anyway_log": downloads,
+        "package_downloads": package_downloads,
+        "conflict_resolutions": conflict_resolutions,
         "documents": documents,
         "inputs": inputs,
+        "rejected_facts": rejected_facts,
+        "client_receipts": client_receipts,
         "field_modifications": field_changes,
+        "audit_events": events,
+        "sqs_snapshots": sqs_snapshots,
         "generated_forms": generated_forms,
     }
 
@@ -1287,6 +1627,7 @@ async def log_underwriting_confirmation(
     previous_value: Optional[str],
     candidates: Optional[list] = None,
     reason: Optional[str] = None,
+    note: Optional[str] = None,
 ) -> None:
     """Record a user-confirmed underwriting value (Beta Report §4.3 / §5.1).
 
@@ -1308,8 +1649,8 @@ async def log_underwriting_confirmation(
                 INSERT INTO underwriting_confirmation_audit (
                     id, session_id, user_id, fact_key, label,
                     confirmed_value, previous_value, confirmed_at,
-                    candidates, reason
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                    candidates, reason, note
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
                 """,
                 f"uwc_{uuid.uuid4().hex}",
                 session_id,
@@ -1321,6 +1662,7 @@ async def log_underwriting_confirmation(
                 datetime.now(timezone.utc).isoformat(),
                 json.dumps(candidates) if candidates is not None else None,
                 reason,
+                (str(note).strip()[:2000] or None) if note else None,
             )
         logger.info(
             "Logged underwriting confirmation session=%s field=%s value=%r",

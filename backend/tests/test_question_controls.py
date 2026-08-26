@@ -166,6 +166,14 @@ def test_producer_name_is_producer_not_client_critical():
 
 
 def test_tier2_and_coverage_fields_are_important():
+    """Priority tiering is unchanged by the 2026-08-26 routing work.
+
+    `gl_each_occurrence` / `umbrella_limit` are still IMPORTANT at this layer -
+    they still matter to the submission and still drive SQS. What changed is
+    only WHO is asked, and that happens one layer up in `decorate_questions`
+    (see `test_coverage_limits_route_to_the_producer`). Keeping the tier
+    assertion here proves the two concerns stayed separate.
+    """
     for f in ("fein", "total_revenue", "gl_each_occurrence", "umbrella_limit",
               "wc_payroll"):
         tax = classify_question(f, ["ACORD_126"], is_curated_client=True)
@@ -414,14 +422,44 @@ def test_submission_urgency_is_client_and_preselected():
     assert q["suggested"] is True
 
 
-def test_desired_limits_stay_client_not_agency():
-    # "Coverage intent" -> Agency does NOT drag the insured's desired LIMITS out of
-    # the Client bucket - they stay Client and keep driving SQS.
-    for f in ("gl_limits", "umbrella_limit", "auto_liability_limit",
-              "property_building_value"):
-        tax = classify_question(f, ["ACORD_126"], is_curated_client=True)
-        assert tax["bucket"] == BUCKET_CLIENT, f
-        assert tax["audience"] == AUDIENCE_CLIENT, f
+def test_coverage_limits_route_to_the_producer():
+    """REVERSED 2026-08-26 by the client's master plan 4.4 ("Coverage limits" is
+    a Producer-Only question) and core principle 5.
+
+    This test previously asserted the opposite, under the name
+    `test_desired_limits_stay_client_not_agency`, pinning the July decision that
+    "coverage intent -> Agency" must not drag the insured's DESIRED limits out of
+    the Client bucket. That decision has been explicitly overruled, the same way
+    the NAICS client-routing decision was overruled on 2026-08-12.
+
+    The name-pattern classifier is deliberately NOT the place this happens - a
+    substring cannot express "producer-only fact" - so the assertion runs through
+    `decorate_questions`, which is where the eligibility door lives.
+
+    `property_building_value` is retained in the list precisely because it must
+    NOT move: 4.3 keeps "Building/BPP values when known" client-eligible.
+    """
+    from services.question_classifier import decorate_questions
+
+    def _decorated(field):
+        q = {"field_name": field, "_canonical_key": field,
+             "_is_curated_client": True}
+        q.update(classify_question(field, ["ACORD_126"], is_curated_client=True,
+                                   canonical_key=field))
+        decorate_questions([q], facts={field: {"value": "$1,000,000",
+                                               "confidence": "ai_high",
+                                               "source": "ai"}})
+        return q
+
+    for f in ("gl_limits", "umbrella_limit", "auto_liability_limit"):
+        q = _decorated(f)
+        assert q["audience"] == AUDIENCE_PRODUCER, f
+        assert q["bucket"] == BUCKET_AGENCY, f
+
+    # The one that stays with the client.
+    q = _decorated("property_building_value")
+    assert q["audience"] == AUDIENCE_CLIENT
+    assert q["bucket"] == BUCKET_CLIENT
 
 
 def test_apply_default_selection_reports_bucket_counts():

@@ -1,6 +1,6 @@
 # Questions for Brent - 24 Aug 2026
 
-Brent - four judgment calls that belong to you, not to us. I've laid out each one as the
+Brent - five judgment calls that belong to you, not to us. I've laid out each one as the
 real-world situation, what the choices mean, and where we lean. After that, three things
 we've assumed - only reply on those if you disagree.
 
@@ -75,6 +75,26 @@ kept 0.85 / 0.50 so that is the only movement.
 **What we need from you:** if you want different numbers - or want Suggested values pushed
 further below verified ones - say so, and tell me whether the change applies to existing
 submissions or new ones only.
+
+---
+
+## 5. How long the E&O audit record must be kept
+
+The audit record now traces every value back to its document and page, keeps every
+override with who changed it and when, and preserves what was open at each download.
+That evidence lives in our database, and databases have cleanup jobs.
+
+Today the operational audit tables are cleaned up after one year, and the raw uploaded
+document data for free and essentials accounts is cleared after 30 and 180 days. An E&O
+claim can surface years after a submission - if a producer needs this record in year
+three, a one-year cleanup makes it partly blank by then.
+
+**What we've set for now:** six months, everywhere the record reads from. Nothing in the
+audit record is deleted before six months on any tier.
+
+**What we need from you:** if your producers' E&O practice needs longer - many shops keep
+E&O files for years - give us the number and we change one setting. Until you do, six
+months stands.
 
 ---
 

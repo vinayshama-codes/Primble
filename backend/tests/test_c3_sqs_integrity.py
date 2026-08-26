@@ -81,17 +81,45 @@ def test_tier2_removals_are_still_asked_for():
     audience=internal / priority=suppressed - Primble would have quietly
     stopped asking anyone for annual payroll, which is a far worse regression
     than the scoring bug 3.14 fixes.
-    """
-    from services.question_classifier import classify_question
 
-    for field in ("total_payroll", "wc_xmod", "wc_payroll_period",
-                  "wc_officer_exclusions", "num_claims"):
-        res = classify_question(field)
+    UPDATED 2026-08-26. The property being pinned is "we still ASK", not "we ask
+    the CLIENT". Master plan 4.4 moved X-Mod, WC payroll period and owner/officer
+    treatment to the producer, so three of these five now legitimately carry
+    audience=producer. They are still asked - they render in the producer's
+    Agency bucket - which is exactly what this anti-rot test exists to protect.
+    `total_payroll` and `num_claims` remain client-eligible per 4.3.
+    """
+    from services.question_classifier import classify_question, decorate_questions
+
+    def _decorated(field):
+        q = {"field_name": field, "_canonical_key": field,
+             "_is_curated_client": True}
+        q.update(classify_question(field, canonical_key=field,
+                                   is_curated_client=True))
+        decorate_questions([q], facts={})
+        return q
+
+    # Still asked of the CLIENT (4.3: payroll, prior claims).
+    for field in ("total_payroll", "num_claims"):
+        res = _decorated(field)
         assert res["audience"] == "client", (
             f"{field} was removed from Structural Tier 2 but must still be "
-            f"asked - got audience={res['audience']}"
+            f"asked of the client - got audience={res['audience']}"
         )
         assert not res["suppressed"], f"{field} must not be suppressed"
+
+    # Still asked, but of the PRODUCER (4.4: X-Mod, WC payroll period,
+    # owner/officer treatment are insurance judgment).
+    for field in ("wc_xmod", "wc_payroll_period", "wc_officer_exclusions"):
+        res = _decorated(field)
+        assert res["audience"] == "producer", (
+            f"{field} must still be asked, of the producer - got "
+            f"audience={res['audience']}"
+        )
+        assert res["bucket"] == "agency", (
+            f"{field} must land in the visible Agency bucket, not the hidden "
+            f"Underwriting one - got bucket={res['bucket']}"
+        )
 
 
 def test_wc_fields_keep_a_scoring_home_on_the_wc_form():

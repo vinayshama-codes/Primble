@@ -206,11 +206,19 @@ async def run_audit_log_retention():
     - sqs_recommendation_audit: recommendation and SQS scoring history
 
     processing_sessions.facts retention is handled by run_facts_retention() at 04:00 UTC.
+
+    audit_events (the C5 E&O event spine) is swept here too, on its own knob:
+    OWNER RULING 2026-08-26 (Q18): "keep the record for 6 months" - so
+    AUDIT_EVENTS_RETENTION_DAYS defaults to 180 and is FLOORED at 180; the
+    three operational tables above keep their 365-day SOC 2 floor, which
+    already exceeds the 6-month E&O window.
     """
     import os as _os
 
     audit_days = int(_os.getenv("AUDIT_LOG_RETENTION_DAYS", "365"))
     cutoff     = (datetime.now(timezone.utc) - timedelta(days=audit_days)).isoformat()
+    events_days = max(int(_os.getenv("AUDIT_EVENTS_RETENTION_DAYS", "180")), 180)
+    events_cutoff = (datetime.now(timezone.utc) - timedelta(days=events_days)).isoformat()
 
     def _row_count(status: str) -> int:
         try:
@@ -233,16 +241,22 @@ async def run_audit_log_retention():
                     "DELETE FROM sqs_recommendation_audit WHERE presented_at < $1",
                     cutoff,
                 )
+                r_events = await conn.execute(
+                    "DELETE FROM audit_events WHERE created_at < $1",
+                    events_cutoff,
+                )
 
         n_audit = _row_count(r_audit)
         n_field = _row_count(r_field)
         n_sqs   = _row_count(r_sqs)
+        n_events = _row_count(r_events)
         ts      = datetime.now(timezone.utc).isoformat()
 
         logger.info(
             "Audit log retention: cutoff=%s deleted acord_audit_log=%d "
-            "field_source_audit=%d sqs_recommendation_audit=%d at=%s",
-            cutoff, n_audit, n_field, n_sqs, ts,
+            "field_source_audit=%d sqs_recommendation_audit=%d "
+            "audit_events(cutoff=%s)=%d at=%s",
+            cutoff, n_audit, n_field, n_sqs, events_cutoff, n_events, ts,
         )
     except Exception as ex:
         logger.error("Audit log retention cleanup failed: %s", ex)
@@ -258,7 +272,11 @@ async def run_facts_retention():
     tombstone so downstream audit queries remain valid.
 
     Retention windows:
-      free        →  30 days
+      free        → 180 days (was 30 - raised 2026-08-26, owner ruling Q18:
+                    "keep the [E&O] record for 6 months". The audit export's
+                    captured-inputs section reads session facts; purging a
+                    free session's facts at day 30 would blank that section
+                    inside the ruled 6-month window)
       essentials  → 180 days
       professional / enterprise → indefinite (skipped)
     """
@@ -268,7 +286,7 @@ async def run_facts_retention():
     ts  = now.isoformat()
 
     TIERS = {
-        "free":       30,
+        "free":       180,
         "essentials": 180,
     }
 
@@ -294,15 +312,25 @@ async def run_facts_retention():
             tombstone = _tombstone(tier)
             try:
                 async with get_pool().acquire() as conn:
+                    # FIXED 2026-08-26 (found during the C5 E&O audit work):
+                    # processing_sessions has NO `facts` column - facts live at
+                    # data->'facts' (config/database.py). The old statement
+                    # (`SET facts = ...`) raised "column does not exist" into
+                    # the except below EVERY night since the job shipped, so no
+                    # free/essentials session was ever actually purged. Same
+                    # tombstone payload, applied where the data actually is.
+                    # jsonb_set with create_missing=true also tombstones a
+                    # session whose data has no facts key at all.
                     result = await conn.execute(
                         """
                         UPDATE processing_sessions ps
-                        SET    facts = $1::jsonb
+                        SET    data = jsonb_set(ps.data, '{facts}', $1::jsonb, true)
                         FROM   users u
                         WHERE  ps.user_id     = u.id
                           AND  u.subscription_tier = $2
                           AND  ps.updated_at  < $3
-                          AND  (ps.facts IS NULL OR ps.facts->>'purged' IS DISTINCT FROM 'true')
+                          AND  (ps.data->'facts' IS NULL
+                                OR ps.data->'facts'->>'purged' IS DISTINCT FROM 'true')
                         """,
                         tombstone, tier, cutoff,
                     )

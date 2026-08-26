@@ -160,7 +160,7 @@ Source documents this plan is built against. Read the relevant one before starti
 | C4 | Contextual Questionnaire Logic | Not started | |
 | C1c | **Route `submission_integrity.py` through the one door** | **Done** | LIVE RUN 2026-08-21: it still reports "Multiple distinct policy numbers found", "Location address differs", "Operations descriptions differ" on a clean multi-policy package. It is the SIXTH comparison site and does not use `fact_comparison` |
 | C1b | **Scoped fact store (D19)** - carry scope ON the fact, additively | **Done 2026-08-23 (C1-Q FIX 7)** | `facts["_scoped"][key]` written once at the end of `merge_facts` from the settled `coverage_lines`; read by `_scope_from_store` BEFORE the character-keyed path. Additive - `mf[key]` untouched, private key skipped by every fact loop. Closed D-1 Layer 1: Run A scopes two carriers on different lines, Run B conflicts two on the same line |
-| C5 | Source Lineage & E&O Audit Record | Partly started | C1 added `value_state`/`evidence_state`/`evidence_actor` to every envelope and the export, `candidates`+`reason` to the confirmation audit, and (C1-D) human-provenance survival across re-runs. Remaining: full lineage chain (Principle 6) |
+| C5 | Source Lineage & E&O Audit Record | **SHIPPED 2026-08-26 (C5-A..C5-E). All 13 clauses + the four headline complaints, live-verified across three scenarios on the real system. Nothing open.** | New door `services/fact_lineage.py` recovers Document + Page by re-joining each merged fact against every document's OWN stored extraction and its `[Document page N]` text - deterministic, zero LLM cost. Export rebuilt: it read `session.doc_summary`, a key never persisted, so SOURCE DOCUMENTS said "(none recorded)" on EVERY export since the feature shipped; it also never read `acord_audit_log` (the full open-items list, per download), `underwriting_confirmation_audit` (C1's candidates - a table with NO reader) or `arq_receipts`. New append-only `audit_events` + 5.12 snapshots on the client's exact trigger list. **Evidence-destruction fixes: `update_pdf` replaced the fact ENVELOPE with a bare string** (our own edit path manufacturing the "Source: unspecified" the client reported), two `log_field_change` sites hardcoded `previous_value=None`, and client-ARQ apply / schedule saves / retractions logged nothing. **Two latent bugs fixed on sight: `run_facts_retention` had NEVER run** (UPDATE against a `facts` column that does not exist - `data->'facts'` is the truth), and **`sqs_history` was dead code** (the repository's append-only merge only engages when the key is passed explicitly and no caller ever did - `delta_this_session` was permanently 0 and the score-improvement panels could never render). Q18 answered by the owner: **6 months**. Read C5-A for root causes, C5-D for the seven defects the live run exposed, C5-E for the clause-by-clause closure and the four stated caveats |
 
 ### V1 - HIGH
 | # | Item | Status | Notes |
@@ -171,7 +171,7 @@ Source documents this plan is built against. Read the relevant one before starti
 | H4 | Core Submission Information Coverage | Not started | |
 | H5 | ACORD 25 Multi-Carrier Mapping | Not started | |
 | H6 | ACORD 125 Form-Generation Foundation | Not started | Answer key is the 125_reference/ folder. Form edition already correct (2025/03) - see D5 |
-| H7 | Audit / Edit History Completion | Not started | |
+| H7 | Audit / Edit History Completion | Not started - but **read C5-A..C5-E first** | C5 already built the spine this item would otherwise start from: append-only `audit_events`, per-fact Document + Page lineage, before/after on every mutation path that had none (client-ARQ apply, schedule saves, retractions, reopens), SQS snapshots, and the download record. Scope H7 against what C5 shipped, not against the pre-C5 codebase |
 
 **Status vocabulary:** `Not started` | `In progress` | `Blocked` | `Done` | `Deferred`
 
@@ -2938,6 +2938,9 @@ these, it has to argue with what is written here first.
 | D33 | **The score trace is emitted BY the scorer, never reconstructed for display**, and anything that credits a score goes through `sqs_service.apply_credits_to_score` so the headline and the trace move together | 2026-08-26 | C3-J: FOUR call sites patched the headline and left the trace stale, printing "81 earned = 85" in the one panel built to make the arithmetic reconcile. A second computation "for the panel" is how the panel and the score drift apart again - the defect C3 exists to close |
 | D34 | **`COALESCE` is not a guard on jsonb.** Every `jsonb_array_elements` / `jsonb_each` / `jsonb_array_length` argument uses `CASE WHEN jsonb_typeof(x) = 'array'` (or `'object'`) | 2026-08-26 | C3-I: COALESCE substitutes only for SQL NULL. A stored JSON **null** is a valid jsonb value, reaches the expansion as a scalar, and raises `cannot extract elements from a scalar`. It was live in five places and silently broke dismissal credits |
 | D35 | **Observability code is production code.** A `try` that wraps both the work AND the reporting of it can lose work that already succeeded; every blanket `except Exception` logs with `exc_info=True` | 2026-08-26 | C3-G / C3-I: a log line interpolating an unbound variable turned a completed credit into a null response, and a bare `str(ex)` made three different failures read identically. One traceback from the owner's logs settled what three of my diagnoses could not |
+| D36 | **Fact lineage is COMPUTED at export time, never stored on the fact.** Both sides of the join already persist - each document keeps its OWN extracted facts and its OWN page-marked text - so the E&O record re-joins them on demand. Adding a per-fact lineage table (or copying multi-source evidence onto every envelope) was rejected | 2026-08-26 | C5-A. Client 5.3 explicitly permits "a different schema ... as long as these relationships are recoverable". Storing it would duplicate evidence that can drift from the documents; computing it cannot. Zero LLM cost, and the 2026-08-23 dec-index arc already measured what asking the model for page numbers costs (~593k tokens, +18-20 min, switched off) |
+| D37 | **Right-or-blank applies to LINEAGE, not just to values.** A page is cited only when the value is literally locatable under a page marker; a document only when its own extraction agrees (via `fact_comparison`) or its text literally contains the value; nothing under `_TEXT_VERIFY_MIN_CHARS` (4 normalised chars) is ever cited. A markerless document cites page 1 ONLY because `ocr_service` provably marks every multi-page document - with `OCR_PAGE_MARKERS=0` it declines again | 2026-08-26 | C5-A / C5-E. A false citation in an E&O record is worse than no citation: it is the one artefact a producer would rely on in a claim. Pinned in both directions by `test_markerless_text_declines_a_page_when_markers_are_off` |
+| D38 | **A producer's resolution settles the FACT's state; the disagreement lives on in the resolution record, not as a permanent `conflicting` state.** `derive_value_state` skips the CONFLICTING branch when `evidence_state == user_confirmed` | 2026-08-26 | C5-D, found on the owner's live run: the record printed "UNRESOLVED (conflicting / user_confirmed)" one line under the DATA CONSISTENCY RESOLUTIONS entry that had just resolved it. The `_uw_conflict_keys` superset records that the DOCUMENTS disagree, which stays true forever, so no confirmation could ever clear it. Client 1.5 + 5.10: retain the history, but a resolved fact is resolved. An UNRESOLVED conflict still reads `conflicting` - the fix must never widen |
 
 ---
 
@@ -3055,6 +3058,8 @@ Principle 7 applies.
 | Q11 | **"No Loss Runs Available" is a 2.9 STATE but 2.5 gives it no SCORE.** Shipped default: 25 alone (the Nothing Provided value), 60 when paired with a no-loss attestation - fails toward no invented credit. One-line swap in `calculate_p4_loss_history` when Brent rules | C2 | 2026-08-24 | **BRENT 2026-08-24: our default was WRONG.** *"we can't treat 'N/A' as '0' ... If 'no known losses', check against the number of years in business."* SHIPPED (C2-E) as the years-in-business ladder. The 1-5 band's exact numbers are our derivation, flagged to him |
 | Q12 | **"Fully valued" requires claim statuses/financials to be READABLE, but no deduction is defined when years parse and statuses don't** - and extraction has no per-claim readability signal to check. Shipped default: no separate deduction (the other three fully-valued components each have their own). A real signal means an extraction-schema change (improving-ll.md rule applies) | C2 | 2026-08-24 | **BRENT 2026-08-24: confirmed, V2.** *"Good ... V2 - Adding it would mean reading claim-by-claim details from every carrier's layout."* No V1 deduction |
 | Q13 | **An ESTABLISHED business that never carried insurance** ("None" to prior carrier): is prior carrier "applicable"? 2.3 only exempts New Venture, so the -10 applies today. Defensible (no prior coverage on an operating business IS an underwriting gap) but the client never said it | C2 | 2026-08-24 | **BRENT 2026-08-24: our default was wrong.** *"the applicant would be 'previously uninsured', which is very different from 'missing prior carrier' ... there probably shouldn't be a deduction here for now."* SHIPPED (C2-E): the -10 now needs positive evidence prior coverage existed |
+
+| Q18 | **How long must the E&O audit record live?** C5 built the record from two kinds of store: durable audit tables and the session blob (per-document text/facts, which the new Document + Page lineage reads). Today `acord_audit_log` / `field_source_audit` / `sqs_recommendation_audit` are swept at 365 days (`AUDIT_LOG_RETENTION_DAYS`), the new `audit_events` table is deliberately never swept, and the facts-retention purge (which had NEVER actually run - broken SQL, fixed 2026-08-26) tombstones free/essentials facts at 30/180 days while leaving `docs[].text` untouched. E&O claims can arrive years after a submission; a 365-day sweep and an E&O record are not obviously compatible, and widening the facts purge to docs would delete the lineage evidence. Needs a product retention ruling; engineering will not pick a number (Principle 7) | C5 | 2026-08-26 | **OWNER 2026-08-26: 6 months.** Implemented: `audit_events` swept at `AUDIT_EVENTS_RETENTION_DAYS` (default 180, floored at 180); free-tier facts retention raised 30 -> 180 so the record's inputs survive the ruled window (the 30-day purge had never actually run - broken SQL - so no live data behaves differently); the three operational audit tables keep their 365-day SOC 2 floor, which exceeds 6 months. Brent's copy of the question updated to state the set default |
 
 **`20Aug_questions_brent.md` at the repo root is the ONE client-facing list: Q3a, Q3b, Q8,
 Q9** (Q10 closed; the C2 items Q11-Q13 were ANSWERED 2026-08-24 - see "BRENT'S RULINGS - ALL CLOSED" below) - written for Brent, not for engineering.
@@ -4989,3 +4994,1388 @@ door plus a test that fails on a second one - not to fix the instance in front
 of you and write the general case down for later. Three of this session's
 recurrences (the second stamping copy, the second cap copy, and now the fourth
 credit copy) are the same shape as defects this file already documents.
+
+---
+
+## Session 2026-08-26 - C4 Contextual Questionnaire Logic (client section 4)
+
+**Source documents:** the client's "4. Contextual Questionnaire Logic" master-plan
+section and `v1-core-principles.md`. Both take precedence over
+`SQS_Scoring_Specification.docx.pdf` where they conflict.
+
+### C4-A - What the client is actually asking for, and what was already shipped
+
+Audited every clause of section 4 against the code before writing a line.
+**Roughly two thirds of section 4 was already built.** Recorded so nobody rebuilds it:
+
+| Clause | State before this session |
+|---|---|
+| 4.1 vocabulary | `fact_state.py` already writes `value_state` / `evidence_state` in the client's exact words |
+| 4.5 normalisation | 5 of 8 items already fold silently through `fact_comparison` -> `fact_equivalence` |
+| 4.6 client-answer conflict | Shipped in C1-D (`client_answer_review.py`) |
+| 4.12 (1) coverage | `_drop_not_applicable_questions` existed on 2 of 3 paths |
+
+**The one real hole:** `question_classifier.classify_question` decides WHO answers a
+question by matching substrings against the FIELD NAME plus membership in the SQS
+scoring tiers. It takes no `facts` argument and reads neither state axis. The
+client's whole 4.1 flow is about state. The machinery existed; the questionnaire
+had never been plugged into it.
+
+### C4-B - THE DECISION THAT MATTERS: Step 3 is not implemented literally
+
+Step 3 reads *"is the value merely Suggested? ... the client MAY be asked."*
+Implemented literally this re-asks nearly the entire package. **Measured, not
+assumed**, against the real writers on 2026-08-26:
+
+* `extraction_service._annotate_facts` (line ~1566) writes
+  `confidence: "ai_high" | "ai_low"`, `source: "ai"` on EVERY extracted fact.
+* `fact_state.derive_evidence_state` returns SOURCE_VERIFIED only for
+  `verified_in_text is True`, `source in {dec_entry, policy_doc_text}`, or
+  `confidence in {deterministic, filled}`.
+* `verified_in_text` has exactly ONE writer in the whole backend
+  (`extraction_service.py:7096`, the dec-entry backfill).
+
+**So virtually every LLM-extracted fact is `evidence_state == "suggested"`.**
+Un-suppressing them all would rebuild the "full insurance application" the
+client's own Desired Outcome and 4.12 forbid.
+
+**Implemented instead:** a Suggested value changes ROUTING, not whether we ask -
+which is Step 3's own second sentence. A Suggested value on an INSURANCE-JUDGMENT
+fact goes to the producer; a Suggested value on an ordinary business fact stays
+suppressed exactly as today. Low volume, matches the clause, cannot flood anyone.
+
+**This is the honest limit of C4:** until something writes `verified_in_text` on
+ordinary extracted facts, Step 2's "Source Verified" and Step 3's "merely
+Suggested" are not distinguishable for most of the package. Closing that is an
+EXTRACTION change (a grounding-quote check per fact), not a questionnaire one, and
+was deliberately NOT bundled here. **Flagged for Brent, see C4-F.**
+
+### C4-C - The one door: `services/question_eligibility.py` (new)
+
+Same pattern as `fact_comparison.py` and `answer_semantics.py`. Holds the client's
+Step 1-5 flow and the 4.4 routing table (`INSURANCE_JUDGMENT_FACTS`, 43 facts,
+every key verified to exist in `FACT_REGISTRY`).
+
+**Structural safety property, not a careful one:** every overlay it can emit does
+one of three things - move a question CLIENT -> PRODUCER, suppress it, or hold a
+conflicting fact for the producer. **There is no code path that routes anything TO
+the client.** So a bug here can only ever produce "the producer sees one item too
+many", never "the insured was asked something they cannot answer". Pinned by
+`test_overlay_never_widens_client_exposure`, which drives EVERY registry fact.
+
+**Ordering note.** The client lists Conflicting as Step 5, but it is evaluated
+FIRST. A conflicting fact carries a VALUE, so `_fact_is_filled` marks it "already
+provided" and the already-known branch would swallow it before Step 5 could route
+it. Pinned by `test_conflicting_beats_already_known`.
+
+**Wiring:** `decorate_questions` gained an OPTIONAL `facts=` argument. Omitting it
+skips the overlay entirely, so every legacy call site is byte-identical
+(`test_missing_facts_argument_changes_nothing`). All three generation paths now
+pass it.
+
+**Path parity fixed while here:** `generate_cross_form_arq_questions` was the only
+one of the three paths that never ran `_drop_not_applicable_questions`, so a
+cross-form conflict about a declined coverage was still asked. It now runs it with
+the same arguments and the same fail-open behaviour as path A.
+
+### C4-D - Routing moves, and the two reversals
+
+Moved to producer per 4.4 + core principle 5: all GL/umbrella/auto/garage limits,
+all deductibles, valuation method, coinsurance, period of restoration, business
+income limit, retro date, X-Mod (+ its effective date), WC officer
+exclusions/officers, WC payroll period, WC + GL class codes, covered-auto symbols,
+`lines_of_business`, `effective_date`.
+
+**Deliberately NOT moved** (4.3 keeps them client-eligible), listed explicitly in
+`CLIENT_ELIGIBLE_DESPITE_TOPIC` so a future tidy-up cannot sweep them in by
+pattern: building/BPP values, construction type, occupancy, year built, roof year,
+sprinkler, fire protection class, total/WC payroll, payroll by state, percent
+subcontracted, radius of operation.
+
+**TWO REVERSALS OF OUR OWN TESTED DECISIONS.** Both were deliberate, both pinned,
+both now overruled by the client - the same shape as the 2026-08-12 NAICS reversal:
+
+1. `_CLIENT_WHITELIST` kept `gl_class_codes` / `wc_class_codes` client-facing with
+   the note *"Same carrier-assigned argument arguably applies; flagged, not
+   assumed."* 4.4 and principle 5 name them explicitly. Flag resolved, entries
+   removed. (`gl_class_codes` was never a real registry fact - only
+   `gl_class_codes_by_location` is.)
+2. `test_desired_limits_stay_client_not_agency` pinned the July ruling that
+   "coverage intent -> Agency" must not drag DESIRED limits out of the Client
+   bucket. 4.4 says "Coverage limits" are producer-only. Test rewritten as
+   `test_coverage_limits_route_to_the_producer`, with the reversal recorded in its
+   docstring. `property_building_value` kept in the test precisely because it must
+   NOT move.
+
+`test_c3_sqs_integrity.py::test_tier2_removals_are_still_asked_for` was updated,
+not deleted: the property it protects is *"we still ASK"*, not *"we ask the
+CLIENT"*. X-Mod / payroll period / officer exclusions now assert audience=producer
+AND bucket=agency; payroll and claims stay client.
+
+**No score moves.** Verified rather than assumed: `sqs_service` mentions
+`question_classifier` only in a COMMENT and never imports it, and neither
+`audience` nor `bucket` is read anywhere in the scorer. Re-routing changes who is
+asked, never a number.
+
+### C4-E - The hidden Underwriting bucket
+
+`SHOW_UNDERWRITING_REVIEW_BUCKET = false` in `AcordModal.jsx` (client request,
+temporary). **I initially warned the owner that re-routed questions would vanish
+into it. That was wrong and is corrected here:** `AUDIENCE_PRODUCER` maps to
+`BUCKET_AGENCY`, and the Agency bucket renders unconditionally - it has no `SHOW_`
+flag. Nothing disappears.
+
+Because that mistake was easy to make, it is now impossible to repeat silently:
+`test_no_judgment_fact_lands_in_a_hidden_bucket` fails the build if any
+producer-routed fact lands in the hidden bucket.
+
+Kept hidden as instructed. Fixed FOR its return: `ARQ_ELIGIBILITY_META` renders the
+new reasons ("Producer decision", "Conflict - resolve", "Not applicable", "Could
+not determine"), visible in Agency today and already correct when the flag flips.
+
+Also verified safe rather than assumed: every select-all predicate in the modal
+gates on `isClientFacing`, so hidden rows can never be ticked, and the init effect
+force-deselects them.
+
+### C4-F - OPEN FOR BRENT / PRODUCT
+
+1. **Nothing verifies an extracted value against the document text**, so almost
+   every fact is `suggested` and Step 2 vs Step 3 cannot be told apart. Closing it
+   is an extraction change. Do we want it, and at what LLM cost?
+2. **`claims_made` and `prior_acts` are not canonical facts.** Claims-made is a
+   FLAG (`gl_is_claims_made`); prior acts exists only as a cross-form question
+   field. 4.7 names both as GL-relevant. Needs a product call before adding facts.
+3. **Five 4.3 client-eligible items have no question at all**: states of
+   operation, payroll by group, employee/job groups, actual job duties, new-venture
+   confirmation. Not built in this session - they are new facts + new questions,
+   not routing.
+
+### C4-G - Verification
+
+Full backend suite: **4373 passed, 1 failed, 14 skipped**. The single failure is
+`test_arq_acord125_missing_only`, the known pre-existing `httpx`/`openai`
+`ImportError: cannot import name 'URL' from 'httpx'` - documented in CLAUDE.md and
+unrelated. `test_normalization`, the other historical failure, now passes.
+**Zero regressions.** New: `tests/test_question_eligibility.py` (44 tests).
+Frontend production build verified clean.
+
+**Not taken on faith:** the 44 new tests passed on their first run, which this file
+has repeatedly shown is a reason for suspicion. Routing was re-verified by driving
+`decorate_questions` directly and printing before/after for six facts - three moved
+to producer/agency, three stayed client/client.
+
+### C4-H - Live test fixtures
+
+`backend/scripts/make_c4_test_pdfs.py` -> `test_data_c4/` (9 PDFs + README).
+Seven scenarios, one per testable clause: S1 GL+property routing, S2 WC, S3 auto,
+S4 umbrella, S5 conflicting revenue (2 files), S6 same-facts-different-printing
+(2 files), S7 declined property with a select-ACORD-140 control run.
+
+Fixture self-check is executable, not a comment: S7 is scanned after generation
+and the script EXITS NON-ZERO if any property characteristic leaked into it,
+because that absence is the entire scenario. Text was read back through
+pdfplumber to confirm no column interleaving (the 2026-08-22 defect).
+
+S6's expected result was predicted offline through the real `fact_comparison.
+verdict` door before shipping the fixture - all five variant pairs (LLC/L.L.C.,
+E 9 Mile St/East 9 Mile Street, CO/Colorado + ZIP+4, entity type, spaced policy
+number) return `same`. If S6 raises a conflict live, the defect is in the
+comparator's CALLERS, not in normalisation.
+
+**Stated in the README rather than implied:** a click-through cannot separate 4.1
+Step 2 from Step 3 (see C4-B), and 4.6 needs a send-and-answer round trip these
+files cannot drive.
+
+### C4-I - Live test run 2026-08-26, and the four defects it found
+
+**Owner ran S1-S7 through the real app.** The run did what a click-through is for:
+it found four defects no unit test caught, three of which are the same shape -
+**a routing rule keyed on a NAME instead of on the canonical fact.**
+
+**What passed.** S1: retro date, valuation, AOP deductible and coinsurance all
+reached Agency carrying the "Producer decision" badge, and ZERO limits /
+deductibles / class codes reached Client - the headline defect is fixed. S6: no
+conflict on address, ZIP, LLC/L.L.C. or the spaced policy number (4.5 confirmed
+live, matching the offline `fact_comparison.verdict` prediction). S7: no property
+question of any kind on a package declining property (4.12 criterion 1). S3:
+vehicle and driver tables stayed Client (4.9).
+
+**FIXES**
+
+1. **SIC reached the CLIENT on ACORD 130.** The field is `NamedInsured_SICCode_A`
+   -> `namedinsured_siccode_a`, which does NOT contain `_PRODUCER_PATTERNS`'
+   entry `"sic_code"` - the pattern carries an underscore, ACORD's name does not.
+   `naics_code` / `sic_code` had been left OUT of `INSURANCE_JUDGMENT_FACTS` on
+   the assumption the name pattern covered them. **That assumption is the exact
+   fragility this module exists to remove**; both are now in the table, so
+   routing no longer depends on how a given form spells the field.
+
+2. **The X-Mod question reached the CLIENT.** `arq_service._FIELD_QUESTION_MAP`
+   maps `narrative_target_markets` to *"What is your workers comp experience
+   modifier (EMOD / XMOD)?"* - an X-Mod question wearing a narrative key, so
+   `wc_xmod` never matched it. It is NOT a `FACT_REGISTRY` fact, so it cannot go
+   in the main table without breaking the anti-rot guard; new
+   `INSURANCE_JUDGMENT_QUESTION_KEYS` holds it, and
+   `test_judgment_question_keys_are_not_registry_facts` fails the build if the
+   two tables ever start overlapping. The test also asserts the question TEXT
+   still asks for the EMOD, so the entry retires itself if the key is repurposed.
+
+3. **"Please list the vehicles to be insured" on ACORD 131 and ACORD 25.**
+   `schedule_capture.schedule_list_key_for_field` falls back to a loose
+   `base.startswith(prefix + "_")` match, so ACORD 131's
+   `Vehicle_CombinedSingleLimit_EachAccidentAmount_A` (an umbrella underlying
+   limit) and ACORD 25's `Vehicle_AnyAutoIndicator_A` (a certificate coverage
+   box) were both claimed as fleet rows. Neither form has a vehicle schedule.
+   **The loose fallback is deliberately LEFT INTACT** - ACORD 127 resolves 268
+   genuine vehicle fields through it. New `binds_a_capturable_column` answers the
+   different question the caller actually needs (*is this a column the client
+   could type into?* = an EXACT registry hit), and `_partition_schedule_fields`
+   now runs two passes: pass 1 finds forms with a real column, pass 2 collapses
+   only those. Measured: 131 loose=4/capturable=0 -> no question; 25
+   loose=16/capturable=0 -> no question; **127 loose=268/capturable=36 -> schedule
+   still works.** A form with no capturable column KEEPS its fields on the
+   ordinary question path - `test_partition_does_not_lose_a_field_it_declines_to_
+   collapse` pins that, because collapsing into a schedule that is never asked
+   would be silent data loss.
+
+4. **"Needs client input: NAICS or SIC industry code"** on the Submission
+   Readiness banner (`AcordModal.jsx`). A SECOND surface, independent of the
+   questionnaire, telling the producer to ask the insured for a classification
+   code Primble now routes to the agency. Its own comment claimed *"every field
+   this check tracks ends up asked via the client questionnaire"* - true when
+   written, false since C4-D. Relabelled "Still needed:", accurate for both
+   audiences, one line preserved.
+
+**Standing lesson, and it is the same one C4-B already recorded once:** three of
+these four are a rule keyed on a field NAME. The client's whole section 4 is a
+complaint about exactly that. When adding a routing rule, key it on the canonical
+fact; a name pattern is a fallback for uncurated fields, never a routing decision.
+
+**Fixture weakness, recorded honestly.** S2, S3 and S4 STATED the judgment values
+in the document, so they extracted and were correctly suppressed as
+already-provided - meaning those three scenarios could not exercise the routing
+they were written for. All live routing evidence came from S1 and S6. The
+regenerated fixtures must OMIT any value whose routing the scenario is testing.
+
+**Verification.** Full backend suite **4378 passed / 1 failed** - the same known
+`httpx`/`openai` `ImportError` documented in CLAUDE.md, unrelated. Zero
+regressions. Five new regression tests, each replaying the live defect with the
+literal ACORD field name. Frontend production build clean.
+
+**Still unproven after this run:** 4.1 Step 5 (S5 raised no revenue conflict and
+no conflict tag - S5B classified "Financial Statements / Needs review", so its
+facts may never have merged), package SQS scores (never reported, so the
+"routing must not move a score" check is unverified live), and S7's ACORD-140
+control run.
+
+### C4-J - Fixtures rebuilt on an executable OMIT contract (2026-08-26)
+
+The first fixture set could not test what it was written to test: S2, S3 and S4
+each PRINTED the judgment values whose routing they existed to prove, so
+extraction found them, `_fact_is_filled` marked them already-provided, and no
+question was ever generated. Three scenarios produced zero routing evidence and
+looked like passes.
+
+**The rule, now written into the generator and enforced by it:** a scenario can
+only test the ROUTING of a value it does NOT state. Each scenario STATES only
+what makes the coverage applicable and OMITS exactly the values under test.
+
+`_FORBIDDEN` is that contract as code - a per-file list of terms that must be
+absent - and `make_c4_test_pdfs.py` EXITS NON-ZERO if any reappears. It caught
+its own author on the first run: S4 closed with prose naming "follow form
+status", one of the terms S4 omits. A comment-only rule would not have.
+
+Eleven files now (was nine). S5B changed from a "Financial Summary" to a second
+APPLICATION - the live run classified the old one as Financial Statements /
+Needs review, so its facts may never have merged and the revenue conflict the
+scenario exists to create was never created. S3 driver hire dates are now full
+MM/DD/YYYY (the live run showed "3 rows need attention" on every driver from a
+bare year). NEW S8 (application + loss run listing 2 claims / $65,700) makes
+clause 4.6 testable end to end for the first time: the client attests "no
+losses" against a document that reports two.
+
+Still not testable by clicking: 4.1 Step 2 vs Step 3, for the reason in C4-B.
+
+### C4-K - Live run round 2: four root causes, all in shared plumbing (2026-08-26)
+
+The rebuilt fixtures did their job. S1 came back a clean pass (18 Client / 18
+Agency: every property characteristic Client, every limit, deductible, valuation,
+coinsurance, business income and period of restoration Agency), S6 confirmed 4.5
+live, S7 run A confirmed 4.12, and the round-1 fixes (SIC, EMOD, officer
+exclusions, phantom vehicle schedule, banner copy) all held. **Scores did not
+move: S7 run A 71, run B 71.**
+
+Four failures remained. **None of them was in the C4 routing layer** - every one
+was a hole in shared plumbing that the routing work merely made visible.
+
+**1. ACORD 130 produced TWENTY ordinal location cards** ("...(1st location)"
+through "(19th location)"). This was a REGRESSION FROM MY OWN C4-I FIX:
+`binds_a_capturable_column` correctly reported that no real column bound on that
+form. It was right, and that was the hole - the `Location_PhysicalAddress_*`
+family was **never registered** in `pdf_service._SCHEDULE_REGISTRY`, on
+**ACORD 130, 133, 160 and 28**. So those addresses could never be STAMPED from a
+known `property_locations` list either; they fell through to gap fill. Registered
+the seven address columns. Measured after: 130 21/24 capturable, 133 23/25, 160
+15/19, 28 5/6 - all collapse; 131/25/160 vehicles still correctly suppressed
+(0 capturable); ACORD 127 still 36. Deliberately NOT registered:
+`Location_HighestFloorCount`, `Location_FullName`, `Location_TaxCode`,
+`Location_LocationDescription`, `Location_PrimaryPremisesIndicator`,
+`Location_Primary_PhoneNumber` - not columns of the location table.
+
+**2. Selecting ACORD 140 did not bring the property questions back** (S7 run B:
+140 scored 8/100 with not one property question). TWO doors had the same hole and
+neither honoured the producer override:
+  * `arq_service._drop_not_applicable_questions` applied the override in its
+    early-exit GATE, then called `is_not_applicable`, which re-reads the FULL
+    denied set;
+  * `pdf_service.apply_fact_state_confidence_labels` labels a box
+    `not_applicable`, and the ARQ form scan skips every field with that label.
+Fixed with ONE door - `fact_state.is_not_applicable_for(facts, key, form_ids)` -
+that both now call, plus `fact_state.lines_applied_for`. An envelope explicitly
+marked `not_applicable` (a human said so) is never overridden: that is a
+statement about the FACT, not an inference from a coverage line.
+
+**3. The revenue conflict was detected and then dropped on the floor.** S5 showed
+"All clear" with no revenue item anywhere. Replayed offline:
+`assess_underwriting_consistency` returns `status=conflict, review_required=True`
+and the pipeline correctly writes `_uw_conflicted_keys`. **The engine was never
+the problem.** A conflicted fact HAS a value, so `_fact_is_filled` calls it
+already-provided and the coverage-guarantee injector skips it - no question is
+built, and `question_eligibility`'s Step 5 overlay can only decorate questions
+that EXIST. Conflicted facts are now re-admitted to the injector; the door then
+routes them to the producer tagged "Conflict - resolve". They can never reach the
+client - that door has no path to the client audience.
+
+**4. ACORD 127 was the ONLY form with an EMPTY `FORM_FIELD_INVENTORY`.** The
+coverage-guarantee injector walks that table, so a Business Auto package asked
+the client for vehicles and drivers and asked NOBODY for the liability limit,
+comp/collision deductibles, physical-damage valuation or covered-auto symbols.
+Added the nine-entry inventory. Two of them (`auto_covered_symbols`,
+`auto_physical_damage_valuation`) had no curated question either, so the injector
+would still have skipped them silently - both added, worded for the producer,
+since 4.9 makes them producer-only and that is now the only audience that reaches
+them.
+
+**THE PATTERN, AND IT IS THE SAME ONE AS C4-I.** Round 1 was three rules keyed on
+a field NAME. Round 2 is four tables with a MISSING ROW - an unregistered field
+family, an override applied in one of two doors, a question that was never built,
+an inventory that was empty. Every one is silent by construction: an empty entry
+produces no question and no error. Hence
+`test_no_form_has_an_empty_inventory`, which fails the build if any form's
+inventory goes empty again, and
+`test_acord130_locations_collapse_into_the_table`, which drives the four real
+schemas rather than a fixture.
+
+**KNOWN RESIDUAL, not fixed, stated rather than buried:** the client-facing
+vehicle table still carries `comp_symbol` / `coll_symbol` columns. 4.9 makes
+symbols producer-only, and there is now a producer question for them, so the
+columns are a duplicate route. They are optional and bind to real ACORD 127
+boxes, and hiding a column from the client but not the producer needs frontend
+work the schedule renderer does not have. Flagged for a decision, not silently
+left. Also unfixed: umbrella attachment point and follow-form still surface no
+question (they are producer-routed by pattern but have no inventory entry on 131).
+
+**Verification.** Full suite **4378 passed / 1 failed** - the known
+`httpx`/`openai` ImportError documented in CLAUDE.md, unrelated. Zero
+regressions. `tests/test_question_eligibility.py` now 55 tests.
+
+### C4-L - Round 3: the two deferred residuals, and why S5 could never have worked
+
+Round 2 was verified live: **S2's twenty location cards collapsed to one table,
+S3's auto structure (liability limit, covered-auto symbols, comp + collision
+deductibles, physical-damage valuation) all appeared in Agency, and S7 run B
+brought the property questions back (Property - 9).** S5 still showed nothing.
+
+**I had deferred two items with "your call" and the owner rightly pushed back.
+Both are now fixed, and chasing the first one uncovered the S5 root cause.**
+
+**THE S5 ROOT CAUSE - `conflicting` was unreachable in production.**
+`derive_value_state` tested one key:
+
+    facts["_uw_conflicted_keys"]     <- built by `unresolved_withheld_keys`,
+                                        which filters on CONFLICT_WITHHOLD_KEYS
+                                        ... and that frozenset is **EMPTY**, by
+                                        Brent's Q4 / D16 ruling that a
+                                        conflicted value still stamps.
+
+So the key is never populated and the branch never fired. The real set is the
+SUPERSET the pipeline writes at `extraction_pipeline.py:895`,
+**`facts["_uw_conflict_keys"]`** (no "-ed"), from `unresolved_conflict_keys` -
+every fact the documents still disagree about, whatever the stamping decision.
+One character apart, and every reader was on the wrong one.
+
+**Whether a fact IS conflicting and whether we WITHHOLD its value are two
+different questions.** `derive_value_state` answers the first, so it now reads
+the superset (both keys, union). C4-K's re-admission fix was necessary but not
+sufficient: it put the question back on the list, and then the state said
+`present`, so the Step 5 overlay had nothing to tag. Verified end to end:
+`value_state -> conflicting`, question routes `producer / agency /
+conflicting_route_to_producer`.
+
+`test_conflicting_is_reachable_from_the_superset_key` asserts
+CONFLICT_WITHHOLD_KEYS is still empty, so if Brent ever reverses D16 the test
+tells the next person to re-check which key is the right signal.
+
+**RESIDUAL 1 - covered-auto symbols were a second route to the wrong audience.**
+4.9 makes symbols a producer decision and C4-K gave them a producer question,
+but `comp_symbol` / `coll_symbol` remained columns in the CLIENT's vehicle
+table. `Column` gained a `producer_only` flag, honoured in exactly ONE place -
+`arq_routes.client_view`, where the client's copy of the table is built. The
+producer's table (served whole by `/generate`), the schedule pre-load endpoint
+and the stamping path all keep every column, so nothing the agency fills is
+lost. Client now sees year / make / model / vin / body_type / gvw.
+
+**RESIDUAL 2 - the umbrella asked for a limit and an SIR and nothing else.**
+4.11 names seven items; ACORD 131's inventory carried two. Added
+`umbrella_attachment_point`, `umbrella_follow_form`, `underlying_policies` and
+`employers_liability_limits` to the inventory, wrote the three missing curated
+questions, and named `underlying_policies` in `INSURANCE_JUDGMENT_FACTS` (the
+`_AGENCY_PATTERNS` entry is "underlying_insurance", which does not match it).
+All four verified routing to producer / agency.
+
+**THE ANTI-ROT TEST THEN FOUND 54 MORE.**
+`test_every_inventory_fact_has_a_question_or_is_a_schedule` generalises the
+shape that hid BOTH the ACORD 127 and ACORD 131 gaps - an inventory entry with
+no curated question, skipped in silence by the coverage-guarantee injector - and
+it immediately reported **54 entries across 12 forms** (137/138 garage and
+auto-structure facts, 141/160 inland-marine items, 186 contractor supplemental,
+133 builders-risk, ACORD 101 remarks, and more).
+
+**They are NOT fixed, and the test was NOT weakened to hide them.** Each needs
+real plain-language wording and an audience decision - a product call, not a
+rename. The known set is pinned as `KNOWN_WITHOUT_A_QUESTION` so the count can
+only go DOWN: a NEW entry fails the build immediately, and REMOVING one without
+updating the baseline also fails, so the ratchet keeps tightening. Recorded here
+rather than hidden, per the no-silent-caps rule.
+
+**Verification.** Full suite **4388 passed / 1 failed** - the known
+`httpx`/`openai` ImportError, unrelated. Zero regressions.
+`tests/test_question_eligibility.py` now 59 tests. Frontend build clean.
+
+**Lesson, and it is the third variant of the same one.** C4-I was rules keyed on
+a field NAME. C4-K was tables with a MISSING ROW. C4-L is a reader on the WRONG
+KEY - `_uw_conflicted_keys` versus `_uw_conflict_keys`. All three are silent by
+construction: no exception, no log, just a feature that never fires. The only
+defence that has actually worked in this arc is a test that enumerates the real
+data (all 17 schemas, the whole inventory) instead of asserting one example.
+
+### C4-M - S4 confirmed; S5 narrowed to writer-vs-reader (2026-08-26)
+
+**S4 PASSES live.** All four 4.11 umbrella items now render in Agency -
+attachment point, follow-form confirmation, Schedule of Underlying Insurance and
+Employers Liability limits. Agency count 13 -> 19.
+
+**Polish found by the same run:** five of the questions added in C4-K/C4-L had no
+`_FIELD_PRODUCER_LABEL_MAP` entry, so the card fell back to the FULL question
+text as its title - "At what underlying limit does the umbrella attach? (For
+example: ...)" sitting beside short rows like "Umbrella SIR". Labels added for
+umbrella_attachment_point, underlying_policies, employers_liability_limits,
+auto_covered_symbols and auto_physical_damage_valuation. Cosmetic, but it made
+the new work read as unfinished.
+
+**S5 STILL SHOWS NO CONFLICT, and the fix is not disproven - it is unverified.**
+C4-L fixed the READER (`derive_value_state` now consults `_uw_conflict_keys`).
+Offline that is proven: the engine returns status=conflict and the question
+routes producer/agency/conflicting_route_to_producer. What is NOT proven is that
+the WRITER fires on the live session - i.e. that `assess_underwriting_consistency`
+flags the two revenue figures when run over the real per-document facts, and that
+`_uw_conflict_keys` survives onto the session the ARQ generator reads.
+
+Guessing further would be the third round of reasoning against the code instead
+of against a real session - the exact mistake `dump_session_facts.py` was built
+to end. That script already replays the conflict engine (section 6); it now also
+prints **section 4b, `_uw_conflict_keys`**, so one run separates the two cases:
+
+  * section 6 lists a total_revenue conflict but 4b is "(none)"  -> PERSISTENCE:
+    the key is computed and lost before the questionnaire sees it.
+  * section 6 lists nothing                                      -> DETECTION:
+    the engine does not flag it on the real per-document facts, and the S5
+    fixture or the extraction is what needs changing, not the routing.
+
+Command: `py backend/scripts/dump_session_facts.py <session_id>`.
+
+**Suite 4388 passed / 1 failed** (known httpx ImportError), zero regressions.
+
+### C4-N - S5 isolated to DETECTION, and the diagnostic that was still ambiguous
+
+The owner ran `dump_session_facts.py` on the live S5 session. It settles the
+writer-vs-reader question from C4-M **decisively**:
+
+  * section 3 - DOC 1 `total_revenue = $2,400,000`, DOC 2 `total_revenue =
+    $3,850,000`. Both documents carry the fact, with different values.
+  * section 4b `_uw_conflict_keys` = **(none)**
+  * section 6 CONFLICT REPLAY = **0 conflict rows, 2 active documents**
+
+So this is **DETECTION, not persistence**. The C4-L reader fix is correct and
+necessary, but nothing ever reaches it: `assess_underwriting_consistency`
+produces no conflict row for `total_revenue` on the real session, even though the
+two per-document values plainly differ.
+
+**Five offline replays, all flagging conflict** - envelope facts and bare
+scalars; 2-key and full 179-key per-document fact sets; application/application
+and application/financial_statements; document text under `raw_text` and under
+the real `text` key (so the Pass-2 scan genuinely ran). Every one returned
+`total_revenue -> conflict [$2,400,000, $3,850,000]`. **The offline harness
+cannot reproduce the live behaviour**, which is the C4-B lesson repeating: an
+offline probe proves the FUNCTION, never the SEAM around it.
+
+**Why the diagnostic could not close it either.** Section 6 printed only rows
+whose status is `conflict`. That cannot distinguish "the engine never assessed
+this field" from "it assessed it and called it consistent" - and those need
+OPPOSITE fixes. Printing the negative space is the whole point of a diagnostic;
+omitting it cost a full live round. Section 6 now prints:
+
+  * every assessed field with its status, review flag and grouped values;
+  * the `uw_confirmations` on file (a confirmed field is reported resolved, not
+    conflicting - a silent suppressor nothing was showing);
+  * the reconcilable fields NEVER assessed, so an absent field is visible as
+    absent rather than inferred from a missing line.
+
+**Next run answers it in one shot:** `total_revenue` present with
+status=consistent means the grouping merged two different amounts (a
+`fact_equivalence` / normalisation defect); absent from the assessed list means
+the field never entered the sweep (a gating defect); present under
+confirmations means a stored confirmation is suppressing it.
+
+Nothing was changed in the conflict engine this round - changing code against a
+hypothesis the data has not confirmed is what the C4 arc keeps punishing.
+
+### C4-O - S5: assessed, one value group, and the two candidates left (2026-08-26)
+
+Section 6 with the C4-N instrumentation returned the decisive line:
+
+    total_revenue   consistent   review=False   [$2,400,000]
+    confirmations on file: (none)
+
+So: the field IS assessed (not a gating miss), nothing is confirmed (not a
+suppressor), and it resolves to **ONE value group** even though section 3 shows
+DOC 1 = $2,400,000 and DOC 2 = $3,850,000.
+
+**Ruled OUT this round, each by direct execution rather than reading:**
+  * `fact_comparison.verdict("total_revenue", "$2,400,000", "$3,850,000")` ->
+    `different`. Same for payroll, GL limits, building value, employee counts.
+    The comparison door is correct.
+  * `document_witnesses("application", "total_revenue")` -> True. The client-1.2
+    role gate is not dropping either document.
+  * `_normalize` -> "2400000" / "3850000". The normalizer separates them.
+  * `_fv` is a plain envelope unwrap - the same read the dump prints from.
+  * Seven offline replays now: envelope vs bare scalar, 2-key vs full 179-key
+    fact sets, application/application vs application/financial_statements, text
+    under `raw_text` vs the real `text` key, and with `dec_page_entries` +
+    `coverage_lines` present so the equivalence CONTEXT is built. **All seven
+    return conflict with two groups.** The offline harness still cannot
+    reproduce the live result.
+
+**Two candidates remain, and they need opposite fixes:**
+  1. both documents contribute and the two groups are merged AFTERWARDS ->
+     an equivalence / grouping defect;
+  2. only one document ever contributes -> a gating or data-shape defect.
+
+Section 6 now prints, per assessed field, the SOURCE COUNT behind each value
+group and the value `_fv` reads out of each document. One group carrying 2
+sources is case 1; one group carrying 1 source, with the per-doc line showing
+both amounts, is case 2. A row is no longer able to hide which one it is.
+
+**No production code changed this round** - seven replays disagreeing with
+production is a reason to instrument, not to edit.
+
+### C4-P - S5: both documents contribute, and the collapse is in the GROUPING KEY
+
+The C4-O instrumentation returned the decisive shape:
+
+    total_revenue   consistent   review=False   [$2,400,000<-2src]
+      engine reads per-doc: S5A=$2,400,000; S5B=$3,850,000
+
+ONE value group carrying TWO sources, while `_fv` demonstrably reads two
+different amounts. That is **case 1** from C4-O: both documents contribute and
+the groups collapse. It is NOT a gating or data-shape defect.
+
+**Ruled out this round, every one by execution:**
+  * `_merge_equivalent_value_groups` / `fact_equivalence.equivalent_index` ->
+    returns None for every differing-amount pair tried (revenue, payroll, GL
+    limits, building value, employee counts), WITH and WITHOUT a real
+    `PackageContext` built by `fact_comparison.build_context`. It is not
+    folding them.
+  * `_drop_class_exposure_candidates` -> keeps both groups even when
+    `gl_class_code_schedule` carries BOTH amounts as class exposures (the S5
+    fixture prints the class basis equal to the revenue in each file, which was
+    the strongest hypothesis).
+  * A ninth full replay, now with the real 179-key merged facts, both
+    `coverage_lines`, `gl_class_code_schedule`, `gl_class_codes_by_location`,
+    `locations` and per-document raw text -> `conflict [(2.4M,1),(3.85M,1)]`.
+
+**What is left.** `groups` is keyed on `_normalize(raw, kind, fact_key)`. One
+group with two sources means both documents produced the SAME normalized key at
+runtime. Offline, `_normalize` returns "2400000" and "3850000" - distinct. So
+either `kind` is not `currency` in the live call, or `_normalize` behaves
+differently there. Nothing in the diagnostic showed the normalized key, which is
+why nine replays could not find this: **the grouping key was the one step
+between reading a value and declaring no conflict that was invisible.**
+
+Section 6 now prints, per document, the value AND its normalized grouping key,
+plus the resolved `kind`. Equal norms confirm the collapse is in normalisation;
+different norms mean the live `groups` dict is not being built from these reads
+at all, which would point at a second code path.
+
+**No production code changed for four rounds on this defect** - nine offline
+replays contradicting production is evidence the harness is wrong, not the
+engine, and editing on that basis is how the C4 arc created its own regressions.
+
+### C4-Q - The two remaining gaps closed at their root (2026-08-26)
+
+Two of the three open items from the honest C4 status are now fixed, and both
+turned out to be ONE defect wearing two faces: **a fact can be perfectly well
+defined and still be unreachable, because the code reads a different table than
+the one holding the answer.**
+
+**GAP A - "a dozen client-eligible facts have no question."**
+Wrong diagnosis. `fact_registry.FACT_REGISTRY[key]["question"]` already carried
+good plain-language wording for most of them; the coverage-guarantee injector
+gates on `arq_service._FIELD_QUESTION_MAP` ALONE, so a fact with a registry
+question was silently skipped. Measured: of 42 inventory entries with no curated
+question, **19 already had one in the registry**.
+
+Fixed with one door - `arq_service._curated_question_for(field_name)` - which
+reads `_FIELD_QUESTION_MAP` first (the client-tuned wording still wins, so no
+rendered question changes by a character) and falls back to the registry. The
+injector and the anti-rot test now both call it. That is `wc_payroll_by_state`,
+`wc_description_of_operations` (job duties), `auto_radius_of_operation`,
+`auto_garaging_addresses`, `gl_form_type` (claims-made status),
+`umbrella_effective_date` / `_expiration_date` (policy periods) and eleven more,
+in one line instead of 19 hand-copied strings that would drift.
+
+`new_venture_indicator` was the ONLY 4.3 item with no question in either table;
+written, client-facing.
+
+**GAP A2 - 23 of the 42 were not facts at all.** `deductible_aop`,
+`project_cost`, `owner_name`, `remarks_text`, `transit_exposure`... none exist in
+`FACT_REGISTRY`. A phantom inventory key can never be filled or asked, **and it
+inflates the fill-rate denominator**, so ACORD 133/141/160/186 have been scoring
+against fields that cannot exist. 18 remapped to the real key they clearly meant
+(`property_deductible_aop`, `builders_risk_project_cost`, ...), 5 that named
+nothing were removed. **Those four forms' scores will RISE** - a correction, not
+a regression. Pinned by `test_no_inventory_entry_names_a_fact_that_does_not_exist`.
+
+The `KNOWN_WITHOUT_A_QUESTION` backlog is now **empty** and the ratchet is a
+plain equality: any regression on either side fails immediately.
+
+**GAP B - Step 2 vs Step 3 made real, deterministically and for free.**
+`derive_evidence_state` calls a value `source_verified` only for
+`verified_in_text is True`, a `dec_entry` source or a deterministic confidence -
+and `verified_in_text` had exactly ONE writer in the backend. Every LLM-extracted
+fact was therefore `suggested`, "Source Verified" was unreachable, and the
+client's Step 2 could not be distinguished from Step 3.
+
+New `fact_state.annotate_text_verification(facts, docs)`: a fact whose value is
+LITERALLY present in the uploaded document text is marked verified. No LLM, no
+cost - the same test `extraction_service._verify_dec_entries` already applies to
+the dec index. Four guards, each load-bearing:
+  1. only ever ADDS - absence of proof is never demotion;
+  2. never overrides `user_confirmed` / `derived` / already-verified;
+  3. a specificity floor of 4 normalised characters - "34", "CO" and "8" appear
+     by accident in almost any document, and a FALSE verification is worse than
+     none because Step 2 uses it to STOP asking;
+  4. scalars only.
+Verified safe for scoring first: `evidence_state` has exactly three readers in
+the backend (the client-answer conflict gate, the audit export, and
+question_eligibility) and **no scorer reads it**.
+
+**Step 3 then completed, narrowly.** A judgment fact whose value is merely
+suggested is re-admitted to the injector and routed to the producer to confirm -
+which is Step 3's own second sentence. Deliberately bounded: insurance-judgment
+keys only (~43, not 179), `suggested` only, producer-only. **It cannot add a
+single question to the client's list.** Taken literally Step 3 would re-ask
+nearly the whole package, which is the C4-B measurement and the reason this is
+narrow rather than faithful.
+
+**STILL OPEN, and honestly: S5.** Eleven offline replays cannot reproduce the
+live collapse. Rather than a twelfth, `dump_session_facts.py` section 6b now
+WRAPS every group-reducing step inside the real engine and reports what each did
+to the real session data, plus the normalised grouping key per document. No
+production code was changed for the conflict engine across five rounds - a
+harness that disagrees with production eleven times is evidence about the
+harness.
+
+**Verification.** Full suite **4393 passed / 1 failed** (known httpx
+ImportError), zero regressions, +5 tests (64 in test_question_eligibility.py).
+Frontend build clean.
+
+### C4-R - S5 SOLVED. `is_component_of` was silencing the conflict (2026-08-26)
+
+Five rounds, twelve offline replays that all disagreed with production, and the
+answer came from instrumenting the real engine rather than rebuilding the
+harness a thirteenth time. Section 6b of `dump_session_facts.py` named it in one
+line:
+
+    total_revenue: _merge_equivalent_value_groups
+       before 2: ['$2,400,000', '$3,850,000']
+       after  1: ['$2,400,000']
+
+**THE ROOT CAUSE.** `equivalent_index` has three context rules. Two were already
+gated. The third, `is_component_of` ("one is a LINE figure, the other the
+PACKAGE figure - a piece, not a rival"), was gated only by KIND:
+`value_kind(fact_key) in {money, count, percent}`.
+
+Measured: that admitted **75 registry facts** - every limit, every deductible,
+employee counts, percentages - none of which is a premium, and a premium is the
+rule's entire justification.
+
+On S5 the verified dec index records the per-location class exposure
+`$3,850,000` as a LINE-level value and the other document's revenue
+`$2,400,000` as a PACKAGE-level one. `is_component_of` therefore pronounced a
+genuine revenue disagreement "a piece of the other" and folded it. The producer
+screen read **"All clear"** on two applications differing by $1.45M.
+
+**THE FIX.** `_component_split_allowed` is now a NAMED SET
+(`_COMPONENT_FACTS = {"total_policy_premium"}`), not a kind test. A part/whole
+reading between two candidate answers to the SAME fact is real only where the
+package figure is genuinely COMPOSED of line figures. That is premiums, and
+nothing else on this schema: two documents stating the insured's revenue are
+RIVAL ANSWERS, not a part and a whole. Registry facts admitted: **75 -> 0**;
+`total_policy_premium` still qualifies (it resolves to money by KEY SHAPE, which
+is why the kind gate covered it - the defect was breadth, never exclusion).
+
+The per-class payroll case the kind gate was reaching for is already handled
+properly by `underwriting_consistency._drop_class_exposure_candidates`, which
+demands positive evidence from the package's own class schedule AND refuses to
+touch an extraction-sourced candidate. That is the right mechanism; this one was
+a blunt duplicate of it.
+
+**A PINNED TEST WAS CHANGED, DELIBERATELY AND ON EVIDENCE.**
+`test_a_quantity_still_gets_the_component_rule` asserted that
+`gl_each_occurrence`, `umbrella_limit`, `total_payroll` and `num_employees` DO
+get the rule, on the premise that "quantity" was a sufficient gate. S5 is live
+proof it is not. Split into
+`test_the_component_rule_survives_for_its_own_purpose` (premium only) and
+`test_a_quantity_alone_does_not_get_the_component_rule` (the four, plus
+`total_revenue`, `property_building_value`, `gl_deductible`). The guarantee got
+STRONGER: fewer facts can now be silenced, not more.
+
+**THIS IS THE THIRD TIME** a context rule keyed on a value's own characters has
+destroyed a real conflict - C1-H/B14 (`different_owners`, the umbrella $1M
+inheriting the GL policy's ownership), 2026-08-23 Run B (`is_component_of` on
+two addresses), and now S5. The first two were fixed by gating the rule; this
+one is fixed by gating it PROPERLY. The standing lesson: a rule that reasons
+about a value's characters must name the FACTS it may speak about, and "kind" is
+not specific enough to be that name.
+
+### Suite status, stated precisely
+
+`py -m pytest -q -p no:randomly` -> **4395 passed, 2 failed, 14 skipped.**
+  1. `test_arq_acord125_missing_only` - the known `httpx`/`openai` ImportError
+     documented in CLAUDE.md. Pre-existing, unrelated.
+  2. `test_dec_index_purge::test_every_consumer_of_the_index_runs_at_or_before_
+     generation` - flags `audit_service.py:1173` as a new `dec_page_entries`
+     consumer. **NOT THIS WORK.** `audit_service.py` carries 331 uncommitted
+     insertions from someone else's session, and line 1173 is a line that
+     EXCLUDES `dec_page_entries` (`if key.startswith("_") or key ==
+     "dec_page_entries": continue`) - a grep-based test flagging an exclusion.
+     Left alone: it is not mine to decide.
+
+**A note worth keeping:** the default run showed **8** failures, the fixed-order
+run **2**. The suite uses `pytest-randomly`, and six of those eight pass both
+individually and file-at-a-time - pre-existing cross-test pollution, exposed by
+ordering, not caused by this work. Anyone measuring a baseline here should use
+`-p no:randomly` or they will chase ghosts.
+
+---
+
+## Session 2026-08-26 - C5 Source Lineage & E&O Audit Record (client section 5)
+
+### C5-A - Full audit + implementation - SHIPPED (2026-08-26)
+**Priority:** V1-CRITICAL
+**Principle(s) touched:** 1, 6, 7 (Preserve Provenance is the whole section)
+
+**Problem.** The client's live audit sample: SOURCE DOCUMENTS "(none recorded)",
+90 captured values labelled only "AI extraction from document", structured
+values "Source: unspecified", no modification history, "Downloaded with 9 open
+items" with no record of WHICH nine. His verdict - "the shape of an audit
+record without sufficient provenance underneath it" - was correct, verified
+symptom by symptom in code.
+
+**Root cause - three classes, not thirteen bugs.**
+1. *The record read the narrowest stores and skipped the richest.* The export
+   read `session.doc_summary` - a key that only ever existed in HTTP responses
+   (4 sites, all inside `JSONResponse`), never persisted - so SOURCE DOCUMENTS
+   was "(none recorded)" on EVERY export since the feature shipped. It never
+   read `acord_audit_log` (which records the FULL open-items list + score +
+   checksum on every download), `underwriting_confirmation_audit` (C1's
+   candidates snapshots - a table with NO READER anywhere), or `arq_receipts`.
+2. *Provenance was a method enum, not a reference.* The fact envelope is
+   `{value, confidence, source:"ai"}`; document identity dies in
+   `merge_facts` (extraction_service.py:7864-7875, pseudo-partials drop
+   filename), page numbers die at the OCR flatten (ocr_service.py:1776), and
+   `_annotate_facts` passes lists/dicts through UNANNOTATED (:2315) - which is
+   exactly the client's 5.6 "unspecified" list. `sqs_service.py:3192` says it
+   in as many words: `"ai" = extracted from *some* document`.
+3. *No append-only spine.* Reopen NULLed `action_at`; statuses/reasons upsert
+   over history; two `log_field_change` call sites hardcoded
+   `previous_value=None`; client-ARQ apply, schedule saves, restamps and
+   retractions logged nothing; `update_pdf` REPLACED the fact envelope with a
+   bare string (destroying provenance our own audit record then reported as
+   "unspecified"); no SQS snapshot store existed.
+
+**Fix.**
+- *New door* `services/fact_lineage.py`: Document + Page attribution computed
+  at export time by re-joining each merged fact against every document's OWN
+  stored extraction (`docs[i].facts`) and its page-marked OCR text
+  (`[Document page N]`, ocr_service). Sameness via `fact_comparison.values_agree`
+  (D3 - one comparison owner); literal presence via `fact_state._verify_norm`
+  with the same 4-char floor as `annotate_text_verification`. Right-or-blank
+  for lineage: a page is cited only when locatable, a document only when its
+  own extraction agrees or its text literally prints the value. Lists get
+  contribution attribution (which doc supplied rows). Zero LLM cost.
+- *Export rebuilt* (`get_audit_trail_export`): documents from `session.docs`
+  (doc_summary kept as legacy fallback) with new `uploaded_at`/`uploaded_by`
+  (stamped in extraction_pipeline); per-fact `sources`, `derivation`, `scope`
+  (D19's `_scoped`), value/evidence states now derived WITH the facts dict
+  (the conflicting / not_applicable branches were unreachable before -
+  `derive_states` was called without it); `_`-sidecars and `dec_page_entries`
+  no longer render as junk rows; `_rejected_facts` surfaced as "VALUES SEEN
+  AND REFUSED"; plus sections from the stores that existed unread:
+  Data Consistency resolutions (first reader of
+  `underwriting_confirmation_audit`), full download log with open-items lists
+  + checksums (`acord_audit_log`), client questionnaire receipts (new
+  session-scoped reader in arq_receipt_service), producer answers including
+  answered-but-still-open (new `get_producer_answers`).
+- *Append-only spine*: new `audit_events` table (INSERT-only, excluded from
+  the 365-day sweep) + `log_audit_event`. Events: documents_uploaded,
+  client_answers_applied, recommendation_reopened / issue_reopened (carrying
+  the prior action/action_at/score the reopen UPDATE then nulls),
+  sqs_snapshot.
+- *5.12 snapshots*: `log_sqs_snapshot_if_changed` stores the scorer's own
+  emitted trace (D33) keyed on the exact trigger signature the client listed
+  (raw, displayed, any pillar, ceiling added/removed, ceiling reason) - never
+  per invisible recalc; a download always snapshots. Wired at all seven
+  recompute/persist sites (select_forms_bulk, worker, reclassify, update_pdf,
+  ARQ recalc, dismiss-credit, both download endpoints).
+- *5.7 derivation stamped at every deriving writer* (extraction_service):
+  `years_in_business`, the renewal-routed proposed effective/expiration dates
+  (the client's own worked example), the dec-entry backfill (with the printed
+  entry's label + owner), `is_renewal` (with the matched phrase), and
+  `billing_plan` all carry `derivation: {rule, inputs, ...}` on the envelope;
+  `_flatten_fact` renders it. Additive key - envelopes already carry ad-hoc
+  keys (verified_in_text, reconciled); the 412 tests over those writers pass
+  unchanged.
+- *Evidence-destruction fixes*: `update_pdf` writes a producer envelope
+  (`{value, confidence: filled, source: producer}`) instead of a bare string -
+  which also un-breaks `sqs_service._producer_supplied_dates` (it reads
+  `source` and could never see an edited date); `log_field_change` now records
+  the CANONICAL fact key (was a copy of the PDF field name - unjoinable);
+  `previous_value` captured at both hardcoded-None sites; client-ARQ apply
+  logs per-fact before/after rows (`source='client_arq'` - allowed by the
+  CHECK since day one, written never) + one event; schedule saves (PUT route
+  and resolve-issue mode=schedule) log row-count changes; reopen logs the
+  retraction of the producer's fact; dismiss/answer/resolve upserts now
+  record the ACTING user (was: whoever the rec was presented to) and answers
+  get `answered_at` (was: permanently untimed on the upsert branch);
+  draft downloads now record the open list alongside the override (the most
+  serious override used to record the least); underwriting confirmations
+  accept an optional producer `note` (5.10).
+- *Two latent bugs fixed on sight* (owner instruction "fix bugs you find"):
+  (1) `run_facts_retention` UPDATEd a `facts` column that does not exist on
+  `processing_sessions` (data lives at `data->'facts'`) - it had failed
+  silently EVERY night since it shipped, so no free/essentials session was
+  ever purged. Now `jsonb_set(ps.data, '{facts}', tombstone)` with the same
+  payload + a purge guard in the export so a tombstone never renders as fact
+  rows. (2) `sqs_history` was dead: the scorer appends and returns it inside
+  `package_sqs`, but `session_repository`'s append-only merge only engages
+  when the key is passed EXPLICITLY and no caller ever did - so the history
+  was forever one entry, `delta_this_session` forever 0, and the frontend
+  score-improvement panels could never render. Every package_sqs persist site
+  now passes it.
+
+- files: services/fact_lineage.py (new), services/audit_service.py,
+  services/arq_service.py, services/arq_receipt_service.py,
+  services/extraction_pipeline.py, services/scheduler_service.py,
+  models/schemas.py, routes/form_routes.py, routes/audit_routes.py,
+  routes/arq_routes.py, routes/download_routes.py, worker.py,
+  frontend/src/components/form/AcordModal.jsx (record renderer + label map -
+  `derived`/`dec_entry`/`user_confirmed`/`policy_doc_text` etc. no longer
+  print raw or "unspecified").
+- tests: tests/test_audit_lineage_20260826.py (27: lineage door incl. the
+  5.4 both-documents case and the no-marker no-page-claim case, export
+  assembly with junk-row + tombstone guards, all 5.12 trigger permutations,
+  snapshot skip-unchanged/always-on-download, and anti-rot pins on every
+  evidence-destruction fix).
+- suite result: see C5-B below.
+
+**Why this and not the alternative.** (a) Asking the LLM for page numbers per
+fact - already tried and lost (the dec-index dedicated pass: ~593k tokens,
++18-20 min, switched off 2026-08-23); pages are derivable free from stored
+text. (b) A stored per-fact lineage table with char offsets - overkill for
+V1; 5.3 explicitly allows "a different schema as long as the relationships
+are recoverable", and both sides of the join are already persisted.
+(c) Fattening the session JSON with multi-source copies - computed at export
+instead; durable tables only for what must outlive the session.
+
+**Blast radius checked.** `update_pdf`'s envelope write flows into
+calculate_package_sqs + the facts merge: envelopes are the NORMAL fact shape
+(bare strings were the anomaly), the merge's D15 protection now correctly
+sees the edit as human-sourced, and the expired-term check starts working on
+edited dates (a producer typing an already-ended term now correctly trips the
+stop - scores can move on that edge, D6 heads-up to Brent). `derive_states`
+gaining the facts arg only in the EXPORT path - no scorer reads
+evidence_state (verified in C4-Q). New envelope key `derivation` is additive
+(envelopes already carry ad-hoc keys: verified_in_text, reconciled). The
+retention fix activates a delete that never ran - localhost MVP, 0 users, but
+flagged loudly to the owner. Full suite + frontend build to verify.
+
+**Known / deliberately not done.**
+- Gap-fill grounding quotes (`question_grounding`) are still discarded at
+  pdf_service.py:19699 - persisting them means threading a third return
+  through `map_facts_to_form`, the most landmine-dense seam in the codebase,
+  for values that already carry `ai_verified`. Deferred with reasons, not
+  forgotten.
+- Field-QA's DELETE+reinsert refresh still discards per-row
+  `downloaded_anyway` stamps on fieldqa_/fieldmap_ rows - harmless now that
+  every download's open-items list is preserved in acord_audit_log and
+  rendered; preserving those rows risked stale findings lingering in the
+  preflight forever.
+- `marketing_reason` stays latest-wins (documented product decision) - a
+  change event could be added to audit_events later if Brent wants history.
+- The retention purge still leaves `docs[].text` + per-doc facts in the
+  session blob (only the `facts` key is tombstoned) - a data-minimization gap
+  that predates this work; ALSO now the audit export's lineage depends on
+  docs surviving, so widening the purge is a Brent decision (Q18), not an
+  engineering default.
+- `audit_events` and the other E&O tables are excluded from the 365-day
+  sweep by default; the operational tables (`field_source_audit`,
+  `sqs_recommendation_audit`, `acord_audit_log`) are still swept at 365d -
+  whether an E&O record must outlive that is Q18.
+
+### C5-B - Verification (2026-08-26)
+Baseline before any C5 work, measured in this tree: **4393 passed / 1 failed
+/ 14 skipped** (the known httpx/openai ImportError in
+test_arq_acord125_missing_only). After all C5 changes: **4425 passed / 1
+failed / 14 skipped** - the SAME single known failure, +29 new tests
+(test_audit_lineage_20260826.py), zero regressions. The +32 delta is 29 new
+tests plus the ordering jitter this file's own tail-note documents
+(pytest-randomly cross-test pollution) - the 412 tests over the
+derived-fact writers and the 77 over dec-entry/renewal routing were also run
+targeted with `-p no:randomly`, all green. One anti-rot test fired exactly as
+designed - test_dec_index_purge's consumer grep caught the export's new
+`dec_page_entries` EXCLUSION line; decided and recorded in its known-list
+(an exclusion is not a consumer; the purge stays safe). A mid-edit background
+suite run transiently showed failures in test_v1_c1_canonical_facts /
+test_v1_c1d_client_answer_review; both re-verified passing deterministically
+after the edits settled. Frontend production build clean (pre-existing
+chunk-size warning only; the localhost VITE_API_BASE guard refuses prod
+builds by design - build verified with a prod-shaped URL).
+
+**D6 heads-up for Brent (owed, not yet sent):** two behaviours can move
+scores. (1) A producer-edited effective/expiration date now carries
+`source: producer`, so the expired-term check finally applies to edited
+dates - a producer typing an already-ended term now trips the stop it was
+always supposed to trip. (2) `delta_this_session` and the score-improvement
+panels start working (they were structurally dead), so users will start
+SEEING score movement that was always happening silently.
+
+### C5-C - Q18 ANSWERED (6 months) + the live test kit (2026-08-26)
+
+**Retention ruling, owner verbatim: "Lets keep the record for 6 months now."**
+Implemented as three concrete changes, each pinned by
+`test_six_month_retention_ruling_is_implemented`:
+1. `audit_events` (the E&O spine) is now swept by
+   `run_audit_log_retention` on its own knob - `AUDIT_EVENTS_RETENTION_DAYS`,
+   default 180, FLOORED at 180 so no environment can undercut the ruling.
+   The append-only property is unchanged from the application's side; the
+   scheduler owns the lifecycle (schemas.py comment updated to match).
+2. Free-tier facts retention raised 30 -> 180: the record's captured-inputs
+   section reads session facts, and purging them at day 30 would blank it
+   inside the ruled window. No live data behaves differently - the purge SQL
+   had never successfully run before the C5-A fix.
+3. The three operational audit tables keep their 365-day SOC 2 floor
+   (`AUDIT_LOG_RETENTION_DAYS`), which already exceeds 6 months; they also
+   serve auth/payment auditing, so the E&O ruling does not shorten them.
+Brent's copy of the retention question now states the set default and asks
+only whether his E&O practice needs longer.
+
+**Live test kit: `c5_test_data/` + `backend/scripts/make_c5_test_pdfs.py`.**
+Five PDFs, three scenarios, README-HOW-TO-TEST.md with 24 numbered checks
+mapped one-to-one to the client's 5.x clauses:
+- S1 (package 4-pager + agreeing COI, upload together, generate 125+127):
+  documents section, Document + Page evidence, both-sources-kept,
+  schedules-not-unspecified, derived years-in-business, then the action
+  flows - field edit, producer answer, dismissal with reason, reopen (event
+  log preserves the erased timestamp), client questionnaire, download-with-
+  open-items (list + note + checksum + snapshot).
+- S2 (renewal dec whose SIX-MONTH term already ended, generate 125): the
+  client's own 5.7 worked example (proposed effective derived from the prior
+  expiration, rule + inputs printed) AND the refused proposed expiration in
+  VALUES SEEN AND REFUSED (a 183-day term must not be assumed annual).
+- S3 (umbrella $3M package + $1M COI, generate 125+131): the record shows
+  `conflicting` BEFORE resolution, the picker shows both values with their
+  files, and after confirming, DATA CONSISTENCY RESOLUTIONS carries every
+  competing value + source + choice + actor + timestamp (5.10).
+Design rule (the inverse of C4's): a lineage fixture must PRINT the value on
+the page its check cites - `_verify()` re-reads every PDF with pdfplumber and
+fails the build if a cited value is missing from its page, if S1A is not
+multi-page (page markers exist only then), if a fixture accidentally prints a
+value that must be DERIVED ("Years in Business"), or if S2's term stopped
+being expired/non-annual (dates are computed from today). The lineage door was
+also dry-run offline against the real generated PDFs: `gl_each_occurrence ->
+"S1A_package_policy.pdf - page 2; S1B_certificate_of_insurance.pdf"`, the
+schedule row -> contribution attribution, and the employee count "24"
+correctly gets NO citation (the 4-char floor; noted in the README so it is
+not reported as a failure).
+
+**One renderer fix found while scripting the checks:** an envelope-less
+structured fact printed `Source: unspecified` ABOVE its new Evidence line -
+the exact words the client reported. The renderer now labels such a row
+"AI extraction from document" whenever document evidence was recovered;
+"unspecified" survives only for a value with no envelope AND no evidence,
+which is the honest case.
+
+Suite after C5-C: **4426 passed / 1 failed / 14 skipped** - the same single
+known httpx failure, zero regressions (C5 total is now 30 tests). Fixture
+`_verify()` green, offline lineage dry-run green, frontend production build
+clean.
+
+### C4-S - S5 SOLVED live; S6/S1 regression-checked; one S1 item to confirm
+
+**S5 PASSES.** The Agency bucket now carries:
+
+    ACORD 126 | Producer-facing | Conflict - resolve
+    Annual revenue - rating basis
+
+Two applications differing by $1.45M produce a producer-routed conflict row.
+Clause 4.1 Step 5 and core principle 4 are satisfied live for the first time.
+The client bucket carries no revenue question - the adjudication never reaches
+the insured, which is the half of Step 5 that matters most.
+
+**S6 PASSES as a regression check on C4-R.** Narrowing `_component_split_allowed`
+to a named set did NOT resurrect any formatting-only conflict: no row for the
+address, the ZIP+4, `LLC` vs `L.L.C.` or the spaced policy number. The
+equivalence layer still folds what it should; it has simply stopped folding what
+it should not.
+
+**S1 - one item to confirm, stated plainly rather than assumed.** Property went
+from 9 questions to 7 between runs. Two facts stopped being asked:
+
+  * `occupancy_type` - CORRECT. The rebuilt S1 fixture prints "Occupancy:
+    Cabinet shop and warehouse" (verified by reading the PDF back), so the fact
+    is known and the question is rightly suppressed. The EARLIER run asking it
+    was the anomaly.
+  * `construction_type` and `fire_protection_class` - UNEXPLAINED. Reading the
+    generated PDF back confirms the document contains neither "construction"
+    nor "fire protection" nor "protection class" anywhere, which the fixture
+    self-check also enforces.
+
+Two possible causes, needing opposite responses, and I will not guess between
+them again:
+  1. extraction produced a value for them this run and did not last run (LLM
+     variance) - the suppression is then CORRECT, but a GUESSED construction
+     type is now stamped on ACORD 140, which is its own concern: it is exactly
+     the "merely Suggested value ships silently" case, and C4-Q only routes
+     JUDGMENT facts for confirmation, not client-eligible ones like this;
+  2. something in C4-Q/C4-R suppresses them - a real regression.
+
+Reviewed against my own changes first: `is_not_applicable_for` and
+`_curated_question_for` can only ADD questions, ACORD_140s inventory is intact
+(all 16 keys including occupancy_type / construction_type /
+fire_protection_class), the component gate touches only conflict grouping, and
+text verification LABELS values, it cannot create them. For the question to
+vanish the FACT must now hold a value - which points at (1). Not proven.
+
+DECISIVE CHECK: open ACORD 140 and look at the Construction Type and Protection
+Class boxes. Filled -> case 1 (correct suppression, and a separate question
+about whether we should stamp a guess). Blank -> case 2, a real regression, and
+the questionnaire is hiding a gap the form still has.
+
+---
+
+## C4 CLOSING STATE - read this one entry, not the nineteen above (2026-08-26)
+
+`C4-A` through `C4-S` are the working record. This is the summary a future
+session should start from.
+
+### What shipped
+
+**ONE DOOR: `services/question_eligibility.py`.** The client's 4.1 Step 1-5 flow
+plus the 4.4 routing table (`INSURANCE_JUDGMENT_FACTS`). Structural safety
+property: every overlay it can emit moves a question CLIENT -> PRODUCER,
+suppresses it, or holds a conflict. **There is no code path that routes anything
+TO the client**, so a bug here can only ever over-inform the producer. Pinned by
+`test_overlay_never_widens_client_exposure`, driven over every registry fact.
+
+`decorate_questions` gained an OPTIONAL `facts=` argument; omitting it skips the
+overlay entirely, so every legacy call site is byte-identical.
+
+### Clause status, verified LIVE unless marked
+
+| Clause | State |
+|---|---|
+| 4.2 / 4.3 / 4.4 routing | **DONE, live** (S1 18/18 split) |
+| 4.7 GL | **DONE, live** |
+| 4.8 Property | **DONE, live** |
+| 4.9 Auto | **DONE, live** (S3; symbols off the client table) |
+| 4.10 WC | **DONE, live** (S2) |
+| 4.11 Umbrella | **DONE, live** (S4, all 7 items) |
+| 4.1 Step 1 applicability | **DONE, live** (S7 both runs, form override works) |
+| 4.1 Step 5 conflicting | **DONE, live** (S5, "Conflict - resolve") |
+| 4.5 normalisation | **PARTIAL** - 6 of 8 verified; see gaps |
+| 4.1 Steps 2/3 | **PARTIAL** - mechanism built, applied narrowly |
+| 4.6 client-answer conflict | **BUILT, NEVER TESTED LIVE** |
+| 4.12 criteria 1/3/4/5 | **DONE** |
+| 4.12 criteria 2/6 | **NOT DONE** |
+
+### The five root causes this arc actually found
+
+Every one was silent by construction - no exception, no log, a feature that
+simply never fired:
+
+1. **Rules keyed on a field NAME** (C4-I). `NamedInsured_SICCode_A` does not
+   contain the pattern `"sic_code"`. Three defects, one shape.
+2. **Tables with a MISSING ROW** (C4-K). An unregistered field family
+   (`Location_PhysicalAddress_*` on four forms), an override applied in one of
+   two doors, an EMPTY `FORM_FIELD_INVENTORY` for ACORD 127.
+3. **A reader on the WRONG KEY** (C4-L). `_uw_conflicted_keys` versus
+   `_uw_conflict_keys`, one character apart. `value_state == conflicting` was
+   unreachable in production.
+4. **TWO tables, one read** (C4-Q). `FACT_REGISTRY[k]["question"]` versus
+   `_FIELD_QUESTION_MAP`; 19 facts had a good question that was invisible. Plus
+   23 inventory entries naming facts that do not exist.
+5. **A gate too coarse to be a gate** (C4-R). `is_component_of` admitted 75
+   facts by KIND when its entire justification is premiums, and folded a real
+   $1.45M revenue conflict.
+
+**The standing lesson, earned three separate times:** a rule that reasons about a
+value's own characters must NAME the facts it may speak about. "Kind" is not
+specific enough to be that name. And the only defence that has actually worked
+here is a test that enumerates the REAL data - all 17 schemas, the whole
+inventory - never one asserted example.
+
+### KNOWN OPEN - do not close C4 without deciding these
+
+1. **S1: `construction_type` / `fire_protection_class` stopped being asked** and
+   the S1 document states neither. Either extraction guessed values (correct
+   suppression, but a guess is stamped on ACORD 140) or something suppresses
+   them (regression). **Decisive check: are those two boxes on the generated
+   ACORD 140 filled or blank?** Unresolved.
+2. **4.6 has never been exercised live.** S8 exists (application + loss run with
+   2 claims). The round trip - send, answer contradicting the loss run, confirm
+   the answer is HELD not applied - has not been run.
+3. **4.5 residual, three items:** ACORD 25 insurer-letter mapping is absent;
+   deterministic date derivation exists only on the renewal branch, so a
+   non-renewal with an effective date and no expiration is ASKED instead of
+   derived; `lob_canon.canon_line` returns None for `GL`, `WC` and `BAP`.
+4. **4.1 Step 3 is implemented narrowly, ON PURPOSE.** A merely-Suggested value
+   is surfaced for confirmation only for the ~43 INSURANCE-JUDGMENT facts.
+   Applied to all 179 it would re-ask nearly the whole package (measured, C4-B).
+   A guessed CLIENT-eligible value (item 1 above may be a live example) still
+   ships silently. **This is a product decision, not an engineering one.**
+5. **4.12 criterion 2 (exposure does not apply)** - only coverage-line denial
+   exists. No vehicles -> auto questions are still asked.
+   **4.12 criterion 6 (would not meaningfully improve)** - nothing REMOVES a
+   zero-value question; ranking and the 28-cap affect pre-selection only.
+6. **`tests/test_dec_index_purge` fails** on `audit_service.py:1173`. NOT this
+   work - that file carries 331 uncommitted insertions from another session, and
+   the flagged line EXCLUDES `dec_page_entries`. Someone must decide it.
+
+### Measuring this suite correctly
+
+`py -m pytest -q -p no:randomly` -> **4395 passed, 2 failed, 14 skipped.**
+The default run reports **8** failures; six pass individually and
+file-at-a-time. The suite uses `pytest-randomly` and has pre-existing
+cross-test pollution. **Always baseline with `-p no:randomly`** or you will
+chase ghosts that belong to nobody.
+
+### Fixtures
+
+`backend/scripts/make_c4_test_pdfs.py` -> `test_data_c4/` (11 PDFs + README).
+Built on ONE rule, enforced by the generator itself: **a scenario can only test
+the ROUTING of a value it does NOT state.** A stated value is extracted and
+correctly suppressed, so the first fixture set proved nothing. `_FORBIDDEN` is
+that contract as code and exits non-zero when violated - it caught its own
+author on the first run.
+
+### C5-D - LIVE RUN: all three scenarios PASS; 7 defects the run exposed, all fixed (2026-08-26)
+
+**The owner ran the full kit on the live system.** Every C5 headline behaviour
+verified on real records: both documents with types + upload times; Document +
+Page evidence ("S1A_package_policy.pdf - page 2; S1B_certificate_of_insurance.pdf"
+on gl_each_occurrence - 5.4 and 5.5 in one line); schedules with contribution
+evidence instead of "unspecified" (5.6); years_in_business and the renewal
+proposed-date with their derivation rules and the refused expiration with its
+reason (5.7, the client's own worked example); the edit 24 -> 30 with actor +
+canonical fact key; the reopen event preserving the erased dismissal timestamp
+(5.9/5.11); the client's answers with name/email/time (5.8); the download
+carrying all 9 open items + checksum (5.13); the conflict showing
+`conflicting` before resolution and the full DATA CONSISTENCY RESOLUTIONS
+entry after (5.10: both values, each tagged with its source file, choice,
+timestamp).
+
+**Seven defects the live records exposed - the fixtures were easier than
+reality exactly once per defect (D22's lesson, again):**
+1. **A resolved conflict still read `UNRESOLVED (conflicting /
+   user_confirmed)`** one line under the resolution entry that settled it.
+   Root cause: `derive_value_state`'s CONFLICTING branch reads the superset
+   key (`_uw_conflict_keys` = "the documents still disagree"), which stays
+   true FOREVER - so no confirmation could ever clear the state. Fixed at the
+   reader: a fact whose evidence_state is USER_CONFIRMED is not conflicting
+   (client 1.5 - the producer's resolution settles the FACT; the
+   disagreement's history lives in the 5.10 resolution record). The
+   evidence_state is re-derived when the caller did not pass it, so every
+   caller agrees. An UNRESOLVED conflict still reads conflicting, test-pinned
+   both directions. question_eligibility (64) + canonical-facts + C3 suites
+   all green - no scorer reads these states.
+2. **Two internal marker facts rendered as captured inputs**
+   ("renewal_dates_routed: True / Source: unspecified",
+   dec_states_payroll_basis) - filtered by CLASS, not name: a BARE Python
+   boolean can only be pipeline bookkeeping, because _annotate_facts wraps
+   every real extracted boolean into an envelope as the string "True"/"False".
+3. **risk_transfer ([structured value]) printed "Source: unspecified" with no
+   evidence** - structured dicts now get the same contribution attribution
+   schedules do (fact_lineage.dict_sources).
+4. **The upload event said "184 value(s)" while the record said 47** - the
+   event counted raw fact keys including empties; now counts non-empty, the
+   same thing the record prints.
+5. **A duplicate score snapshot fired because the cap's wording gained its
+   " Fix: ..." remediation suffix** on a different render path - the suffix is
+   presentation, stripped from the 5.12 signature.
+6. **"score 70, held at 85" read as nonsense** - the renderer now prints
+   "held at N" only when the cap binds the displayed score, else
+   "cap N in effect".
+7. **"Chosen: $3,000,000 (was: $3,000,000)"** - under D16 the suggested value
+   stamps before confirmation, so confirming the suggestion printed an
+   identical "was". Suppressed when unchanged.
+
+**Also observed working as designed, called out so nobody "fixes" them:**
+inferred booleans (agreed_value_endorsement "False") cite their documents
+without a page - the per-document extraction genuinely produced them and the
+`suggested` state says they are unverified; the mailing address cites page 4,
+not page 1, because page 1 prints it split across two rows and the citation
+requires the value contiguous; a dismissal on a card WITH an answer box
+records no reason - that is Q17, the owner's own "not now" ruling, and the
+dismissal itself was still recorded (the reopen event proved it).
+
+- files: services/fact_state.py, services/audit_service.py,
+  services/fact_lineage.py, routes/form_routes.py,
+  frontend/src/components/form/AcordModal.jsx
+- tests: +4 in test_audit_lineage_20260826.py (35 total in the file)
+- suite result: **4428 passed / 1 failed / 14 skipped** - the same single
+  known httpx failure, zero regressions. Frontend production build clean.
+
+**Verdict: C5 is verified live end to end.** The record is regenerated on
+every click, so all fixes apply to existing submissions immediately after a
+backend restart + browser refresh.
+
+### C5-E - CLAUSE-BY-CLAUSE CLOSURE + the last gap (2026-08-26)
+
+**Asked directly by the owner: "is every issue the client raised closed?"**
+Answered clause by clause against the OWNER'S OWN LIVE RECORDS (S1-before,
+S1-after, S2-record, S3-before, S3-after), not against intent. One gap was
+found while answering it and closed before the answer was given.
+
+**THE LAST GAP - the client's 5.4 example prints "COI.pdf - Page 1" and we
+printed the COI with no page at all.** C5-A deliberately declined to name a
+page for a markerless document, reasoning it "could be a 40-page text". That
+reasoning was half right and therefore wrong: `ocr_service._PAGE_MARKER` is
+emitted for EVERY multi-page document with content, so while markers are
+enabled a markerless text is PROVABLY single-page and its value is on page 1
+by definition. `fact_lineage.build_doc_index` now cites page 1 for that case,
+reading `ocr_service._PAGE_MARKERS_ON` lazily so the honest no-page behaviour
+returns the moment `OCR_PAGE_MARKERS=0` - the only configuration where a
+markerless text really could be 40 pages. Both directions test-pinned
+(`test_every_supporting_document_is_retained`,
+`test_markerless_text_declines_a_page_when_markers_are_off`). The record now
+prints the client's example verbatim: **"S1A_package_policy.pdf - page 2;
+S1B_certificate_of_insurance.pdf - page 1"**.
+
+**Verdict: all 13 clauses + the four headline complaints CLOSED.** Each row
+proven by a specific artefact in the owner's live records:
+
+| Clause | Proof |
+|---|---|
+| Headline (no source docs / "AI extraction" only / "unspecified" / no modification history) | All four visibly gone from S1/S2/S3 |
+| 5.1 material facts | Every fact in the store gets the treatment - no curated subset to defend |
+| 5.2 document record | id, filename, type + confidence, upload time, uploader - both files |
+| 5.3 fact lineage | key, raw value, both states, scope, document + page (clause itself permits a different schema if relationships are recoverable) |
+| 5.4 all supporting sources | "S1A - page 2; S1B - page 1" - his example, verbatim, after C5-E |
+| 5.5 Document + Page | live on every verifiable value |
+| 5.6 structured "unspecified" | **zero** occurrences in the S3 re-run; every example he listed (symbols, drivers, coverage lines, locations, underlying policies) carries evidence |
+| 5.7 derived facts | his own worked example runs verbatim in S2: rule + inputs + evidence |
+| 5.8 user-supplied | producer answers with actor/time; client answers with name, email, time, per question |
+| 5.9 overrides | "24" -> "30" with actor + time; retractions logged; reopen preserved the prior dismissal timestamp |
+| 5.10 conflict history | S3-after IS the requirement: both values each tagged with its file, choice, timestamp |
+| 5.11 event log | append-only table; upload / answers / reopen / snapshots all observed live |
+| 5.12 snapshots | all four triggers fired in S1-after, nothing redundant; content matches his list |
+| 5.13 download with open items | acknowledgment + all 9 items + score + checksum preserved |
+
+**THE FOUR CAVEATS, stated so nobody is ambushed by them** (each has a
+one-sentence answer that ends the conversation):
+1. Values under `_TEXT_VERIFY_MIN_CHARS` (4 normalised chars, e.g. "24") get
+   no page citation - "24" occurs by accident in any document, and a false
+   citation in an E&O record is worse than none. Blank-over-wrong, applied to
+   lineage.
+2. Dismissing a card that HAS an answer box records no reason - that is Q17,
+   the owner's own 2026-08-26 "not now" ruling, not a C5 gap. The dismissal
+   itself is still recorded (the reopen event carried `prior action:
+   dismissed at ...`).
+3. 5.10's "any resolution note" is plumbed end to end (column, writer, API
+   field, renderer) but the picker UI has no note box yet - the clause says
+   the note is optional, so nothing is unmet; it is a ~20-minute UI add.
+4. A value a document only IMPLIES (`agreed_value_endorsement: False`) cites
+   its documents without a page - there is no printed line to point at, and
+   the `suggested` evidence state says so honestly.
+
+**Suite: 4429 passed / 1 failed / 14 skipped** - the same single known
+httpx/openai ImportError, zero regressions, 33 tests in
+`test_audit_lineage_20260826.py`. Fixture `_verify()` green, frontend build
+clean, `c5_test_data/` + README regenerated so check 2 states the page-1
+expectation.
+
+**Owed to Brent before he notices (D6), unchanged from C5-B:** the
+edited-expired-date path now trips the stop it always should have, and
+score-improvement deltas start rendering because `sqs_history` was structurally
+dead until C5-A. Both are corrections, both move numbers.
+
+### C4-T - The S1 ACORD 140 answers it: BLANK AND UNASKABLE, again (2026-08-26)
+
+The owner supplied the generated ACORD 140. It settles C4-S item 1, and NOT the
+way I guessed - I had reasoned toward extraction variance. It is a real defect,
+and it was pre-existing rather than a C4 regression.
+
+**CONSTRUCTION TYPE is BLANK on the form AND absent from the questionnaire.**
+PROT CL carries "1" (junk, see below) which correctly suppresses its question;
+YR BUILT is blank and IS asked. Construction type is the odd one out.
+
+**ROOT CAUSE.** `_backfill_and_resolve_present` computes a FORM-AWARE present
+set and states its own contract: *"if nothing could be stamped, the fact is left
+OUT of the present set so the client is still asked for it."* The form SCAN
+honours it. The coverage-guarantee injector did NOT - it asked
+`_fact_is_filled(facts.get(key))`, which is true for any value sitting in
+`facts` whether or not it ever reached a box. A fact that is present in facts
+but cannot stamp therefore produced a BLANK BOX AND NO QUESTION.
+
+This is the same shape as S7 run B (a property form blank and unaskable) one
+layer down, and the fourth variant of the arc-long pattern: two views of the
+same question, and the code consulted the weaker one. Fixed: the injector uses
+the caller-supplied form-aware set when there is one, and keeps the facts-only
+test as the fallback for callers that supply nothing.
+
+**SEPARATE AND MORE SERIOUS - the 140 is full of mined junk.** Not a
+questionnaire defect; recording it because it is worse than anything C4 has
+fixed. On the sparse S1 property page, gap fill filled unrelated boxes:
+
+  CARRIER               = "Applied For"   (a coverage STATUS as a carrier name)
+  BLANKET SUMMARY BLKT# = "91340"         (the GL CLASS CODE)
+  DIST TO HYDRANT/FIRE STAT/FIRE DISTRICT/CODE NUMBER/PROT CL = "1" each
+                                          (all mined from the words "Location 1")
+  # GUARDS / WATCHMEN   = "28"            (the EMPLOYEE COUNT)
+  BURGLAR ALARM TYPE    = "safe" / "premises"  (word fragments)
+  PREMISES FIRE PROTECTION = "Building characteristics and coverage terms are
+                              to be confirmed before b"  (the fixture disclaimer)
+  R/L/FRONT/REAR EXPOSURE = "4820 Marshall Street, Wheat" (the address)
+  VALUATION             = "R"
+
+This is the C21/C22 class - a thin document gives the model little to work with
+and it borrows the nearest token. `fire_protection_class = "1"` then SUPPRESSES
+its own question, so a garbage value both ships on a legal form and silences the
+only mechanism that would have caught it. **The questionnaire cannot fix this;
+it is a gap-fill grounding problem and belongs with the C21/C22 work.**
+
+Suite after the fix: **4429 passed / 1 failed** (`-p no:randomly`; the known
+httpx ImportError). `test_dec_index_purge` now passes - the other session"s
+audit_service work moved on. +1 test (66 in test_question_eligibility.py).

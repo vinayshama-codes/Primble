@@ -456,6 +456,16 @@ async def dismiss_recommendation(
             score_at_action=req.sqs_score_at_action,
             score_impact=req.score_impact,
         )
+        # E&O 5.12: a credited dismissal moves the displayed score - snapshot
+        # the refreshed package (the credit patched it in place via jsonb_set).
+        try:
+            from services.audit_service import log_sqs_snapshot_if_changed
+            _post = await get_processing_session(req.session_id)
+            await log_sqs_snapshot_if_changed(
+                req.session_id, str(current_user["id"]),
+                _post.get("package_sqs"), "dismiss_credit")
+        except Exception as _snap_ex:
+            logger.warning(f"dismiss: sqs snapshot skipped: {_snap_ex}")
 
     return JSONResponse({
         "success":               success,
@@ -646,6 +656,17 @@ async def answer_recommendation(
     from services.arq_service import (
         apply_producer_answer_to_session, recalculate_session_scores,
     )
+    # E&O 5.9: read the value being replaced BEFORE the apply overwrites it.
+    # previous_value was hardcoded None here until 2026-08-26.
+    _prev_fact_val = None
+    try:
+        from services.fact_lineage import envelope_value
+        _prev_sess = await get_processing_session(req.session_id)
+        _prev_fact_val = envelope_value((_prev_sess.get("facts") or {}).get(req.field))
+        if isinstance(_prev_fact_val, (list, dict)):
+            _prev_fact_val = None
+    except Exception as _pv_ex:
+        logger.warning(f"answer_recommendation: prior-value read failed: {_pv_ex}")
     applied, _updated = await apply_producer_answer_to_session(
         req.session_id, req.field, req.answer,
     )
@@ -684,7 +705,8 @@ async def answer_recommendation(
             field_name=req.field,
             fact_key=req.field,
             source="producer",
-            previous_value=None,
+            previous_value=(str(_prev_fact_val).strip()[:2000] or None)
+                           if _prev_fact_val is not None else None,
             new_value=str(req.answer).strip(),
             confidence="filled",
             model_version=SQS_MODEL_VERSION,
@@ -849,6 +871,21 @@ async def reopen_recommendation(
             )
         except Exception as ex:
             logger.error(f"reopen_recommendation: clear failed for {row.get('field')}: {ex}")
+        if cleared:
+            # E&O 5.9: the retraction is a modification - a value left the
+            # package. Unlogged until 2026-08-26 (a fact could vanish with
+            # nothing in MODIFICATION HISTORY).
+            try:
+                await log_field_change(
+                    session_id=req.session_id, user_id=str(current_user["id"]),
+                    form_id=row.get("form_id"), field_name=row["field"],
+                    fact_key=row["field"], source="producer",
+                    previous_value=str(row.get("producer_answer") or "")[:2000] or None,
+                    new_value="", confidence=None,
+                    model_version=SQS_MODEL_VERSION,
+                )
+            except Exception as _rle:
+                logger.warning(f"reopen_recommendation: retraction log failed: {_rle}")
 
     if cleared or credit_applied:
         from services.arq_service import recalculate_session_scores
@@ -871,6 +908,24 @@ async def reopen_recommendation(
 
     reopened = req.rec_id in active_rec_ids
     if reopened:
+        # E&O 5.11: the reopen UPDATE nulls action / action_at /
+        # sqs_score_at_action - preserve that state in the append-only event
+        # log BEFORE it is erased (never destroy the original, 5.9).
+        try:
+            from services.audit_service import log_audit_event
+            await log_audit_event(
+                req.session_id, str(current_user["id"]),
+                "recommendation_reopened",
+                {"rec_id": req.rec_id,
+                 "prior_action": row.get("action"),
+                 "prior_action_at": row.get("action_at"),
+                 "prior_score_at_action": row.get("sqs_score_at_action"),
+                 "prior_answer": row.get("producer_answer"),
+                 "prior_reason": row.get("override_reason"),
+                 "answer_retracted": bool(cleared)},
+            )
+        except Exception as _ev_ex:
+            logger.warning(f"reopen_recommendation: event log failed: {_ev_ex}")
         # Nulled LAST, deliberately: recalculate_session_scores' auto-resolve pass only
         # touches rows with action IS NULL, so clearing it earlier would let that pass
         # immediately re-stamp 'resolved' and defeat the reopen.
@@ -1060,6 +1115,13 @@ async def resolve_issue(
     # this" from "this was already open".
     _before: dict = {}
     _open_facts: list = []
+    # E&O 5.9: the pre-write facts, so the modification log can carry the value
+    # being replaced (previous_value was hardcoded None here until 2026-08-26).
+    _pre_facts: dict = {}
+    try:
+        _pre_facts = (await get_processing_session(req.session_id)).get("facts") or {}
+    except Exception as _pf_ex:
+        logger.warning(f"resolve_issue: pre-write facts read failed: {_pf_ex}")
 
     if mode == "field":
         field = (req.field or "").strip()
@@ -1128,6 +1190,24 @@ async def resolve_issue(
         if not ok:
             return JSONResponse({"success": False, "message": result.get("message", "Could not save schedule.")})
         applied = True
+        # E&O 5.9/5.11: schedule saves were the one resolve mode with NO audit
+        # row at all (found 2026-08-26). One row per save, summarized by row
+        # count - per-cell rows for a 100-vehicle fleet would be noise, and the
+        # rows themselves are in facts + the receipt trail.
+        try:
+            from services.fact_lineage import envelope_value as _env_val
+            _prev_rows = _env_val(_pre_facts.get(list_key))
+            _prev_n = len(_prev_rows) if isinstance(_prev_rows, list) else 0
+            await log_field_change(
+                session_id=req.session_id, user_id=str(current_user["id"]),
+                form_id=req.form_id, field_name=f"schedule::{list_key}",
+                fact_key=list_key, source="producer",
+                previous_value=f"{_prev_n} row(s)",
+                new_value=f"{len(rows)} row(s)",
+                confidence="filled", model_version=SQS_MODEL_VERSION,
+            )
+        except Exception as _se:
+            logger.warning(f"resolve_issue: schedule audit log failed: {_se}")
 
     else:
         return JSONResponse({
@@ -1137,10 +1217,17 @@ async def resolve_issue(
 
     if _log_field:
         try:
+            from services.fact_lineage import envelope_value as _env_val
+            _prev_v = _env_val(_pre_facts.get(_log_field))
+            if isinstance(_prev_v, (list, dict)):
+                _prev_v = None
             await log_field_change(
                 session_id=req.session_id, user_id=str(current_user["id"]),
                 form_id=req.form_id, field_name=_log_field, fact_key=_log_field,
-                source="producer", previous_value=None, new_value=str(_log_value)[:2000],
+                source="producer",
+                previous_value=(str(_prev_v).strip()[:2000] or None)
+                               if _prev_v is not None else None,
+                new_value=str(_log_value)[:2000],
                 confidence="filled", model_version=SQS_MODEL_VERSION,
             )
         except Exception as _le:
@@ -1316,10 +1403,47 @@ async def reopen_issue(
 
     resolution = resolution_for(req.code)
     cleared_any = False
+    _cleared_priors: dict = {}
     if resolution and resolution.get("mode") == "field":
+        # E&O 5.9: capture the values about to be retracted, then log each
+        # retraction as a modification (previously silent - a fact could
+        # vanish from the package with nothing in MODIFICATION HISTORY).
+        _pre_facts: dict = {}
+        try:
+            from services.fact_lineage import envelope_value as _env_val
+            _pre_facts = (await get_processing_session(req.session_id)).get("facts") or {}
+        except Exception as _pf_ex:
+            logger.warning(f"reopen_issue: pre-clear facts read failed: {_pf_ex}")
         for fact in resolution.get("facts") or []:
             ok, _ = await clear_producer_answer_from_session(req.session_id, fact)
             cleared_any = cleared_any or ok
+            if ok:
+                try:
+                    _prev = _env_val(_pre_facts.get(fact))
+                    if isinstance(_prev, (list, dict)):
+                        _prev = None
+                    _cleared_priors[fact] = str(_prev)[:300] if _prev is not None else None
+                    await log_field_change(
+                        session_id=req.session_id, user_id=str(current_user["id"]),
+                        form_id=req.form_id, field_name=fact, fact_key=fact,
+                        source="producer",
+                        previous_value=(str(_prev).strip()[:2000] or None)
+                                       if _prev is not None else None,
+                        new_value="", confidence=None,
+                        model_version=SQS_MODEL_VERSION,
+                    )
+                except Exception as _rle:
+                    logger.warning(f"reopen_issue: retraction log failed for {fact}: {_rle}")
+    if cleared_any or req.issue_id:
+        try:
+            from services.audit_service import log_audit_event
+            await log_audit_event(
+                req.session_id, str(current_user["id"]), "issue_reopened",
+                {"issue_id": req.issue_id, "rule_code": req.code,
+                 "retracted_facts": _cleared_priors},
+            )
+        except Exception as _ev_ex:
+            logger.warning(f"reopen_issue: event log failed: {_ev_ex}")
 
     if req.issue_id:
         await set_issue_status(
@@ -1381,6 +1505,9 @@ async def resolve_recommendation(
         rec_id=req.rec_id,
         sqs_score_at_action=req.sqs_score_at_action,
         model_version=SQS_MODEL_VERSION,
+        # E&O 5.11: a manual resolve names its actor (was omitted, so the row
+        # kept whoever the rec was PRESENTED to).
+        user_id=str(current_user["id"]),
     )
     return JSONResponse({"success": success})
 

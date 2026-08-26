@@ -79,10 +79,12 @@ class Column(dict):
         required: bool = False,
         placeholder: str = "",
         width: int = 0,
+        producer_only: bool = False,
     ):
         super().__init__(
             key=key, label=label, type=type, required=required,
             placeholder=placeholder, width=width,
+            producer_only=producer_only,
         )
 
 
@@ -130,8 +132,20 @@ SCHEDULE_DEFS: Dict[str, ScheduleDef] = {
             # declarations page normally states ONE symbol per coverage for the
             # whole schedule, which pdf_service inherits into every row, so these
             # only need filling when a fleet genuinely varies by vehicle.
-            Column("comp_symbol", "Comp symbol",      "text", placeholder="7", width=110),
-            Column("coll_symbol", "Collision symbol", "text", placeholder="7", width=125),
+            # PRODUCER-ONLY from 2026-08-26. Master-plan 4.9 makes covered-auto
+            # symbols a producer decision ("Producer: limits; symbols; coverage
+            # structure"), and core principle 5 forbids asking the client to
+            # perform insurance classification. There is now a dedicated
+            # producer question (`auto_covered_symbols`), so leaving these
+            # columns in the CLIENT's copy of the table was a second route to
+            # the wrong audience. The producer still sees and fills them - the
+            # flag is honoured only where the client's table is built
+            # (`arq_routes.client_view`), so pre-loading and stamping are
+            # unchanged.
+            Column("comp_symbol", "Comp symbol",      "text", placeholder="7", width=110,
+                   producer_only=True),
+            Column("coll_symbol", "Collision symbol", "text", placeholder="7", width=125,
+                   producer_only=True),
         ],
     ),
     "auto_drivers": ScheduleDef(
@@ -237,6 +251,42 @@ def schedule_list_key_for_field(field_name: str) -> Optional[str]:
     if defn is None:
         return None
     return defn.list_key if defn.list_key in SCHEDULE_DEFS else None
+
+
+def binds_a_capturable_column(field_name: str) -> bool:
+    """Is this field an EXACT registry binding, i.e. a real column of the table?
+
+    THE LOOSE PREFIX FALLBACK ABOVE IS WHY THIS EXISTS. It claims any field
+    whose base merely STARTS WITH a registry prefix, and ACORD reuses those
+    prefixes for things that are not schedule rows at all. Measured 2026-08-26
+    on the live C4 run:
+
+      * ACORD 131 - `Vehicle_CombinedSingleLimit_EachAccidentAmount_A` and
+        `Vehicle_BodilyInjury_PerAccidentLimitAmount_A` are the UMBRELLA's
+        underlying-limit boxes, not a fleet;
+      * ACORD 25  - `Vehicle_InsurerLetterCode_A`, `Vehicle_AnyAutoIndicator_A`
+        are certificate coverage boxes, not a fleet.
+
+    Both forms therefore raised "Please list the vehicles to be insured" at the
+    client, on forms that have no vehicle schedule to fill.
+
+    The loose fallback is DELIBERATELY LEFT INTACT - ACORD 127 resolves 268
+    genuine vehicle fields through it, so removing it would break the real
+    schedule. This predicate is the separate question the caller actually needs:
+    *does this form carry a column the client could type into?* An exact
+    registry hit is that, and nothing else is.
+    """
+    if not field_name:
+        return False
+    try:
+        from services.pdf_service import _SCHED_ROW_RE, _SCHEDULE_REGISTRY
+    except Exception:                                         # noqa: BLE001
+        return False                                          # fail closed
+    m = _SCHED_ROW_RE.match(field_name)
+    if not m:
+        return False
+    defn = _SCHEDULE_REGISTRY.get(m.group(1))
+    return bool(defn and defn.list_key in SCHEDULE_DEFS)
 
 
 # ---------------------------------------------------------------------------

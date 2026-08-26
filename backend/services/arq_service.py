@@ -358,6 +358,14 @@ _FIELD_QUESTION_MAP = {
     "auto_liability_limit":     "How much liability coverage are you looking for on your business vehicles?",
     "auto_deductible_comp":     "How much would you pay out of pocket for non-collision vehicle damage (such as theft, weather, or vandalism)?",
     "auto_deductible_collision": "How much would you pay out of pocket if one of your business vehicles is in a collision?",
+    # ADDED 2026-08-26. Both are PRODUCER-only under master-plan 4.9 ("covered-auto
+    # symbols", "policy-level physical-damage structure") and route to Agency via
+    # question_eligibility. They had no question text at all, so even once ACORD
+    # 127 gained an inventory the coverage-guarantee injector - which requires a
+    # curated question - would have skipped them. Worded for the producer, since
+    # that is the only audience that can reach them.
+    "auto_covered_symbols":     "Which covered-auto symbols apply to each coverage? (For example: Liability 01; Comprehensive 07; Collision 07)",
+    "auto_physical_damage_valuation": "How is physical damage valued on the vehicle schedule - Actual Cash Value or Stated Amount?",
     # Workers Compensation
     "wc_payroll":               "What is the total annual payroll for employees covered under Workers Compensation?",
     "wc_class_codes":           "What types of work do your employees perform? (Describe their job duties — your agent will assign the appropriate codes)",
@@ -366,6 +374,21 @@ _FIELD_QUESTION_MAP = {
     # Umbrella / Excess
     "umbrella_limit":           "How much additional liability coverage would you like on top of your other policies? (For example: $1,000,000 or $5,000,000 extra)",
     "umbrella_sir":             "For this extra liability coverage, how much would you be willing to cover yourself before it kicks in?",
+    # 4.3 "New venture / no prior operations" - the only client-eligible fact
+    # left with no question in EITHER table after the registry fallback landed.
+    # Client-facing by design: the insured is the only one who knows whether the
+    # business is newly formed, and it is the honest explanation for an absent
+    # loss history rather than a gap.
+    "new_venture_indicator":    "Is this a brand new business with no prior operating history? (If yes, we will not expect prior insurance or loss runs.)",
+    # ADDED 2026-08-26. Master-plan 4.11 names "attachment requirements",
+    # "follow-form status" and the "Schedule of Underlying Insurance" as
+    # producer-facing umbrella items, and 4.4 adds "limit adequacy". They had no
+    # curated question, so the coverage-guarantee injector - which requires one -
+    # could never surface them and nobody was ever asked. Worded for the
+    # producer, the only audience that reaches them.
+    "umbrella_attachment_point": "At what underlying limit does the umbrella attach? (For example: $1,000,000 CSL over Auto and $1,000,000 / $2,000,000 over GL)",
+    "underlying_policies":       "List the Schedule of Underlying Insurance: for each line, the carrier, policy number, policy period and limits the umbrella sits over.",
+    "employers_liability_limits": "What are the Employers Liability limits on the underlying Workers Compensation policy? (For example: $1,000,000 / $1,000,000 / $1,000,000)",
     "schedule_of_underlying_insurance": "Is a Schedule of Underlying Insurance included with this submission (the list of the underlying GL / Auto / Employers Liability policies your umbrella sits over)?",
     "umbrella_follow_form":     "Do the submitted documents explicitly state the umbrella follows form over the underlying coverages? Leave blank if it is not explicitly stated.",
     # Miscellaneous
@@ -562,6 +585,16 @@ _FIELD_PRODUCER_LABEL_MAP = {
     "wc_officer_exclusions":    "Officer inclusions / exclusions",
     "umbrella_limit":           "Umbrella limit",
     "umbrella_sir":             "Umbrella SIR",
+    # ADDED 2026-08-26. Without a producer label the card falls back to the full
+    # question text, so the C4 live run (S4/S3) showed rows titled "At what
+    # underlying limit does the umbrella attach? (For example: ...)" sitting
+    # next to short ones like "Umbrella SIR". Cosmetic, but it made the new
+    # questions read as unfinished next to the rest of the panel.
+    "umbrella_attachment_point": "Umbrella attachment point",
+    "underlying_policies":       "Schedule of Underlying Insurance",
+    "employers_liability_limits": "Employers Liability limits",
+    "auto_covered_symbols":      "Covered-auto symbols",
+    "auto_physical_damage_valuation": "Physical damage valuation",
     "schedule_of_underlying_insurance": "Schedule of underlying insurance",
     "umbrella_follow_form":     "Follow-form confirmation",
     "percent_subcontracted":    "Subcontracted work %",
@@ -1039,8 +1072,41 @@ async def _classify_other_reason_adverse(explanation: str) -> bool:
         return False
 
 
-def _resolve_question(field_name: str) -> tuple[str, str | None]:
+def _curated_question_for(field_name: str) -> Optional[str]:
+    """The plain-language question for a fact, from EITHER curated table.
+
+    THERE ARE TWO QUESTION TABLES AND ONLY ONE WAS EVER READ.
+    `_FIELD_QUESTION_MAP` here, and `fact_registry.FACT_REGISTRY[key]["question"]`
+    - the registry entry every fact is supposed to carry. The
+    coverage-guarantee injector gates on `_FIELD_QUESTION_MAP` alone, so a fact
+    with a perfectly good registry question was unreachable: no question, no
+    error, no way to notice.
+
+    Measured 2026-08-26: of 42 form-inventory entries with no curated question,
+    **19 already had one in the registry**. That is the whole
+    `wc_payroll_by_state` / `auto_radius_of_operation` / `gl_form_type` /
+    `new_venture_indicator` class of "client-eligible fact nobody is ever asked
+    for" in one line, rather than 19 hand-copied strings that can drift.
+
+    `_FIELD_QUESTION_MAP` still wins - it is the client-tuned wording - so no
+    question that renders today changes by a character.
+    """
     q = _FIELD_QUESTION_MAP.get(field_name)
+    if q:
+        return q
+    try:
+        from services.fact_registry import FACT_REGISTRY
+        entry = FACT_REGISTRY.get(field_name) or {}
+        rq = entry.get("question")
+        if rq and isinstance(rq, str) and rq.strip():
+            return rq.strip()
+    except Exception:                                         # noqa: BLE001
+        pass
+    return None
+
+
+def _resolve_question(field_name: str) -> tuple[str, str | None]:
+    q = _curated_question_for(field_name)
     if q:
         q = _clean_duplicate_words(q)
         return q, None
@@ -2232,11 +2298,34 @@ def _partition_schedule_fields(missing_fields: dict, field_current_values: dict)
     schedule_forms: dict = {}
     if not ENABLE_SCHEDULE_CAPTURE:
         return schedule_forms
+
+    # PASS 1 - which FORMS genuinely carry a capturable column of each schedule.
+    # Live defect 2026-08-26 (C4 test S4/S6): ACORD 131 and ACORD 25 raised
+    # "Please list the vehicles to be insured" at the client, because a bare
+    # `Vehicle_` prefix match claimed the umbrella's underlying-limit boxes and
+    # the certificate's coverage indicators as fleet rows. Neither form has a
+    # vehicle schedule. A schedule question is only honest when the form carries
+    # a column the client could actually type into - see
+    # `schedule_capture.binds_a_capturable_column`.
+    real_forms: dict = {}
+    for field_name, form_ids in missing_fields.items():
+        list_key = _schedule_key_for_question_field(field_name)
+        if list_key and schedule_capture.binds_a_capturable_column(field_name):
+            real_forms.setdefault(list_key, set()).update(form_ids)
+
+    # PASS 2 - collapse only the fields belonging to a JUSTIFIED (schedule, form)
+    # pair. A field on a form with no capturable column is left in
+    # `missing_fields` and takes the ordinary question path, where the classifier
+    # routes it on its own merits (an umbrella limit box is uncurated, so rule 7
+    # keeps it internal). Nothing is silently dropped either way.
     for field_name in list(missing_fields.keys()):
         list_key = _schedule_key_for_question_field(field_name)
-        if not list_key:
+        if not list_key or list_key not in real_forms:
             continue
-        schedule_forms.setdefault(list_key, set()).update(missing_fields[field_name])
+        justified = set(missing_fields[field_name]) & real_forms[list_key]
+        if not justified:
+            continue
+        schedule_forms.setdefault(list_key, set()).update(justified)
         del missing_fields[field_name]
         field_current_values.pop(field_name, None)
     return schedule_forms
@@ -2383,14 +2472,19 @@ def _drop_not_applicable_questions(questions: List[dict], facts: dict,
         # rule as the exception path below.
         return questions
     try:
-        from services.fact_state import is_not_applicable, denied_lines
+        from services.fact_state import is_not_applicable_for, denied_lines
         denied = denied_lines(facts) - _lines_the_producer_is_applying_for(form_ids)
         if not denied:
             return questions              # nothing declined, or all of it re-applied for
         kept, dropped = [], []
         for q in questions:
             key = q.get("_canonical_key") or _canonical_key(q.get("field_name") or "")
-            if key and is_not_applicable(facts, key):
+            # `is_not_applicable_for`, NOT `is_not_applicable`: the per-question
+            # test has to honour the same producer override the gate above
+            # applied. Before 2026-08-26 it did not, and selecting ACORD 140 on
+            # a property-declining package still suppressed every property
+            # question - form blank AND unaskable (C4 test S7 run B).
+            if key and is_not_applicable_for(facts, key, form_ids):
                 dropped.append(key)
                 continue
             kept.append(q)
@@ -2658,13 +2752,84 @@ async def generate_arq_questions(
             _bucket = _inv_fact_forms.setdefault(_fact_key, [])
             if _fid not in _bucket:
                 _bucket.append(_fid)
+    # Client 4.1 Step 5 / core principle 4 (2026-08-26). A fact in an unresolved
+    # cross-document conflict HAS a value, so `_fact_is_filled` calls it
+    # already-provided and no question is ever built - which left
+    # `question_eligibility`'s Step 5 overlay nothing to route, because it can
+    # only decorate questions that exist.
+    #
+    # Measured live (C4 test S5): two applications for the same insured stating
+    # $2,400,000 and $3,850,000 revenue. `assess_underwriting_consistency`
+    # correctly returned status=conflict and the pipeline correctly wrote
+    # `_uw_conflicted_keys`, yet the producer screen showed "All clear" and NO
+    # revenue item appeared anywhere. The conflict was detected and then
+    # silently dropped on the floor - exactly what principle 4 forbids.
+    #
+    # So a conflicted fact is re-admitted here. The eligibility door then routes
+    # it to the PRODUCER and tags it "Conflict - resolve"; it can never reach
+    # the client, because that door has no path to the client audience.
+    _conflicted_keys = set((facts or {}).get("_uw_conflicted_keys") or ()) | \
+                       set((facts or {}).get("_uw_conflict_keys") or ())
+
+    # ── Client 4.1 Step 3, now that it is reachable (2026-08-26) ────────────
+    # "If the value involves insurance classification, policy interpretation or
+    # material ambiguity, route to producer." A judgment fact whose value is
+    # merely SUGGESTED - the model produced it and the documents do not
+    # literally say it (see fact_state.annotate_text_verification) - is exactly
+    # that case, and today it is suppressed as already-provided and stamped onto
+    # a legal form with nobody asked.
+    #
+    # Deliberately NARROW, because Step 3 taken literally would re-ask almost
+    # the whole package (C4-B):
+    #   * INSURANCE-JUDGMENT facts only - ~43 keys, not all 179;
+    #   * `suggested` only - a text-verified, derived or human value is left
+    #     alone;
+    #   * routed to the PRODUCER, deselected by default, so it can never add a
+    #     single question to the client's list.
+    _suggested_judgment: set = set()
+    try:
+        from services.question_eligibility import is_insurance_judgment
+        from services.fact_state import derive_evidence_state, SUGGESTED
+        for _k, _raw in (facts or {}).items():
+            if not _k or _k.startswith("_") or not is_insurance_judgment(_k):
+                continue
+            if isinstance(_raw, dict) and "value" in _raw \
+                    and derive_evidence_state(_raw)[0] == SUGGESTED:
+                _suggested_judgment.add(_k)
+    except Exception as _sjx:                                 # noqa: BLE001
+        logger.warning("arq: suggested-judgment sweep skipped - %s", _sjx)
+    _readmit = _conflicted_keys | _suggested_judgment
+    # The caller's form-aware present set, when it supplied one. None means the
+    # caller had no opinion and the facts-only test below stands.
+    _present_on_form = present_fact_keys if present_fact_keys is not None else None
     for _fact_key, _fact_forms in _inv_fact_forms.items():
-        if _fact_key not in _FIELD_QUESTION_MAP:
+        # BOTH question tables - see `_curated_question_for`. Gating on
+        # `_FIELD_QUESTION_MAP` alone made 19 facts with a perfectly good
+        # registry question unreachable, silently.
+        if not _curated_question_for(_fact_key):
             continue
         if _fact_key in seen_field_names or _fact_key in seen_canon_keys:
             continue
-        if _fact_is_filled(facts.get(_fact_key)):
-            continue
+        # THE FORM-AWARE SET, not the facts-only one (2026-08-26).
+        # `_backfill_and_resolve_present` says it in its own docstring: "if
+        # nothing could be stamped, the fact is left OUT of the present set so
+        # the client is still asked for it". The form SCAN honours that. This
+        # injector did not - it asked `_fact_is_filled(facts[key])`, which is
+        # true for any value sitting in `facts` whether or not it ever reached a
+        # box.
+        #
+        # Live defect (C4 test S1, ACORD 140): CONSTRUCTION TYPE came back BLANK
+        # on the generated form AND was absent from the questionnaire. The fact
+        # was in `facts`, so the injector skipped it; the value never stamped, so
+        # the box stayed empty. Blank box, nobody asked - which is precisely the
+        # outcome the form-aware set exists to prevent, and the same shape as
+        # S7's "blank and unaskable" property form.
+        if _fact_key not in _readmit:
+            if _present_on_form is not None:
+                if _fact_key in _present_on_form:
+                    continue
+            elif _fact_is_filled(facts.get(_fact_key)):
+                continue
         seen_field_names.add(_fact_key)
         seen_canon_keys.add(_fact_key)
         _ids  = sorted(set(_fact_forms))
@@ -2724,6 +2889,10 @@ async def generate_arq_questions(
                            else _present_fact_keys(facts)),
         narrative_components=_narrative_components_from_facts(facts, session_docs=session_docs, flags=flags),
         hard_stop_text=hard_stop_text,
+        # Client 4.1 (2026-08-26): hand the facts over so the eligibility door
+        # can read value_state / evidence_state. Without this argument the
+        # overlay is skipped entirely and this path behaves as it did before.
+        facts=facts,
     )
     # Schedules own their taxonomy explicitly (see docstring): must run after
     # decoration and before the default-selection pass reads priority/suppressed.
@@ -2887,6 +3056,7 @@ def generate_arq_questions_from_facts(
         present_fact_keys=_present_fact_keys(facts),
         narrative_components=_narrative_components_from_facts(facts, flags=flags),
         hard_stop_text=hard_stop_text,
+        facts=facts,          # client 4.1 eligibility flow - see path A above
     )  # session_docs not available on this path; uses the stored profile + facts
     _finalize_schedule_taxonomy(questions)
     apply_default_selection(questions)
@@ -3160,10 +3330,17 @@ def generate_cross_form_arq_questions(
         questions,
         present_fact_keys=_present_fact_keys(facts or {}),
         narrative_components=_narrative_components_from_facts(facts or {}, flags=flags),
+        facts=(facts or {}),
     )
     _attach_producer_labels(questions)
     _attach_input_types(questions)
     _attach_classification_suggestions(questions, facts or {})
+    # Client 4.1 Step 1 - path parity (2026-08-26). This path was the ONLY one of
+    # the three that never ran the not-applicable filter, so a cross-form conflict
+    # about a coverage the documents decline (and no selected form applies for)
+    # was still asked. Same arguments, same fail-open behaviour as path A.
+    questions = _drop_not_applicable_questions(
+        questions, facts or {}, (generated_forms or {}).keys())
 
     for q in questions:
         q.pop("_is_cross_form", None)
@@ -3639,6 +3816,12 @@ async def apply_arq_answers_to_session(
 
     generated = proc_session.get("generated_forms", {})
     facts     = dict(proc_session.get("facts", {}) or {})
+    # E&O 5.8/5.9: client-questionnaire writes were the largest unlogged
+    # mutation path (found 2026-08-26) - facts overwritten with no before/after
+    # anywhere. Changes are collected here and written to field_source_audit
+    # AFTER the session persist, so a slow audit write can never block the
+    # apply and the loop stays synchronous.
+    _c5_change_log: List[dict] = []
     flags     = dict(proc_session.get("flags", {}) or {})
     flags_changed = False
     updated   = []
@@ -3687,7 +3870,14 @@ async def apply_arq_answers_to_session(
             rows, _report = schedule_capture.validate_rows(
                 list_key, schedule_capture.decode_answer(new_val),
             )
+            _c5_prev_rows = facts.get(list_key)
+            _c5_prev_n = len(_c5_prev_rows) if isinstance(_c5_prev_rows, list) else 0
             facts[list_key] = schedule_capture.rows_for_facts(list_key, rows)
+            _c5_change_log.append({
+                "field": f"schedule::{list_key}", "fact_key": list_key,
+                "previous": f"{_c5_prev_n} row(s)",
+                "new": f"{len(facts.get(list_key) or [])} row(s)",
+            })
             for _fid in _restamp_schedule_into_forms(generated, list_key, facts):
                 if _fid not in updated:
                     updated.append(_fid)
@@ -3724,6 +3914,7 @@ async def apply_arq_answers_to_session(
         # facts-driven scorers (root cause of "score didn't change", §6.2).
         canon = _canonical_key(field_name)
         if canon and not canon.startswith("_"):
+            _c5_prev_raw = facts.get(canon)
             # Same interpretation door as the producer path - a client can type
             # "None" or "not sure" just as easily. See answer_semantics.
             try:
@@ -3741,6 +3932,23 @@ async def apply_arq_answers_to_session(
                     "confidence": "client_arq",
                     "source":     "client_arq",
                 }
+            try:
+                _c5_prev_val = (_c5_prev_raw.get("value")
+                                if isinstance(_c5_prev_raw, dict) else _c5_prev_raw)
+                if isinstance(_c5_prev_val, (list, dict)):
+                    _c5_prev_val = None
+                _c5_new_env = facts.get(canon)
+                _c5_new_val = (_c5_new_env.get("value")
+                               if isinstance(_c5_new_env, dict) else _c5_new_env)
+                if str(_c5_new_val or "") != str(_c5_prev_val or ""):
+                    _c5_change_log.append({
+                        "field": field_name, "fact_key": canon,
+                        "previous": (str(_c5_prev_val).strip()[:2000] or None)
+                                    if _c5_prev_val is not None else None,
+                        "new": str(_c5_new_val or "")[:2000],
+                    })
+            except Exception:                                 # noqa: BLE001
+                pass
             # Stamp this canonical answer into EVERY generated form whose schema
             # carries it under an ACORD field name. Curated client questions and
             # every `_maybe_inject_*` / coverage-guarantee question key on a
@@ -3823,6 +4031,36 @@ async def apply_arq_answers_to_session(
         processing_session_id, _update_payload,
         delete_facts=(None if held_conflicts else ["_client_answer_conflicts"]),
     )
+    # E&O 5.8/5.9/5.11: durably record what the questionnaire changed. The
+    # per-answer respondent identity lives on the immutable receipt
+    # (arq_receipt_service); these rows carry the before/after per fact with
+    # source='client_arq' - a source value the table's CHECK always allowed
+    # and nothing ever wrote until 2026-08-26. Best-effort AFTER the persist:
+    # an audit failure must never take down the apply.
+    try:
+        from services.audit_service import log_field_change, log_audit_event
+        from services.sqs_service import SQS_MODEL_VERSION as _C5_MV
+        _owner = str(proc_session.get("user_id") or "")
+        for _chg in _c5_change_log:
+            await log_field_change(
+                session_id=processing_session_id, user_id=_owner,
+                form_id=None, field_name=_chg["field"],
+                fact_key=_chg["fact_key"], source="client_arq",
+                previous_value=_chg["previous"], new_value=_chg["new"] or "",
+                confidence=None, model_version=_C5_MV,
+            )
+        await log_audit_event(
+            processing_session_id, _owner, "client_answers_applied",
+            {"arq_id": arq_id,
+             "client_name": arq.get("client_name") or "",
+             "client_email": arq.get("email") or arq.get("client_email") or "",
+             "fields_changed": len(_c5_change_log),
+             "answers_received": len(answers),
+             "held_for_producer": len(held_this_run)},
+        )
+    except Exception as _c5_ex:                               # noqa: BLE001
+        logger.warning("ARQ %s: client-answer audit logging failed: %s",
+                       arq_id, _c5_ex, exc_info=True)
     logger.info(f"ARQ {arq_id}: applied {len(updated)} fields to session {processing_session_id}"
                 + (f"; held {len(held_this_run)} for producer resolution: {held_this_run}"
                    if held_this_run else ""))
@@ -4481,9 +4719,27 @@ async def recalculate_session_scores(processing_session_id: str) -> dict:
         "cross_issues_last": cf_deduped,
         "structured_issues": fresh_structured,
     }
+    # The scorer appends to sqs_history and hands it back inside package_sqs,
+    # but session_repository's append-only merge only engages when the key is
+    # passed EXPLICITLY - no caller ever did, so the history stayed at one
+    # entry and delta_this_session was permanently 0 (found 2026-08-26, C5).
+    if isinstance(package_sqs, dict) and package_sqs.get("sqs_history"):
+        _session_updates["sqs_history"] = package_sqs.get("sqs_history")
     if issue_diff is not None:
         _session_updates["issue_diff_last"] = issue_diff
     await upd_processing_session(processing_session_id, _session_updates)
+
+    # E&O 5.12: snapshot the score when this recalculation materially moved it
+    # (answer applied, issue resolved, questionnaire remediation - one site
+    # covers every caller of this recalc).
+    try:
+        from services.audit_service import log_sqs_snapshot_if_changed
+        await log_sqs_snapshot_if_changed(
+            processing_session_id, str(proc.get("user_id") or "") or None,
+            package_sqs, "score_recalculated",
+        )
+    except Exception as _snap_ex:                              # noqa: BLE001
+        logger.warning("ARQ recalc: sqs snapshot skipped: %s", _snap_ex)
 
     # §6.2 / AC2: auto-resolve open recommendation audit records whose underlying
     # issue was cleared during this recalculation. After the SQS recompute, each

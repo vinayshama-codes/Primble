@@ -6384,6 +6384,21 @@ FORM_FIELD_INVENTORY: Dict[str, List[str]] = {
         "operations_description", "total_revenue", "total_payroll",
         "additional_named_insureds",
     ],
+    # ADDED 2026-08-26 - ACORD 127 was the ONLY form with no inventory at all.
+    # Measured live (C4 test S3): a Business Auto package asked the client for
+    # vehicles and drivers but asked NOBODY for the auto liability limit, the
+    # comprehensive / collision deductibles, the physical-damage valuation or
+    # the covered-auto symbols. The coverage-guarantee injector walks this
+    # table, so an empty entry meant no auto question could ever be generated.
+    # The four structural entries are producer-only under master-plan 4.9 and
+    # route to Agency through `question_eligibility.INSURANCE_JUDGMENT_FACTS`.
+    "ACORD_127": [
+        "auto_vin_schedule", "auto_drivers", "auto_garaging_addresses",
+        "auto_radius_of_operation",
+        "auto_liability_limit", "auto_covered_symbols",
+        "auto_deductible_comp", "auto_deductible_collision",
+        "auto_physical_damage_valuation",
+    ],
     "ACORD_140": [
         "locations", "occupancy_type", "construction_type", "year_built",
         "roof_year", "sprinkler_system", "fire_protection_class",
@@ -6400,6 +6415,13 @@ FORM_FIELD_INVENTORY: Dict[str, List[str]] = {
     "ACORD_131": [
         "umbrella_limit", "umbrella_sir", "gl_limits", "auto_liability_limit",
         "effective_date", "applicant_name",
+        # ADDED 2026-08-26 - master-plan 4.11's own list. The C4 live run (S4)
+        # showed the umbrella asking for a limit and an SIR and nothing else:
+        # attachment point, follow-form status, the Schedule of Underlying
+        # Insurance and the Employers Liability limits all surfaced NO question,
+        # because the injector walks this table. All four are producer-facing.
+        "umbrella_attachment_point", "umbrella_follow_form",
+        "underlying_policies", "employers_liability_limits",
     ],
     "ACORD_130": [
         "wc_payroll", "wc_class_codes", "wc_xmod", "wc_officer_exclusions",
@@ -6427,27 +6449,27 @@ FORM_FIELD_INVENTORY: Dict[str, List[str]] = {
     ],
     "ACORD_101": [
         "operations_description", "applicant_name", "effective_date",
-        "remarks_text", "form_reference", "explanation_of_yes_answers",
+        "additional_remarks_text",
     ],
     "ACORD_133": [
-        "project_address", "project_cost", "completion_date",
-        "construction_type", "owner_name", "contractor_name",
-        "insured_interest", "applicant_name", "effective_date",
+        "builders_risk_project_address", "builders_risk_project_cost", "builders_risk_completion_date",
+        "construction_type", "builders_risk_owner_name", "builders_risk_contractor_name",
+        "builders_risk_insured_interest", "applicant_name", "effective_date",
     ],
     "ACORD_141": [
-        "locations", "scheduled_item_description", "scheduled_item_value",
-        "valuation_method", "deductible_aop", "deductible_wind",
-        "deductible_earthquake", "deductible_flood",
+        "locations",
+        "valuation_method", "property_deductible_aop", "property_deductible_wind",
+        "property_deductible_earthquake", "property_deductible_flood",
         "coinsurance_percentage", "applicant_name", "effective_date",
     ],
     "ACORD_160": [
-        "inland_marine_item_description", "inland_marine_item_value",
-        "transit_exposure", "schedule_duration",
+        "inland_marine_items", "inland_marine_total_value",
+        "inland_marine_transit_limit",
         "applicant_name", "effective_date",
     ],
     "ACORD_186": [
-        "contractor_type", "subcontracted_percentage", "residential_commercial_split",
-        "high_hazard_operations", "licensing_details",
+        "contractor_type", "percent_subcontracted", "contractor_residential_pct",
+        "contractor_high_hazard_ops", "contractor_license_number",
         "applicant_name", "effective_date",
     ],
     "ACORD_28": [

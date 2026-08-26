@@ -231,7 +231,43 @@ def derive_value_state(fact_key: str, raw: Any, facts: Optional[dict] = None,
     * anything else                                       -> present
     """
     value, env = _unwrap(raw)
-    if facts and fact_key in (facts.get("_uw_conflicted_keys") or ()):
+    # BOTH keys, and the second one is the one that actually fires (2026-08-26).
+    #
+    #   `_uw_conflicted_keys` = facts whose STAMPED VALUE is withheld. It is
+    #       built from `unresolved_withheld_keys`, which filters on
+    #       `CONFLICT_WITHHOLD_KEYS` - and that frozenset is **EMPTY**, by
+    #       Brent's Q4 / D16 ruling that a conflicted value still stamps. So in
+    #       production this key is never populated and this branch never fired:
+    #       `value_state == conflicting` was UNREACHABLE.
+    #   `_uw_conflict_keys` = the SUPERSET written at extraction_pipeline.py:895
+    #       from `unresolved_conflict_keys` - every fact the documents still
+    #       disagree about, whatever the stamping decision.
+    #
+    # Whether a fact IS conflicting and whether we withhold its value are two
+    # different questions; this function answers the first, so it must read the
+    # superset. Measured live (C4 test S5): two applications stating $2,400,000
+    # and $3,850,000 revenue produced "All clear" and no conflict item anywhere,
+    # because the engine flagged it, the pipeline recorded it under the superset
+    # key, and every reader was looking at the withhold key.
+    # ...but a fact a HUMAN has resolved is no longer conflicting (C5-D live
+    # finding, 2026-08-26): the superset key records that the DOCUMENTS still
+    # disagree - which stays true forever - so after the producer picked
+    # $3,000,000 in Data Consistency the record printed
+    # "UNRESOLVED (conflicting / user_confirmed)" one line under the
+    # DATA CONSISTENCY RESOLUTIONS entry that resolved it. Client 1.5: the
+    # producer's resolution settles the FACT; the disagreement's history lives
+    # in the resolution record (5.10), not as an unresolved state. The
+    # evidence_state is re-derived when the caller did not supply it, so every
+    # caller gets the same answer.
+    _es = evidence_state
+    if _es is None:
+        try:
+            _es = derive_evidence_state(raw)[0]
+        except Exception:                                     # noqa: BLE001
+            _es = None
+    if (_es != USER_CONFIRMED
+            and facts and (fact_key in (facts.get("_uw_conflict_keys") or ())
+                           or fact_key in (facts.get("_uw_conflicted_keys") or ()))):
         return CONFLICTING
     if env.get("not_applicable") is True:
         return NOT_APPLICABLE
@@ -338,6 +374,82 @@ def is_comparable(fact_key: str, raw: Any, facts: Optional[dict] = None) -> bool
     return derive_value_state(fact_key, raw, facts) in COMPARABLE_VALUE_STATES
 
 
+_TEXT_VERIFY_MIN_CHARS = 4
+
+
+def _verify_norm(text: str) -> str:
+    """Lowercase, strip every non-alphanumeric. Same shape as the dec-entry
+    verifier, so "$2,400,000" matches "$ 2,400,000" and "2400000"."""
+    return "".join(ch for ch in str(text).lower() if ch.isalnum())
+
+
+def annotate_text_verification(facts: Optional[dict],
+                               docs: Optional[list]) -> int:
+    """Mark a fact SOURCE VERIFIED when its value is literally in the documents.
+
+    THIS IS WHAT MAKES THE CLIENT'S 4.1 STEP 2 vs STEP 3 REAL.
+    `derive_evidence_state` calls a value `source_verified` only for
+    `verified_in_text is True`, a `dec_entry` source, or a deterministic
+    confidence. Measured 2026-08-26: `extraction_service._annotate_facts` writes
+    `confidence: ai_high|ai_low, source: ai` on EVERY extracted fact, and
+    `verified_in_text` had exactly ONE writer in the whole backend (the
+    dec-entry backfill). So virtually every fact was `suggested`, "Source
+    Verified" was unreachable, and Step 2 could not be told from Step 3.
+
+    Deterministic and free - no LLM. It answers the only question that matters
+    here: does the document actually SAY this? The precedent is
+    `extraction_service._verify_dec_entries`, which already gates the dec index
+    the same way.
+
+    FOUR GUARDS, and each exists for a reason:
+      1. **Only ever ADDS.** A value absent from the text is left exactly as it
+         was, never marked unverified - absence of proof is not proof, and this
+         must not be able to demote a fact.
+      2. **Never overrides a stronger state.** A `user_confirmed`, `derived` or
+         already-verified envelope is skipped, so a human answer can never be
+         relabelled as merely document-sourced.
+      3. **Specificity floor.** A value normalising to fewer than
+         ``_TEXT_VERIFY_MIN_CHARS`` characters is skipped. "CO", "8" or "1"
+         appear by accident in almost any document, and a coincidental match is
+         a FALSE verification - which is worse than no verification, because it
+         is what Step 2 uses to stop asking.
+      4. **Scalars only.** Lists, dicts and booleans have no literal printing to
+         look for.
+
+    Returns the number of facts newly verified, for the caller to log.
+    """
+    if not isinstance(facts, dict) or not docs:
+        return 0
+    hay = " ".join(
+        _verify_norm(d.get("text") or "")
+        for d in docs
+        if isinstance(d, dict) and not d.get("excluded")
+    )
+    if not hay:
+        return 0
+    verified = 0
+    for key, raw in list(facts.items()):
+        if not key or key.startswith("_"):
+            continue
+        if not (isinstance(raw, dict) and "value" in raw):
+            continue                       # bare scalar carries no envelope
+        if raw.get("verified_in_text") is True:
+            continue
+        if derive_evidence_state(raw)[0] in (USER_CONFIRMED, DERIVED,
+                                             SOURCE_VERIFIED):
+            continue                       # guard 2
+        value = raw.get("value")
+        if value is None or isinstance(value, (bool, list, dict)):
+            continue                       # guard 4
+        needle = _verify_norm(value)
+        if len(needle) < _TEXT_VERIFY_MIN_CHARS:
+            continue                       # guard 3
+        if needle in hay:
+            raw["verified_in_text"] = True
+            verified += 1
+    return verified
+
+
 def annotate_fact_states(facts: dict, flags: Optional[dict] = None) -> dict:
     """Write ``value_state`` / ``evidence_state`` onto every envelope in place.
 
@@ -427,5 +539,78 @@ def is_not_applicable(facts: Optional[dict], fact_key: str) -> bool:
 
     Positive evidence only: a package with no ``coverage_lines``, an unmapped
     line name, or any entry granting the same family all return False.
+
+    NOTE: this asks the DOCUMENTS only. Anything deciding whether to ASK a
+    question, or whether to excuse a blank BOX, must use
+    :func:`is_not_applicable_for` and pass the selected forms - see its
+    docstring for the defect that distinction exists to prevent.
     """
     return value_state_of(facts, fact_key) == NOT_APPLICABLE
+
+
+def lines_applied_for(form_ids=None) -> frozenset:
+    """Coverage families the producer has SELECTED a section form for.
+
+    Read off `pdf_service._SECTION_FORM_LINE_PHRASES`, the same table
+    `fact_line` uses, so the two can never drift: ACORD 140 -> property,
+    127/137 -> auto, 131 -> umbrella. Package-level forms (125, 101, 25) name
+    no line and correctly contribute nothing.
+    """
+    out: set = set()
+    if not form_ids:
+        return frozenset()
+    try:
+        from services.pdf_service import _SECTION_FORM_LINE_PHRASES
+        from services.lob_canon import canon_line
+        for fid in form_ids:
+            for phrase in _SECTION_FORM_LINE_PHRASES.get(str(fid), ()):
+                fam = canon_line(phrase)
+                if fam:
+                    out.add(fam)
+    except Exception:                                         # noqa: BLE001
+        return frozenset()                # no opinion -> override nothing
+    return frozenset(out)
+
+
+def is_not_applicable_for(facts: Optional[dict], fact_key: str,
+                          form_ids=None) -> bool:
+    """Not applicable to THIS submission - documents AND producer intent.
+
+    THE SELECTED FORMS OVERRIDE THE DOCUMENTS, and that is the whole point.
+    `coverage_lines` is read off the uploaded declarations page, which on a
+    renewal is the EXPIRING policy - so "COMMERCIAL PROPERTY - NO COVERAGE" is a
+    statement about what they HAD, not about what they are applying for. A
+    producer who selected ACORD 140 is applying for property.
+
+    LIVE DEFECT THIS FIXES (C4 test S7 run B, 2026-08-26). The override existed
+    in `arq_service._drop_not_applicable_questions`, but only in its early-exit
+    gate: the gate subtracted the selected forms, then the per-question test
+    called `is_not_applicable`, which re-read the FULL denied set and knew
+    nothing about form selection. Measured: a package declining property, with
+    ACORD 140 DELIBERATELY SELECTED, produced a 140 scoring 8/100 and NOT ONE
+    property question - the form shipped blank AND unaskable, the exact outcome
+    the filter's own docstring says must never happen.
+
+    A second, independent door had the same hole:
+    `pdf_service.apply_fact_state_confidence_labels` labels a box
+    `not_applicable`, and the ARQ form scan skips every field carrying that
+    label. Both doors now call THIS function, so the override cannot be
+    honoured in one place and forgotten in the other.
+
+    An envelope that explicitly records `not_applicable` (a human said so, or
+    `answer_semantics` stored it) is NOT overridden - that is a statement about
+    the FACT, not an inference from the coverage line.
+    """
+    if not isinstance(facts, dict) or not fact_key:
+        return False
+    state = value_state_of(facts, fact_key)
+    if state != NOT_APPLICABLE:
+        return False
+    raw = facts.get(fact_key)
+    if isinstance(raw, dict) and (raw.get("not_applicable") is True
+                                  or raw.get("value_state") == NOT_APPLICABLE):
+        return True                       # explicit about the fact itself
+    line = _line_of_fact(fact_key)
+    if line and line in lines_applied_for(form_ids):
+        return False                      # they are applying for it - ask
+    return True

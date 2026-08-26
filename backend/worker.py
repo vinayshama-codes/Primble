@@ -410,8 +410,20 @@ async def _process_form_generation_job(job: dict, queue) -> None:
         }
         if package_sqs is not None:
             _update_payload["package_sqs"] = package_sqs
+            # Explicit key engages session_repository's append-only
+            # sqs_history merge (see form_routes' select_forms_bulk persist).
+            if isinstance(package_sqs, dict) and package_sqs.get("sqs_history"):
+                _update_payload["sqs_history"] = package_sqs.get("sqs_history")
 
         await upd_processing_session(session_id, _update_payload)
+
+        # E&O 5.12: first scoring snapshot on the async generation path.
+        try:
+            from services.audit_service import log_sqs_snapshot_if_changed
+            await log_sqs_snapshot_if_changed(
+                session_id, user_id, package_sqs, "form_generated")
+        except Exception as _snap_ex:
+            logger.warning("Job %s: sqs snapshot skipped: %s", job_id, _snap_ex)
 
         # Log audit recommendations
         for fid, r in results.items():
