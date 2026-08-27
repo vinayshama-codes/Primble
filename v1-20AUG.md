@@ -120,6 +120,7 @@ Source documents this plan is built against. Read the relevant one before starti
 | `125_reference/ACORD 125 - field completition 8-19-26.docx` | Client's written walkthrough: a synthetic account (Front Range Electrical Contractors LLC) and exactly what a correct 125 should and should not contain | C1 value states, C2 loss history, H6. **This is the master 125 test case** |
 | `test_data_v1_c1/` + `backend/scripts/make_v1_c1_test_pdfs.py` | Four generated PDFs reproducing every section-1 defect, plus `README-HOW-TO-TEST.md` with 10 numbered checks | Live validation of C1. **Regenerate before every run.** Check 5 (the $3M/$1M umbrella conflict) is the gate; see LIVE TEST RESULTS for the scorecard. **Check 8 now expects TWO location rows** (file 5 carries a real Aurora premises) and **check 3 must require the scoped-row badge, not the absence of a row** - see C1-Q |
 | `test_data_v1_c1/6_conflicting_dec.pdf` + `backend/scripts/make_v1_c1_adversarial_pdf.py` | The NEGATIVE control: a rival carrier's dec page planting seven disagreements that MUST fire, with Auto and Umbrella repeated identically to file 1 as an in-run control | **Run B.** Upload as a SEPARATE submission from Run A. `README-RUN-A-AND-B.md` is the scorecard. A quiet Run B means the checks are dead, not passing (C1-Q) |
+| `test_data_c9/` + `backend/scripts/make_c9_test_pdfs.py` | Three packages, four PDFs, for client section 9 / H4, plus `README-HOW-TO-TEST.md` with 13 numbered checks. P1 (2 files, ONE submission) routing + contact demotion + entity normalisation + the WC payroll-period charge; P2 new-venture sole proprietor; **P3 states EVERYTHING and is the GUARD RAIL** - every H4 rule must stay silent on it | Live validation of H4. **Regenerate before every run** (dates are computed from today). The generator's `_verify()` FAILS THE BUILD on a broken OMIT contract, and after the first live run it also enforces a STRUCTURAL condition: the token "payroll" may appear EXACTLY ONCE across the two P1 files. The first version printed `PREMIUM BASIS: Payroll` in the GL hazard table, which satisfies the annual test and silently disarmed the one check P1 exists for - every word-level ban passed (H4-B) |
 | `CLAUDE.md` | Project brief + full historical fix log | Blast-radius checks. Do not treat as current truth without reading the code |
 | `improving-ll.md` | LLM call registry, cost model, prompt rules | Mandatory before touching any prompt or batching |
 | `FIX_TRACKING_2026-08-15.md` | Relationship-preservation fixes (policy/line identity) | C1 scope work builds directly on this |
@@ -167,11 +168,12 @@ Source documents this plan is built against. Read the relevant one before starti
 |---|------|--------|-------|
 | H1 | Coverage-Specific SQS Gap Closure | **SHIPPED 2026-08-26, LIVE-VERIFIED 2026-08-27 (H1-A..H1-M). CLOSED ON SCORING** - every 6.3 / 6.4 clause implemented and confirmed on the running app over two uploads, including the guard rail (the WC payroll -3 fires on a bare figure and stays silent on a document that states the period). 6.1 / 6.2 / 6.5 regression-pinned, nothing to implement. **STILL OPEN:** Q19-Q21 await Brent's confirmation (owner-ruled defaults, shipped); two NON-SCORING observations never seen live (the `OUT_OF_BATCH_KEYS` log line, the ACORD 127 USE checkbox); the split-limit restamp fix never seen live; Q22's root cause unknown (hardened, and the score has not vanished since). **Read H1-M for the closure ledger.** | One door: `services/coverage_evidence.py` (owned-vs-HNOA, the five Auto Completeness items, the three supplemental WC states, coverage-flag support). Two new Exposure buckets `auto_completeness` (cap 25) / `wc_supplemental` (cap 10); the two "+ Warning" items go through the LEGACY engine so they cap at 85 without also charging the cross-document bucket. New fact `auto_vehicle_use` (extraction v15, C80). HNOA-only accounts mark the five owned-vehicle facts Not Applicable and stop asking for them. **Edit-path flag demotion fixed** (an auto line with no limit and no schedule lost every auto penalty on the first field edit) plus the human-set flags a re-merge discarded. **Four phantom-key bugs fixed on the way** (split limits unsatisfiable hard stop, deductible basis, COPE building/BPP collapse, 127 garaging key). D6 applies in both directions. Read H1-A for the audit, H1-B for what shipped, H1-C for the phantom ledger |
 | H2 | Early Score / Readiness Presentation | **SHIPPED 2026-08-27 (H2-A), LIVE-VERIFIED (H2-B). Closed on the owner's scope.** | The pre-form "Submission Readiness NN%" was `tier2_score` - a Tier 2 completeness ratio, not the SQS. Replaced by the STATUS LABEL of the package SQS as it stands (new one door `sqs_service.current_package_sqs`, stateless before generation, persisted score after) plus a "Key details in place / missing" split from the score's own Tier 1 + Tier 2 lists (`key_details`). Remediation counts live on the Hard Stops / Warnings sections ("N items still need attention · M handled"), and the Review step now re-loads stored Resolve/Dismiss marks. Client 7.2's countdown shipped at section level by owner's call. Read H2-A |
-| H3 | Workers Compensation Data Capture | **Analysis complete 2026-08-27 (H3-A), NOT YET BUILT - blocked on Q24-Q30** | ~55% exists: extraction reads the class table + officers, ACORD 130 prints code / duties / payroll / officer name-title-%, every 8.2 fact has a question, 8.3 already holds (nothing generates a WC code; the rating-table code boxes are owned blanks when no table was extracted). Missing: NO capture table (`SCHEDULE_DEFS` NOTE is stale - the 130 bindings were repaired 2026-08-15/16, the table never added), per-group employee counts, state, officer include/exclude - all fall to the LLM; `wc_payroll_by_state` stamps nowhere and its cross-form total check reads a LIST while the merge writes a DICT (dead since it shipped). Root cause: WC exposure modelled as a rating table for the FORM, never as a fact a HUMAN can enter - free text into a list fact is invisible to every consumer. Plan: one client table on the existing `wc_class_codes` key (class-code column producer-only), a producer-only officers table, states and by-state payroll derived from rows (D28), no new SQS rule. **Read H3-A before touching any WC path** |
-| H4 | Core Submission Information Coverage | Not started | |
+| H3 | Workers Compensation Data Capture | **SHIPPED + LIVE-VERIFIED 2026-08-27 (H3-A audit, H3-B build, H3-C kit, H3-D live run 1 + 7 fixes, H3-E live run 2 confirmation). Suite 4761 passed / 1 failed (documented `httpx` ImportError), 64 tests.** Round 1 passed every FORM check and found 7 defects on the way to a HUMAN; round 2 confirmed 6 of the 7 on the regenerated forms and questionnaire (the 7th needs the pre-form screen). **Client section 8 is delivered: 8.1 / 8.2 / 8.3 all built and seen live.** STILL TO TEST (3, in H3-E): the pre-form screen for the effective-date fix; the W3 producer step (8.3 "retain producer-entered codes", the one clause never seen live); the client questionnaire link itself. **Q29 deliberately NOT built** - a rows-vs-stated-payroll warning is a new rule, for Brent. Observed and NOT fixed (none are section 8): an invented `# CLAIMS` in the prior-carrier grid, label text in the premium block's Other cells, a second officer's title extraction missed | One door `coverage_evidence`; two tables on the EXISTING facts; extraction v17. **Read H3-A for the audit, H3-D for the 7 live defects and their root causes, H3-E for what remains** |
+| H4 | Core Submission Information Coverage | **CLOSED ON THE MATRIX 2026-08-27 (H4-A..H4-D). MEASURED: routing 29/29, scoring home 29/29, key rules 28/29 (one partial), Desired Outcome 8/8 stages owned** - see H4-D for the scorecard and how it was produced. Only 8 of the 29 rows were broken; the other 21 came from C1-C5/H1-H3 and were verified, not rebuilt. Date hard stop investigated and deliberately UNCHANGED (H4-C). Suite 4824 passed / 1 failed** (the documented `httpx` ImportError), +47 tests, zero regressions. **Not live-verified - the owner's next upload is the check.** Three items open for Brent (Q31, Q32, Q33 - Q33 is a WRONG VALUE on ACORD 125 and is the most serious) | Section 9 is an ACCEPTANCE MATRIX, not a field list. 21 of 30 rows already held; 9 deviated in 5 classes. Shipped: **F15 CLOSED** (the client questionnaire destroyed "None"/"N/A" before `answer_semantics` - and closing it exposed 4 more defects on the same lines, all fixed); `prior_carrier` reaches the client again (Brent Q8 + 9.1); expiration date / GL form type / audit period / billing plan routed to the producer; **entity type made one vocabulary** (5 live false Data Consistency conflicts on ACORD's own wording, a validator refusing 8 of our own 13 dropdown options, and a stamper that ticked the WRONG box for "S Corporation" and "Non-Profit Corporation" and NOTHING for "Sole Proprietorship"); Tier 1 contact demoted not suppressed; new venture is a valid Years-in-Business state; WC payroll period N/A when annual is clear. New standing gate `tests/test_h4_core_fact_matrix.py` (47). **Read H4-A before touching any routing, answer-interpretation or entity path** |
 | H5 | ACORD 25 Multi-Carrier Mapping | Not started | |
 | H6 | ACORD 125 Form-Generation Foundation | Not started | Answer key is the 125_reference/ folder. Form edition already correct (2025/03) - see D5 |
-| H7 | Audit / Edit History Completion | Not started - but **read C5-A..C5-E first** | C5 already built the spine this item would otherwise start from: append-only `audit_events`, per-fact Document + Page lineage, before/after on every mutation path that had none (client-ARQ apply, schedule saves, retractions, reopens), SQS snapshots, and the download record. Scope H7 against what C5 shipped, not against the pre-C5 codebase |
+| H7 | Audit / Edit History Completion | **DELIVERED 2026-08-27, LIVE-VERIFIED over two rounds (H7-A audit, H7-B build, H7-C kit, H7-D live run 1 + 5 defects, H7-E live run 2 + closure). All 8 client events, all 7 attributes and the Desired Outcome confirmed on the running app. Suite 4890 passed / 1 failed** (the documented `httpx` ImportError), +65 tests, zero regressions, frontend build clean. **STILL OPEN:** S2 (the multi-insured integrity override) never run live; the pre-form hard-stop rail unreachable after generation; the override classification under-claims on some boxes (measured, safe direction) | **Read H7-A for the root cause, H7-B for what shipped, H7-D for the 5 live defects, H7-E for the clause-by-clause closure.** Root cause was ONE class: the operational tables were made to double as the audit trail - correctly MUTABLE for dismiss-credit / the download gate / the issue rail / reopen, and an audit trail must not be, so history died every time the workflow moved on. Fix is D49: workflow tables hold STATE, `audit_events` holds HISTORY, and the event is emitted by the writer the action already goes through. New pure door `services/audit_history.py`; `record_material_change` called from INSIDE the eight existing audit writers; actor resolved once per export and rendered everywhere (it was rendered NOWHERE); `previous_source` closes the generated-value override; `activity_service` became an adapter over the spine (D50); `submission_integrity_audit` got its first reader; retention 180 -> 365 (D48). **Two defects found while building and three more on the live run**, including the owner's own reported "answer not saving" (the record was right, the CARD lied - D56) and a machine `"null"` competing as a VALUE that manufactured TWO false hard stops (D55). **Scores move UP on both - D6.** Source lineage inside the one model is met by design decision (D36), not construction - tell Brent in those words |
+| BE | **V1 Beta Exit Criteria** - verification + fixes | **VERIFIED AND 7 FIXED 2026-08-28 (BE-A..BE-E). 40 of the client's 49 criteria held against the CODE; 9 did not. Seven shipped this session, two are recorded as NOT fixed with reasons. Suite 4917 passed / 1 failed (the documented `httpx` test - see BE-D, its CLAUDE.md description is now WRONG), +27 tests, zero regressions, no frontend change.** | **Read BE-A for what was measured, BE-B for the seven fixes, BE-C for the two left alone.** Fixed: `gl_class_code_schedule` asked the CLIENT for GL class codes (core principle 5); an ungated ACORD 186 HARD STOP demanded WC payroll from GL-only packages (71 -> 60); a field CLEAR was audited but never persisted (D18 not followed); a dismiss was silently dead after any Download Anyway and its credit reverted; the schedule save never rescored; derived provenance was lost on every override; and the client's own `loss_history` claims TABLE was invisible to the no-loss contradiction guard (one door `loss_history_state.asserted_claims`). **D6 BOTH WAYS: GL-only contractor packages go UP, a typed claim contradicting an attestation goes DOWN.** NOT fixed: bare `GL`/`WC`/`BAP` in `lob_canon` (blocked by D9 - needs Brent or an owner override) and extraction's literal `"N/A"` counting as data (CLAUDE.md GAP 1 - needs a measured pass, not a one-liner) |
 
 **Status vocabulary:** `Not started` | `In progress` | `Blocked` | `Done` | `Deferred`
 
@@ -2946,6 +2948,20 @@ these, it has to argue with what is written here first.
 | D41 | **OWNER 2026-08-26: an auto line that says neither owned nor hired/non-owned is PRESUMED OWNED for 6.3.** HNOA-only needs positive evidence (symbols reaching only hired/non-owned, an explicit "no owned vehicles", or every granted auto line naming HNOA). `auto_exposure_kind` still returns UNKNOWN so the trace can say "presumed" | 2026-08-26 | The client's "genuinely Hired/Non-Owned only" reads as evidence to exempt, and the empty ACORD 127 is exactly the submission 6.3 exists to catch. Brent to confirm (Q19) |
 | D42 | **A coverage flag is demoted on the edit path only when NO positive evidence for the line remains** - no section form selected for it, no `coverage_lines` grant, no fact of that line answered - decided by `coverage_evidence.coverage_flag_supported`, which derives the line's facts from the registry. Never "the two facts the penalty reads are blank" | 2026-08-26 | H1 audit: `form_routes.update_pdf` dropped `has_auto_coverage` when the limit and the schedule were both blank - the most incomplete auto account lost every auto penalty on the first edit of any field, and the score rose. Same shape for property / umbrella / WC |
 | D43 | **"Known to exist", "clearly annual" and "applicability indicated" are read from NAMED evidence, never inferred from a category.** Officers exist when individuals are NAMED (never from entity type); a payroll figure is annual when its OWN label / source MEANS annual (synonyms, not one spelling); an X-Mod applies when the document or the producer SAYS so (effective date, "pending", "see worksheet") | 2026-08-26 | Owner rulings 5 and 6 (2026-08-26). Principle 3: silence is not a value. The alternative readings fire on nearly every WC account and turn a real check into noise |
+| D44 | **A capture TABLE owns its own audience split.** A column is hidden from the client by `Column(producer_only=True)`; a whole table is the producer's by `ScheduleDef(producer_only=True)` (honoured by `_finalize_schedule_taxonomy`, refused by the send path, skipped by `client_view`). `question_eligibility.overlay_for` never judges a `field_type == "schedule"` question by its canonical key | 2026-08-27 | H3-B: `wc_class_codes` IS an insurance-judgment fact, but the TABLE is the client's payroll-by-group answer with the code column stripped. Judging the table by its key flagged the client's own exposure table "producer review" for a column the client never sees |
+| D45 | **A WC class code is right-or-blank: only the structured row may print one.** Every ACORD 130 code box (`RateClass_ClassificationCode`, `RateClass_DescriptionCode`, `Individual_RatingClassificationCode`) is schedule-OWNED, so with no extracted or typed row it is an owned blank - the gap-fill LLM is never asked for it | 2026-08-27 | Client 8.3: "Primble should not generate or recommend WC class codes in V1." A code box the model can fill from prose IS a recommendation. Measured before H3: the officer code boxes and the description-code boxes reached the LLM whenever no table existed |
+| D46 | **A capture TABLE is never a "machine-worded" question.** `arq_service._hide_machine_worded_questions` skips `field_type == "schedule"` outright, and `schedule_capture.question_text`'s default template must never begin with `_MACHINE_QUESTION_PREFIX` ("Please provide your "). Both conditions, not either | 2026-08-27 | H3-D: that default WAS the banned prefix, so both WC tables were built, routed to Client/Agency, and then hidden one step later - the client's whole section 8 capture invisible while 54 unit tests passed. The four original schedules escaped only by each having a hand-written override. A table carries a column spec and a human label; it cannot be "a PDF box with a sentence wrapped round its name", which is all that filter exists to catch |
+| D47 | **A label owned by another subject standing immediately in front of it is not this field's label.** `underwriting_consistency._label_has_foreign_subject` drops a text-scan match whose preceding two words on the SAME line name a foreign subject (experience / modification / rating / anniversary / retro / birth / hire ...). Deny-list on purpose: it can only ever DROP a rival candidate, never invent one | 2026-08-27 | H3-D: `\b(?:policy\s+)?effective(?:\s+date)?` matches inside "Experience Modification Effective Date:", so the X-Mod's date became a rival POLICY effective date - a false conflict card and an 85 cap on EVERY WC package printing a mod date. Applies to every reconcilable field, not just WC. Same structural shape as H1-K's payroll gate and the 2026-08-08 boilerplate fix |
+| D48 | **OWNER 2026-08-27: the E&O event spine is retained for 365 days, not 180.** `AUDIT_EVENTS_RETENTION_DAYS` default and floor both move to 365, matching `AUDIT_LOG_RETENTION_DAYS`. This SUPERSEDES the 180-day half of the Q18 ruling; the 6-month floor for session facts (`run_facts_retention`, free/essentials = 180) is unchanged and still honours it | 2026-08-27 | H7-A: `audit_events` (180d) was expiring BEFORE the mutable tables it exists to explain (`field_source_audit` / `sqs_recommendation_audit` / `acord_audit_log`, all 365d) and before six tables that are never swept at all. From month 7 to month 12 the record would have been exactly what client section 12 calls out - current state with the history already deleted. `test_six_month_retention_ruling_is_implemented` pins the literal `"180"` string and MUST be updated in the same commit; the ruling it pins is not being weakened, it is being extended |
+| D49 | **The workflow tables hold STATE; `audit_events` holds HISTORY; the event is emitted by the writer the action already goes through, never by the exporter.** `sqs_recommendation_audit`, `submission_issue_status`, `marketing_reason_audit` stay mutable upserts - dismiss-credit, the download gate, the issue rail and reopen all read them as current state and must keep doing so. Every material act ALSO appends one immutable envelope to the spine | 2026-08-27 | H7-A root cause: the operational tables were made to double as the audit trail. They are correctly mutable, an audit trail must not be, and one table cannot be both - so history was destroyed every time the workflow moved on. Replacing them with an event-sourced projection was REJECTED: it touches C1, C3, C5, H1 and H2 at once for a record the producer can already read |
+| D50 | **OWNER 2026-08-27: ONE MODEL, not a dual-write.** `activity_service.record_event` stops being an independent writer and becomes an adapter over the spine; the navbar Activity Log reads a user-scoped projection of the same rows. `activity_events` is kept read-only for pre-existing rows. Three additive changes make it possible: `package_label` on `audit_events`, an index on `(user_id, created_at)`, and a `visibility` marker separating product-history events from E&O-only ones | 2026-08-27 | Client section 12 verbatim: *"one underlying event/history model that can serve: product history; debugging; source lineage; E&O Audit Record."* Measured before the ruling: the two tables have near-identical schemas and record the SAME acts under different names - `answers_applied` / `client_answers_applied`, `sqs_scored` / `sqs_snapshot`, and one download writing THREE rows across three stores |
+| D51 | **"Role" is the workflow role - producer / client / system - DERIVED, never a new column on `users`.** producer = the session owner acting; client = `source='client_arq'`, named from the immutable `arq_receipts` row; system = no acting user (auto-resolve, scheduler, extraction). Agency RBAC (CSR / principal) is explicitly NOT in V1 | 2026-08-27 | OWNER 2026-08-27. No RBAC exists to read - `admin_users` is an email allow-list and `users` has no role column (verified). The client's section 12 list pairs "actor" with "role", which reads as *who acted and in what capacity on this submission*, not org hierarchy |
+| D52 | **A reason is PLUMBED on every material change and PROMPTED on none.** `field_source_audit` and the spine envelope both carry `reason`; no new reason box appears on the form-edit path | 2026-08-27 | OWNER 2026-08-27, consistent with Q17's standing "not now" on dismissal reasons. The column existing costs nothing and closes the schema gap the client named; a prompt on every field edit is a UX decision nobody has asked for |
+| D53 | **A document's ROLE is a property of ONE document; "these two describe different real-world objects" is a property of the PAIR.** `fact_comparison._ROLE_BLIND_FACTS` may only say "this role does not STATE this fact" - true for a loss run's "period covered" (a claims window, not a policy term), false for a declarations page and a policy term. It must NEVER be used to suppress a comparison between two documents that both genuinely state the fact: that SILENCES a conflict instead of resolving it (P4), and it deletes the `_scoped` verdict that already resolves genuine multi-policy packages. Pair-level decisions belong in the DOWNGRADE gate, not the role table | 2026-08-27 | H4-C. Making a dec page blind to policy dates fixed the reported case and was refuted three ways by independent review - it silenced dec-vs-dec and dec-vs-certificate conflicts outright, and it would have hidden a wrong value that still ships on ACORD 125 (Q33) |
+| D54 | **A predicate feeding the Not Applicable axis must be FLAG-INDEPENDENT.** `fact_state` calls `coverage_evidence.h1_fact_not_applicable(fact_key, facts)` with NO flags, and `facts["_flags"]` exists only for the duration of one `annotate_fact_states` pass. Any rule there that reads a coverage flag is BLIND at `overlay_for`, `_tier2_not_applicable` and `is_not_applicable_for` time and will mark its fact Not Applicable on EVERY package. **A deduction whose question has been retired is worse than the gap it was written for** | 2026-08-27 | H4-A. The first cut of the WC payroll-period rule routed through `wc_payroll_period_status`, whose first line reads `has_workers_comp`; it charged the -3 and asked nobody. My own probe missed it by passing `_flags` inside the facts dict - a harness shape. Pinned by `test_h4_core_fact_matrix::test_the_payroll_period_deduction_always_has_a_route_to_remediation` |
+| D55 | **A MACHINE non-value is never a candidate.** `underwriting_consistency._normalize` returns None for `""` / `"null"` / `"none"` on every kind, so an extractor's own spelling of "nothing found" can never become a competing VALUE in the Data Consistency picker. Deliberately narrow: a HUMAN typing "None" is an ANSWER with no value and is handled by `answer_semantics` on a different path (C2-G); `_normalize` only ever sees document-extracted candidates | 2026-08-27 | H7-D defect 5, live: the picker reported *"Policy Effective Date: documents disagree (09/17/2026, null)"* and the same for the expiration - TWO false hard stops capping a perfectly consistent two-document package at 60. `_normalize("null","date")` returned the truthy string `'null'`, which passed every `if not norm: continue` guard. The module ALREADY knew the rule - its own scalar reader `_fv` drops exactly these three - it was simply never applied on the paths that BUILD candidate groups. One rule, two copies, one dormant: the same shape as C1's five comparison sites and H1-C's phantom keys. Principle 3. Scores move UP - D6 |
+| D56 | **A "confirm X" recommendation must retire once X is answered EITHER way.** Gate the prompt on "has this been ANSWERED" (`loss_history_state.new_venture_answered`), never on "is the answer YES" (`new_venture_confirmed`) - C2-G's split between *what is the value* and *did they answer*. The genuine underlying gap keeps its own separate recommendation and correctly stays open | 2026-08-27 | H7-D defect 1, the owner's own reported bug: `_NEW_VENTURE_CONFIRM_REC` was appended whenever loss history was absent, with no reference to whether it had been answered. "Yes" makes the pillar Not Applicable so the rec stops being generated and the card closes; "No" - the honest answer on most accounts - changed nothing the scorer reads, so the rec came back identical, auto-resolve had nothing to stamp, and the card reappeared Open with an empty dropdown. The answer was saved correctly at every layer - fact, envelope and audit row - and only the CARD lied. The owner answered it three times before reporting it. A blank is still unanswered (Principle 3) |
+| D57 | **The three bare coverage abbreviations `GL` / `WC` / `BAP` canonicalise, and they match as WHOLE TOKENS, never as substrings.** `lob_canon._ABBREVIATIONS`, checked AFTER `_SPECIFIC` so "Excess GL" stays umbrella. Exactly these three; a fourth is a fresh D9 decision and `test_the_ruling_covers_exactly_three_abbreviations` fails the build if one is added quietly | 2026-08-28 | **OWNER RULING 2026-08-28**, the product approval D9 reserves. Open as O2 since 2026-08-26: the most common shorthand in commercial insurance was being treated as *"terminology not covered by a known normalization rule"* (client 1.7), so a line printed `GL` was routed to the producer as an unrecognised coverage part and could never be DENIED. **D9 was right to hold it, and the reason is the matching mechanism, not the equivalence**: `_SPECIFIC` / `_GL_PHRASES` match by SUBSTRING, and "burglary and theft", "plate glass" and "roofing shingles" all CONTAIN "gl" - a naive append would have read a crime line, a property line and a roofer's own trade as General Liability. Measured, then built token-wise: 0 regressions across the existing vocabulary, 0 adversarial failures |
 
 ---
 
@@ -3068,13 +3084,18 @@ Principle 7 applies.
 | Q19 | **Auto line requested, nothing says owned or HNOA-only** (no vehicle list, no covered-auto symbols, no physical damage): apply the 6.3 deductions (presume owned) or route to the producer with no deduction? Engineering built presume-owned on the owner's ruling (D41) | H1 | 2026-08-26 | **OWNER 2026-08-26: presume owned.** Shipped. In Brent's doc as an assumption to confirm |
 | Q20 | **"Owners/officers known to exist"** - only individuals named in the package or by a person, or every corporation/LLC by definition? Built narrow (named individuals only); the broad reading fires on nearly every WC account | H1 | 2026-08-26 | **OWNER 2026-08-26: "go with your instincts"** -> narrow. Shipped (D43). In Brent's doc to confirm |
 | Q21 | **"Clearly annual" payroll** - is the figure's own printed label ("Estimated Annual Payroll", "per annum", "12 months") or a class-code schedule row enough, with no separate period field? Built yes, by MEANING not spelling; the -3 fires only for a bare figure with no period anywhere | H1 | 2026-08-26 | **OWNER 2026-08-26: yes, and match the meaning not the exact words.** Shipped (D43). In Brent's doc to confirm |
-| Q24 | **H3 8.1 employee count per group: full-time + part-time (two columns, form-true - ACORD 130 prints `RateClass_FullTimeEmployeeCount` AND `PartTimeEmployeeCount` per row) or ONE number as the client's example shows?** One number would have to land in the full-time box - a wrong value for a mixed group. Engineering default: FT + PT | H3 | 2026-08-27 | open |
-| Q25 | **H3 8.1 "job title / employee group" and "description of actual duties" as ONE table column?** ACORD 130 has no job-title box; `RateClass_DutiesDescription`'s own tooltip asks for "the classification description or a brief statement regarding the duties". Two columns need a computed stamp key and break `test_every_schedule_column_binds_to_a_live_acord_field`. Engineering default: one column, placeholder "Field employees - roofing installation" | H3 | 2026-08-27 | open |
-| Q26 | **H3 8.2 ACORD 130 `Individual_IncludedExcludedCode` vocabulary** - the tooltip says only "Included or Excluded"; the printed form column reads INC / EXC. Engineering default: stamp "INC" / "EXC" from the two extracted booleans | H3 | 2026-08-27 | open |
-| Q27 | **H3 8.2 officers table PRODUCER-only, whole table?** C4 already routes `wc_officers` to the producer (4.4 "owner/officer inclusion/exclusion"); officer NAMES are factual but the treatment is judgment, and one table cannot split audiences by row. Engineering default: producer-only, whole table (needs a table-level `producer_only` flag - today `_finalize_schedule_taxonomy` forces EVERY table to the client) | H3 | 2026-08-27 | open |
-| Q28 | **H3 8.2 retire the free-text `wc_payroll_by_state` client question once the group table carries a state per row?** Plan derives the by-state map from the rows (every row must have state AND payroll, labelled `derived`, never overwriting a stated value - D28); the scalar question then falls out as already-provided. Engineering default: yes | H3 | 2026-08-27 | open |
-| Q29 | **H3 - is a "group rows do not sum to the stated WC payroll" warning wanted?** NOT built. It is a NEW validation rule (Principle 7 / precedence note); the existing 20% `wc_payroll_mismatch` compares wc_payroll to total_payroll only. Engineering default: not built until ruled | H3 | 2026-08-27 | open |
-| Q30 | **H3 - let the dormant 10% state-total-vs-total-payroll HARD STOP go live?** `_check_wc_multi_state_payroll_breakdown` reconciles only a LIST shape while the merge has always written a DICT, so `wc_state_payroll_total_mismatch` has never fired on live data. It is spec, dead by accident - but waking it can cap packages at 60 that were never capped (D6, scores DOWN). Engineering default: fix the shape and let it run | H3 | 2026-08-27 | open |
+| Q24 | **H3 8.1 employee count per group: full-time + part-time (two columns, form-true - ACORD 130 prints `RateClass_FullTimeEmployeeCount` AND `PartTimeEmployeeCount` per row) or ONE number as the client's example shows?** One number would have to land in the full-time box - a wrong value for a mixed group. Engineering default: FT + PT | H3 | 2026-08-27 | **OWNER 2026-08-27: "fix things properly" - engineering default authorised.** Shipped (H3-B) |
+| Q25 | **H3 8.1 "job title / employee group" and "description of actual duties" as ONE table column?** ACORD 130 has no job-title box; `RateClass_DutiesDescription`'s own tooltip asks for "the classification description or a brief statement regarding the duties". Two columns need a computed stamp key and break `test_every_schedule_column_binds_to_a_live_acord_field`. Engineering default: one column, placeholder "Field employees - roofing installation" | H3 | 2026-08-27 | **OWNER 2026-08-27: "fix things properly" - engineering default authorised.** Shipped (H3-B) |
+| Q26 | **H3 8.2 ACORD 130 `Individual_IncludedExcludedCode` vocabulary** - the tooltip says only "Included or Excluded"; the printed form column reads INC / EXC. Engineering default: stamp "INC" / "EXC" from the two extracted booleans | H3 | 2026-08-27 | **OWNER 2026-08-27: "fix things properly" - engineering default authorised.** Shipped (H3-B) |
+| Q27 | **H3 8.2 officers table PRODUCER-only, whole table?** C4 already routes `wc_officers` to the producer (4.4 "owner/officer inclusion/exclusion"); officer NAMES are factual but the treatment is judgment, and one table cannot split audiences by row. Engineering default: producer-only, whole table (needs a table-level `producer_only` flag - today `_finalize_schedule_taxonomy` forces EVERY table to the client) | H3 | 2026-08-27 | **OWNER 2026-08-27: "fix things properly" - engineering default authorised.** Shipped (H3-B) |
+| Q28 | **H3 8.2 retire the free-text `wc_payroll_by_state` client question once the group table carries a state per row?** Plan derives the by-state map from the rows (every row must have state AND payroll, labelled `derived`, never overwriting a stated value - D28); the scalar question then falls out as already-provided. Engineering default: yes | H3 | 2026-08-27 | **OWNER 2026-08-27: "fix things properly" - engineering default authorised.** Shipped (H3-B) |
+| Q29 | **H3 - is a "group rows do not sum to the stated WC payroll" warning wanted?** NOT built. It is a NEW validation rule (Principle 7 / precedence note); the existing 20% `wc_payroll_mismatch` compares wc_payroll to total_payroll only. Engineering default: not built until ruled | H3 | 2026-08-27 | **NOT BUILT (H3-B).** The precedence note forbids a new validation rule without product approval; the owner's go-ahead covered the defaults, not a new rule. Needs Brent - not yet in `20Aug_questions_brent.md` (owner to say if it should be) |
+| Q30 | **H3 - let the dormant 10% state-total-vs-total-payroll HARD STOP go live?** `_check_wc_multi_state_payroll_breakdown` reconciles only a LIST shape while the merge has always written a DICT, so `wc_state_payroll_total_mismatch` has never fired on live data. It is spec, dead by accident - but waking it can cap packages at 60 that were never capped (D6, scores DOWN). Engineering default: fix the shape and let it run | H3 | 2026-08-27 | **OWNER 2026-08-27: "fix things properly" - engineering default authorised.** Shipped (H3-B) |
+
+| Q31 | **Physical address is charged in the ACORD 125 fill rate on EVERY package.** Section 9.1 says it "Applies When: Exposure/location requires it" with the key rule *"Do not universally require"*, and 3.12 already makes the WARNING exposure-gated - but `sqs_service.FORM_FIELD_INVENTORY["ACORD_125"]` lists `physical_address`, so `calculate_sqs_from_facts` counts it as an owed field on a single-location GL-only account that needs no separate premises address. Engineering did NOT change it: removing an inventory entry moves scores UP on those accounts, which is a scoring decision, and D32 forbids fixing it by silencing the question instead (the package would keep paying for a blank nobody can be asked for). Options: (a) leave it - one owed field, uniform across packages; (b) make the entry conditional on the same exposure test 3.12 uses | H4 | 2026-08-27 | |
+| Q32 | **The client is asked for a WC payroll-by-class-code breakdown that the H3 employee-group table already collects.** `narrative_growth_trends` is a narrative slot repurposed to ask for class code + description + payroll; H3 correctly routed it to the producer, but it is still INJECTED alongside the table that answers it (and the X-Mod is likewise asked twice, via `wc_xmod` and `narrative_target_markets`). Suppressing the injection is not free: `_narrative_enrichment_present` credits the Narrative Quality component ONLY from that fact key, so dropping the question costs ~5 points of that pillar on every WC package unless the component is re-credited from the table rows. Engineering default: NOT changed - a D6 score move nobody has signed off | H4 | 2026-08-27 | |
+
+| Q33 | **A declarations page's EXPIRING policy term wins the merge and stamps into ACORD 125's PROPOSED EFFECTIVE DATE box.** Measured 2026-08-27: `_DOC_TYPE_PRIORITY` ranks `dec_page` (0) above `application` (1), so on the most common upload shape - current dec page + new application - `merge_facts` gives `effective_date` the term that is ENDING. RC1b fixed this for RENEWALS via `_route_renewal_dates` (gated on `is_renewal` AND an already-ended term); a rewrite to a new carrier is neither and falls through, and `_resolve_renewal_proposed_period` is gated on the same flag so the box is not even an owned blank. Engineering did NOT fix it: it is a change to primary-truth selection, which every fact flows through, and it has had no adversarial round. Recommended shape: extend RC1b rather than reorder the priority list - for `effective_date` / `expiration_date` ONLY, a PROSPECTIVE document (application / supplemental application / quote) outranks a BOUND one (dec page / policy / certificate / binder / endorsement), and the bound term routes to the existing `prior_*` namespace. **The cross-document date hard stop is currently the only thing on any screen pointing at this box, which is why it must not be silenced first** | H4 | 2026-08-27 | |
 
 **`20Aug_questions_brent.md` at the repo root is the ONE client-facing list: Q3a, Q3b, Q8,
 Q9** (Q10 closed; the C2 items Q11-Q13 were ANSWERED 2026-08-24 - see "BRENT'S RULINGS - ALL CLOSED" below) - written for Brent, not for engineering.
@@ -7372,3 +7393,2175 @@ countdown, deliberately not built (recorded above so nobody mistakes it for an o
 **Still worth one line to Brent (D6):** the band can move at generation - a hard stop on a
 merely recommended form is a warning until the form is selected (C75), and the fill rate
 joins the score. Presentation only; no score changed.
+
+---
+
+## Session 2026-08-27 - H3 Workers Compensation Data Capture (client section 8)
+
+### H3-A - Full audit of section 8 - ANALYSIS COMPLETE, NOT YET BUILT (2026-08-27)
+**Priority:** V1-HIGH
+**Principle(s) touched:** 1 (one canonical fact), 3 (missing is not no), 5 (never ask the
+client to classify), 6 (provenance), 7 (no new rule without product approval)
+
+**Read-only session. No code, no UI, no test was changed.** Everything below was read in
+the code or executed offline (`compute_form_gaps("ACORD_130")` with sample WC facts), not
+taken from a markdown file. Owner asked for the analysis and the open questions only.
+
+**What Brent is saying, plainly.** One total payroll number tells him nothing. Let the
+business list its people in GROUPS - office, sales, field crew - with how many, what they
+actually do, annual payroll per group, the state, and the WC class code if one is already
+known. Keep the other WC facts (total payroll, payroll by state, owners/officers in or out,
+X-Mod, subcontracting %, payroll period). And Primble must NOT guess or suggest WC class
+codes - copy what a document or the producer supplies, tidy the format, run the checks
+that already exist. Section 8 defines NO new score rule; "improves SQS" means the existing
+WC rules get better input (Principle 7 - nothing new is scored).
+
+#### Status - ~55% exists [VERIFIED]
+
+Already there:
+* Extraction reads a WC class table into `wc_class_codes` rows (code, description,
+  state, payroll, rate) and officers into `wc_officers` (name, title, ownership %,
+  include, exclude, state) - `extraction_service.py:280, 431`.
+* ACORD 130 prints code / duties / payroll per row (offline run: rows A-C stamped) and
+  officer name / title / ownership % (`_SCHEDULE_REGISTRY` bindings repaired 2026-08-15/16).
+* Every 8.2 fact exists with a question: `total_payroll`, `wc_payroll`,
+  `wc_payroll_by_state`, `wc_officers`, `wc_officer_exclusions` (choice list),
+  `wc_xmod` + `wc_xmod_effective_date` + derived applicability, `percent_subcontracted`,
+  `wc_payroll_period` (choice list, meaning-based validator, H1-K gate).
+* 8.3 already holds: nothing generates a WC code. `_codes_to_industry` only COMPARES;
+  `naics_suggester` is NAICS/SIC only; when no class table was extracted the rating-table
+  code boxes are OWNED BLANKS - `RateClass_ClassificationCode_A-N` sit in the
+  deterministic-blank set, never in the LLM gap list (offline run, both `[]` and absent key).
+
+Missing:
+1. **No capture table.** `schedule_capture.SCHEDULE_DEFS` has vehicles / drivers /
+   locations / losses only. Its NOTE ("wc_class_codes / wc_officers ... match ZERO real
+   schema field") is STALE - the real ACORD 130 bindings were added 2026-08-15/16 but the
+   table never was. The only human input is the scalar free-text `wc_class_codes`
+   question (producer-only) and the `wc_officers` list question - and a string typed into
+   a list fact stamps nothing and scores nothing (`_resolve_schedule_row` needs a list;
+   `coverage_evidence._rows` returns `[]` on a string).
+2. **Employee count per group** - not extracted, not bound, not stamped.
+   `RateClass_FullTime/PartTimeEmployeeCount_A-C` reach the LLM (offline run).
+3. **State** - extracted per row, printed nowhere. `RateState_StateOrProvinceName_A` and
+   `PartOne_StateOrProvinceCode_A-J` reach the LLM.
+4. **Officer include/exclude** - extracted as two booleans;
+   `Individual_IncludedExcludedCode` unbound -> LLM. Officer state / duties /
+   remuneration -> LLM.
+5. **`wc_payroll_by_state`** is a free-text client question that stamps nowhere, and
+   `cross_form_validator._check_wc_multi_state_payroll_breakdown` reconciles only a LIST
+   shape (`cross_form_validator.py:600`) while the merge writes a DICT
+   (`extraction_service.py:3764`) - `wc_state_payroll_total_mismatch` has never run live.
+6. **One 8.3 leak:** `Individual_RatingClassificationCode_A-D` and
+   `RateClass_DescriptionCode_*` DO reach the LLM with no schedule present (offline run) -
+   code boxes the model can fill from prose.
+
+#### Root cause [VERIFIED]
+
+WC exposure was built as a **rating table for the FORM** (extractor reads it, stamper
+prints it), never as a **fact a HUMAN can enter**. Every human-facing WC input is a
+scalar free-text box over a list-shaped fact, so the answer is invisible to the stamper,
+the scorer and the 130 checklist. Same class Figure 15 fixed for fleets (2026-07-21) and
+H1-E fixed for auto ("a schedule-backed fact is asked ONCE, as its table"). WC was left
+out of `SCHEDULE_DEFS` on 2026-07-21 because its bindings were dead THEN; the bindings
+were repaired in August, the table was never added, the NOTE went stale.
+
+#### Plan - reuse the schedule machinery; one table, no new fact key, no LLM
+
+1. **`wc_class_codes` joins `SCHEDULE_DEFS`** ("Employee groups / WC payroll"). Column keys
+   REUSE the extraction row keys so extraction -> table -> facts -> stamping is ONE shape
+   (Principle 1): `description` ("Employee group and what they do", required),
+   `full_time_employees`, `part_time_employees`, `payroll` (annual, required), `state`,
+   `code` (**producer_only** - Principle 5, the same flag that hides comp/coll symbols
+   from the client), `rate` (producer_only, so extracted rates survive a round trip). Two
+   new registry bindings for the FT / PT count boxes; the extraction row gets the same two
+   keys (v16 -> v17, C83 in `improving-ll.md`, ~15 tokens on the cached prefix, extraction
+   cache invalidated once).
+2. **State from the rows, positive evidence only.** Rating-sheet state printed only when
+   every row shares ONE state (our template has a single sheet - a form limit);
+   `PartOne_A-J` = the distinct row states; `wc_payroll_by_state` DERIVED (state ->
+   summed payroll) only when every row has state AND payroll, labelled `derived`, never
+   overwriting a stated value - the D28 / `_derive_from_dec_entries_h1` shape. Fix the
+   dict/list defect (item 5) on the way.
+3. **Officers table** (`wc_officers`), PRODUCER-only (C4 routes `wc_officers` to the
+   producer). Needs a table-level `producer_only` flag honoured by
+   `_finalize_schedule_taxonomy`, which today hard-codes every table to CLIENT - default
+   off, the four live tables unchanged. Bind `Individual_StateOrProvinceCode` -> `state`
+   and `Individual_IncludedExcludedCode` -> computed from the two booleans (Q26).
+4. **Routing seam.** `question_eligibility.overlay_for` will tag the class-code table as
+   insurance-judgment because its canonical key is `wc_class_codes`;
+   `_finalize_schedule_taxonomy` then overrides the audience but leaves
+   `eligibility_reason` / `producer_review` stale. Make `overlay_for` skip
+   `field_type == "schedule"` - inside a table the column flags own the split. The scalar
+   producer question "What types of work do your employees perform?" drops by itself
+   (`_drop_scalar_duplicates_of_schedule_questions`). Retarget
+   `wc_multi_state_no_breakdown` from `_R_NARRATIVE` to `_r_schedule("wc_class_codes")`
+   so Resolve opens the table.
+5. **Close the 8.3 leak** (item 6): the officer class-code and description-code boxes
+   become owned blanks like the rating-table code box already is. A light normaliser
+   splits a "8810 Clerical" cell into code + description ("normalize known formatting");
+   suffixes untouched. Register `code` + `state` as the `_SCHEDULE_DEDUP_KEYS` identity so
+   a class table printed on two pages does not survive the chunk union twice
+   (`_NATURAL_ID_SUBKEYS` has no `code` - pre-existing).
+6. **SQS: no new rule.** Only movements: a filled table fills `wc_class_codes` (the -10
+   retires) and the payroll-period -3 retires because a typed annual-payroll column is
+   annual by construction (`coverage_evidence._payroll_source_is_annual` reads row
+   `payroll`). D6 - tell Brent.
+
+**Why this and not the alternative.**
+* A new `wc_job_groups` key beside `wc_class_codes` - two canonical facts for one
+  exposure; the stamper, scorer, 130 checklist and class-code vote all read
+  `wc_class_codes` (Principle 1).
+* A separate "job title" column - ACORD 130 has no job-title box (Q25).
+* One "employees" number - the form has FT and PT; one number lands in FT, a wrong value
+  for a mixed group (Q24).
+* Deriving `wc_payroll` / `total_payroll` from the row sum - a partial table gives a wrong
+  total (H1-F class). Reconcile only; a rows-vs-stated warning is a NEW rule (Q29).
+* Any LLM involvement - none; the client's 8.3 boundary and the standing blank-over-wrong
+  rule both forbid it.
+
+**Forward simulation (executed against every 8.x item).**
+* 8.1, three groups typed by the client: rows -> `facts["wc_class_codes"]` -> restamp
+  prints code / duties / payroll / FT / PT for A-C, sheet state "CO", PartOne A = CO,
+  by-state derived. `_is_ops_class_code_mismatch` reads only the `code` key - 8810 / 8742
+  are standard exceptions, 5551 governs, no false -15. `_class_exposure_amounts` picks
+  money columns by NAME token (`_discover_class_schedule_money_columns`), so FT / PT counts
+  are never read as amounts. Period status SATISFIED. HELD.
+* Client leaves codes blank: column is producer-only anyway; code boxes stay owned blanks;
+  the producer's table shows the same rows WITH the code column - "retain
+  producer-entered codes". HELD.
+* Extraction found 2 rows, client adds one: `current_rows` pre-loads; dedup on
+  (description, state). HELD.
+* Multi-state rows: sheet state blank (form limit, producer sees it), PartOne lists both,
+  by-state derived, `wc_multi_state` re-derived from the dict, the hard stop satisfied -
+  and the dormant 10% state-total hard stop RUNS for the first time (Q30).
+* Empty table / no documents: nothing derived, nothing stamped, questions asked. HELD.
+* Legacy sessions: old extracted rows lack FT / PT -> those cells blank. HELD.
+* 8.2 facts: untouched except by-state (derived) and officer treatment (now printable).
+  X-Mod / period / subcontracting paths unchanged. HNOA / Not-Applicable logic untouched.
+* Tests expected to move: the column-binding test (must pass with the new bindings),
+  `test_issue_resolution` schedule-mode keys (the retarget in step 4),
+  `test_h1_coverage_gap_closure` officer shapes (unchanged). The
+  `test_judgment_facts_route_to_producer` pins are scalar-question tests - unaffected.
+* NOT testable offline: live render of a `number` column (`ScheduleTable` uses plain text
+  inputs for every type; server `validate_cell` has NO `number` branch - add one);
+  officer overflow (`ROW_CAPACITY` is a global 14, the form has 4 officer rows - the
+  overflow notice would be wrong for officers); the producer-only table flag against the
+  four existing tables (must default off).
+
+**Blast radius.** Schedule plumbing (shared by the 4 live tables), question routing, the
+extraction schema version, ACORD 130 stamping, one cross-form check. No SQS rule changes.
+Nothing in C1-C5 / H1 / H2 moves except the payroll-period status behaving as H1 intends.
+
+**UI.** No frontend change made, and NONE expected: `ScheduleTable.jsx` renders any column
+spec the server sends, `ClientQuestionnaire.jsx` renders any `field_type: schedule`
+question, and the producer pre-load panel in `AcordModal.jsx` iterates
+`GET /api/arq/schedules`, which walks `SCHEDULE_DEFS` - a new table appears in both places
+with zero frontend edits. The only visible difference after the build: two new tables
+(client: employee groups; producer: officers) and the free-text WC questions they replace.
+
+**Risks, named.** (1) The routing seam in step 4 - miss it and the client never sees the
+table, or sees it flagged "producer review". (2) The state-total hard stop waking (Q30) -
+scores DOWN on mismatched packages, an existing rule but D6. (3) `PROMPT_VERSION` bump
+invalidates the extraction cache - a re-upload of an already-processed package re-extracts
+once (~14 calls).
+
+**Open for the owner - Q24-Q30 in the register above.** Nothing is built until they are
+ruled; every default is stated there.
+
+### H3-B - SHIPPED (2026-08-27)
+**Priority:** V1-HIGH
+**Principle(s) touched:** 1, 3, 5, 6, 7
+
+**Owner ruling that unblocked it:** *"fix things properly ... fix all the client's
+requirements of part 8 ... do not over engineer."* Read as approval of the engineering
+defaults stated in Q24-Q30, EXCEPT Q29 - a rows-vs-stated-payroll warning is a NEW
+validation rule and the precedence note forbids one without product approval. Q24-Q28 and
+Q30 are recorded as owner-authorised defaults; Q29 stays open for Brent.
+
+#### What shipped, by clause
+
+| Clause | Client's direction | What now happens |
+|---|---|---|
+| **8.1 job group** | title / group, employees, duties, annual payroll, state, known class code | ONE client table on the existing `wc_class_codes` fact: "Employee group and what they do" (one cell - ACORD 130 has no title box, Q25), full-time + part-time (the form's two boxes, Q24), annual payroll, state; `code` and `rate` producer-only (Principle 5). Stamps rows A-N: code / duties / payroll / FT / PT; Part 1 states = the DISTINCT row states; the rating sheet's state label only when every row shares one |
+| **8.2 total payroll / payroll period / X-Mod / subcontracting** | support when applicable | Unchanged - each already had a fact, a question and (for X-Mod / period) H1's evidence rules. A typed annual-payroll column satisfies the 6.4 period check by construction |
+| **8.2 payroll by state** | support when applicable | DERIVED {state: summed payroll} from a COMPLETE table (every row has state AND payroll), `evidence_state: derived` with rule + inputs, never over a stated value, recomputed on every save and dropped when the rows stop supporting it (Q28). The free-text question falls out as already-provided. The multi-state hard stop's Resolve now opens the table |
+| **8.2 owners / officers, inclusion / exclusion** | support when applicable | Producer-only officers table (Q27), 4 rows (the form's capacity). Included / Excluded is a typed word or the extractor's booleans, read ONCE by `coverage_evidence.officer_treatment_code`, printed as INC / EXC (Q26) on `Individual_IncludedExcludedCode`; officer state prints; unknown treatment stays an owned blank and still counts as unresolved for 6.4 |
+| **8.3 extract / retain / normalize / compare, never recommend** | boundary | Extract: v17 row schema. Retain: producer-typed codes round-trip through the table. Normalize: "8810 Clerical" -> code 8810 + wording, suffixes untouched, never invents. Compare: the existing class-code vote, unchanged. Never recommend: EVERY ACORD 130 code box is schedule-owned - right-or-blank, the LLM is never asked (D45). `naics_suggester` verified WC-blind |
+
+#### Root causes, and what each fix closes
+
+1. **No human-enterable WC fact** (the class): `SCHEDULE_DEFS` lacked both WC schedules
+   (stale NOTE from 2026-07-21; bindings repaired 2026-08-15/16, table never added). Fixed
+   by two `ScheduleDef`s on the existing keys. Closes: free text typed into a list fact
+   stamping nothing and scoring nothing, for every WC input.
+2. **Per-row counts / state / treatment unbound** -> gap fill. Fixed by seven registry
+   bindings; the family-level phantom-row logic already suppresses rows beyond the list.
+3. **`_check_wc_multi_state_payroll_breakdown` read a LIST, the merge writes a DICT.**
+   Fixed to read both (and the derived envelope). The 10% state-total hard stop runs for
+   the first time - D6, scores can go DOWN (Q30, authorised).
+4. **8.3 leak** - `Individual_RatingClassificationCode_A-D` and `RateClass_DescriptionCode_*`
+   reached the LLM with no table. Fixed by owning them (D45).
+5. **Class rows duplicated across chunks** (no natural id on a rating row). Fixed by a
+   bespoke identity code + state + payroll - two locations' rows for one class do NOT fold
+   (payroll differs); an exact reprint does.
+6. **The eligibility overlay judged a TABLE by its canonical key** - `wc_class_codes` is
+   insurance-judgment, so the client's own payroll table would have carried "producer
+   review". Fixed at the door: a schedule question is never overlaid (D44).
+
+#### Files
+* `services/coverage_evidence.py` - `officer_treatment_code` / `_label`,
+  `wc_class_row_states`, `wc_class_shared_state`, `wc_payroll_by_state_from_rows`,
+  `normalize_wc_class_row`; `wc_officer_treatment_status` now reads the one helper.
+* `services/schedule_capture.py` - `ScheduleDef(producer_only, row_capacity)`, the two
+  defs, `capacity_for`, `is_producer_only`, `number` cell type, officer treatment cell on
+  read, code normaliser on write, overflow against the schedule's OWN capacity, stale
+  NOTE corrected.
+* `services/pdf_service.py` - seven `_SCHEDULE_REGISTRY` bindings; `_resolve_schedule_row`
+  answers the sheet state / Part 1 states / INC-EXC through `coverage_evidence`.
+* `services/extraction_service.py` - v16 -> v17 (two row keys, C83 in `improving-ll.md`),
+  `_wc_class_dedup_keys`, `derive_wc_facts_from_class_rows` (merge tail, before the
+  multi-state flag re-derivation, which now unwraps the derived envelope).
+* `services/arq_service.py` - producer-only taxonomy, `producer_only` + per-schedule
+  capacity on the question payload, `_derive_wc_row_facts` on both save paths.
+* `routes/arq_routes.py` - send path refuses a producer-only table; `client_view` skips
+  it; per-schedule capacity.
+* `services/question_eligibility.py` - schedule questions skipped (D44).
+* `services/issue_registry.py` - `wc_multi_state_no_breakdown` (both engines) -> table.
+* `services/cross_form_validator.py` - dict / envelope shape in the state-total check.
+* `tests/test_h3_wc_data_capture.py` - 54 tests, every one against the real ACORD 130
+  schema or the real merge helper. **No frontend file changed.**
+
+#### Verification
+* Offline, real schema, the client's own 8.1 example: rows A-C print code / duties /
+  payroll / FT / PT; sheet "CO"; Part 1 A = CO, B-C owned blanks; by-state `{"CO":
+  "$800,000"}` derived with provenance; officer A `INC`, state CO; officer with a typed
+  "Excluded" -> `EXC`; a nameless treatment -> owned blank. Two states: sheet blank, Part 1
+  CO / TX, by-state summed per state. Empty / absent table: NO code box in the LLM gap
+  list. Partial table: nothing derived. Stated by-state value: untouched.
+* Guard suites first (532 across schedule capture, eligibility, issue resolution, legacy
+  rules, H1 x2, auto symbols, prompt caching, C3, C4): green. Then the full suite, LAST:
+  **4751 passed / 1 failed** (`test_arq_acord125_missing_only`, the documented `httpx`
+  ImportError), 14 skipped. Baseline was 4680 / 1.
+
+#### Blast radius - tell Brent (D6, both directions)
+* DOWN: any multi-state WC package whose by-state figures do not sum to the 125 payroll
+  within 10% is now capped at 60 by an existing spec rule that had never fired.
+* UP: a filled employee-group table retires the -10 "no WC class codes" and the -3 payroll
+  period item.
+* Cost: the v17 bump invalidates the extraction cache once per already-processed package
+  (~14 calls on the next upload); +~15 tokens on the cached prefix.
+
+#### Known / deliberately not done
+* Q29 - rows-vs-stated-payroll warning: NOT built (new rule). Brent.
+* `WorkersCompensation_RateState_StateOrProvinceName_A1` (the page-2 copy of the sheet
+  label) does not match the row regex and still reaches the LLM. Same value either way.
+* Officer rows B-D's UNBOUND columns (birth date, duties, remuneration, location number)
+  still reach the LLM while a row exists - pre-existing; the root-level phantom capacity is
+  the max over both WC lists. Not a code box, not an 8.3 concern.
+* Not live-verified. The owner's next upload with a WC package is the check: expect the
+  employee-group table in the client list (no code column), the officers table in the
+  Agency bucket and the pre-load panel, and the 130's Part 1 / rating-sheet state printed.
+
+### H3-C - LIVE TEST KIT + the defect the dry run caught before the owner did (2026-08-27)
+
+**Kit:** `py backend/scripts/make_h3_test_pdfs.py` -> `h3_test_data/` with three
+one-file packages and `README-HOW-TO-TEST.md` (what to upload, what to read on the
+pre-form screen, which forms to generate, what to check on each and where, what counts
+as a failure, and what is known-and-expected).
+
+| Package | Proves |
+|---|---|
+| **W1** groups complete, ONE state | 8.1 the whole table on the 130 (code / duties / FT / PT / remuneration), 8.2 officers INC+EXC / X-Mod / subcontracting, payroll-by-state derived and AGREEING - the guard rail: the new hard stop must stay SILENT; 8.3 a compound "8810 Clerical" cell split; the same rating row printed TWICE folded to one |
+| **W2** two states, totals disagree | Part 1 lists CO and TX, the rating sheet's state label stays BLANK, and the 10% state-total HARD STOP fires - the spec rule that had never once run |
+| **W3** no class table | 8.3: every code box BLANK on a roofing account (5551 is the obvious code and Primble must not write it), the empty table still ASKED, a producer-typed code stamps, and the H1-K payroll-period -3 still fires |
+
+Three uploads, 125 + 130 on each. Fixture rules recorded in the script's docstring
+(a class row carrying an amount satisfies the period by itself - D43; W2 may print no
+WC payroll TOTAL or the pre-existing 20% rule fires too and hides the one under test).
+
+#### THE DEFECT - and it was mine, in H3-B, shipped and green
+
+The dry run drives the real pipeline with the facts these documents produce.
+W1's rows came back **6 printed -> 6 folded**, the derived payroll-by-state
+**DOUBLED to $1,600,000**, and the new hard stop fired on the package built to prove
+it stays silent.
+
+**Root cause.** `_wc_class_dedup_keys` built its identity from the RAW code cell
+(`re.sub(r"[^0-9A-Za-z]", "", ...)`), and the union runs BEFORE
+`normalize_wc_class_row`. A premium summary printing `8810 Clerical` and a rating
+sheet printing `8810` therefore produced `8810CLERICAL` and `8810` - two keys, two
+rows, one row counted twice.
+
+**Blast radius beyond the fixture, which is why it matters:** that is how real WC
+packages print - a summary with a combined "CLASS CODE / CLASSIFICATION" column and a
+rating sheet with separate columns. Any such document doubled its own payroll-by-state
+and manufactured a false 60-cap.
+
+**Fix at the root, one door:** `coverage_evidence.wc_class_code_token` is now the ONE
+reading of "what code does this cell carry?", used by the normaliser AND by the union
+identity, so the two cannot drift. Verified after the fix: 6 -> 3 rows, counts 2 / 3 / 8,
+part-time 2 on the roofing row, by-state `{CO: $800,000}`, hard stop silent.
+
+**Why the unit test did not catch it:** `test_the_same_rating_row_printed_twice_folds`
+fed both printings in the SAME shape. A fixture easier than reality, exactly the trap
+the change quality bar names. Now pinned by
+`test_the_same_row_printed_in_TWO_SHAPES_folds` (the live shapes) and
+`test_the_code_token_has_one_reader`.
+
+**Standing lesson, and it is H1's lesson arriving one layer down:** an offline probe
+proves the FUNCTION; only the SEAM catches this. The H3-B unit suite was 54 green
+against a defect that would have shown up on the owner's first upload. **Build the kit
+and dry-run it against the real code BEFORE calling a section shipped.**
+
+#### Also found, not a defect - recorded so it is not chased
+
+`WorkersCompensation_RateClass_Rate_*` is NON-FILLABLE in the ACORD template (a rate
+is the carrier's to compute), so the RATE column never prints. The value is still
+retained in the fact and still shown in the producer's table - preserved, not
+discarded. Written into the kit's "known and expected" section.
+
+**Suite after the fix: 4751 passed / 1 failed** (the documented `httpx` ImportError),
+56 H3 tests. **Still not live-verified - the three uploads are the check.**
+
+### H3-D - FIRST LIVE RUN (W1-W3): the form passed, the questionnaire did not - 7 defects, all fixed (2026-08-27)
+
+**The owner ran all three packages and sent back the three generated ACORD 130s plus the
+pre-form / questionnaire screens.** Everything H3-B built for the FORM worked on the first
+attempt. Everything that had to reach a HUMAN was invisible. Seven defects, each traced to
+a root cause in code before any fix was written.
+
+#### What the run PROVED (do not re-test)
+
+* the same rating row printed twice folded to **3 rows, not 6**;
+* the compound cell split - code box `8810`, not `8810 Clerical`;
+* per-group counts **2 / 3 / 8**, and the company headcount 15 never reached a group box;
+* W1 Part 1 = `CO` only (three CO groups are ONE state); sheet = `CO`;
+* W2 Part 1 = `CO TX`, and the rating sheet's state **BLANK** - it refuses to name one
+  state for a two-state account;
+* **the derivation works end to end**: W2's hard stop reads *"totals $800,000"*, a figure
+  printed NOWHERE in the document - it was summed from the rows;
+* the dormant 10% hard stop **fired**, capped at 60, and the trace reconciled
+  ("70 earned, held at 60 = 60 / Why ...");
+* W3: **zero class codes anywhere** on a roofing account - 8.3 holds;
+* W3 WC Supplemental **97%** - H1-K's payroll-period -3 still fires;
+* the officers table never reached the client.
+
+#### The seven defects
+
+| # | Symptom | Root cause | Mine? |
+|---|---|---|---|
+| 1 | **Neither WC table was ever asked.** Both appeared only in the producer's "Fill schedules yourself" strip | `schedule_capture.question_text`'s DEFAULT template began `"Please provide your "` - which IS `arq_service._MACHINE_QUESTION_PREFIX`. `_hide_machine_worded_questions` runs at line 3004, AFTER `_finalize_schedule_taxonomy`, and routed both tables to internal. The four original schedules escaped only because each happened to carry a hand-written override starting "Please list" | **YES (H3-B)** |
+| 2 | The client was asked *"Provide your WC payroll breakdown by class code … (For example: 5183 Plumbing - $320,000)"* | `narrative_growth_trends` - a narrative slot repurposed into a classification question, so `wc_class_codes` in the judgment table never matched it. **The identical defect as `narrative_target_markets` (C4-S), one slot over, missed when that one was found** | no |
+| 3 | W1 grew a third "officer" with duties *Roofing installation* and $520,000; **W2 printed three officers on a package with none**, carrying the three group payrolls; W3 printed $640,000 as an officer's pay | The officer row's four unbound columns (BirthDate / DutiesDescription / RemunerationAmount / LocationProducerIdentifier) fell to gap fill, and the model filled them from the employee-group table beside them | **YES (activated by H3-B)** |
+| 4 | PART 3 OTHER STATES repeated Part 1 (`CO TX` / `CO` with Part 1 blank) | `PartThree_*` unbound -> the model copied Part 1. Part 3 means states NOT in Part 1 | no |
+| 5 | INCREASED LIMITS = `1,000,000` (the EL LIMIT as a rating multiplier); ASSIGNED RISK SURCHARGE = the experience mod | seven `StateCoverage_*_ModificationFactor_*` boxes unbound -> gap fill took the nearest number | no |
+| 6 | W2's premium block printed `STATE: CO` while the sheet directly above it correctly refused | `RateState_StateOrProvinceName_A1` - two trailing characters, so `_SCHED_ROW_RE` never matched it and the H3-B binding missed it | **YES (H3-B)** |
+| 7 | *"Policy Effective Date: documents disagree (09/17/2026, 07/13/2026)"* - a false Data Consistency card, an Important warning and an **85 cap**, on W1 and W2 | `\b(?:policy\s+)?effective(?:\s+date)?` matches inside **"Experience Modification Effective Date:"**. Verified: that is the only "ffective" line in W1. Fires on EVERY WC package printing a mod effective date; the control is W3, which prints no mod and showed no conflict | no |
+
+#### The fixes
+
+1. **A TABLE IS NEVER A RAW SCHEMA PROMPT** - `_hide_machine_worded_questions` skips
+   `field_type == "schedule"` (structural), AND the default template now reads
+   "Please list your ...", AND both WC schedules got proper client-worded overrides.
+   Three conditions because the wording alone is what failed.
+2. `narrative_growth_trends` added to `INSURANCE_JUDGMENT_QUESTION_KEYS`. The
+   "Subcontracted %" question and its HINT also dropped "(class code)" and the worked
+   code examples - the FACT stays client-eligible (client 4.3), only the jargon went.
+3. **Every remaining column of both WC schedules is now BOUND**, so nothing inside a WC
+   row can be invented. Chosen over widening `_resolve_phantom_schedule_row`, which keys
+   capacity on the FIRST name segment and so shares one capacity between officers and
+   rating rows - narrowing that would change the Vehicle family's deliberately
+   conservative "supported by EITHER list" rule for no gain here.
+4. `PartThree_StateOrProvinceCode` bound to a new always-blank sub-key (`_wc_never`).
+5. New `_resolve_wc_premium_cell` in `_AUTHORITATIVE_BLANK_RESOLVERS`: the experience mod
+   fills its own box from `wc_xmod`; **every other rating factor is an owned blank**.
+6. The same resolver owns `..._A1` and answers it from `wc_class_shared_state` - the
+   premium block can never disagree with the sheet above it.
+7. `underwriting_consistency._label_has_foreign_subject` - a label owned by another
+   subject standing immediately in front of it is not this field's label. Structural
+   (same line, last two words only), and a DENY-list so it can only ever drop a rival
+   candidate, never invent one. Same shape as H1-K's payroll-period gate.
+
+#### Verified after the fix (real code, real PDFs)
+
+* zero WC boxes reach the LLM on all three packages (was 26);
+* officer remuneration A/B/C = blank on W2; duties C blank on W1;
+* Part 3 blank; IncreasedLimits / AssignedRisk blank; ExperienceOrMerit = 0.92 / 1.05,
+  and blank on W3 which states no mod;
+* premium STATE = `CO` on W1, **blank** on W2, blank on W3;
+* `_text_scan_values(W1_text, "effective_date")` -> `[]` (was `['07/13/2026']`), while
+  "Policy Effective Date: 09/17/2026" and a bare "Effective Date:" still scan;
+* the real `generate_arq_questions` now emits **wc_class_codes -> client** and
+  **wc_officers -> producer/agency**, neither suppressed, and no client question asks for
+  a classification code.
+
+**Blast radius, measured:** every field bound here exists on **ACORD 130 and no other
+form** (267 fields; the other 16 schemas carry none). The questionnaire fixes are
+form-agnostic but touch routing only.
+
+Tests: `tests/test_h3_wc_data_capture.py` **64** (+8 for H3-D, each pinned to its live
+shape). Guard suites 553 green. Suite **4761 passed / 1 failed** (the documented `httpx`
+ImportError).
+
+#### Standing lessons
+
+1. **The seam, again, and this time it hid the whole feature.** H3-B's unit tests drove
+   `_finalize_schedule_taxonomy` directly and were green while the step AFTER it undid
+   the result. An offline probe proves the FUNCTION; only running the pipeline proves the
+   ORDER. Third time in this file.
+2. **A default that is the one string a downstream filter rejects is a trap, not a
+   default.** `question_text`'s template had been that since Figure 15; four schedules
+   survived only by each having an override. The next schedule would have failed too.
+3. **When a defect is found in one instance of a pattern, sweep the pattern.** C4-S found
+   one repurposed narrative slot and fixed that one; the sibling shipped to a client
+   questionnaire for a month. The sweep is now a test.
+4. **A necessary condition is not a sufficient one** - the classification sweep itself
+   needed a structural second condition, or it would have flagged `gl_class_codes`, whose
+   copy correctly says *"your agent will assign the classification code."*
+
+### H3-E - ROUND 2 LIVE: all seven H3-D fixes CONFIRMED on the forms (2026-08-27)
+
+Same three packages re-uploaded. **Six of the seven fixes are visible in the generated
+ACORD 130s and the questionnaire, and all six hold. The seventh (the false
+effective-date conflict) needs the PRE-FORM screen, which was not captured this round.**
+
+| Fix | Round 1 | Round 2 |
+|---|---|---|
+| 1 tables never asked | absent from both buckets | **W1/W2/W3: "WC class codes" table in the CLIENT list** under a new "Workers Compensation" group; **owners/officers table in AGENCY** on all three |
+| 2 client asked for class codes | client-facing, with NCCI examples | **gone from the client**; on W3 it now sits in Agency as "Producer-facing / Producer decision". "Subcontracted %" reads "by type of work" |
+| 3 phantom officers | W1 grew a 3rd officer (*Roofing installation*, $520,000); **W2 printed 3 officers with none on file** ($90,000/$410,000/$300,000); W3 $640,000 | **W1 shows exactly Dana + Marcus, row C empty; W2's officer block is entirely EMPTY; W3 empty** |
+| 4 Part 3 Other States | W2 "CO TX", W3 "CO" with Part 1 blank | **blank on all three**, Part 1 still correct (W1 CO, W2 CO TX, W3 blank) |
+| 5 invented rating factors | INCREASED LIMITS = 1,000,000 / 1.05; ASSIGNED RISK = the mod | **only EXPERIENCE OR MERIT carries a factor** (0.92 / 1.05), blank on W3 which states none |
+| 6 premium-block state | W2 said CO while the sheet refused | **W2 blank**, W1 CO, W3 blank |
+| 7 false date conflict | card + 85 cap on W1 and W2 | **not observable** - pre-form screen not captured. Verified offline; still to see live |
+
+Also confirmed: the per-row NAICS that used to print against row A alone is now blank on
+all three; W3's rating table is still completely empty (8.3 holds).
+
+**`producer_label` checked, NOT changed.** The producer's review screen shows the short
+label "WC class codes" over the table. That map is stripped by the client-view whitelist
+(verified: `producer_label` appears nowhere in `routes/arq_routes.py`), so the CLIENT sees
+only "Please list your employees by group ...". Working as designed - a label change here
+would have been a fix to a defect that does not exist.
+
+#### Observed in round 2, none of them section 8, none of them fixed
+
+1. **`# CLAIMS` invented in the prior-carrier grid** - `2` on W1, `1` on W2, on packages
+   that state no claims at all. Round 1 put `1.05` in that grid's MOD column instead, so
+   this is jitter in the same unbound family. **A wrong number on a legal form**, and the
+   next thing worth owning - but it is the loss-history grid, not WC (the same
+   pre-existing family that puts the CURRENT policy numbers under PRIOR CARRIER).
+2. **"Experience Modification Factor" / "Experience Modification Effective" /
+   "Workers Compensation"** written as TEXT into the premium block's "Other" description
+   cells. Labels, not numbers - noise rather than a misstatement. `_WC_RATING_FACTOR_RE`
+   owns the FACTOR boxes only.
+3. **Marcus Ruiz's TITLE prints blank** on W1 where the document plainly shows
+   "Vice President". The binding is proven correct (`Individual_TitleRelationshipCode_B`
+   stamps when the row carries a title), so extraction did not capture the SECOND
+   officer's title. Round 1 hid this because the LLM had put it in the DUTIES box; the
+   form is now honest but less complete. An extraction-quality item.
+4. **W2 lost the Q6 subcontractor "Y / 5%"** it answered in round 1. Compliance-pass
+   jitter, untouched by H3.
+
+#### Still to test - three things, nothing else
+
+* the **pre-form screen** on W1/W2 (fix 7);
+* the **W3 producer step** - type a group row carrying `5551 Roofing`, save, confirm it
+  stamps and the payroll-period -3 clears. This is 8.3's "retain producer-entered codes",
+  the only section 8 clause never yet seen live;
+* the **client questionnaire link itself** - the table has only ever been seen in the
+  PRODUCER's review list, never rendered as the client's editable grid.
+
+---
+
+## Session 2026-08-27 - H4 Core Submission Information Coverage (client section 9)
+
+### H4-A - SHIPPED (2026-08-27)
+**Priority:** V1-HIGH
+**Principle(s) touched:** 1 (one canonical fact), 2 (normalize before comparing),
+3 (missing is not No), 4 (do not silently resolve conflicts), 5 (never ask the client to
+classify), 6 (provenance), 7 (unknown -> producer review)
+
+#### What the client is actually asking for
+
+Not "add fields". His own Current Problem section says it: *"The problem is not simply
+whether a field exists. A fact may currently be: extracted; normalized incorrectly; asked
+again; scoped incorrectly; scored in the wrong place; poorly sourced; treated as missing
+when it is actually N/A."*
+
+Sections 1-8 each fixed one feature. **Section 9 is the cross-cutting audit of the ~30
+facts that decide a submission**, and 9.1 is its acceptance spec - four columns per fact:
+when it applies, who is asked, where it scores, and the one rule not to get wrong. It
+defines NO new scoring rule (principle 7 holds throughout).
+
+#### Status before this session: ~75%. 21 of 30 rows held; 9 deviated, in FIVE classes
+
+| Class | Defect | Rows |
+|---|---|---|
+| A | Routing keyed on a field NAME instead of the canonical fact | prior carrier, expiration date, GL form type |
+| B | The client questionnaire DESTROYED "None" / "N/A" before the answer door | FEIN, prior carrier, every Tier 2 fact |
+| C | "Applies When" never consulted before asking | contact name/phone/email |
+| D | Entity type had FIVE vocabularies and none of them was ACORD's | entity type |
+| E | A derived STATE existed but nothing wrote the FACT it implies | years in business, WC payroll period |
+
+#### What shipped, by clause
+
+| 9.1 row | Client's key rule | What now happens |
+|---|---|---|
+| **Prior Carrier** | *"Client factual answer allowed; Producer final"*, *"N/A / New Venture allowed"* | Reaches the CLIENT again (`_CLIENT_WHITELIST`). Brent's Q8 ruling (*"skip shortcut and ask client"*) was never implemented - `_AGENCY_PATTERNS` matched the substring and routed it producer-only, so the insured was never asked the one fact the -10 turns on. "Producer final" was already built (D12/D17) and is not re-implemented. Scope is structural: `prior_carrier_naic` and `prior_policy_number` stay agency because the whitelist is EXACT set membership, never a substring |
+| **Proposed / Expiration date** | *"Client does not need to interpret policy period"* | `expiration_date` (plus `audit_period`, `billing_plan`) routed to the producer. It is a yellow REQUIRED box on ACORD 125, drives the effective-before-expiration hard stop, and is reassigned by `_route_renewal_dates` on a renewal - none of which an insured can reason about. **Still asked** (D32), in the Agency bucket |
+| **Entity Type** | *"Normalize equivalent legal formats"* | ONE vocabulary. New `normalization.entity_family` (9 ACORD families) read by the validator and the stamper; `_ENTITY_TYPE_SYNONYMS` corrected. See the defect ledger below - this row had the most wrong with it |
+| **Contact Name/Phone/Email** | *"Any one contact method satisfies Tier 1"* | The scorer always knew; the questionnaire asked all three as CRITICAL and pre-ticked them. Now DEMOTED to Important once any one is answered - **never suppressed** |
+| **Annual Revenue / Number of Employees** | *"Explicit zero differs from missing"*, *"Zero/new venture can be valid"* | Already correct at every layer (validator, `interpret_answer`, `_fact_is_filled`, scorer). Verified, not assumed; now pinned |
+| **Years in Business** | *"New venture is valid state"* | A confirmed New Venture derives `years_in_business` as **Not Applicable** (never "0" - see below), so Tier 2 stops charging 1/6 for history the business cannot have and the question retires. Withdrawn confirmation retracts it via `delete_facts` (D18) |
+| **WC Payroll Period** | *"N/A if annual basis is clear"* | 6.4's four branches already decided it; the verdict only ever reached the SCORE. Now reaches the FACT, so nobody is asked the period of a figure that does not exist or is already annual by construction |
+| **FEIN** | *"Do not invent"* | Unchanged and verified (C50's five stacked backfill conditions). What changed is that "N/A" is now an ANSWER rather than a discarded string |
+| **Physical Address** | *"Do not universally require"* | **NO CODE CHANGE - deliberately.** See "Rejected" |
+| GL/WC class codes, auto symbols, COPE, umbrella, loss status, payroll | - | Already compliant (C2/C3/C4/H1/H3). Now pinned by the matrix |
+
+#### Class B, in full - closing F15 exposed four more defects on the same lines
+
+F15 was recorded in C3-C on 2026-08-25 and never fixed: `arq_service._clean_answer_ex`
+dropped `("n/a","na","?","unknown","none","null","-","--","tbd","unsure")` outright, so a
+CLIENT answering "None" to our own question *"Who provided your business insurance most
+recently? (If none, write 'None')"* had the answer thrown away, while the PRODUCER path
+read the identical word correctly through `answer_semantics`. Two doors, two meanings, on
+the exact question Brent ruled on.
+
+The door is now `answer_semantics`, as C2-G always claimed. **Placement is load-bearing** -
+three things stay ABOVE it, and each is a measured failure rather than a precaution:
+
+1. **`is_not_sure_value`.** `_UNCERTAIN_RE` is `\b`-anchored and underscore is a word
+   character, so `__NOT_SURE__` does NOT match "not sure" - the door returns VALUE and the
+   sentinel would be stored and stamped as a real answer.
+2. **The "null" / punctuation drop.** The door reads "null" as ordinary free text.
+3. **The checkbox / indicator branch.** The door reads a bare "no" as an ABSENCE, which
+   would empty every ACORD Yes/No box answered "No".
+
+And four defects the change surfaced, all fixed:
+
+* **THE BLOCKER: the raw string reaches the ACORD box BEFORE the fact envelope.**
+  `field_state[field_name] = new_val` runs independently of `build_fact_envelope`, and
+  `pdf_service._fill_and_highlight` skips only `('', 'null', 'None')` - **case
+  sensitively**. So capital-N "None" was stopped by accident while "none", "N/A", "nil"
+  and "not applicable" would PRINT on a legal form, labelled `client_arq` (green, "client
+  supplied"). An absence now stamps "" and carries its meaning in `value_state`, which is
+  what the producer path already did through `_deterministic_map`.
+* **A Yes/No answer is never an absence.** The first cut re-interpreted the CANONICALISED
+  "No" at the apply path and would have blanked every Yes/No box on every form. Caught by
+  adversarial review; fixed with a structural second condition.
+* **A required identity fact can never be "not applicable".** `fact_answered` credits both
+  absence states and `_tier2_not_applicable` removes an N/A fact from the DENOMINATOR, so
+  "Applicant legal name = N/A" scored as ANSWERED - one word in every box bought a perfect
+  Structural pillar. Closed at the one door, using FACT_REGISTRY's own `required` flag, so
+  the PRODUCER path is fixed in the same stroke. Brent's ruling is about facts whose
+  absence is MEANINGFUL (a prior carrier, a claim count) and was never about the
+  applicant's name.
+* **A client "None" could silently delete an extracted narrative.**
+  `verdict("operations_description", "Roofing contractor", "None")` returns SAME, so the
+  P4 hold declined and the absence overwrote the fact. `_client_answer_conflicts_with_
+  source` now has a structural first condition in the one direction the comparator
+  provably cannot judge.
+
+**Two live bugs fixed on the way, both independent of section 9:** a client typing "I will
+confirm later" / "no idea" / "waiting on my accountant" was STAMPED on the form while an
+empty envelope wiped the extracted fact (wrong in both directions in one pass); and a
+client with no umbrella typing "nil" into a currency box had the WHOLE submission refused
+with a 422 they had no correct answer for.
+
+#### Class D, in full - entity type had five vocabularies
+
+`answer_options.ENTITY_TYPE_OPTIONS`, `FACT_REGISTRY`'s literal uppercase set,
+`pdf_service._INDICATOR_RULES`' nine substring rules, Guard 1's `_fact_entity_indicator`,
+and `display_canonicalizer._ENTITY_DISPLAY`. Measured defects, all against the real
+schemas:
+
+* **Five live FALSE Data Consistency conflicts**, including ACORD 125's own checkbox
+  wording: `values_conflict("entity_type", ["LLC", "Limited Liability Corporation"])` was
+  **True**, because the full phrase was not a synonym key so "limited"->"ltd" and
+  "corporation"->"corp". Also Sole Proprietor/Sole Proprietorship, Nonprofit/Non-Profit,
+  Corporation/Incorporated, Partnership/General Partnership. `entity_type` IS a
+  reconcilable field, so these reached a producer as review items on two values that are
+  the same company. **This is literally the client's key rule for this row failing.**
+* **Our own dropdown refused by our own validator.** `_validate_producer_answer` rejected
+  8 of the 13 options `answer_options` offers - "Limited Liability Company", "S
+  Corporation", "Joint Venture", "Association", "Municipality or Government Entity" - with
+  *"That does not look right for this field"*.
+* **The stamper ticked the wrong box.** "Sole Proprietorship" ticked NOTHING (ACORD's box
+  is Individual); "S Corporation" ticked Corporation; "Non-Profit Corporation" ticked both
+  Corporation and NotForProfit in Pass 1 and Guard 1 then collapsed to the WRONG one; and
+  **any unrecognised value, including the empty string, asserted nine explicit "No"s** -
+  principle 3 written on a legal document - while never reaching gap fill at all.
+* **The two forms print DIFFERENT sets**, verified across all 17 schemas: ACORD 125 has
+  Individual and NotForProfit; ACORD 130 has SoleProprietor and UnincorporatedAssociation
+  and neither of those two. So a family maps to a SET of box words, not one name.
+
+Fixed by one owner, `pdf_service._resolve_legal_entity_indicator`, copied in contract from
+`_resolve_vehicle_use_indicator` (which exists because seven substring rules ticked two
+mutually exclusive ACORD 127 USE boxes - H1-F). ACORD's own tooltip decides the shape:
+*"Indicates the legal entity CODE for the named insured IS 'Corporation'"* - singular.
+`entity_family` is ADDITIVE: `normalize_entity_type` still owns comparison (D3), and the
+new validator is a proven strict SUPERSET of the literal set it replaces.
+
+**`_entity_type_is_recognized` is deliberately NOT named `_is_entity_type`**:
+`extraction_service`'s dec-page backfill enrols candidate validators by
+`v_name.startswith("_is_")`, so that rename would silently add `entity_type` to a backfill
+it has never taken part in. The name is load-bearing and says so.
+
+#### Root causes, and what each fix closes as a CLASS
+
+1. **Routing decided by a field NAME rather than the canonical fact** - the defect section
+   4 exists to remove, and C4-I already recorded three instances. Closes: any fact whose
+   ACORD spelling happens to contain (or miss) a pattern token.
+2. **A door that predates `answer_semantics` keeping its own token list.** Closes: every
+   place the client path and the producer path disagreed about the same English word.
+3. **A rule that reads a coverage FLAG being consulted from a flag-free seam.** Closes: a
+   whole family of "not applicable on every package" bugs - see the guard rail below.
+4. **A mutually exclusive checkbox GROUP expressed as independent substring rules.**
+   Closes: wrong-single-tick and multi-tick on any ACORD box group.
+5. **A derived STATE with no corresponding FACT.** Closes: the scorer knowing something
+   the questionnaire and Tier lists cannot see (H1's X-Mod and H3's payroll-by-state were
+   the same shape).
+
+#### The guard rail, and it caught me
+
+The first cut of the WC payroll-period rule routed the Not Applicable decision through
+`wc_payroll_period_status`, which reads `flags`. But `fact_state` calls
+`h1_fact_not_applicable(fact_key, facts)` with **no flags**, and `facts["_flags"]` exists
+only for the duration of one `annotate_fact_states` pass (set at line ~493, popped in a
+`finally`). So the first line of that status function -
+`if not _flag(flags, "has_workers_comp"): return NOT_APPLICABLE` - marked the fact Not
+Applicable **on every package**, while the client's -3 was still being charged: **a
+deduction with no route to remediation**, which is worse than the gap it was written for.
+
+My own offline probe missed it because I passed `_flags` inside the facts dict - a
+test-harness shape, not the production shape. **That is this file's own standing lesson,
+verbatim: an offline probe proves the FUNCTION, never the SEAM around it.** Two independent
+adversarial reviewers found it within minutes of each other. The predicate is now
+FLAG-INDEPENDENT and reads facts only, and `test_h4_core_fact_matrix::test_the_payroll_
+period_deduction_always_has_a_route_to_remediation` fails the build if a deduction is ever
+charged on a fact the questionnaire has retired.
+
+A second loop closed with it: `annotate_fact_states` writes DERIVED states back onto the
+envelope, and `wc_payroll_period_status` read `_recorded_state` as authoritative - so once
+a package had been annotated, adding a real payroll figure could never make the -3 fire
+again. `_human_recorded_state` gates that on provenance: a person's "does not apply"
+persists; our own conclusion is recomputed from the evidence every time.
+
+#### Rejected, with the reasoning
+
+* **Suppressing the physical-address question.** It looked like the obvious reading of
+  *"Do not universally require"* and it is a **D32 violation**: 3.12's wording is about
+  Structural Completeness (a SCORING statement), while `FORM_FIELD_INVENTORY["ACORD_125"]`
+  still charges fill rate for `physical_address` on every package. Suppressing the question
+  would leave the submission paying for a blank **nobody - client or producer - can be
+  asked for**, which is precisely the measured precedent D32 exists to prevent. The
+  measured cost of leaving it alone is one unticked OPTIONAL card (`points=3`, never
+  pre-selected), and the form is unaffected either way (`_resolve_special('_loc')` falls
+  back to `mailing_address`, so a blank physical address already prints correctly). Two
+  further reasons it would have been wrong: `flags == {}` is the live shape from
+  `proc_session.get("flags", {})`, so the filter would have silently stopped asking on any
+  legacy session; and `_looks_like_street_address` returns True for a PO Box, so the
+  question would have vanished on exactly the package the physical-vs-mailing rule exists
+  for. **The residual is a SCORING question, raised as Q31 rather than decided here.**
+* **Deriving `years_in_business = "0"` on a new venture.** Measured: a derived "0" makes
+  `years_in_business_band` YOUNG, which makes route 2 of `loss_history_not_applicable` fire
+  **on the band alone** - so the moment the New Venture confirmation was withdrawn,
+  `calculate_p4_loss_history` returned **None (the Loss History pillar DELETED)** where it
+  had returned 60. The N/A envelope gives band=unknown, leaves the pillar at 60, still
+  retires the Tier 2 charge and the question, and displays as "NOT APPLICABLE" - which is
+  what the client calls this state. It also stops arguing with Brent's *"we can't treat
+  'N/A' as '0'"*.
+* **Demoting the contact siblings to OPTIONAL.** `apply_default_selection` sends OPTIONAL
+  to `default_selected=False; suggested=False`, so the ACORD 125 Contact Full Name and
+  Email boxes would be blank AND unasked - three separate form fields behind one Tier 1
+  requirement. IMPORTANT frees the pre-ticked slot (the entire measured cost) and keeps the
+  cards visible.
+* **Deleting or "fixing" `FACT_REGISTRY["tier"]`.** The audit's premise that it has no
+  reader is **factually wrong**: `extraction_service._get_field_tier` maps it to
+  `_TIER_WEIGHTS` and `_score_value` multiplies the merge score by it. It is a merge
+  authority prior, not an SQS tier, and the two genuinely differ. Left alone; noted.
+* **Suppressing the `narrative_growth_trends` injection** once the H3 employee-group table
+  exists. Its ROUTING was already fixed by H3; stopping the INJECTION would take ~5 points
+  off Narrative Quality on every WC package, because `_narrative_enrichment_present`
+  credits that component only from that fact key. A D6 score move nobody signed off - Q32.
+
+#### Files
+
+* `services/normalization.py` - `entity_family` + `ENTITY_FAMILIES` + `_ENTITY_FAMILY_RULES`
+  (additive; the comparator is untouched); six corrected `_ENTITY_TYPE_SYNONYMS` entries.
+* `services/fact_registry.py` - `_entity_type_is_recognized` replaces the literal set.
+* `services/pdf_service.py` - `_resolve_legal_entity_indicator` + `_ENTITY_BOX_WORDS`;
+  the nine entity `_INDICATOR_RULES` retired.
+* `services/arq_service.py` - the semantics door in `_clean_answer_ex`; the pre-stamp
+  interpretation + C3 3.8 fill-rate label at the apply path; the P4 structural first
+  condition; `_apply_new_venture_derivations` on both save paths; `new_venture_confirmed`
+  retraction (pre-existing bug).
+* `services/answer_semantics.py` - `_is_required_fact` + the required-fact gate.
+* `services/loss_history_state.py` - `apply_new_venture_derivations`.
+* `services/coverage_evidence.py` - `_payroll_period_already_settled` (flag-independent),
+  `_human_recorded_state`.
+* `services/question_eligibility.py` - four judgment facts; the Tier 1 contact demotion
+  with its `score_impact` correction; the Step 1 audience leak.
+* `services/question_classifier.py` - `prior_carrier` whitelisted.
+* `services/sqs_service.py` - the Prior Carrier display row removed from Narrative Quality.
+* `frontend/.../AcordModal.jsx` - the `contact_already_provided` badge.
+* `tests/test_h4_core_fact_matrix.py` (47, new), plus corrected fixtures in
+  `test_h1_coverage_gap_closure.py`, `test_question_controls.py`,
+  `test_structured_input_types.py`.
+
+#### Verification
+
+**Suite: 4824 passed / 1 failed / 14 skipped** (`py -m pytest -q -p no:randomly`).
+Baseline before this work, measured this session: **4777 / 1**. The one failure is
+`test_arq_acord125_missing_only`, the documented `httpx` ImportError. **+47 tests, zero
+regressions.** Frontend production build clean.
+
+**Three test fixtures were corrected rather than deleted**, each with the superseded
+assertion recorded in its own docstring:
+* `test_structured_input_types::test_not_sure_and_blank_still_yield_no_answer` - its
+  `_clean_answer_ex("n/a","total_payroll") == (None,"")` line WAS the test-side pin of F15.
+* `test_h1_coverage_gap_closure::test_vehicle_use_..._payroll_period_is_the_producers` -
+  passed `facts={}`, i.e. a package with NO PAYROLL, for which the period is genuinely Not
+  Applicable. It was asserting the routing of a question that should not be asked, and
+  passed only because the Not Applicable branch leaked `audience: client`. Both the code
+  leak and the fixture are fixed.
+* `test_question_controls::test_prior_carrier_and_policy_numbers_are_agency` - overruled by
+  9.1's own routing column and Brent's Q8.
+
+#### Blast radius - D6, tell Brent BOTH directions
+
+| What | Direction |
+|---|---|
+| A client answering "None" / "N/A" now earns explicit-no credit or leaves the fill-rate denominator | **UP** |
+| The no-prior-losses attestation typed as "None" finally sets its flag (~5 pts, Loss History) | **UP** |
+| Confirmed new ventures stop being charged 1/6 of Tier 2 for Years in Business | **UP** |
+| Entity-type false conflicts stop raising Data Consistency review items | UP (fewer cards) |
+| Submissions previously refused with a 422 for typing "nil" now complete | **UP** |
+| "N/A" typed into a REQUIRED identity field no longer buys a Tier 1 credit | **DOWN** (correctly) |
+| A client absence that contradicts a document is now HELD for the producer | neither - a new picker row |
+| Prior carrier reaching the client may close the -10 sooner | UP, per account |
+
+**Presentation only, no score:** the Prior Carrier row leaves the Narrative Quality panel.
+
+#### Known / deliberately not done
+
+* **Not live-verified.** The owner's next upload is the check. Expect: prior carrier in the
+  client list; expiration date, GL form type, audit period and billing plan in the Agency
+  bucket; one entity checkbox ticked on the 125; and a client "None" surviving as an answer.
+* **The schedule branch still eats absences.** `schedule_capture.decode_answer` returns `[]`
+  for "None", "N/A" and "we have no vehicles" alike, so a client saying there are none is
+  indistinguishable from one who never opened the table. Per D44 the right fix is an
+  explicit "there are none" control on the table widget, not free-text parsing. Out of scope.
+* **The producer is asked for the X-Mod TWICE** (`wc_xmod` and `narrative_target_markets`,
+  both injected on any WC package, both producer-routed). Pre-existing; C4-I fixed the
+  routing of the second and left the duplication. Same shape as Q32.
+* **`_derive_indicator`'s two dead rules** (`NamedInsured_EntityType`,
+  `NamedInsured_BusinessEntity`) match no field in any of the 17 schemas. Harmless, noted.
+* **ACORD 130 prints no Not-For-Profit box**, so a non-profit employer's WC application has
+  nowhere deterministic to go and the group is left to the evidence-gated fill. A form
+  limit, not a defect; pinned by the matrix so nobody "fixes" it into a wrong tick.
+
+### H4-B - FIRST LIVE RUN (c9 kit, 3 packages) + the owner's two UI questions (2026-08-27)
+
+**Owner ran P1-P3 through the real app and sent the screens.** Recorded in full: three
+H4 fixes are confirmed live, one fixture defect meant a fourth check tested nothing, and
+two of the owner's questions turned out to be answered by the client's own spec.
+
+#### What the run PROVED live
+
+| Check | Result |
+|---|---|
+| **Prior carrier reaches the CLIENT** (H4-A class A) | **PASS** - "Prior / incumbent carrier ... Client sees: Who provided your business insurance most recently? (If none, write 'None')" sits in the Client bucket on P1 and P2 |
+| **Expiration date / GL form type / audit period / billing plan reach the PRODUCER** | **PASS** - P2's Agency bucket carries "Policy expiration date"; P1's carries the GL retro date, GL limits and deductible; P3 asks for none of them because it states them all |
+| **Contact demotion** (H4-A class C) | **PASS** - P1 supplied a phone only, and "Primary contact - name" and "Primary contact - email" both came back **Important / Suggested** carrying the new **"Contact already provided"** badge, still visible and still selectable. Zero Critical questions on the whole package |
+| **The WC payroll-period guard rail** | **PASS on P3** - the package whose payroll label states the period asks nobody and is charged nothing (WC Supplemental 100%, no period question anywhere) |
+| **The Prior Carrier display row is gone** | **PASS** - P1/P2/P3 all render Narrative Quality with its own row only; "Prior Carrier / Marketing Reason" no longer appears as a scoring sub-row (it correctly remains in the NARRATIVE COMPONENTS taxonomy, which is a different thing - whether the narrative discusses it) |
+
+#### THE FIXTURE DEFEAT: check 4 tested nothing, and every word-level guard passed
+
+P1 exists to prove the WC payroll-period **-3 fires AND the producer is asked** - the one
+branch where the client's 6.4 deduction is charged. The live run showed the opposite:
+`WC payroll period / basis` badged **"Not applicable"**, WC Supplemental **100%**, no
+charge. The deduction and the question still AGREED (which is the property that matters,
+and it held), but the charging branch was never exercised.
+
+**Cause, measured.** P1A printed its GL schedule of hazards as
+`PREMIUM BASIS: Payroll / EXPOSURE: $1,240,000`, and
+`coverage_evidence._payroll_source_is_annual` accepts a payroll or remuneration rating
+basis on ANY class-code schedule - including a General Liability one - as a statement that
+the package's payroll is annual (a rating schedule states annual remuneration by
+definition). So the period resolved to SATISFIED.
+
+Measured side by side: basis `Payroll` -> `satisfied`; basis `Gross Sales` -> `missing`.
+
+**This is the C4-J lesson one level deeper.** A scenario cannot test a value it states -
+and P1 stated it OBLIQUELY, through a different coverage line's rating basis. Every
+`_FORBIDDEN` word ban passed, because the fixture never used the words "annual payroll".
+The fix is a STRUCTURAL check, not another banned word: across both P1 files the token
+"payroll" may now appear **exactly once** (the bare WC figure) and never as a rating
+basis. Proved non-vacuous by reverting the basis and confirming the generator exits
+non-zero.
+
+#### The owner's two questions, answered from the spec rather than from opinion
+
+**1. "Policy date mismatch across documents - did the client ask for this?"** YES, verbatim.
+`SQS_Scoring_Specification` section 4, *"Conditions: complete hard-stop list"* ->
+**Cross-document identity conflicts, 4 conditions**: applicant legal name, FEIN,
+*"3. Effective date differs across uploaded documents"*, *"4. Expiration date differs
+across uploaded documents"* - all feeding the 60 ceiling, with the note *"Items 3 and 4
+downgrade to warnings when a document carries an explanation that specifically addresses
+the policy period."* The rule stays. What was wrong was where it FIRED - see H4-C.
+
+**2. "Remove Tier 1 / Tier 2 - did the client ask for this?"** YES - they are the client's
+own vocabulary. Spec section 3.1 IS the formula
+(`Structural = Tier 1 x 0.35 + Tier 2 x 0.30 + Fill rate x 0.35`, reweighted to
+40/35/25 by master-plan 3.2) and names *"Tier 1 - six fields plus contact"* and
+*"Tier 2 - twelve fields"*; master-plan section 9.1's own **"V1 Scoring Home"** column
+reads "Structural Tier 1" / "Structural Tier 2 + identity consistency" on roughly fifteen
+rows.
+
+**Owner's decision after being shown that: hide the two rows in the UI ONLY.** Done, and
+the distinction is enforced by where the change lives - a
+`HIDDEN_SQS_CATEGORY_KEYS = new Set(["tier1","tier2"])` filter in `AcordModal.jsx`, beside
+the existing `_rollup` filter. Verified after the change: `_structural_parts` still emits
+`tier1 (0.40) / tier2 (0.35) / fill (0.25)` summing to the same pillar (78.2 on the
+owner's own screenshot values), `check_tier1` / `check_tier2` are untouched, and
+`build_score_trace` still carries the whole C3 ledger. **Form Fill Rate is deliberately
+NOT hidden** - it is the one Structural input that is not tier jargon and the producer acts
+on it directly.
+
+**Nothing is lost to the producer**, and that is worth stating because C3's Desired Outcome
+is traceability: the SAME Tier 1 + Tier 2 content still reaches them in plain language on
+the pre-form Review card as "Key details in place / missing" (H2's `key_details`, which
+reads the identical two lists), and the full arithmetic remains in `score_trace`.
+
+#### A THIRD defect the run exposed: New Venture was being asked to the CLIENT
+
+Two of the three packages showed **"New venture confirmation - Client sees: Is this a
+brand new business with no prior operating history?"** in the CLIENT bucket - including P3,
+a twelve-year-old business with a stated prior carrier.
+
+`FACT_REGISTRY["new_venture_indicator"]` sets `question: None` and `forms: set()`, and its
+own comment reads *"Producer confirmation (client 2.2: 'if the producer confirms') - it is
+answered from the Loss History card, **never asked to the client**."* It was asked anyway:
+`arq_service._FIELD_QUESTION_MAP` carries curated wording for the key, which makes
+`is_curated_client` true, which routes it CLIENT / optional. A documented intent and the
+behaviour had drifted apart - section 9's "asked again / scoped incorrectly" class exactly.
+
+**Not cosmetic.** `apply_arq_answers_to_session` sets `flags["new_venture_confirmed"]` from
+this answer exactly as the producer path does, and a confirmed New Venture takes the whole
+Loss History pillar to Not Applicable (C2 2.2) and now also marks Years in Business Not
+Applicable (H4-A). That is a scoring-material determination about the account, and client
+2.2 gives it to the producer in terms. Fixed by adding `new_venture_indicator` to
+`INSURANCE_JUDGMENT_FACTS`; the producer keeps answering it exactly where C2 put it, on the
+Loss History recommendation card, which is a different surface and is untouched.
+
+#### Still unproven after this run
+
+* **Check 5, the headline** - a client answering "None" / "N/A" and it surviving the round
+  trip. Needs a send-and-answer, which a forms click-through cannot do.
+* **Checks 7-10 (P2)** - the New Venture confirmation was never given, so the derived
+  Years-in-Business Not Applicable, the score movement and the retraction are all unproven.
+* **Checks 6 / 12** - the generated ACORD 125 LEGAL ENTITY boxes were not sent back.
+* **Check 4** - now reachable for the first time after the fixture fix.
+
+### H4-C - THE POLICY-DATE HARD STOP: investigated, NOT changed, and the real defect it is pointing at (2026-08-27)
+
+**Owner's question:** *"Did the client ask us to do this? If not, remove it from the SQS
+screen"* - about the P1 message *"Policy date mismatch across documents. Score is capped at
+60 unless the difference is explained."*
+
+**Answer: YES, verbatim, and it stays.** `SQS_Scoring_Specification` section 4,
+*"Conditions: complete hard-stop list"* -> **Cross-document identity conflicts, 4
+conditions**: 1. applicant legal name, 2. FEIN, **3. Effective date differs across uploaded
+documents**, **4. Expiration date differs across uploaded documents** - all feeding the 60
+ceiling, with the client's own escape hatch: *"Items 3 and 4 downgrade to warnings when a
+document carries an explanation that specifically addresses the policy period."*
+
+**OWNER'S RULING, 2026-08-27:** *"if different docs shows different values of same thing
+then we can show it to the user."* That is already the shipped behaviour and it is why
+nothing changed here. Measured on the live shape (application 10/01/2026 + dec page
+10/01/2025):
+
+```
+DATA CONSISTENCY row - effective_date
+  status: conflict   review_required: True   merged_value: 10/01/2025
+    candidate '10/01/2026'  <- P1A_application.pdf
+    candidate '10/01/2025'  <- P1B_dec_page.pdf
+```
+
+Both values, each attributed to its own file, with a one-click resolve. The rule detects
+it, the panel shows it, the producer decides. **No code change.**
+
+#### The fix I proposed was REFUTED by all three reviewers, and they were right
+
+The proposal was to add `dec_page` to `fact_comparison._ROLE_BLIND_FACTS` for
+`effective_date` / `expiration_date`, the way C1-I added `loss_run`. It works on the
+reported case - measured, `app+dec` goes clean and Tier 1 does not regress - and it is
+still wrong, three ways:
+
+1. **It silences REAL conflicts (P4).** Two dec pages with different terms, a dec page and
+   the COI issued off it with different terms, and `app+dec+dec` where the two dec pages
+   disagree with EACH OTHER all go **CLEAN** - not downgraded, deleted from every surface.
+   The picker row disappears entirely (0 witnesses -> no values -> field skipped), and
+   `detect_source_conflicts` cannot pick up the slack because both keys sit in
+   `extraction_pipeline`'s static `_consistency_owned` skip set. The dec-page-vs-certificate
+   case is the C1/Orbin $3M-vs-$1M shape one field over, and it is one of the
+   highest-signal conflicts the picker catches.
+2. **It destroys the output of a strictly better mechanism.** `facts["_scoped"]` (D19)
+   already covers `effective_date` / `expiration_date`. On a genuine two-policy package
+   whose `coverage_lines` attribute each term to its own line, the picker TODAY returns
+   `status: scoped, review_required: False` with both values retained under their scope -
+   the right answer, with evidence. Role blindness deletes that verdict too.
+3. **It makes the role table assert something false.** `_ROLE_BLIND_FACTS` means "this role
+   does not state this fact". For a loss run and a policy date that is true - C1-I's own
+   note says the loss run's "period covered" is a 5-year claims window, not a policy term.
+   For a declarations page it is the exact opposite: a dec page is the single most
+   authoritative statement of a policy term in the package.
+
+**Why the existing downgrade did not fire, measured.** `CONTRACT_SCOPED_HARD_STOP_KEYS` is
+already exactly `{effective_date, expiration_date}` and both engines already consult one
+downgrade decision - but both gate it on `eq_context.is_multi_contract`, which is literally
+`len(contracts) >= 2` where `contracts` is the set of distinct POLICY NUMBERS from the dec
+index. An application proposing a term carries no policy number, so `app + dec` is ONE
+contract and the downgrade never runs:
+
+```
+app + dec, index carries 1 policy number  -> [hard_stop] date_conflict, [hard_stop] expiration_conflict
+app + dec, index carries 2 policy numbers -> [warning]   date_conflict, [warning]   expiration_conflict
+```
+
+Same two documents, same two dates; only the number of indexed contracts changed. The
+mechanism was written for "three policies, three terms" (probe run C, 2026-08-17) and
+nobody wrote the "one bound policy + one proposed term" case. `_dates_owned_separately`
+fails for the same reason - the application's date is unattributed in `value_owner`.
+
+**A bound-vs-prospective downgrade was also proposed and also NOT taken.** It is the right
+AXIS (a dec page / policy / certificate / binder / endorsement documents a policy that
+EXISTS; an application / supplemental application / quote describes the term being APPLIED
+FOR - two different real-world objects, so their dates are not rival answers), and it
+belongs behind one door because the comment at `CONTRACT_SCOPED_HARD_STOP_KEYS` records
+what happened last time each engine held its own copy. It was not taken because a
+downgrade only moves the ceiling **60 -> 85**, not to uncapped - measured, not assumed - so
+it half-fixes a package that is not actually defective, while the owner's ruling
+("show it to the user") is already satisfied by the picker. Recorded here so the next chat
+starts from the measurement instead of re-deriving it.
+
+#### THE REAL DEFECT UNDERNEATH - NOT FIXED, and it is the one that matters
+
+**The declarations page's EXPIRING effective date wins the merge and is what stamps into
+ACORD 125's PROPOSED EFFECTIVE DATE box.** Measured end to end through the real merge:
+
+```
+_DOC_TYPE_PRIORITY: dec_page = 0, application = 1
+select_primary_truth(app 10/01/2026, dec 10/01/2025) -> dec_page
+merge_facts(...)["effective_date"]                   -> 10/01/2025   <- the EXPIRING term
+```
+
+So on the most common commercial-lines upload shape - current dec page plus a new
+application - the form ships the term that is ENDING in the box that asks for the term
+being APPLIED FOR. **The hard stop is crude and fires for the wrong reason, but it is
+currently the only thing on any screen pointing at that box.** That is the single strongest
+argument against silencing it, and it is why this entry changes nothing.
+
+This is a known class, half-fixed: `FIX_TRACKING_2026-08-15.md` RC1b records exactly this
+defect ("RULE 1's 'current policy' IS the expiring dec on a renewal, so 07/15/2025-07/15/2026
+stamped as the PROPOSED term") and fixed it with `_route_renewal_dates` - which fires ONLY
+when `is_renewal` is affirmative AND the term has already ENDED. A rewrite to a new carrier
+is neither, so it falls straight through. `_resolve_renewal_proposed_period` is gated on
+`renewal_dates_routed`, which only `_route_renewal_dates` sets, so the proposed-date boxes
+are not owned blanks either. **There is nothing between the merge and the PDF.**
+
+**Deliberately not fixed in this pass.** It is a change to `merge_facts` / primary-truth
+selection, which every fact and every package flows through, and it has not been through an
+adversarial round. Raised as **Q33**. Recommended shape when it is taken: extend RC1b's own
+mechanism rather than reordering `_DOC_TYPE_PRIORITY` - for `effective_date` /
+`expiration_date` ONLY, a PROSPECTIVE document's stated term outranks a BOUND document's,
+and the bound term routes to the existing `prior_*` namespace.
+
+#### Also worth knowing (found while tracing, none of it acted on)
+
+* `policy_effective_date` / `policy_expiration_date` are DEAD KEYS - present in
+  `_FIELD_CONFIDENCE_SOURCES`, `normalization.DATE_FIELDS` and the alias map, with zero
+  writers and no FACT_REGISTRY entry. The same dead pair already sits inside the `loss_run`
+  role entry, where it has never done anything.
+* The picker's role skip is a `continue` at the TOP of the per-document loop, so any role
+  entry suppresses Pass 1 (LLM fact), Pass 1b (per-coverage-line) AND Pass 2 (raw-text
+  scan) together. A role entry is total, never partial.
+* **CLAUDE.md's standing note that `test_normalization` is a known pre-existing failure is
+  STALE** - it is green at HEAD (28 passed). Anyone using that note as cover for a red
+  `test_normalization` would be waving through a real regression.
+
+---
+
+## Session 2026-08-27 - H7 Audit / Edit History Completion (client section 12)
+
+### H7-A - Full audit of section 12 - ANALYSIS COMPLETE, NOT YET BUILT (2026-08-27)
+**Priority:** HIGH
+**Principle(s) touched:** 1 (One Canonical Fact), 6 (Preserve Provenance)
+**Relationship to C5:** section 5 built the RECORD. Section 12 asks for the MODEL under it.
+C5 is not being reopened; nothing in C5-A..C5-E is contradicted by anything below.
+
+#### What the client is actually asking for
+Not a new report. He is asking us to stop **generating** history and start **recording** it.
+His own words: the record must be *"generated from real system history rather than
+reconstructed later from incomplete current state"*, and one event model must serve four
+consumers - product history, debugging, source lineage, E&O Audit Record.
+
+#### Status - ~55% [VERIFIED]
+| Piece | State |
+|---|---|
+| Append-only spine exists (`audit_events`) | shipped C5-A |
+| Field-level before/after log (`field_source_audit`) | writes at 8 call sites |
+| Conflict resolutions durable + append-only (`underwriting_confirmation_audit`) | yes |
+| Source lineage (`fact_lineage.py`, computed at export - D36) | yes |
+| **All 8 client-listed events reach the spine** | **1 of 8** |
+| **Actor rendered anywhere in the record** | **0 of 12 sections** |
+| **Role** | no column anywhere |
+| **Reason on a field change** | no column |
+| **One model serving all four consumers** | four disconnected mechanisms |
+
+#### ROOT CAUSE - one class [VERIFIED]
+**The operational tables were made to double as the audit trail.** They are correctly
+MUTABLE - dismiss-credit, the download gate, the issue rail and reopen all read them as
+current state - and an audit trail must not be. One table cannot be both, so history was
+destroyed every time the workflow needed to move on.
+
+`get_audit_trail_export` (audit_service.py:1101) visits EIGHT tables plus the live session
+blob and returns 15 disjoint arrays. It is an aggregator, not a reader of a history.
+
+#### The five verified consequences
+
+**1. Only 1 of the client's 8 events is an event.**
+
+| Client event | Where it lands today | History? |
+|---|---|---|
+| producer edit | `field_source_audit` INSERT | partial - no reason, no role, actor not rendered |
+| client answer | `field_source_audit` + `client_answers_applied` event | the only one on the spine |
+| producer override | `download_audit` / `submission_integrity_audit` | NO - and the integrity table has ZERO readers |
+| conflict resolution | `underwriting_confirmation_audit` INSERT | append-only, but not on the spine |
+| issue resolution | `submission_issue_status` **UPSERT** | NO - latest-wins, one row |
+| recommendation dismissal | `sqs_recommendation_audit` **UPSERT** | NO - latest-wins, one row |
+| form edit | same path as producer edit | not distinguished |
+| generated-value override | nothing | not modelled at all |
+
+The asymmetry is the tell: **reopen** writes an event (`recommendation_reopened`,
+`issue_reopened`) because C5 needed to rescue state the UPDATE was about to erase.
+**Dismiss and resolve do not.** History was added where it was rescued, not where it belongs.
+Also destructive: `mark_recommendation_answer_recorded` OVERWRITES `producer_answer` and
+`answered_at`, so answer -> reopen -> re-answer keeps only the last value.
+
+**2. The record never names a human.** `user_id` is stored in `field_source_audit`,
+`sqs_recommendation_audit`, `submission_issue_status`, `underwriting_confirmation_audit` and
+`audit_events`. `get_field_change_log` and `get_download_audit_log` do not even SELECT it.
+Nothing anywhere resolves a `user_id` to a name or email. The renderer prints
+`Changed by: producer edit` - a METHOD, not an ACTOR. The only named human in the whole
+record is the client, from `arq_receipts`.
+
+**3. Two parallel event logs with near-identical schemas.**
+`activity_events` (product history, navbar Activity Log, 9 event types, NEVER swept) and
+`audit_events` (E&O only, 5 event types, swept at 180d). They record the SAME acts under
+different names: `answers_applied` / `client_answers_applied`, `sqs_scored` / `sqs_snapshot`,
+and **one download writes three rows across three stores** (`download_audit`,
+`acord_audit_log`, `sqs_snapshot(trigger=package_downloaded)`). This IS the client's
+"separate reporting subsystem disconnected from the actual workflow". Closed by D50.
+
+**4. The spine expired BEFORE the state it explains.** Four clocks: `audit_events` 180d;
+`field_source_audit` / `sqs_recommendation_audit` / `acord_audit_log` 365d;
+`underwriting_confirmation_audit`, `submission_issue_status`, `submission_integrity_audit`,
+`marketing_reason_audit`, `download_audit`, `arq_receipts`, `activity_events` NEVER;
+session facts 180d (free/essentials). Closed by D48.
+
+**5. One common path destroys audit rows.** `sync_field_qa_findings` and
+`sync_field_mapping_findings` run a DELETE of every `fieldqa_` / `fieldmap_` prefixed row in
+`sqs_recommendation_audit` then reinsert (audit_service.py:132, :220) - and they run on
+**every producer field edit** (form_routes.py:2178). A dismissed field-QA item and its typed
+reason are erased on the next edit and vanish from DISMISSED ITEMS.
+**Bounded honestly: NO SCORE MOVES.** Those rows carry `score_impact: None`
+(field_qa.py:574 etc.), so `dismiss_earned_credit` was always False. Audit loss only.
+The spine fixes this for free - once the dismissal is an immutable event, the DELETE only
+clears the work queue, and C5-A's stale-findings concern is respected unchanged.
+
+#### THE FIX - agreed shape (owner rulings 2026-08-27, D48-D52)
+Five changes. **No migration of an existing table, no touch to scoring, gating or
+dismiss-credit.**
+
+- **A. One envelope, one writer.** `audit_service.record_material_change(...)` wrapping
+  `log_audit_event`, enforcing the client's seven attributes in a fixed shape:
+  `{fact_key, field_name, form_id, previous_value, new_value, previous_source,
+  actor:{id,name,email}, role, action, reason, occurred_at}`.
+- **B. Emit from INSIDE the existing writers, never from the routes** - `log_field_change`,
+  `mark_recommendation_dismissed`, `set_issue_status`, `log_underwriting_confirmation`,
+  `log_document_reclassified`, `log_integrity_resolution`. A call site cannot forget. Same
+  one-door idiom as `fact_comparison` (D3) and `coverage_evidence` (H1).
+- **C. The three data holes.** Actor: one lookup of id / full_name / email over the distinct
+  user ids per export, rendered on every row. Role: derived per D51.
+  Generated-value override: at form_routes.py:1791-1793 `prev_state` AND the prior
+  `confidence` dict are both already in scope before the edit applies - pass the prior
+  confidence as `previous_source`, and `ai_high` / `ai_low` vs `filled` vs empty separates
+  "overrode a generated value" from "corrected a human entry" from "filled a blank".
+  **The client's 8th event, for one argument.**
+- **D. One chronological section.** Export gains a `history` array from the spine; the
+  frontend gains ONE "COMPLETE HISTORY" section. The existing 12 sections stay as detail
+  views, so nothing regresses.
+- **E. One model (D50).** `activity_service.record_event` becomes an adapter over the spine;
+  the Activity Log reads a user-scoped projection. `activity_events` kept read-only for
+  pre-existing rows. Needs three additive changes on `audit_events`: `package_label`, an
+  index on (user_id, created_at), and a visibility marker separating product-history events
+  from E&O-only ones.
+- **F. `submission_integrity_audit` gains its first reader** (owner: "fix it as well") -
+  document reclassification and multi-insured overrides are two of the client's "producer
+  override" events, written at three sites and invisible. Same defect C5-A fixed for
+  `underwriting_confirmation_audit`; it recurred.
+
+**Rejected, with reasons.** (a) *One unified events table replacing all nine* - correct in
+the abstract, but `sqs_recommendation_audit` drives dismiss-credit, the download gate and
+reopen, and `submission_issue_status` drives the issue rail; rebuilding them as projections
+touches C1, C3, C5, H1 and H2 at once. Rejected on blast radius. (b) *Add actor to the record
+and stop* - that is the symptom; six months later a new action ships with no event, exactly
+as dismissal did. (c) *Preserve dismissed rows through the fieldqa DELETE* - C5-A already
+recorded the stale-findings risk; the spine makes the DELETE harmless instead.
+(d) *A role column on `users`* - no RBAC exists to read (D51).
+
+#### FORWARD-SIMULATION - what breaks, before anyone writes code
+**Holds:** `test_audit_events_table_is_registered_and_append_only` pins that nothing in
+`audit_service` UPDATEs or DELETEs `audit_events` - every change here is INSERT-only. The
+5.12 snapshot dedupe filters on `event_type='sqs_snapshot'` (audit_service.py:912), so new
+event types cannot disturb it. No change to `sqs_recommendation_audit` semantics,
+`active_score_credits`, `_apply_dismiss_score_credit` or any cap. C1's `candidates` snapshot
+is read and re-emitted, never modified. H1-G, C3's `score_trace` (D33) and H2's
+`current_package_sqs` untouched.
+
+**BREAKS - must ship in the same commit:**
+1. **`test_six_month_retention_ruling_is_implemented`** asserts the literal 180-day getenv
+   expression in `scheduler_service`. D48 changes it. Update the test WITH the ruling
+   recorded above - the 6-month floor is being extended, not weakened, and the
+   facts-retention half of Q18 is untouched.
+2. **The frontend EVENT LOG renderer** has a hardcoded if/else per event type
+   (AcordModal.jsx:4989); unknown types print a bare name with no detail.
+3. **PII rule inversion (D50 consequence).** `activity_service`'s docstring rule is
+   "no fresh PII - client FIRST name only, never the email, so the table needs no
+   field-level encryption". `audit_events` ALREADY stores `client_email` in
+   `client_answers_applied` (arq_service.py:4344). Merging makes the product-history store
+   inherit that. Not a blocker - the spine is already the more sensitive table - but the
+   activity_service rule becomes obsolete and must be retired deliberately, not by accident.
+4. **`activity_events` is never swept; the spine is swept at 365d (D48).** Product history
+   that is permanent today starts being deleted at 365 days. Deliberate, tell Brent (D6).
+5. **Volume.** Every field edit writes 2 rows instead of 1 (a 100-field form edit becomes
+   200). Not a problem at 0 users; stated so it is not a surprise later.
+
+**Checked and NOT a problem:** `arq_sessions.session_id` is NOT NULL, so the five
+`record_event` call sites reading `arq.get("session_id")` cannot in practice hand a NULL to
+`audit_events.session_id` (which IS NOT NULL). One defensive guard, not a redesign.
+`source='ai'` is allowed by the `field_source_audit` CHECK and has never been written by any
+caller - the change log starts at the first human touch, which is correct: all 8 of the
+client's events are human acts, and ingestion is already covered by `documents_uploaded`.
+
+#### Owner rulings received 2026-08-27 (all five open questions closed)
+1. **Retention** - "yes raise it". -> D48 (365d, supersedes the 180 half of Q18).
+2. **`submission_integrity_audit`** - "fix it as well". -> in scope, item F.
+3. **`activity_events` vs `audit_events`** - "one model". -> D50.
+4. **Reason on a plain form edit** - "leave ui alone". -> D52 (plumb the column, no prompt).
+5. **Role** - "Okay" to workflow role, not RBAC. -> D51.
+
+#### STILL OPEN - one clarification before implementation
+**D50's "one model" is being implemented as one WRITE PATH and one STORE going forward,
+with `activity_events` frozen read-only - not as a big-bang migration of existing rows and
+not as a rewrite of the Activity Log UI.** If the intent is literally one table with the
+existing rows migrated and `activity_events` dropped, say so before A-F start: it is a
+different size of job. Everything else is decided.
+
+**Nothing has been built. No code changed, no suite run. Analysis only.**
+
+### H4-D - CLOSURE LEDGER (client section 9, 2026-08-27)
+
+**Verdict: CLOSED ON THE MATRIX. Not "nothing open" - three items are named honestly
+below, and one of them puts a WRONG VALUE on ACORD 125.**
+
+#### The scorecard, MEASURED not asserted
+
+Section 9.1 is 29 rows x 4 columns. Three of those columns are mechanically checkable, and
+every number below was produced by driving the REAL code - `classify_question` +
+`decorate_questions` (which runs the eligibility overlay) for routing, `TIER1_FIELDS` /
+`TIER2_FIELDS` read out of `sqs_service` for the scoring home, and the owning door for each
+key rule. Nothing here is read off a markdown file.
+
+| Column | Result |
+|---|---|
+| **Default Question Routing** - who is asked | **29 / 29** |
+| **V1 Scoring Home** - where it scores | **29 / 29** |
+| **Key Rule** - the substance | **28 / 29**, one PARTIAL |
+| **Desired Outcome** - the 8-stage pipeline | **8 / 8** stages have a shipped owner |
+
+Zero routing mismatches. Zero scoring-home mismatches. The one partial is Physical Address
+(see below).
+
+**The Desired Outcome pipeline, stage by stage, with the door that owns it:**
+Extract (`extraction_service`, v17) -> Normalize (`fact_comparison` / `fact_equivalence` /
+`normalization`, D3's one comparator) -> Scope (`facts["_scoped"]`, D19) -> Reconcile (the
+Data Consistency picker, C1-C) -> Determine Applicability (`question_eligibility` +
+`fact_state`'s two axes, C4) -> Remediate (questionnaire + resolution cards, C2 / C4) ->
+Score in the Correct Home (C3 3.5 / 3.14 moved payroll, claims and the WC fields out of
+Structural; H4 removed the last prior-carrier display row) -> Preserve Source
+(`fact_lineage` + `audit_events`, C5).
+
+#### What H4 actually changed, and what was already delivered
+
+**Only 8 of the 29 rows were broken.** The other 21 were already correct from C1-C5, H1, H2
+and H3, and were VERIFIED here rather than rebuilt - which is the point of running the
+matrix as a test instead of re-implementing the section.
+
+| Row | What was wrong before H4 |
+|---|---|
+| Proposed Effective Date | expiration date, GL form basis, audit period and billing plan all asked the CLIENT |
+| Entity Type | five live false Data Consistency conflicts (including ACORD's own checkbox wording against "LLC"), a validator refusing 8 of our own 13 dropdown options, and a stamper ticking the WRONG box for "S Corporation" / "Non-Profit Corporation" and NOTHING for "Sole Proprietorship" |
+| Contact Name/Phone/Email | all three asked as CRITICAL and pre-ticked while Tier 1 already counted them as one satisfied requirement |
+| FEIN | a client's "N/A" DESTROYED before it could become an answer (F15) |
+| Prior Carrier | never reached the client at all; "None" destroyed by the same door |
+| Years in Business | a producer-confirmed new venture still charged 1/6 of Tier 2 for history it cannot have |
+| WC Payroll Period | the producer asked about the period of a figure that was already annual, or did not exist |
+| Physical Address | investigated; deliberately NOT changed - see the partial |
+
+Plus one cross-cutting fix that touches EVERY client-answerable row (the `answer_semantics`
+door in `_clean_answer_ex`), and `new_venture_indicator` being asked of the client, found on
+the owner's own run.
+
+#### THE ONE PARTIAL
+
+**Physical Address - "Do not universally require".** Routing and scoring home are correct,
+and it is properly out of Tier 1 and Tier 2. But `FORM_FIELD_INVENTORY["ACORD_125"]` still
+lists it, so `calculate_sqs_from_facts` counts it as an owed field on every package,
+including a single-location GL risk whose mailing address IS its premises.
+
+Deliberately not changed, and the reasoning is worth keeping because the obvious fix is the
+wrong one: suppressing the QUESTION would be a **D32 violation** - the package would keep
+paying fill-rate for a blank that nobody, client or producer, can be asked for. The correct
+fix is on the SCORING side and moves scores upward, so it is **Q31** and it is Brent's.
+
+#### STILL OPEN - do not let these disappear
+
+| # | Item | Can it move a score? | Worse than that? |
+|---|---|---|---|
+| 1 | **Q33 - a declarations page's EXPIRING term stamps into ACORD 125's PROPOSED EFFECTIVE DATE box.** `_DOC_TYPE_PRIORITY` ranks `dec_page` above `application`, so on the commonest upload shape the merge hands `effective_date` the term that is ENDING | No | **YES - a wrong value on a legal document.** The cross-document date hard stop is currently the only thing on any screen pointing at that box, which is exactly why H4-C did not silence it |
+| 2 | **Q31 - physical address charged universally in the ACORD 125 fill rate** | Yes, UP on single-location non-property accounts | No |
+| 3 | **Q32 - the WC payroll breakdown and the X-Mod are each asked twice** (confirmed live on the owner's run) | Yes, DOWN ~5 Narrative Quality points if the duplicate is dropped without re-crediting from the H3 table | No |
+| 4 | **Live proof missing for the headline fix** - a client answering "None" / "N/A" and it surviving the round trip (kit check 5), and the whole New Venture flow (checks 7-10). Neither is provable offline | - | - |
+
+#### Standing lessons this arc produced, in the order they were learned
+
+1. **An offline probe proves the FUNCTION, never the SEAM (now D54).** I shipped the WC payroll-period
+   rule with a probe that passed `_flags` inside the facts dict - a test-harness shape.
+   Production never carries it, so the rule marked the fact Not Applicable on EVERY package
+   while the -3 was still charged: a deduction with no route to remediation. Two independent
+   reviewers caught it within minutes of each other. The repo had already written this lesson
+   down once; I re-learned it anyway.
+2. **A guard rail is not optional in a test kit.** P3 (states everything, must stay silent)
+   is the reason this can be called closed. A rule that fires on the ordinary case is this
+   codebase's single most repeated failure - five times now.
+3. **A fixture can disarm itself OBLIQUELY.** P1 stated the payroll basis in a *General
+   Liability* rating column and silently satisfied a *Workers Comp* period check. Every
+   word-level ban passed. A necessary-but-not-sufficient guard needs a STRUCTURAL second
+   condition - the same lesson H1-F recorded, one layer further out.
+4. **Answering "did the client ask for this?" is a research task, not a judgement call.**
+   Both of the owner's removal requests turned out to be client-specified in the spec's own
+   words. The five minutes spent extracting `SQS_Scoring_Specification` section 4 and section
+   3.1 prevented deleting a named hard stop and the traceability C3 was built to deliver.
+5. **Fix the GUARD, not the TABLE (now D53).** The proposed dec-page role-blindness fixed the reported
+   case and was refuted three ways - it silenced real conflicts, destroyed the `_scoped`
+   verdict that already resolves genuine multi-policy packages, and would have made
+   `_ROLE_BLIND_FACTS` assert something false about the most authoritative document in the
+   package. The mechanism was already there and correct; only its predicate was too narrow.
+6. **Do not silence an alarm before checking what it is pointing at.** The policy-date hard
+   stop fires for the wrong reason AND is the only surface flagging a genuinely wrong value.
+   Removing it first would have shipped that value in silence.
+
+#### Verification
+
+**Suite: 4824 passed / 1 failed / 14 skipped** (`py -m pytest -q -p no:randomly`), against a
+measured baseline of **4777 / 1** before this arc. The one failure is
+`test_arq_acord125_missing_only`, the documented `httpx` ImportError. **+47 tests, zero
+regressions.** Frontend production build clean. New standing gate:
+`tests/test_h4_core_fact_matrix.py` (47) turns 9.1 into a contract that fails the build on
+drift.
+
+**CORRECTION TO CLAUDE.md, verified at HEAD:** its standing note that `test_normalization`
+is one of two known pre-existing failures is **STALE** - the file is green (28 passed). The
+only pre-existing failure is `test_arq_acord125_missing_only`. Anyone using the old note as
+cover for a red `test_normalization` would be waving through a real regression.
+
+#### Blast radius - D6, tell Brent BOTH directions
+
+Full table in H4-A. Net: **UP** for a client answering "None" / "N/A" (credit instead of a
+discarded answer), for the no-prior-losses attestation finally setting its flag, for
+confirmed new ventures, for submissions previously refused with a 422, and for entity-type
+false conflicts no longer raising review items. **DOWN** in exactly one place, correctly:
+"N/A" typed into a required identity field no longer buys a Tier 1 credit.
+**Presentation only, no score:** the Prior Carrier row left the Narrative Quality panel, and
+the Tier 1 / Tier 2 sub-rows are hidden in the UI (owner's call - the scorer, the blend and
+`score_trace` are untouched, and the same content still reaches the producer as the pre-form
+"Key details in place / missing").
+
+### H7-B - SHIPPED (2026-08-27)
+
+**Baseline before any H7 work, measured in this tree: 4824 passed / 1 failed / 14
+skipped** (the documented `httpx`/`openai` ImportError in
+`test_arq_acord125_missing_only`). **After: 4882 passed / 1 failed / 14 skipped** -
+the same single known failure, +58 tests, zero regressions. Frontend production
+build clean (pre-existing chunk-size warning only).
+
+#### What shipped, by clause
+
+**A. One envelope.** New `services/audit_history.py` - the pure, DB-free half of
+the spine: the event vocabulary, `derive_role`, `change_kind`,
+`build_change_envelope`, `normalize_event`, `actor_ids_in`. Every event now
+carries the client's seven attributes in FIXED positions
+(`fact_key` / `field_name` / `previous_value` / `new_value` / `actor_id` /
+`role` / `reason` + `action`), with `detail` the only free-form part - which is
+where they hid before.
+
+**B. One writer, emitted from INSIDE the eight existing audit writers**
+(`audit_service.record_material_change`). `log_field_change`,
+`mark_recommendation_dismissed`, `mark_recommendation_answer_recorded`,
+`set_issue_status`, `log_underwriting_confirmation`, `log_integrity_resolution`,
+`log_document_reclassified`, `log_download_with_open_recs` - plus
+`arq_service`'s `client_answers_applied`, which moved off raw `log_audit_event`
+so the summary carries the same seven attributes as everything else. A route can
+forget; a writer the act must already pass cannot (D49, same one-door idiom as
+`fact_comparison` D3 and `coverage_evidence` H1).
+
+**C. The three data holes.**
+- *Actor*: `resolve_actors()` - ONE query over the DISTINCT ids per export, not
+  one per row; every section of the record now prints the person AND the role.
+  Two readers gained `user_id` in their SELECT (`get_field_change_log`,
+  `get_download_audit_log`) and two more were added
+  (`get_dismissed_recommendations`, `get_issue_statuses`).
+- *Role*: derived, no `users` column (D51).
+- *Generated-value override*: `field_source_audit.previous_source` +
+  `form_routes._prior_provenance`, which prefers the FACT envelope (it STATES
+  provenance) over the form-highlight label (it only implies it).
+
+**D. One chronological history.** Export gains `history`; the record gains
+"COMPLETE HISTORY (chronological)". The old EVENT LOG section was REMOVED - it
+rendered the same rows with less on each, and keeping two views of one history
+inside the fix for "two views of one history" would have been absurd. Its bespoke
+per-type wording was carried across into `_historyDetail`.
+
+**E. One model (D50).** `activity_service` is now an adapter: it writes
+`audit_events` with `visibility='product'` and reads a UNION of the spine and the
+frozen legacy `activity_events` rows, so no producer loses feed history. The nine
+event-type STRINGS, `record_event`'s signature and the read shape the UI consumes
+are all unchanged, so `ActivityLogModal` needed no edit and cannot regress.
+`audit_events` gains `package_label` + `visibility` + a `(user_id, created_at)`
+index, all additive on both the CREATE and ALTER paths.
+
+**F. `submission_integrity_audit` gets its first reader** (`get_integrity_audit_log`)
+and a "PRODUCER OVERRIDES" section. `integrity_assessed` is excluded - that is
+the system's own verdict, not a human act, and the resolution row already carries
+the verdict it acted on.
+
+**D48. Retention 180 -> 365**, floored, matching the operational tables.
+
+#### Two defects found while building, both mine, both pinned
+
+1. **`change_kind` consulted `previous_source` BEFORE asking whether there was a
+   previous value at all.** Filling a BLANK required box whose highlight label
+   happens to be AI-ish would have recorded *"the producer overrode an
+   AI-generated value"* against a box the AI never filled - a false statement
+   about a human, in an E&O record. Order is now: retraction -> fill -> override
+   -> correction, pinned by
+   `test_a_field_that_was_empty_can_never_have_been_overridden`.
+2. **The first version keyed AI provenance off the wrong vocabulary.** There are
+   TWO: the FACT envelope's (`ai_high` / `ai_low`, pinned by
+   `field_source_audit.confidence`'s CHECK) and the FORM HIGHLIGHT's
+   (`low_confidence` / `ai_verified` / `filled` / `missing_required`, written by
+   `pdf_service`). `update_pdf` holds the second. `_AI_SOURCES` now knows both
+   rather than asking call sites to translate - translating at the call sites is
+   how the two drifted apart. **Also found: `_load_fieldmap` is a stub returning
+   an empty fieldmap and an empty ai_set, so `update_pdf`'s `ai_set` membership
+   test is dead code** - it was the obvious provenance signal and it is always
+   empty.
+
+#### Verification (executed, not reasoned)
+- Suite 4882/1/14 as above; `test_h7_audit_history.py` (58) +
+  `test_audit_lineage_20260826.py` (33, two updated for D48 + the constant move).
+- **INSERT column-count vs placeholder-count checked on all 16 statements** in
+  the two files touched - zero mismatches.
+- **End-to-end offline seam run** against a fake pool: all eight material acts
+  written, all eight read back through `get_audit_trail_export`, every one naming
+  a human, and the client answer correctly reading **role=Client** despite being
+  applied under the producer's user id.
+- **Failure isolation proven in BOTH directions**: with the whole DB down every
+  writer returns its failure value and nothing claims success; with only the
+  SPINE failing, the act still returns success and the underlying row still
+  lands - a lost history row never undoes a completed action, and it logs with a
+  traceback (D35).
+- Frontend production build re-run AFTER the final JSX edit (the first run
+  predated it).
+
+#### Blast radius - D6, tell Brent
+1. **Volume**: every field edit now writes 2 rows (index + event) instead of 1.
+2. **Product history now expires at 365 days** (D48). It never expired before,
+   because `activity_events` was never swept. Deliberate.
+3. **`activity_service`'s "no fresh PII" docstring rule is retired** - it
+   described the old table. The spine already carried `client_email` on
+   `client_answers_applied` before this change. Call sites still pass first names
+   only; the reasoning that the table needs no encryption no longer holds.
+4. No score moves. Nothing in this change touches scoring, gating, dismiss-credit
+   or reopen - `sqs_recommendation_audit` and `submission_issue_status` keep
+   their upsert semantics exactly (pinned by
+   `test_the_mutable_workflow_tables_were_not_turned_into_history`).
+
+#### Known / deliberately not done
+- **The `fieldqa_` / `fieldmap_` DELETE+reinsert is untouched.** It still clears
+  those rows on every producer field edit, but the dismissal is now an immutable
+  spine event, so the history survives and C5-A's stale-findings concern is
+  respected. Measured again this session: those rows carry `score_impact: None`,
+  so `dismiss_earned_credit` is always False - **no score has ever moved on this
+  path.** Audit loss only, and now closed.
+- **`recommendation_reopened` / `issue_reopened` / `documents_uploaded` still
+  write raw `log_audit_event` payloads**, not envelopes. They already carry the
+  prior state C5-A added and `normalize_event` gives them actor + role from the
+  row, so converting them would add risk without adding information.
+- **One act can produce two events** (answering a recommendation emits
+  `recommendation_answered` AND `field_changed`). That is two true statements
+  about one click, in ONE store with ONE shape, adjacent in time - not the
+  two-disconnected-stores duplication section 12 is about.
+- **Not live-verified.** Everything above is suite + offline seam + build. The
+  owner's next upload is the real check, and C5's own standing lesson applies:
+  an offline probe proves the FUNCTION, never the SEAM around it - the fake-pool
+  run is closer than a unit test but it is still not the running app.
+- **The override classification UNDER-claims on some boxes, by design, and it
+  was measured.** `change_kind` can only say "the producer overrode an
+  AI-generated value" when the edited PDF box resolves (via
+  `_ACORD_FIELD_RULES`) to a canonical fact that EXISTS in the store - that
+  envelope is what states the model produced it. Driving the real stamper over
+  ACORD 125: **8 of 13 populated boxes qualify.** The clearest miss is
+  `BusinessInformation_FullTimeEmployeeCount_A`, which is alias-stamped from
+  `num_employees` while the field rules map the BOX to `num_employees_full_time`
+  - **a key nothing writes** (the phantom-key class H1-C catalogued; NOT chased
+  here, it is a pre-existing field-rules defect, not an H7 one). Those edits
+  record `corrected an existing entry` instead. That is the safe direction: it
+  can miss a real override, it can never invent one, and an invented override is
+  a false statement about a human in an E&O record. The h7 kit tests BOTH
+  outcomes deliberately so the limit is visible rather than buried.
+
+### H7-C - LIVE TEST KIT (2026-08-27)
+
+`py backend/scripts/make_h7_test_pdfs.py` -> `h7_test_data/` (3 PDFs +
+README-HOW-TO-TEST.md, 19 numbered checks mapped to the client's clauses).
+
+Small on purpose: section 12 is about HISTORY, and history is made by ACTIONS,
+so the click sequence is the test and the documents only have to make each of
+the eight events REACHABLE. Two events need no document at all
+(`document_reclassified` - the control is on every session, not just flagged
+ones; `package_downloaded` - any download with an open item).
+
+- **S1** (H7A package + H7B certificate): reclassify -> resolve the umbrella
+  conflict -> generate 125 + 131 -> override an AI value -> the contrast edit ->
+  answer a rec -> reopen and answer DIFFERENTLY -> dismiss with a reason ->
+  resolve an issue with NO reason -> client questionnaire -> download with open
+  items -> read the record. Covers all eight events plus the Activity Log checks.
+- **S2** (H7A + H7C, a DIFFERENT insured): the multi-insured review, overridden
+  with "Continue anyway" - the `overridden=True` half of `producer_override`,
+  which is the half that sat in a table with no reader until H7. Kept in its own
+  scenario so a foreign entity never contaminates S1's facts.
+
+**Dry-run against the REAL code before shipping the kit** (not reasoned - each
+one drove the production function): `assess_submission_integrity` returns
+`high / review_required=False` on S1 and `low / review_required=True` on S2 with
+both entities named; `values_agree("umbrella_limit", $3M, $1M)` is False and
+`umbrella_limit` is a curated `currency` reconcilable, so the picker will appear;
+and the stamper run above chose the override target by measurement.
+
+**`_verify()` caught a real fixture defect and was itself wrong once.** Its first
+version failed because H7A's umbrella page also prints `$1,000,000` - as the
+UNDERLYING GL limit, which is what a real umbrella declarations page looks like.
+Sanitising that away would have been building the convenient fixture D22 warns
+about, so the CHECK was fixed instead: what matters is that the CERTIFICATE must
+not print the policy's limit (that direction would make the documents agree and
+no conflict would be raised at all).
+
+### H7-D - FIRST LIVE RUN (S1): the record PASSES, and 5 defects it exposed (2026-08-27)
+
+**The owner ran S1 on the live system and supplied the record.** Every H7
+headline behaviour is confirmed on real data:
+
+- `COMPLETE HISTORY (chronological)` present; the old `EVENT LOG` gone.
+- **Every row names a human** - `vinay sharma <vinaysharma@astreait.com>
+  (Producer)` - across all 18 rows and all six older sections. Not one
+  `By: unknown`. Before H7 the record named nobody, anywhere.
+- **Both generated-value overrides labelled correctly**: the ACORD 125
+  operations description and the ACORD 131 umbrella SIR each carry
+  `Change: overrode an AI-generated value`, and `MODIFICATION HISTORY` prints
+  `How: Entered/edited by producer (previous value: AI extraction (high
+  confidence))`.
+- **The answer -> reopen -> different answer sequence is fully preserved**:
+  three `Recommendation answered` events with their distinct values, the
+  retraction to blank, and the `Recommendation reopened` carrying
+  `prior action: resolved at ... (answer retracted)`. The upsert used to keep
+  only the last answer.
+- Conflict resolution, download-with-open-items + reason, and the SQS snapshots
+  all present. **Activity Log clean** - nine product events only, no field
+  edits, older packages intact (D50 verified live).
+
+**Not exercised this run:** `PRODUCER OVERRIDES` is `(none)` - the owner did not
+reclassify a document, and could not reach the hard-stop / warning rail after
+generation (see OPEN below). `issue_status_changed` therefore still has no live
+proof; S2 was not run.
+
+#### The five defects, three of them mine
+
+1. **THE OWNER'S REPORTED BUG - "reopened, submitted a different answer, not
+   getting saved".** It WAS saved: the fact, the envelope and the audit row were
+   all correct on his own record. **The card lied.**
+   `_NEW_VENTURE_CONFIRM_REC` was appended by `calculate_p4_loss_history`
+   whenever loss history was absent, with no reference to whether it had been
+   answered. Answering **Yes** makes the pillar Not Applicable, so the rec stops
+   being generated and the card closes; answering **No** - the honest answer on
+   most accounts - changes nothing that function reads, so the rec came back
+   identical, the auto-resolve pass had nothing to stamp, and the card
+   reappeared Open with an empty dropdown. He answered it three times.
+   **The class: a confirm-X prompt only ONE of whose two answers can retire
+   it.** New door `loss_history_state.new_venture_answered` (deliberately
+   separate from `new_venture_confirmed` - C2-G's "what is the value" vs "did
+   they answer" split) gates `_new_venture_prompt`. The genuine gap
+   ("No loss history provided") keeps its own rec and correctly stays open.
+   A blank still counts as unanswered (Principle 3).
+
+2. **A no-op recorded as a modification (mine).** Submitting the same answer
+   twice produced `"No ..." -> "No ..."  /  Change: corrected an existing
+   entry` - an E&O record stating the producer altered something they did not.
+   `update_pdf` has always skipped unchanged fields; the producer-answer and
+   resolve-issue paths never did. Guarded in `log_field_change` itself so a
+   future writer inherits it, with `record_unchanged=True` as the documented
+   exception for the two SCHEDULE paths, whose before/after is a ROW COUNT
+   (editing a VIN in row 2 of three leaves "3 row(s)" -> "3 row(s)" while
+   genuinely changing the data).
+
+3. **`"$3,000,000" -> "$3,000,000"` on the conflict resolution (mine).** C5-D
+   fix 7 killed exactly this in the resolutions section - under D16 the
+   suggested value stamps BEFORE confirmation, so confirming the suggestion
+   leaves previous == chosen. The new history section reintroduced it one layer
+   up. Suppressed when unchanged, same rule as C5-D.
+
+4. **`Reason: No reason provided` printed as a reason (mine).** That string is
+   the UI's SENTINEL for an unexplained dismissal - `dismiss_earned_credit`
+   already treats it as no reason. Now one named `_NO_REASON_SENTINELS`, shared
+   by the credit predicate and the record so the score and the E&O record
+   cannot disagree about what counts as a reason.
+
+5. **A machine `null` was a competing VALUE - two FALSE HARD STOPS.** The
+   pre-form screen reported *"Policy Effective Date: documents disagree
+   (09/17/2026, null)"* and the same for the expiration, **capping a perfectly
+   consistent two-document package at 60**. Root cause:
+   `_normalize("null", "date")` returned the truthy string `'null'`, so it
+   passed every `if not norm: continue` guard and became a rival candidate.
+   **The module already knew the rule** - its own scalar reader (`_fv`, line
+   ~701) drops `""` / `"null"` / `"none"` - it was simply never applied on the
+   paths that BUILD candidate groups (per-coverage-line and text scan). One
+   rule, two copies, only one of them running: the same shape as C1's five
+   comparison sites and H1-C's phantom keys. Fixed in `_normalize`, narrowly:
+   only the MACHINE's own spellings of "no value found". A human typing "None"
+   is an ANSWER with no value and is handled by `answer_semantics` on a
+   different path (C2-G); this function only ever sees document-extracted
+   candidates. Verified both directions - `Nonesuch Holdings LLC` and
+   `Nonprofit Alliance Inc` survive.
+   **SCORES MOVE UP on any package where an extractor emitted a bare "null" -
+   D6, tell Brent.** This is a correction, and it removes hard stops.
+
+#### Also shipped this session - TWO UI elements hidden, neither a client ask
+**The "Quality Fill Rate: N% -> N%" delta line** and **the whole "Session delta"
+card** ("+N pts this session" / "Started at X -> now Y") are hidden, via
+`SHOW_FILL_RATE_DELTA` and `SHOW_SESSION_SCORE_DELTA` next to the existing
+`SHOW_COMPLETION_METRICS`. Markup intact on both, backends untouched.
+
+**The owner asked the right question - "did the client ask for this, or are we
+showing it?" - and the answer was checked against the SOURCES, not our notes.**
+`SQS_Scoring_Specification.docx.pdf` (24,688 chars) has ZERO hits for
+"this session", "delta", "started at", "progress" or "before and after"; its
+only two "improvement" hits are 3.11's credit-stacking rule. Client section 7 IS
+the score-presentation section and asks for exactly three things - a qualitative
+status label, remediation progress shown SEPARATELY, and the numeric SQS kept in
+the dedicated results experience. A session delta is none of them.
+
+It was our own panel, and it had been **structurally dead since it shipped** -
+`sqs_history` was never persisted, so `delta_this_session` was permanently 0 and
+the card never rendered. C5-A's fix to `sqs_history` is the only reason it became
+visible, which is why it surfaced on the very first H7 live run.
+
+**The backends stay.** `delta_this_session` / `sqs_history` feed the 5.12 audit
+snapshots and the SQS narrative's model context (where the prompt already forbids
+restating any number - the 2026-08-12 fix), and `fill_rate_before` /
+`fill_rate_after` still carry the section 6.2 remediation delta. Deleting either
+would break the E&O record to hide a line.
+
+**Standing lesson:** a feature nobody asked for can hide indefinitely behind a
+bug, then arrive looking like a regression the moment the bug is fixed. Two of
+the three hidden panels here were found that way.
+
+#### OPEN, from the run itself
+**The hard-stop / warning rail is unreachable after generation.** The owner
+could not resolve or dismiss a pre-form issue once forms existed, so
+`issue_status_changed` has no live proof and defect 5's two false hard stops
+could not be cleared from the UI at all. The SQS panel's Cross-Form Validation
+section does carry Resolve / Dismiss, which writes the same event - that is the
+post-generation route to test it. Whether the full pre-form rail should be
+reachable later is a product question, not an H7 one.
+
+#### Observed, NOT fixed, none of them H7
+- `is_renewal` holds a whole sentence ("This declarations page is issued in
+  connection with the policy identified above and supersedes any prior issue.")
+  instead of a boolean - an extraction defect.
+- `property_locations` still prints `Source: unspecified` while every other
+  structured fact carries contribution evidence - one straggler from C5-D fix 3.
+- `DOWNLOADS` prints `Score at download: 60` while `SCORE HISTORY` records 53 at
+  the same instant. 60 is the FORM score (ACORD 131) and 53 the package score,
+  so both are true; the label does not say which. Cosmetic, worth a word.
+
+- suite: **4889 passed / 1 failed / 14 skipped** - the same single known
+  `httpx` ImportError, +7 tests, zero regressions. Frontend build clean.
+
+### H7-E - ROUND 2 LIVE: the last three events confirmed; SECTION 12 CLOSED (2026-08-27)
+
+**Owner-confirmed on the running app**, closing the three events H7-D's first
+run left unproven:
+
+1. **Pre-form -> reclassify a document's type -> `producer_override`.**
+   `submission_integrity_audit` had three writers and NO reader anywhere before
+   H7 - the same defect C5-A fixed for `underwriting_confirmation_audit`,
+   recurring one table over. It now has a reader (`get_integrity_audit_log`) and
+   its own PRODUCER OVERRIDES section, and the before -> after document type,
+   the timestamp and the actor all render.
+2. **SQS panel -> Cross-Form Validation -> Resolve the ACORD 25 item ->
+   `issue_status_changed`.** This is the event the old export could not show at
+   all: it printed issue rows only when they happened to carry a `reason`, so a
+   plain Resolve was invisible, and `submission_issue_status` is a latest-wins
+   UPSERT that keeps no history of the transition.
+3. **Send to Client -> answer -> submit -> `client_answers_applied` +
+   per-fact `field_changed` rows reading role = CLIENT.** The subtlest
+   correctness property in the whole change: the questionnaire is applied under
+   the SESSION OWNER's user id because the client has no account, so deciding
+   role on "is there a user_id" would file every client answer as a producer
+   action. `derive_role` checks `source` FIRST, and that ordering is what the
+   live run confirms (D51).
+
+**Note on scope, stated precisely:** the `producer_override` CLAUSE is verified
+via document reclassification. The SECOND writer of that same event type - the
+`overridden=True` multi-insured integrity override, scenario S2 in the h7 kit -
+has still not been run live. The event type, the reader and the rendering are
+proven; that one writer is not.
+
+#### SECTION 12 CLOSURE LEDGER - the client's own structure
+
+| Client's words | State |
+|---|---|
+| *"cannot be reliable if the product does not consistently capture meaningful state changes"* | **Closed.** 1 of 8 events reached an append-only store before H7; all 8 do now, emitted from INSIDE the writer each act must pass (D49), so a call site cannot forget |
+| *"should not become a separate reporting subsystem disconnected from the actual workflow"* | **Closed.** The record is no longer assembled by the exporter from mutable current state. Two near-identical event logs became one (D50) |
+| **one model -> product history** | **Closed, live.** `activity_service` is an adapter over the spine; the navbar feed renders from it, clean, with older packages intact |
+| **one model -> debugging** | **Closed.** One store, one envelope, one write path; every history write logs its own failure with a traceback (D35) |
+| **one model -> source lineage** | **Met by DESIGN DECISION, not by construction - say this to Brent plainly.** The RECORD is unified, but lineage stays COMPUTED at export (D36) rather than evented. That was measured, not assumed: asking the model for page numbers cost ~593k output tokens and +18-20 min and was switched off 2026-08-23. The spine carries provenance-of-CHANGE; `fact_lineage` carries provenance-of-ORIGIN |
+| **one model -> E&O Audit Record** | **Closed, live.** `COMPLETE HISTORY (chronological)` is built from the spine |
+| affected fact/field | **Closed, live** |
+| original value | **Closed, live** |
+| new value | **Closed, live** |
+| actor | **Closed, live.** Zero `By: unknown` across every row and every section. Before H7 the record named no human in any of its 12 sections |
+| role | **Closed, live**, both directions - Producer on edits, **Client** on questionnaire answers |
+| timestamp | **Closed, live** |
+| reason / action when relevant | **Closed, live.** Action on every event; reason wherever one was given, and the "No reason provided" SENTINEL is no longer printed as though it were one |
+| producer edit | **Closed, live** (H7-D) |
+| client answer | **Closed, live** (H7-E) |
+| producer override | **Closed, live** (H7-E, via reclassification; S2's integrity writer untested) |
+| conflict resolution | **Closed, live** (H7-D) |
+| issue resolution | **Closed, live** (H7-E) |
+| recommendation dismissal | **Closed, live** (H7-D) |
+| form edit | **Closed, live** (H7-D) |
+| generated-value override | **Closed, live** (H7-D), with the measured under-claim in H7-B's known list |
+| *"generated from real system history rather than reconstructed later from incomplete current state"* | **Closed.** Every row was written by the workflow at the moment the act happened |
+
+**VERDICT: client section 12 is DELIVERED.** All eight events, all seven
+attributes and the Desired Outcome are verified on the running app across two
+rounds. One clause - source lineage inside the one model - is met by a recorded
+design decision rather than by construction, and Brent should hear that in those
+words rather than discover it.
+
+#### D6 - what to tell Brent, in priority order
+1. **Scores move UP** wherever an extractor emitted a bare `"null"`: that string
+   was competing as a VALUE and manufacturing false date conflicts. On the H7
+   fixture alone it produced TWO hard stops capping a clean two-document package
+   at 60 (H7-D defect 5). This is a correction and it removes hard stops.
+2. **Scores can move** on the new-venture path: the confirm card now retires on
+   either answer, so packages stop carrying an unretirable recommendation.
+3. **Three UI panels are hidden**, none of them a client ask - Form Completion /
+   Quality Fill Rate, the fill-rate delta, and the session score delta. Backends
+   all intact.
+4. Every field edit now writes two rows (index + event); product history now
+   expires at 365 days, where `activity_events` never expired.
+
+#### STILL OPEN after section 12 - do not let these disappear
+- **S2 (the multi-insured integrity override) has never been run live.** Three
+  clicks: upload `H7A` + `H7C`, Continue anyway, generate ACORD 125, read the
+  record. The kit is built and self-verified.
+- **The pre-form hard-stop / warning rail is unreachable after generation.** The
+  owner could not clear the two false hard stops from the UI at all on round 1.
+  Cross-Form Validation is the post-generation route for the issue rail; whether
+  the full pre-form rail should be reachable later is a product question.
+- **`is_renewal` holds a whole sentence** ("This declarations page is issued in
+  connection with the policy identified above and supersedes any prior issue.")
+  instead of a boolean - an extraction defect, not section 12.
+- **`property_locations` still prints `Source: unspecified`** while every other
+  structured fact carries contribution evidence - one straggler from C5-D fix 3.
+- **The generated-value override UNDER-CLAIMS on some boxes** - measured, 8 of 13
+  populated ACORD 125 fields qualify. Safe direction (never invents an
+  override), root cause is a phantom canonical key in `_ACORD_FIELD_RULES`
+  (H1-C's class), deliberately not chased here.
+
+#### Standing lessons this arc produced
+1. **A feature nobody asked for can hide behind a bug, then arrive looking like a
+   regression the moment the bug is fixed.** Two of the three panels hidden this
+   session were invisible only because `sqs_history` was dead. When something new
+   appears on screen, ask who asked for it - the owner did, and the answer was no.
+2. **The record can be right while the CARD lies.** The owner's "not getting
+   saved" bug had a correct fact, a correct envelope and a correct audit row; the
+   only broken thing was a recommendation that could not be retired by one of its
+   two answers. Check what the user SEES, not only what was stored.
+3. **One rule in two copies means one of them is dormant.** `"null"` was dropped
+   by the scalar reader and honoured as a value by the candidate builder, in the
+   same file. Same shape as C1's five comparison sites and H1-C's phantom keys.
+
+**The two standing rules this arc produced are D55 and D56** in the decision
+register (a machine non-value is never a candidate; a confirm-X prompt retires on
+either answer). Both were live defects, not theory.
+
+#### Files and tests
+- new: `services/audit_history.py`, `tests/test_h7_audit_history.py` (65),
+  `backend/scripts/make_h7_test_pdfs.py` -> `h7_test_data/` (3 PDFs + a
+  19-check README).
+- changed: `services/audit_service.py`, `services/activity_service.py`,
+  `services/arq_service.py`, `services/loss_history_state.py`,
+  `services/sqs_service.py`, `services/scheduler_service.py`,
+  `services/underwriting_consistency.py`, `models/schemas.py`,
+  `routes/form_routes.py`, `routes/audit_routes.py`, `routes/arq_routes.py`,
+  `frontend/src/components/form/AcordModal.jsx`,
+  `tests/test_audit_lineage_20260826.py` (2 updated for D48).
+- suite: **4890 passed / 1 failed / 14 skipped** - the same single documented
+  `httpx`/`openai` ImportError, zero regressions. Frontend production build
+  clean (pre-existing chunk-size warning only).
+
+---
+
+## Session 2026-08-28 - V1 BETA EXIT CRITERIA: verified against the code, 7 defects fixed
+
+### BE-A - The verification, and what it found (2026-08-28)
+
+**The client issued a beta-exit checklist - 49 criteria across Data Integrity,
+Data Consistency, Loss History, SQS, Questionnaire, Coverage-Specific and
+Provenance / Audit. Every one was checked against the CODE, never against this
+file.** That distinction is the whole point: this log has recorded, repeatedly,
+work that was "done" and unreachable in practice - a result key one level too
+high (`_harvest_dec_index`), a question hidden by a machine prefix (D46), a
+fallback preserving the defect it was meant to fix (H1-H), a hard stop reading
+keys nothing writes (H1-C). A change-log entry is not evidence.
+
+**Method.** Full suite; frontend production build; the 809 pinning tests across
+the sections under review re-run individually; then ~20 probes driving the REAL
+modules - `calculate_package_sqs`, `calculate_p4_loss_history`, `overlay_for`,
+`coverage_evidence`, `fact_comparison`, `run_cross_form_validation` - each with
+the adversarial direction as well as the happy one.
+
+**Result: 40 of 49 hold. 9 did not.** Seven were cleanly fixable and shipped in
+this session (BE-B). Two are recorded below and NOT fixed, for stated reasons.
+
+#### What the probes confirmed working (not assumed - measured)
+
+| Area | Evidence |
+|---|---|
+| Address / name / FEIN equivalence | `E 9 Mile Rd` vs `East 9 Mile Road`, `Suite 100` / `Ste 100` / `#100`, `48201` vs `48201-1234`, `ABC Roofing LLC` vs `ABC Roofing, L.L.C.`, `12-3456789` vs `123456789` all agree; a genuinely different address still conflicts |
+| "No Coverage" is not active | `denied_families` returns `workers_comp`; the row grants nothing |
+| Auto owned vs HNOA-only | Exposure pillar **67** (owned, five items missing) vs **92** (HNOA-only) vs **92** (no auto line) - the client's 6.3 ask, working |
+| X-Mod is never guessed | new venture -> `not_applicable`, mod present -> `satisfied`, nothing known -> `unknown`, and UNKNOWN never deducts |
+| Loss History ladder | 83 cases through the real scorer, **0 mismatches** against Brent's ruled table; every number in the 100/85/70 structure found in code |
+| Ceilings never floor | raw 45 + hard stop = **45**; raw 50 + warning = **50**; hard + soft = 60, not 45 |
+| Issue-status clicks | resolve / dismiss / reopen / Download Anyway touch no scorer and no `package_sqs` |
+| NAICS / SIC | producer-routed through the real door |
+
+### BE-B - The seven fixes (2026-08-28)
+
+Each carries the client's own criterion, the measured defect, and - where the
+defect is a CLASS rather than one line - a structural guard so the next
+instance fails the build. Tests: `tests/test_v1_beta_exit_20260828.py` (25) plus
+2 in `tests/test_question_eligibility.py`.
+
+**1. "GL/WC class codes never reach the client" was FALSE on one fact.**
+`gl_class_code_schedule` survived `question_eligibility.overlay_for` as
+`audience=client`, asking the insured verbatim to *"Provide the GL rating
+schedule per class code (class code, premium/exposure basis, exposure amount
+i.e. payroll or gross sales, territory, and subcontracted %)"* - five insurance
+classifications in one box, a direct breach of core principle 5.
+It escaped every guard for a reason worth keeping: it is **not** in
+`SCHEDULE_DEFS`, so D44's table-level audience split never applied (that rule
+protects `wc_class_codes` by stripping its producer-only `code` column, and
+there is no table here to strip), and its key ends `_schedule` rather than the
+`_codes` its siblings share. **A hand-maintained list of 50 keys cannot guard
+itself**, so `test_no_classification_question_ever_reaches_the_client` now
+DERIVES the check from every registry question's own TEXT. Matched on the ASK,
+not the key name - deliberately, because `narrative_target_markets` and
+`narrative_growth_trends` are both real X-Mod / class-code questions wearing
+narrative keys (C4-S, H3-D) and a key-name rule is what let those through.
+No score moves; routing only.
+
+**2. "WC-specific information no longer penalizes non-WC submissions" - one
+cross-form rule was ungated.** `_check_acord186_subcontracting_vs_gl_wc` raised
+a **HARD STOP** keyed on WC payroll with no WC gate at all. Measured: a GL-only
+roofing contractor (`has_workers_comp` False, forms 125/126/186, 40%
+subcontracted, no payroll) raised *"no Workers Comp payroll is provided. WC
+payroll is required"* and the package fell **71 -> 60**. The remediation asks
+for `wc_payroll`, so the producer could only clear it by inventing a WC figure.
+Gated in the shape its five siblings already use, and slightly broader - the
+flag alone is enough, so a WC package that did not select ACORD 130 keeps the
+check. **Strictly narrower than the behaviour it replaces: it can only remove a
+false stop, never add one.** The subcontractor exposure is a real GL concern and
+is not lost, only no longer stated as a missing WC figure; a GL-side rule for it
+would be a NEW validation rule and belongs to Brent (Principle 7).
+**SCORES GO UP on GL-only contractor packages carrying ACORD 186 - D6.**
+
+*The structural guard was vacuous on its first draft and that is worth
+recording:* every one of these rules also names `ACORD_130` in its issue's
+`forms` list, so scanning the function body for the gate string found a "gate"
+that gates nothing - the test passed over the UNFIXED rule. It now reads only
+`ast.If` **test** expressions. Verified by removing the fix and watching all
+three tests fail, then restoring.
+
+**3. "Overrides preserve prior values" - a CLEAR was recorded but never
+persisted.** `update_pdf` sets a cleared fact to `None`, and the facts merge is
+deliberately ADDITIVE (`resolve_facts_write` skips None so an in-flight writer
+can never blank another's value), so the clear was audited as *"removed a
+value"* and silently dropped: the store kept the old value, the next
+`recalculate_session_scores` scored it as present, and
+`_restamp_canonical_into_forms` could put it back on the form. **The E&O record
+and the fact store disagreed** - the mirror image of the C5-A envelope
+destruction. **D18 already governs exactly this** ("never a bare pop") and was
+not being followed. Now the cleared keys go through `delete_facts`.
+Read off the FINAL state, never the loop: two ACORD fields can map to one fact,
+and `delete_facts` is applied after the merge, so collecting a key at clear-time
+would delete what the same request just wrote.
+
+**4. "Downloads with unresolved issues preserve the open-item state" - a dismiss
+was dead after any Download Anyway.** `log_download_with_open_recs` stamps
+`action='downloaded_anyway'` on every unresolved row; the dismiss upsert's
+`WHERE action IS NULL` therefore matched nothing on every later dismiss - while
+the function still logged *"Marked rec dismissed"*, returned True and appended
+`recommendation_dismissed` to the event spine. **DISMISSED ITEMS and COMPLETE
+HISTORY then contradicted each other**, the item stayed "unresolved" on every
+later download record, and `active_score_credits` (which reads
+`action='dismissed'`) never re-applied the credit - so a typed-reason credit was
+granted once and **silently reverted on the next rescore**.
+`downloaded_anyway` is a MARKER that the producer shipped with the item open,
+not a terminal resolution. Its two siblings on the same table -
+`mark_recommendation_resolved` and `mark_recommendation_answer_recorded` -
+already accepted it; **the dismiss writer was the odd one out, which is why
+nobody noticed**. Genuinely terminal actions are still never overwritten, and a
+test now pins all three writers to the same rule.
+
+**5. "Material changes trigger full recalculation" - the schedule save did not
+rescore.** `PUT /api/arq/schedules/{id}` wrote `facts[list_key]` and restamped
+the forms but never scored, so a producer pre-loading `wc_class_codes`,
+`auto_vin_schedule` or `auto_drivers` changed the very facts the H1 -10 / -15
+rules and the 6.3 bucket read, and the score stayed stale until an unrelated
+trigger rebuilt it. Every other human-write path recalculates - including the
+resolve-issue schedule mode, which calls the same `save_session_schedule` and
+then the same function. Non-fatal by design: the save has already succeeded and
+been audited, so a scoring failure must not turn a persisted change into a 500.
+
+**6. "Derived values retain derivation lineage" - lost on every override.**
+`_prior_provenance` consulted `confidence` before `source`, and a derived fact
+carries both, so overriding `years_in_business` or `wc_payroll_by_state`
+recorded *"corrected an existing entry"* with the derived origin gone, and a
+renewal-routed date (D28 / RC1b) was recorded as an AI override. `source` is the
+axis that STATES how a value was produced (client 1.4's four evidence states);
+confidence only grades an AI value's strength and describes nothing on a derived
+fact. **Deliberately NOT added to `audit_history._AI_SOURCES`**: a derivation is
+deterministic and document-grounded, so filing it as "overrode an AI-generated
+value" would be a false statement about the producer in an E&O record - the same
+class H7-B fixed when an empty field was called an override. It classifies as a
+correction, and the record now names `derived` as what was corrected.
+
+**7. "Contradictory no-loss evidence remains visible and appropriately capped" -
+the client's own claims table was invisible to the guard.** Every consumer read
+the scalars `num_claims` / `total_incurred`; nothing read the `loss_history`
+TABLE (`SCHEDULE_DEFS["loss_history"]`: date, line, description, paid,
+reserved). Nothing derives one from the other - extraction only counts claims
+out of loss-run TEXT - so a claim the insured or the producer **typed** was
+invisible. Measured on the real scorer:
+
+```
+attested "no prior losses" + one typed claim row  -> 60, no conflict, no rec
+the same claim as num_claims=1                    -> 45 + conflict
+```
+
+**The more explicit the evidence, the less it counted.** The same blindness sat
+in `prior_operations_evidence`, so a typed claim could not stop a New Venture
+confirmation from making Loss History Not Applicable.
+New ONE DOOR `loss_history_state.asserted_claims(facts) -> (claims, incurred)`,
+read by both. Returns a **MAXIMUM, never a sum**: a loss run stating 3 claims
+and a table listing those same 3 rows is one set of facts printed twice, and
+adding them would manufacture 6 (the C23 / B1 lesson).
+**The adversarial case was written first** and it is the one that matters: the
+mirror of this bug is worse than the bug, because a half-typed or empty row
+inventing a claim would cap a genuinely CLEAN submission at 45 and call the
+insured's attestation a contradiction. A row counts only on positive content -
+a real date, description, line or money figure. Verified: `[]`, `[{}]`, all-blank
+rows, a non-dict row and a `$0` row all yield `(0, 0.0)` and score 60.
+**SCORES GO DOWN where a typed claim contradicts an attestation - D6.**
+
+### BE-C - NOT fixed, and why (2026-08-28)
+
+**Neither is an oversight; both are recorded so they are not mistaken for one.**
+
+**1. ~~"Equivalent coverage terminology" - bare `GL` / `WC` / `BAP`~~ - SUPERSEDED
+the same day. The owner ruled 2026-08-28 and it is FIXED - see BE-F and D57.**
+Left here as written, because the REASON it sat unfixed is the point: the change
+is two minutes and **D9 blocked it** - *"Folding a phrase into an existing
+family, or adding a family, needs product approval."* That is a permission
+blocker, not a technical one, and engineering was right not to self-approve it:
+when the fix was finally written, the naive version of it was measured to be
+actively dangerous (BE-F).
+
+**2. "Missing information does not become unsupported negative/default values"
+is closed on the HUMAN path and open on EXTRACTION.** `answer_semantics` handles
+every human answer correctly, but `merge_facts` writes `facts[key]` directly, so
+an LLM-extracted literal `"N/A"` still counts as data - measured, `fein="N/A"`
+scores **Tier 2 100**. This is CLAUDE.md's own **GAP 1**, still open at HEAD.
+`services/placeholder_detector.is_placeholder_value` already exists and is used
+by `field_qa` and `pdf_service` but is **never called by the merge**; wiring it
+in is the right shape and touches every fact in the system, so it needs a
+measured run against a real package before it ships. **Not a same-day fix, and
+not to be done as a one-liner.**
+
+**Also still open from earlier arcs, re-confirmed at HEAD by this pass:**
+`_report_ungrounded_ai_values` is still shadow / report-only (F-1, invented GL
+class codes); **O6** (the ACORD 140 mined-junk fill) is untouched; **O1**
+(clause 4.6) has still never been exercised end to end; Q31 / Q32 / Q33 are with
+Brent, and **Q33 is a wrong value on a generated ACORD 125**.
+
+### BE-D - Verification (2026-08-28)
+
+* Suite before: **4890 passed / 1 failed / 14 skipped**.
+  After, attributable to this session: **4917 passed / 1 failed / 14 skipped**
+  (+27: 25 in `test_v1_beta_exit_20260828.py`, 2 in `test_question_eligibility.py`).
+  **Zero regressions.**
+* **The whole tree currently measures 5038 passed / 1 failed / 14 skipped /
+  1 xfailed**, because six untracked `tests/test_v1_regpack_*.py` files
+  (121 tests + 1 xfail, describing themselves as the client's *"REQUIRED V1
+  REGRESSION TEST PACK"*) appeared in `backend/tests/` during this session from
+  work outside it. They all pass and NOTHING here touched them - recorded only
+  so the next person reconciling the count knows where the extra 121 came from
+  and does not attribute them to the beta-exit fixes.
+* The single failure is `test_arq_acord125_missing_only`, and **its description
+  in CLAUDE.md is now wrong.** In ISOLATION it dies on the documented
+  `httpx`/`openai` ImportError (it self-stubs `httpx`). Inside the full suite,
+  where real `httpx` is already imported, it gets further and fails on a STALE
+  pre-C4 assertion instead - it expects `{"applicant_name"}` and receives the
+  post-C4 question set. Dead either way, not a regression, but the "known
+  `httpx` failure" line no longer describes what happens in a full run.
+* Frontend production build clean. **No frontend file was touched** - none of
+  these fixes needs a UI element, and none was added.
+* Probes and their verbatim output are in the session scratchpad, not the repo.
+
+### BE-E - Standing lessons from this pass
+
+1. **A criterion is verified against the code or it is not verified.** Seven of
+   the nine defects sat behind passing tests and a change log that said "done".
+2. **A guard that scans a whole function body for a gate string finds mentions,
+   not gates.** The first structural test here passed over the very rule it was
+   written for. Always remove the fix and watch the guard fail (C25).
+3. **Three writers on one table will disagree eventually.** `resolved` and
+   `answer_recorded` learned that `downloaded_anyway` is not terminal; `dismiss`
+   never did, and nothing compared them until now.
+4. **When one fact has two spellings, the one a HUMAN types is the one that gets
+   forgotten** - the machine's `num_claims` was read everywhere, the client's own
+   claims table nowhere.
+
+---
+
+## Session 2026-08-28 - REQUIRED V1 REGRESSION TEST PACK (client's 18 scenarios)
+
+### RP-A - BUILT AND GREEN, one confirmed gap (2026-08-28)
+
+The client's "REQUIRED V1 REGRESSION TEST PACK" (18 numbered scenarios, to be
+retained as recurring regression scenarios) is now executable. **121 tests, 120
+passing, 1 strict xfail.** Six files, one per theme, all sharing the
+`test_v1_regpack_` prefix so the whole pack runs as a unit:
+
+```
+py -m pytest -q -p no:randomly tests/ -k v1_regpack      ->  121 passed, 1 xfailed
+```
+
+| File | Client tests |
+|------|--------------|
+| `tests/test_v1_regpack_identity.py` | 1 (address equivalence), 3 (ACORD 25 multi-insurer), 4 (loss-run name) |
+| `tests/test_v1_regpack_coverage_scope.py` | 2 (terminology), 11 (property-only), 12 (HNOA-only) |
+| `tests/test_v1_regpack_loss_history.py` | 5 (new venture), 6 (Path C 50), 7 (attested 60), 8 (contradicted 45) |
+| `tests/test_v1_regpack_classification.py` | 9 (NAICS/SIC), 10 (WC class code), 13 (owned auto, no schedule) |
+| `tests/test_v1_regpack_provenance.py` | 14 (client answer conflict), 15 (producer override), 16 (derived date) |
+| `tests/test_v1_regpack_audit_score.py` | 17 (download with open issues), 18 (SQS ceiling) |
+
+**17 of the client's 18 scenarios PASS against current code.** Every number the
+client quoted reproduces exactly on the real engines: Path C 50 / attested 60 /
+contradiction cap 45 (`_LOSS_CONFLICT_CAP`), Auto Completeness -15, and all
+three ceiling examples (88+warning->85, 88+hard->60, 42+hard->42, ceiling never
+a floor).
+
+### THE ONE GAP - client test 3, "insurer letters map correctly"
+
+`tests/test_v1_regpack_identity.py::test_r03_insurer_letters_map_to_their_line`
+is an **`xfail(strict=True)`**. It is **H5 "ACORD 25 Multi-Carrier Mapping",
+which the ledger has always said is Not started** - measured, not assumed, on
+the real ACORD 25 schema with a 3-carrier package:
+
+* `_ACORD_FIELD_RULES` maps `Insurer_FullName` to the ONE package-level
+  `carrier_name` scalar, so on three distinct carriers `Insurer_FullName_A` is
+  filled and **B-F are blank**.
+* every `*_InsurerLetterCode_*` has rule value `None` AND sits in
+  `_RAW_TEXT_SKIP_PATTERNS`, so no coverage line can point at its own insurer
+  row - deliberately never invented, but never mapped either.
+
+**The rest of test 3 PASSES and is pinned as passing tests:** per-line policy
+numbers stay on their own certificate rows (GL BBC7263 / Auto 6E7-40-02---26 /
+Umbrella 6J7-40-02---26), a line the package does not carry stays **blank rather
+than borrowed** (WC), and three carriers raise **no conflict** - `carrier_name`
+comes back `status: "scoped"` through C1b's `_scoped` store. Remove the xfail
+when H5 ships; `strict=True` means it fails the build the day it starts working,
+so it cannot be forgotten.
+
+### WHAT THE POSITIVE CONTROLS CAUGHT - the reason to keep them
+
+Three of this pack's tests were passing **vacuously** on the first run and were
+only caught because every negative assertion carries a positive control:
+
+1. `match_loss_run_identity` reads `d["facts"]`, **not** `d["extracted"]["facts"]`.
+   A fixture using the latter gives the matcher no name at all, so it returns
+   `POSSIBLE` for **every** input - including a completely different company.
+   Test 4 ("formatting alone does not reduce Loss History") would have passed
+   because nothing was ever compared. The control
+   (`test_r04_a_different_insured_is_still_caught`) failed and exposed it; with
+   the real shape, `Summit Mechanical Services Inc` correctly returns `no_match`.
+2. `assess_underwriting_consistency` reads `d["facts"]` too. Test 1's "no
+   warning" was passing on a document the engine could not see. Fixed, it now
+   asserts the stronger `status == "consistent"` on a row the engine really
+   compared - and the control confirms a Boulder address still conflicts.
+3. The multi-insurer carrier test needed `facts["_scoped"]` - the C1b store
+   `merge_facts` always writes. Without it a healthy 3-carrier package DOES
+   read as a conflict; with it, `scoped`. A control pins the other direction:
+   two carriers on the SAME line is still a real conflict.
+
+**Standing lesson, and it is D22 again:** a fixture missing the key the
+production reader actually uses does not fail - it passes for the wrong reason.
+Every scenario in this pack therefore asserts a positive control, and three
+tests carry an explicit comment naming the key that must not be changed back.
+
+### TWO BEHAVIOURS WORTH KNOWING (neither is a defect)
+
+* **`_drop_not_applicable_questions` fails OPEN** (`return kept or questions`):
+  when every question would be dropped it returns the original list. A test
+  feeding it only auto questions therefore sees none dropped. The pack's
+  property-only fixtures always include the applicable property question, which
+  is also the realistic shape.
+* **HNOA-only owned-vehicle questions are NOT suppressed by that filter** - an
+  HNOA account declines nothing, so `denied_lines` is empty and the filter never
+  engages. The door that actually silences them is
+  `question_eligibility.overlay_for` **Step 1** (`value_state == not_applicable`),
+  which the pack now drives directly, including with ACORD 127 selected.
+
+### Suite
+
+`py -m pytest -q -p no:randomly` from `backend/` -> **5038 passed, 1 failed,
+14 skipped, 1 xfailed.** The one failure is the documented
+`test_arq_acord125_missing_only` `httpx` ImportError. Verified over **three
+consecutive full runs**; the pack adds zero regressions. (One earlier run
+reported two extra failures in `test_sqs_scoring_fixes_20260816` and
+`test_v1_c1_canonical_facts`; both pass in isolation and did not recur in three
+subsequent full runs - consistent with this suite's documented pre-existing
+cross-test pollution, not with anything the pack introduced.)
+
+### BE-F - `GL` / `WC` / `BAP` canonicalise: the owner ruled, and the naive fix was dangerous (2026-08-28)
+
+**OWNER RULING 2026-08-28**, giving the product approval D9 reserves: add the
+three bare abbreviations. Recorded as **D57**. This closes the eighth of the
+nine beta-exit criteria and retires **O2**, open since 2026-08-26.
+
+#### Why it sat unfixed, stated plainly
+
+**It was never a technical blocker. It was a permission one.** D9: *"Folding a
+phrase into an existing family, or adding a family, needs product approval."*
+`canon_line` decides whether two documents are naming the SAME coverage line,
+and getting that wrong in either direction is a class of defect this file has
+already recorded twice - **G3** (a money rule folded Denver into Lakewood) and
+**B14** (the umbrella $3M-vs-$1M conflict scoped into silence). So "engineering
+does not unilaterally decide what counts as the same coverage" is a rule with
+scar tissue behind it, and holding a two-minute change for a one-sentence
+ruling was the correct trade.
+
+#### And D9 was right, for a reason nobody had written down
+
+The obvious implementation - append `"gl"` to `_GL_PHRASES`, `"wc"` to the
+Workers Comp tuple - **is actively wrong**, because `_SPECIFIC` and
+`_GL_PHRASES` match by **SUBSTRING** (`p in s`, `lob_canon.py:132`). That is
+safe for a multi-word phrase and catastrophic for a two-letter one. Measured
+BEFORE writing the fix:
+
+| Printed line | contains | naive result |
+|---|---|---|
+| `Burglary and theft` | `gl` | a **CRIME** line read as General Liability |
+| `Plate glass` | `gl` | a **PROPERTY** line read as General Liability |
+| `Roofing shingles` | `gl` | a roofer's **own trade** read as General Liability |
+| `Glazing contractors` | `gl` | ditto |
+| `Showcase coverage` / `Newcastle Mutual` | `wc` | read as **Workers Comp** |
+
+**The danger was never the equivalence - it was the matching mechanism.** A
+one-line append would have manufactured coverage lines out of ordinary English
+on exactly the accounts this codebase serves (a roofing contractor's schedule
+contains "shingles"; a property schedule contains "plate glass"; a crime line
+IS "burglary"). That is a normalisation change silencing or inventing a line,
+which is the G3 / B14 failure mode, arriving through the front door.
+
+#### What shipped
+
+New `lob_canon._ABBREVIATIONS`, matched on **whole tokens** via `s.split()` -
+the same test the bare-`liability` branch beneath it already used, so no new
+mechanism was invented. Three entries, `gl` / `wc` / `bap`, and nothing else.
+
+**Order is load-bearing and deliberate:** abbreviations are checked AFTER
+`_SPECIFIC`, so `"Excess GL"` resolves to **umbrella**, exactly as
+`"Excess General Liability"` always has. Checking them first would let an
+excess policy masquerade as the primary line it sits over - **the C23 defect**,
+which put a $3,000,000 umbrella limit into the GL boxes. Never the other way
+round.
+
+#### Measured
+
+* The three that were broken: `GL` -> `general_liab`, `WC` -> `workers_comp`,
+  `BAP` -> `auto` (and lower-case / padded spellings).
+* **0 adversarial failures** across the eleven substring traps above.
+* **0 regressions** across the 23-phrase existing vocabulary (GL, CGL, bare
+  `Liability`, WC, Employers Liability, Business Auto, Umbrella, Excess, all
+  six specialty families, `Widget Liability` -> None, `""` -> None).
+* **700 passed** across the ten suites that touch `lob_canon`.
+* Client-visible symptom now closed, end to end: a carried line printed `GL` no
+  longer lands in `unmapped_material_lines` (Primble telling the producer it
+  does not recognise the commonest abbreviation in commercial insurance), and
+  `WC ... No Coverage` can now be DENIED - which was impossible while
+  `canon_line` returned None for it, since `denied_families` skips a line it
+  cannot place.
+
+#### Known limit, deliberately not built
+
+`G.L.` and `W/C` still return None: `_clean` strips punctuation to `"g l"` /
+`"w c"`, so dotted or slashed initials are a MULTI-TOKEN sequence and matching
+them needs a different mechanism. The ruling covered three abbreviations, not a
+general initialism parser. `test_the_ruling_covers_exactly_three_abbreviations`
+fails the build if a fourth is added quietly - **D9 is applied here, not
+repealed.**
+
+Tests: 6 in `tests/test_v1_beta_exit_20260828.py` (now 31 in that file).

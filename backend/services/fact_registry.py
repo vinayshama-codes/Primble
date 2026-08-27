@@ -118,6 +118,32 @@ def _is_payroll_period(v: str) -> bool:
     return payroll_period_meaning(v) is not None
 
 
+def _entity_type_is_recognized(v: str) -> bool:
+    """A legal entity type we can place on ACORD's own nine-box list.
+
+    Owned by `normalization.entity_family`, the SAME reader the ACORD 125
+    stamper uses, so a value this accepts is one the form can actually express -
+    which the literal 16-item uppercase set it replaces could not promise.
+
+    Measured 2026-08-27, V1 H4: that set REFUSED 8 of the 13 options
+    `answer_options.ENTITY_TYPE_OPTIONS` offers, so a producer picking
+    "Limited Liability Company", "S Corporation", "Joint Venture", "Association"
+    or "Municipality or Government Entity" from OUR OWN dropdown was told
+    *"That does not look right for this field"* by `_validate_producer_answer`.
+    The replacement is a strict SUPERSET: every value the old set accepted still
+    maps to a family, and all 13 options now validate.
+
+    DO NOT RENAME THIS TO `_is_entity_type`. `extraction_service`'s dec-page
+    backfill selects its candidate validators with
+    `v_name.startswith("_is_")` (see `_backfill_empty_facts_from_entries`), so
+    an `_is_` prefix would silently enrol `entity_type` in a backfill it has
+    never taken part in - a behaviour change nobody asked for, arriving through
+    a rename. The name is load-bearing.
+    """
+    from services.normalization import entity_family
+    return entity_family(v) is not None
+
+
 # ---------------------------------------------------------------------------
 # FACT_REGISTRY
 # ---------------------------------------------------------------------------
@@ -240,11 +266,7 @@ FACT_REGISTRY: dict[str, dict] = {
         "forms":       {"ACORD_125"},
         "question":    "How is your business legally set up? (LLC, Corporation, Sole Proprietor, Partnership, etc.)",
         "tier": 2, "required": False,
-        "validate":    lambda v: v.strip().upper() in {
-            "LLC", "CORPORATION", "CORP", "SOLE PROPRIETOR", "SOLE PROPRIETORSHIP",
-            "PARTNERSHIP", "LLP", "LP", "S-CORP", "S CORP", "C-CORP", "C CORP",
-            "NON-PROFIT", "NONPROFIT", "TRUST", "OTHER",
-        },
+        "validate":    _entity_type_is_recognized,
         "format_hint": "LLC, Corporation, Sole Proprietor, Partnership, LLP, etc.",
     },
     "effective_date": {

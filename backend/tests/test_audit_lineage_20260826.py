@@ -407,16 +407,44 @@ def test_retention_job_targets_the_real_column():
 
 
 def test_six_month_retention_ruling_is_implemented():
-    # OWNER 2026-08-26 (Q18): the E&O record is kept for 6 months. Three
-    # concrete consequences, each pinned:
+    # OWNER 2026-08-26 (Q18): the E&O record is kept for 6 months - a FLOOR.
+    # OWNER 2026-08-27 (V1 H7 / D48): the spine's own knob moves 180 -> 365 so
+    # it no longer expires BEFORE the mutable tables it exists to explain. The
+    # 6-month ruling is extended, not weakened; this test now pins both.
     src = _src("services/scheduler_service.py")
-    # 1. audit_events is swept on its own knob, floored at 180 days.
+    # 1. audit_events is swept on its own knob, floored at 365 days (D48).
     assert "DELETE FROM audit_events" in src
-    assert 'max(int(_os.getenv("AUDIT_EVENTS_RETENTION_DAYS", "180")), 180)' in src
+    assert 'max(int(_os.getenv("AUDIT_EVENTS_RETENTION_DAYS", "365")), 365)' in src
     # 2. No tier's facts purge undercuts the 6-month window (free was 30).
     assert '"free":       180' in src
     # 3. The operational audit tables keep a floor at or above 6 months.
     assert '_os.getenv("AUDIT_LOG_RETENTION_DAYS", "365")' in src
+
+
+def test_the_spine_never_expires_before_the_state_it_explains():
+    """D48, and the reason the number moved.
+
+    `audit_events` is the ONLY record of a dismissal, an issue resolution or a
+    conflict resolution as an EVENT - the tables holding those as current state
+    are swept at AUDIT_LOG_RETENTION_DAYS. A spine with a shorter window leaves
+    a window where the record reads as reconstructed-from-current-state, which
+    is the defect client section 12 reports. Floors only; env may raise either.
+    """
+    import re
+    src = _src("services/scheduler_service.py")
+    # int(_os.getenv(...)) closes TWO parens before the floor argument.
+    spine = re.search(r'AUDIT_EVENTS_RETENTION_DAYS",\s*"(\d+)"\)+\s*,\s*(\d+)\)', src)
+    ops   = re.search(r'AUDIT_LOG_RETENTION_DAYS",\s*"(\d+)"\)', src)
+    assert spine and ops, "retention knobs not found in the expected shape"
+    spine_default, spine_floor = int(spine.group(1)), int(spine.group(2))
+    ops_default = int(ops.group(1))
+    assert spine_floor >= ops_default, (
+        f"spine floor {spine_floor}d < operational default {ops_default}d - the "
+        "event history would expire before the state it explains"
+    )
+    assert spine_default >= ops_default, (
+        f"spine default {spine_default}d < operational default {ops_default}d"
+    )
 
 
 def test_sqs_history_is_passed_at_every_package_persist():
@@ -456,7 +484,12 @@ def test_draft_downloads_keep_the_open_items_list():
 def test_client_answer_apply_logs_field_changes():
     src = _src("services/arq_service.py")
     assert 'source="client_arq"' in src
-    assert "client_answers_applied" in src
+    # V1 H7: the event now goes through the one writer, so the literal string
+    # moved to `audit_history.EVENT_CLIENT_ANSWERS_APPLIED`. Behaviour is
+    # unchanged - the same event still reaches the same append-only table -
+    # so accept either spelling rather than pinning an import style.
+    assert ("client_answers_applied" in src
+            or "EVENT_CLIENT_ANSWERS_APPLIED" in src)
 
 
 def test_reopen_preserves_prior_state_in_the_event_log():

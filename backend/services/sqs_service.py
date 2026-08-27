@@ -2208,8 +2208,23 @@ def _loss_history_conflict(facts: dict, flags: dict) -> bool:
     no-loss attestation (a clean multi-year loss run CONFIRMS it) - only real
     claims / incurred amounts do.
     """
-    claims   = _to_int(_fv(facts, "num_claims")) or 0
-    incurred = _to_float(_fv(facts, "total_incurred")) or 0.0
+    # V1 BETA EXIT (2026-08-28) - through the ONE door
+    # (`loss_history_state.asserted_claims`), which also reads the client's own
+    # `loss_history` claims TABLE. Reading the two scalars alone meant a claim
+    # the insured or the producer TYPED contradicted nothing: measured, an
+    # attestation plus one typed claim row scored 60 with no conflict, while the
+    # same claim entered as `num_claims=1` scored 45 and raised one. Nothing
+    # derives `num_claims` from those rows - extraction only counts claims out
+    # of loss-run text - so the more explicit evidence was the invisible one.
+    # SCORES GO DOWN where a typed claim contradicts an attestation - D6.
+    try:
+        from services.loss_history_state import asserted_claims
+        claims, incurred = asserted_claims(facts)
+    except Exception:                                   # noqa: BLE001
+        # Fail to the PRIOR behaviour, never to silence: the conflict ceiling
+        # is what keeps a contradicted attestation visible.
+        claims   = _to_int(_fv(facts, "num_claims")) or 0
+        incurred = _to_float(_fv(facts, "total_incurred")) or 0.0
     no_loss = (
         bool(flags.get("no_prior_losses"))
         or bool(flags.get("narrative_states_no_losses"))
@@ -2310,6 +2325,29 @@ _NEW_VENTURE_CONFIRM_REC = (
     "Venture status - Loss History will then be marked Not Applicable instead "
     "of counting against the score."
 )
+
+
+def _new_venture_prompt(facts: dict, flags: dict) -> list:
+    """The New Venture confirm prompt, ONLY while it is still unanswered.
+
+    LIVE RUN 2026-08-27 (H7 S1): this rec was appended unconditionally whenever
+    loss history was absent. Answering "Yes" makes the pillar Not Applicable, so
+    the rec stops being generated and the card closes. Answering "No" - the
+    honest answer on most accounts - changes nothing this function reads, so the
+    rec came back identical, the auto-resolve pass had nothing to stamp, and the
+    card reappeared as Open with an empty dropdown. The answer was saved
+    correctly at every layer; only the card lied, and the owner answered it
+    three times before reporting it.
+
+    A confirm-X prompt must stop asking once X is confirmed EITHER way. The real
+    remaining gap (no loss history on file) keeps its own recommendation in the
+    same list - that one SHOULD stay open, and it does.
+    """
+    # Imported here, not at module scope: loss_history_state imports back into
+    # this module's helpers, and the existing readers in calculate_p4_loss_history
+    # take the same local-import route for that reason.
+    from services.loss_history_state import new_venture_answered
+    return [] if new_venture_answered(facts, flags) else [_NEW_VENTURE_CONFIRM_REC]
 
 
 def calculate_p4_loss_history(
@@ -2568,12 +2606,12 @@ def calculate_p4_loss_history(
             "No loss runs are available for this account - ask the insured to "
             "attest No Known Losses, or record known claims, to firm up the "
             "loss history.",
-            _NEW_VENTURE_CONFIRM_REC,
+            *_new_venture_prompt(facts, flags),
         ])
     else:
         return _result(25, [
             "No loss history provided - required for carrier submission",
-            _NEW_VENTURE_CONFIRM_REC,
+            *_new_venture_prompt(facts, flags),
         ])
 
     # ── Prior-carrier adjustment (client C2 2.3: present 0 / missing -10) ────
@@ -3913,9 +3951,19 @@ def _compute_category_breakdown(
         cope_info_score, cope_info_st = None, "not_applicable"
         loc_info_score,  loc_info_st  = None, "not_applicable"
 
-    # ── Prior Carrier (under Narrative Quality per client mapping) ───────────
-    carrier_s  = 100 if _ok("prior_carrier") else 0
-    carrier_st = "ok" if carrier_s == 100 else "missing"
+    # ── Prior Carrier: REMOVED from the Narrative Quality breakdown ──────────
+    # V1 H4 (client section 9), 2026-08-27. Section 9.1's Prior Carrier row
+    # gives it exactly one Scoring Home - **"Loss History only"** - and C2 2.7
+    # already moved the SCORE there on 2026-08-24. The DISPLAY row under
+    # Narrative Quality was left behind, so the one panel built to make the
+    # arithmetic traceable (C3's Desired Outcome) still showed prior carrier
+    # sitting in a second pillar, contradicting the ledger beside it.
+    # Display-only and verified to change no number: `carrier_s` / `carrier_st`
+    # had exactly one reader, the row itself, and no test or frontend code
+    # references `prior_carrier_context`. Narrative Quality keeps its other row,
+    # so the panel's own "has categories" guard is unaffected. Sessions scored
+    # before today keep the row, because the breakdown is served back out of the
+    # stored `package_sqs` - display drift on old data, no score anywhere.
 
     # ── Exposure Consistency sub-rows ────────────────────────────────────────
     # When the package scorer passes the real per-bucket scores, render THOSE so
@@ -4020,7 +4068,6 @@ def _compute_category_breakdown(
         },
         "narrative_quality": {
             "narrative_quality":     _cat(None, "computed_separately", "Narrative Quality"),
-            "prior_carrier_context": _cat(carrier_s, carrier_st,       "Prior Carrier / Marketing Reason"),
         },
     }
 

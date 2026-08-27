@@ -582,3 +582,82 @@ def test_a_fact_that_could_not_stamp_is_still_asked():
         "produces a blank box and no question")
     # And the facts-only fallback must survive for callers that supply nothing.
     assert "_fact_is_filled(facts.get(_fact_key))" in injector
+
+
+# ---------------------------------------------------------------------------
+# V1 BETA EXIT (2026-08-28) - "GL/WC class codes never reach the client"
+# ---------------------------------------------------------------------------
+
+def test_no_classification_question_ever_reaches_the_client():
+    """Core principle 5, enforced from the QUESTIONS, not from a hand list.
+
+    The client's beta-exit criteria name two rules outright - "NAICS/SIC never
+    reach the client" and "GL/WC class codes never reach the client". Both were
+    implemented as membership in `INSURANCE_JUDGMENT_FACTS`, a hand-maintained
+    set, and on 2026-08-28 exactly one registry fact had been missed:
+    `gl_class_code_schedule`, whose question asks the insured for a class code,
+    an exposure basis, a rating territory and a subcontracted percentage.
+
+    A list cannot guard itself. This test reads every fact's OWN question text
+    and fails if anything that ASKS for a classification is not producer-routed,
+    so the next repurposed slot is caught by the words it puts on the screen
+    rather than by whether someone remembered to add its key.
+
+    Deliberately matched on the ASK, not on the key name: `narrative_target_
+    markets` and `narrative_growth_trends` are both real X-Mod / class-code
+    questions wearing narrative keys (C4-S, H3-D), and a key-name rule is
+    exactly what let those two through the first time.
+    """
+    import re
+    from services.fact_registry import FACT_REGISTRY
+    from services.question_eligibility import is_insurance_judgment
+
+    asks_for_a_classification = re.compile(
+        r"class code|classification code|"
+        r"\bnaics\b|\bsic code\b|"
+        r"covered.?auto symbol|coverage symbol",
+        re.IGNORECASE,
+    )
+
+    leaked = []
+    for key, entry in FACT_REGISTRY.items():
+        if not isinstance(entry, dict):
+            continue
+        question = str(entry.get("question") or "")
+        if not question or not asks_for_a_classification.search(question):
+            continue
+        if not is_insurance_judgment(key):
+            leaked.append(f"{key}: {question[:90]}")
+
+    assert not leaked, (
+        "these questions ask the CLIENT to perform an insurance "
+        "classification (core principle 5 + the V1 beta-exit criteria). Add "
+        "each key to INSURANCE_JUDGMENT_FACTS, or route it as a producer-only "
+        "table column:\n  " + "\n  ".join(sorted(leaked))
+    )
+
+
+def test_the_gl_rating_schedule_is_producer_routed():
+    """The literal 2026-08-28 defect, pinned by its own key.
+
+    The derived test above would also catch it, but only while the question
+    keeps its current wording. This one survives a reword.
+    """
+    from services.question_eligibility import is_insurance_judgment, overlay_for
+    from services.question_classifier import classify_question
+
+    assert is_insurance_judgment("gl_class_code_schedule")
+
+    classified = classify_question(
+        "gl_class_code_schedule",
+        canonical_key="gl_class_code_schedule",
+        is_curated_client=True,
+    )
+    question = dict(classified)
+    question.update({
+        "field_name": "gl_class_code_schedule",
+        "canonical_key": "gl_class_code_schedule",
+        "question": "?",
+    })
+    overlay = overlay_for(question, {})
+    assert overlay.get("audience", classified.get("audience")) == "producer"

@@ -373,12 +373,43 @@ def test_bucket_derivation():
                              ["ACORD_126"])["bucket"] == BUCKET_UNDERWRITING
 
 
-def test_prior_carrier_and_policy_numbers_are_agency():
-    # The client re-classified prior carrier + all policy numbers as AGENCY items
-    # (producer / CSR answers them), NOT client questions.
-    for f, canon in (("prior_carrier", "prior_carrier"),
-                     ("policy_number", None),
-                     ("prior_policy_number", None)):
+def test_policy_numbers_are_agency_but_prior_carrier_is_client_answerable():
+    """All POLICY NUMBERS are agency items; the PRIOR CARRIER is not.
+
+    REVERSAL, recorded rather than deleted (V1 H4, 2026-08-27). This test was
+    `test_prior_carrier_and_policy_numbers_are_agency` and asserted that
+    `prior_carrier` is producer-only, from the July "prior carrier information
+    is an AGENCY question" clarification. TWO later client statements overrule
+    that for the carrier itself, and only for the carrier:
+
+      * master plan 9.1, Prior Carrier row, Default Question Routing column:
+        *"Client factual answer allowed; Producer final"*;
+      * Brent, answering Q8 on 2026-08-24: *"That's not really how brokers
+        work. For now, skip shortcut and ASK CLIENT."*
+
+    The insured knows who currently insures them, it takes seconds to answer,
+    and it is the one fact the -10 Loss History deduction turns on. "Producer
+    final" is already built and is NOT re-implemented by routing: a client
+    answer that materially disagrees with a document is HELD for the producer
+    by `client_answer_review` (D12 / D17).
+
+    The scope of the reversal is the point of this test. `prior_carrier_naic`
+    is a carrier-assigned code (core principle 5) and `prior_policy_number` is
+    covered by the client's own "all policy numbers are AGENCY" ruling, so both
+    stay producer-side - and they stay there STRUCTURALLY, because
+    `_CLIENT_WHITELIST` is matched by exact set membership over
+    {field_name, base, canonical_key}, never as a substring.
+    """
+    client_side = classify_question("prior_carrier", ["ACORD_125"],
+                                    is_curated_client=True,
+                                    canonical_key="prior_carrier")
+    assert client_side["audience"] == AUDIENCE_CLIENT
+    assert client_side["bucket"] == BUCKET_CLIENT
+    assert client_side["suppressed"] is False
+
+    for f, canon in (("policy_number", None),
+                     ("prior_policy_number", None),
+                     ("prior_carrier_naic", "prior_carrier_naic")):
         tax = classify_question(f, ["ACORD_125"], is_curated_client=True, canonical_key=canon)
         assert tax["audience"] == AUDIENCE_PRODUCER, f
         assert tax["bucket"] == BUCKET_AGENCY, f

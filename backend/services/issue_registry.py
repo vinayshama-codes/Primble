@@ -322,7 +322,9 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "wc_payroll_vs_revenue": _r_field("wc_payroll", "total_revenue"),
     "wc_subcontracting_payroll_conflict": _r_field("percent_subcontracted", "wc_payroll"),
     # per-state payroll has no live capture schedule / writable scalar - explain
-    "wc_multi_state_no_breakdown": _R_NARRATIVE,
+    # V1 H3 (2026-08-27): the breakdown by state and class IS the employee-group
+    # table - Resolve opens it instead of asking for a note.
+    "wc_multi_state_no_breakdown": _r_schedule("wc_class_codes"),
     "wc_state_payroll_total_mismatch": _r_field("total_payroll"),
     # ── WC / GL class code alignment ──
     "wc_gl_class_code_mismatch": _R_NARRATIVE,            # explain exposure mismatch via 101
@@ -727,7 +729,7 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     # Per-state payroll has no live capture schedule and no writable scalar -
     # same call as the cross-form twin wc_multi_state_no_breakdown.
     ("Multi-state WC", "WC payroll reconciliation", "required",
-     "legacy_wc_multi_state_no_breakdown", _R_NARRATIVE),
+     "legacy_wc_multi_state_no_breakdown", _r_schedule("wc_class_codes")),
     ("Workers Comp detected but payroll is missing", "WC payroll reconciliation", "recommended",
      "legacy_wc_payroll_missing", _r_field("wc_payroll", "total_payroll")),
     ("Revenue-to-payroll ratio", "WC payroll reconciliation", "recommended",

@@ -312,6 +312,32 @@ _CLIENT_WHITELIST = {
     # this the producer pattern fires on the raw field name and routes the
     # question to the producer panel instead of the client questionnaire.
     "contact_name", "contact_email",
+    # ── prior_carrier, V1 H4 (client section 9), 2026-08-27 ──────────────────
+    # Section 9.1's row for Prior Carrier reads, in the client's own columns:
+    # Default Question Routing = *"Client factual answer allowed; Producer
+    # final"*, Scoring Home = *"Loss History only"*, Key Rule = *"N/A / New
+    # Venture allowed"*. And Brent, answering Q8 on 2026-08-24: *"For now, skip
+    # shortcut and ASK CLIENT."*
+    #
+    # The `_AGENCY_PATTERNS` entry "prior_carrier" below made that impossible:
+    # the fact resolved to audience=producer / bucket=agency / suppressed, so
+    # the insured was NEVER asked who their current carrier is - a question they
+    # can answer instantly and the one fact the -10 Loss History deduction turns
+    # on. The July "prior carrier information is an AGENCY question"
+    # clarification is superseded here by the client's own section 9 table.
+    #
+    # SCOPE IS EXACTLY ONE KEY, and that is structural rather than careful:
+    # `whitelisted` is EXACT SET MEMBERSHIP over {field_name, base,
+    # canonical_key}, never a substring test, so `prior_carrier_naic` (a
+    # carrier-assigned code - principle 5) and `prior_policy_number` (the
+    # client's own "all policy numbers are AGENCY" ruling) keep matching
+    # `_AGENCY_PATTERNS` and stay producer-side. Pinned by test.
+    #
+    # "Producer final" is ALREADY built and is not re-implemented here: a client
+    # answer that materially disagrees with a document is HELD for the producer
+    # by `client_answer_review` (D12 / D17), and the Loss History card stays
+    # the producer's to resolve.
+    "prior_carrier",
 }
 
 # ── Narrative-supported answers (§6.3 item 2) — all 12 components evaluated ────

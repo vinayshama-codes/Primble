@@ -271,6 +271,11 @@ async def send_arq(
         # can never email a do-not-send field to the insured.
         if q.get("bucket") == BUCKET_DO_NOT_SEND or q.get("audience") == AUDIENCE_DO_NOT_SEND:
             continue
+        # V1 H3: a producer-only table (owners / officers) is never sent to the
+        # insured, whatever a crafted payload says - core principle 5.
+        if (q.get("field_type") == "schedule"
+                and schedule_capture.is_producer_only(str(q.get("schedule_key") or ""))):
+            continue
         si = q.get("score_impact") if isinstance(q.get("score_impact"), dict) else {}
         q_entry = {
             "field_name":    _sanitize_str(q.get("field_name", ""), 128),
@@ -331,7 +336,7 @@ async def send_arq(
             q_entry["columns"]           = _sdef["columns"]
             q_entry["dedup_keys"]        = _sdef["dedup_keys"]
             q_entry["vin_decode"]        = bool(_sdef["vin_decode"])
-            q_entry["row_capacity"]      = schedule_capture.ROW_CAPACITY
+            q_entry["row_capacity"]      = schedule_capture.capacity_for(_lk)
             q_entry["current_rows"]      = _rows
 
         clean_questions.append(q_entry)
@@ -460,8 +465,8 @@ async def client_view(token: str, request: Request):
         if q.get("field_type") == "schedule":
             _lk = q.get("schedule_key", "")
             _sdef = schedule_capture.get_def(_lk)
-            if _sdef is None:
-                continue
+            if _sdef is None or schedule_capture.is_producer_only(_lk):
+                continue                      # V1 H3: producer-only tables never render here
             _rows, _ = schedule_capture.validate_rows(_lk, q.get("current_rows") or [])
             # Master-plan 4.9 / core principle 5 (2026-08-26): a column flagged
             # `producer_only` is stripped from the CLIENT's copy of the table.
@@ -480,7 +485,7 @@ async def client_view(token: str, request: Request):
                 "columns":           _client_cols,
                 "dedup_keys":        _sdef["dedup_keys"],
                 "vin_decode":        bool(_sdef["vin_decode"]),
-                "row_capacity":      schedule_capture.ROW_CAPACITY,
+                "row_capacity":      schedule_capture.capacity_for(_lk),
                 "current_rows":      _rows,
             })
         questions_for_client.append(q_item)
@@ -1181,11 +1186,36 @@ async def save_session_schedule_route(
             session_id=session_id, user_id=str(current_user["id"]),
             form_id=None, field_name=f"schedule::{list_key}", fact_key=list_key,
             source="producer", previous_value=f"{_prev_n} row(s)",
+            record_unchanged=True,   # row COUNT can be unchanged while rows change
             new_value=f"{len(result.get('rows') or [])} row(s)",
             confidence="filled", model_version=SQS_MODEL_VERSION,
         )
     except Exception as _se:
         logger.warning(f"save_session_schedule_route: audit log failed: {_se}")
+
+    # V1 BETA EXIT (2026-08-28) - "Material changes trigger full recalculation."
+    # This endpoint wrote facts[list_key] and restamped the forms but never
+    # rescored, so a producer pre-loading `wc_class_codes`, `auto_vin_schedule`
+    # or `auto_drivers` here changed the very facts the H1 -10 / -15 rules and
+    # the 6.3 auto-completeness bucket read, and the score stayed stale until
+    # some unrelated trigger (a field edit, a client answer) happened to rebuild
+    # it. Every OTHER human-write path already recalculates - including the
+    # resolve-issue schedule mode, which calls the same `save_session_schedule`
+    # and then this same function - so this was the one save that did not.
+    #
+    # Non-fatal by design, exactly as on the field-edit and ARQ paths: the save
+    # itself has already succeeded and been audited, so a scoring failure must
+    # not turn a persisted change into a 500. `recalculate_session_scores`
+    # keeps the last good score on its own failure (H1-G) and re-applies
+    # outstanding dismissal credits (F5).
+    try:
+        from services.arq_service import recalculate_session_scores
+        await recalculate_session_scores(session_id)
+    except Exception as _re:
+        logger.error(
+            f"save_session_schedule_route: rescore failed (non-fatal): {_re}",
+            exc_info=True,
+        )
     return JSONResponse({"success": True, **result})
 
 

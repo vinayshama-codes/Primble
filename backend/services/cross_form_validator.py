@@ -592,13 +592,23 @@ def _check_wc_multi_state_payroll_breakdown(
         ))
         return issues
 
-    # If breakdown is present, verify it totals to ACORD 125 payroll
-    if isinstance(wc_by_state, list):
+    # If breakdown is present, verify it totals to ACORD 125 payroll.
+    # V1 H3 (2026-08-27): the merge has ALWAYS written this fact as a DICT
+    # ({state: amount}) and this branch only ever read a LIST, so the check
+    # below never ran on live data. Both shapes are read now; a free-text
+    # answer (a string) has no total and is left alone.
+    if isinstance(wc_by_state, dict):
+        amounts = list(wc_by_state.values())
+    elif isinstance(wc_by_state, list):
+        amounts = wc_by_state
+    else:
+        amounts = []
+    if amounts:
         state_total = sum(
             _to_float(
                 entry.get("payroll") if isinstance(entry, dict) else entry
             ) or 0
-            for entry in wc_by_state
+            for entry in amounts
         )
         tot_pay = _to_float(_fv(facts, "total_payroll"))
         if state_total > 0 and tot_pay and tot_pay > 0:
@@ -1129,6 +1139,30 @@ def _check_acord186_subcontracting_vs_gl_wc(
     issues: List[dict] = []
 
     if "ACORD_186" not in triggered_ids:
+        return issues
+
+    # V1 BETA EXIT (2026-08-28) - "WC-specific information no longer penalizes
+    # non-WC submissions." This was the ONE cross-form rule reading a WC fact
+    # with no WC gate. Measured before the fix: a GL-only roofing contractor
+    # (`has_workers_comp` False, forms 125/126/186, 40% subcontracted, no
+    # payroll) raised the HARD STOP below and its package fell 71 -> 60,
+    # demanding "Workers Comp payroll" from a submission that carries no
+    # Workers Comp line. The remediation asks for `wc_payroll`, so the producer
+    # could only clear it by inventing a WC figure.
+    #
+    # Both branches reason about WC payroll, so the gate is on the whole rule,
+    # in the same shape its five siblings already use (`ACORD_130 in
+    # triggered_ids`, two of them also reading the flag). Slightly broader than
+    # those - the flag alone is enough - so a genuine WC package that did not
+    # select ACORD 130 keeps the check. Strictly NARROWER than the behaviour it
+    # replaces, so it can only ever remove a false stop, never add one.
+    #
+    # NOTE the subcontractor exposure itself is a real GL concern; it is not
+    # lost, it is simply not stated as a missing WC figure. A GL-side rule for
+    # it would be a NEW validation rule (Principle 7 / the precedence note) and
+    # belongs to Brent, not to this fix.
+    # SCORES GO UP on GL-only contractor packages carrying ACORD 186 - D6.
+    if "ACORD_130" not in triggered_ids and not flags.get("has_workers_comp"):
         return issues
 
     pct_sub = _to_float(_fv(facts, "percent_subcontracted"))

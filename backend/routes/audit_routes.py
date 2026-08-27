@@ -1202,6 +1202,7 @@ async def resolve_issue(
                 session_id=req.session_id, user_id=str(current_user["id"]),
                 form_id=req.form_id, field_name=f"schedule::{list_key}",
                 fact_key=list_key, source="producer",
+                record_unchanged=True,   # row COUNT can be unchanged while rows change
                 previous_value=f"{_prev_n} row(s)",
                 new_value=f"{len(rows)} row(s)",
                 confidence="filled", model_version=SQS_MODEL_VERSION,

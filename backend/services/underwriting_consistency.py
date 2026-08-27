@@ -155,6 +155,51 @@ def _generic_label_pattern(label: str, shape: str) -> str:
     words = re.escape(label.strip()).replace(r"\ ", r"\s+")
     return rf"\b{words}\s*[:\-]\s*{shape}"
 
+
+# ── A LABEL QUALIFIED BY A FOREIGN SUBJECT IS NOT THIS FIELD'S LABEL ─────────
+# V1 H3-D, found on the first live WC run (2026-08-27). The bespoke pattern for
+# `effective_date` is `\b(?:policy\s+)?effective(?:\s+date)?...`, and `\b` sits
+# happily in the middle of
+#
+#     Experience Modification Effective Date: 07/13/2026
+#
+# so the X-Mod's effective date was scanned as a rival POLICY effective date.
+# Measured live: a false "Policy Effective Date - values differ" card, an
+# Important warning, and an SQS capped at 85 - on EVERY WC package that prints
+# a mod effective date. Confirmed by the control: the one package with no mod
+# date showed no conflict.
+#
+# This is the 2026-08-08 defect class again (a label regex capturing a
+# different field's value) and it takes the same shape of fix as H1-K's payroll
+# gate: a NECESSARY condition needs a STRUCTURAL second one. The label must not
+# be owned by another subject standing immediately in front of it.
+#
+# Deny-list, not allow-list, and deliberately: it can only ever DROP a scanned
+# rival candidate, never invent one. The worst case is that a genuine conflict
+# phrased this way stops being detected - which is exactly the behaviour before
+# this scanner existed - whereas the allow-list direction manufactures false
+# conflicts, which is the live defect.
+_FOREIGN_LABEL_QUALIFIERS = (
+    "experience", "modification", "mod", "x-mod", "xmod", "emod", "merit",
+    "rating", "anniversary", "retro", "retroactive", "audit", "birth",
+    "hire", "hired", "termination", "inspection", "quote", "bind", "binder",
+)
+_QUALIFIER_TAIL_CHARS = 48
+
+
+def _label_has_foreign_subject(text: str, start: int) -> bool:
+    """Do the words immediately before this match name a DIFFERENT subject?
+
+    Structural, never a distance window: only the text on the SAME line, and
+    only the last two words before the label - "Experience Modification" in
+    "Experience Modification Effective Date" - so a mod mentioned a sentence
+    earlier can never suppress a genuine policy date.
+    """
+    head = text[max(0, start - _QUALIFIER_TAIL_CHARS):start]
+    head = head.rsplit("\n", 1)[-1]          # same line only
+    words = re.findall(r"[A-Za-z][\w\-]*", head)
+    return any(w.lower() in _FOREIGN_LABEL_QUALIFIERS for w in words[-2:])
+
 # ── Plausibility floor for a scanned numeric value ───────────────────────────
 # The floor rejects a stray small number that happens to follow a label-ish
 # word ("Sales: 5" inside a ratio table). What counts as "stray" depends on
@@ -330,6 +375,12 @@ def _text_scan_values(text: str, fact_key: str) -> List[str]:
         for m in re.finditer(pattern, text, re.IGNORECASE):
             raw = (m.group(1) or "").strip()
             if not raw:
+                continue
+            # This field's label, or another subject's? See the constant above.
+            if _label_has_foreign_subject(text, m.start()):
+                logger.debug(
+                    "text scan: dropped %s=%r - label qualified by another "
+                    "subject", fact_key, raw)
                 continue
             if kind == "currency":
                 norm = _normalize_currency(raw)
@@ -703,6 +754,32 @@ def _normalize_text(value: Any) -> Optional[str]:
 
 
 def _normalize(value: Any, kind: str, fact_key: Optional[str] = None) -> Optional[str]:
+    # A MACHINE NON-VALUE IS NOT A CANDIDATE (V1 H7-D, live run 2026-08-27).
+    #
+    # `_normalize("null", "date")` used to return `'null'` - truthy, so the
+    # string sailed through every `if not norm: continue` guard and became a
+    # rival VALUE. On the H7 live fixture the extractor emitted a bare "null"
+    # for a coverage line that prints no dates, and the picker then reported
+    # *"Policy Effective Date: documents disagree (09/17/2026, null)"* plus the
+    # same for the expiration - TWO false hard stops capping a perfectly
+    # consistent package at 60.
+    #
+    # This module ALREADY knew the rule: `_fv` (line ~701) drops exactly
+    # ""/"null"/"none" when reading a scalar fact. It was simply never applied
+    # on the paths that build candidate groups (per-coverage-line and text
+    # scan), so there were two copies of "what counts as a non-value" and only
+    # one of them ran - the same one-rule-two-copies shape as C1's five
+    # comparison sites and H1-C's phantom keys.
+    #
+    # Scope is deliberately narrow: only the MACHINE's own spellings of "no
+    # value found". A human typing "None" is an ANSWER with no value and is
+    # handled by `answer_semantics` on a different path (C2-G) - this function
+    # only ever sees document-extracted candidates.
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in ("", "null", "none"):
+        return None
+
     # "identity" routes through the Workstream-2 normalization layer so the
     # picker uses the SAME equivalence rules as the cross-document conflict
     # detectors. normalize_value() dispatches by fact_key (name/date/entity/

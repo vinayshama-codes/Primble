@@ -359,6 +359,21 @@ def _coerce_typed(kind: Optional[str], text: str) -> Optional[str]:
 _UNREADABLE: List[dict] = []          # coverage evidence, see unresolved_answers()
 
 
+def _is_required_fact(fact_key: str, entry: Optional[dict]) -> bool:
+    """Does the submission structurally require this fact to carry a value?
+
+    Read off FACT_REGISTRY's own `required` flag rather than a second list here
+    - the registry already states it, and a fact added there inherits the rule
+    without anyone remembering this function exists.
+    """
+    try:
+        if entry is None:
+            entry = _registry_entry(fact_key)
+        return bool((entry or {}).get("required"))
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
 def interpret_answer(fact_key: str, answer: Any,
                      entry: Optional[dict] = None) -> Interpretation:
     """Interpret one human answer for one fact. Pure and deterministic."""
@@ -407,6 +422,36 @@ def interpret_answer(fact_key: str, answer: Any,
     coerced = _coerce_typed(kind, stripped)
     if coerced is not None:
         return out(VALUE, value=coerced, reason=f"typed:{kind}")
+
+    # 2b. A FACT THE SUBMISSION CANNOT EXIST WITHOUT IS NEVER "not applicable"
+    #     AND NEVER "there is none" (V1 H4, 2026-08-27).
+    #
+    #     Brent's ruling - *"we can't treat 'N/A' as '0' ... 'No known losses'
+    #     is a legitimate answer"* - is about facts whose ABSENCE is meaningful:
+    #     a prior carrier, a claim count, an X-Mod. It was never about the
+    #     applicant's legal name. But `fact_answered` credits BOTH absence
+    #     states, `sqs_service._answered` reads it for Tier 1, and
+    #     `_tier2_not_applicable` removes a not_applicable fact from the Tier 2
+    #     DENOMINATOR - so "Applicant legal name = N/A" scored as ANSWERED, and
+    #     one word typed into every question produced a perfect Structural
+    #     pillar. That is the defect the register already records as measured
+    #     and fixed once ("'N/A' in every Tier-2 field scored 100"); it survived
+    #     on this path because `arq_service._clean_answer_ex` happened to be
+    #     discarding the words before they reached here. Closing F15 removed
+    #     that accident, so the rule has to be stated where it belongs - at the
+    #     one door, which fixes the PRODUCER path in the same stroke.
+    #
+    #     The set is DERIVED, never hand-listed: `required: True` in
+    #     FACT_REGISTRY already means "this submission is not a submission
+    #     without it". A new required fact inherits the rule automatically.
+    #     Everything else keeps Brent's behaviour exactly.
+    if _is_required_fact(fact_key, entry) and (
+            stripped in _NA_TOKENS or _NA_RE.search(text)
+            or stripped in _ABSENCE_TOKENS):
+        return out(UNKNOWN, reason="required_cannot_be_absent", message=(
+            "This one is needed to submit the application, so it cannot be "
+            "marked not applicable. Please enter the value, or leave it blank "
+            "if you do not have it yet and we will keep asking."))
 
     # 3. INAPPLICABILITY - a real answer, per Brent: N/A is not zero.
     if stripped in _NA_TOKENS or _NA_RE.search(text):

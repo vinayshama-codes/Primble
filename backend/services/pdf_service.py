@@ -573,6 +573,35 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     "WorkersCompensation_RateClass_DutiesDescription":  _ScheduleDef("wc_class_codes", "description"),
     "WorkersCompensation_RateClass_RemunerationAmount": _ScheduleDef("wc_class_codes", "payroll"),
     "WorkersCompensation_RateClass_Rate":               _ScheduleDef("wc_class_codes", "rate"),
+    # V1 H3 (client 8.1, 2026-08-27): the per-group employee counts - the two
+    # boxes ACORD 130 prints beside every rating row, previously handed to the
+    # gap-fill LLM with the company-wide headcount in view.
+    "WorkersCompensation_RateClass_FullTimeEmployeeCount": _ScheduleDef("wc_class_codes", "full_time_employees"),
+    "WorkersCompensation_RateClass_PartTimeEmployeeCount": _ScheduleDef("wc_class_codes", "part_time_employees"),
+    # The carrier's own description code: OWNED by the schedule so it is
+    # right-or-blank (client 8.3 - a code box the model must never fill from
+    # prose). No row carries it today, so it prints blank.
+    "WorkersCompensation_RateClass_DescriptionCode":    _ScheduleDef("wc_class_codes", "description_code"),
+    # STATE, from the rows (positive evidence only - see `_resolve_schedule_row`):
+    #   * PartOne_A..J = the DISTINCT states the rows name, one per row letter;
+    #   * the rating sheet's state label = the ONE state every row shares
+    #     (our template prints a single sheet; two states leave it blank).
+    "WorkersCompensation_PartOne_StateOrProvinceCode":  _ScheduleDef("wc_class_codes", "state"),
+    "WorkersCompensation_RateState_StateOrProvinceName": _ScheduleDef("wc_class_codes", "_wc_sheet_state"),
+    # OWNED, so nothing inside a rating row can be invented (V1 H3-D, live run).
+    # A per-class SIC / NAICS is CLASSIFICATION (client 8.3) and a location
+    # number is the producer's own filing convention: right-or-blank, never a
+    # guess. Live: the applicant's NAICS was stamped against row A alone, on a
+    # package whose rating table was otherwise empty.
+    "WorkersCompensation_RateClass_SICCode":            _ScheduleDef("wc_class_codes", "sic_code"),
+    "WorkersCompensation_RateClass_NAICSCode":          _ScheduleDef("wc_class_codes", "naics_code"),
+    "WorkersCompensation_RateClass_LocationProducerIdentifier": _ScheduleDef("wc_class_codes", "location_number"),
+    # PART 3 - OTHER STATES INSURANCE. Part 3 means "states NOT listed in Part 1
+    # where the applicant may have operations", so copying Part 1 into it is a
+    # contradiction. Live on all three packages: W2 printed "CO TX" in BOTH, and
+    # W3 printed "CO" in Part 3 with Part 1 blank. No fact states other-states
+    # coverage, so this is an owned blank until one does.
+    "WorkersCompensation_PartThree_StateOrProvinceCode": _ScheduleDef("wc_class_codes", "_wc_never"),
 
     # ── WC Officers / Owners (ACORD 130) ───────────────────────────────────
     "Officer_FullName":              _ScheduleDef("wc_officers", "name"),
@@ -590,6 +619,36 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
     "WorkersCompensation_Individual_FullName":              _ScheduleDef("wc_officers", "name"),
     "WorkersCompensation_Individual_TitleRelationshipCode": _ScheduleDef("wc_officers", "title"),
     "WorkersCompensation_Individual_OwnershipPercent":      _ScheduleDef("wc_officers", "ownership_pct"),
+    # V1 H3 (client 8.2, 2026-08-27). Included / Excluded is now MAPPED - the
+    # two extracted booleans (or the word a producer typed) become the INC /
+    # EXC code through `coverage_evidence.officer_treatment_code`, the one
+    # reader the 6.4 check also uses. State prints from the row. The officer's
+    # rating class code is OWNED (blank unless a row carries it) - client 8.3,
+    # the last code box the LLM could still fill from prose.
+    "WorkersCompensation_Individual_StateOrProvinceCode":     _ScheduleDef("wc_officers", "state"),
+    "WorkersCompensation_Individual_IncludedExcludedCode":    _ScheduleDef("wc_officers", "include_exclude"),
+    "WorkersCompensation_Individual_RatingClassificationCode": _ScheduleDef("wc_officers", "class_code"),
+    # THE REST OF THE OFFICER ROW, OWNED (V1 H3-D, 2026-08-27). These four were
+    # the only unbound columns left in the family, so they fell to gap fill -
+    # and the model filled them from the EMPLOYEE-GROUP table sitting beside
+    # them. Measured live on all three packages: W1 grew a third "officer"
+    # whose duties were "Roofing installation" earning $520,000; W2, with NO
+    # officers at all, printed three officer rows carrying the three group
+    # payrolls ($90,000 / $410,000 / $300,000); W3 printed $640,000 as an
+    # officer's pay.
+    #
+    # Binding them is the fix rather than widening the phantom-row capacity:
+    # `_resolve_phantom_schedule_row` keys capacity on the FIRST name segment,
+    # so `WorkersCompensation_Individual_*` and `_RateClass_*` share one
+    # capacity - the max of two unrelated lists. Narrowing that is a change to
+    # the Vehicle family's documented "supported by EITHER list" rule, which is
+    # deliberately conservative. Owning the columns fixes the wrong values
+    # without touching it: a row past the officer list resolves to None, and a
+    # column no row carries resolves to None. Right-or-blank either way.
+    "WorkersCompensation_Individual_BirthDate":               _ScheduleDef("wc_officers", "dob"),
+    "WorkersCompensation_Individual_DutiesDescription":       _ScheduleDef("wc_officers", "duties"),
+    "WorkersCompensation_Individual_RemunerationAmount":      _ScheduleDef("wc_officers", "remuneration"),
+    "WorkersCompensation_Individual_LocationProducerIdentifier": _ScheduleDef("wc_officers", "location_number"),
 
     # ── Additional Named Insureds (ACORD 125) ────────────────────────────────
     # row_offset=1: _A is the primary insured scalar, _B onward are additional
@@ -752,6 +811,20 @@ _SCHEDULE_REGISTRY: Dict[str, "_ScheduleDef"] = {
 
 _SCHED_ROW_RE = re.compile(r"^(.+)_([A-N])$")
 
+# ── V1 H3: WC cells that are DERIVED from the rows rather than indexed ────────
+# `_resolve_schedule_row` answers these from `coverage_evidence` (the one WC
+# row reader) instead of `items[idx][sub_key]`. Positive evidence only; no rows
+# or disagreeing rows -> None, which is an owned blank the producer sees.
+_WC_SHEET_STATE_KEY = "_wc_sheet_state"          # the single rating sheet's state
+_WC_OFFICER_TREATMENT_KEY = "include_exclude"    # INC / EXC from booleans or text
+# A cell that is OWNED and always blank: bound purely so gap fill can never be
+# asked about it. Part 3 Other-States is the live case - see the registry.
+_WC_NEVER_KEY = "_wc_never"
+# Bases whose row letters index the DISTINCT values of `sub_key` across the
+# list (Part 1 states: three groups in CO and one in TX print CO, TX - not
+# CO, CO, CO, TX).
+_WC_DISTINCT_STATE_BASES = frozenset({"WorkersCompensation_PartOne_StateOrProvinceCode"})
+
 
 def repeating_group_key(field_name: str, tooltip: Optional[str]):
     """Repeating-group identity for a gap-fill slot field: ``(base, tooltip)``.
@@ -876,6 +949,19 @@ def _resolve_schedule_row(field_name: str, facts: dict):
     if defn.list_key in _NAME_ONLY_INVALID_SCHEDULES and isinstance(items, list) \
             and items and not _schedule_has_substance(defn.list_key, items):
         return None
+    # V1 H3 - an owned, permanently blank cell (Part 3 Other States).
+    if defn.sub_key == _WC_NEVER_KEY:
+        return None
+    # V1 H3 - state cells derived from the employee-group rows (one reader).
+    if defn.sub_key == _WC_SHEET_STATE_KEY or base in _WC_DISTINCT_STATE_BASES:
+        try:
+            from services.coverage_evidence import wc_class_row_states, wc_class_shared_state
+        except Exception:                                     # noqa: BLE001
+            return None                                       # fail closed: blank
+        if defn.sub_key == _WC_SHEET_STATE_KEY:
+            return wc_class_shared_state(items) if list_idx == 0 else None
+        states = wc_class_row_states(items)
+        return states[list_idx] if list_idx < len(states) else None
     if not isinstance(items, list) or list_idx >= len(items):
         logger.debug(
             f"schedule_row: field={field_name!r} list={defn.list_key!r} "
@@ -890,6 +976,12 @@ def _resolve_schedule_row(field_name: str, facts: dict):
         if defn.sub_key in (_NAME_GIVEN_KEY, _NAME_SURNAME_KEY):
             given, surname = _split_driver_name(item.get("name"))
             val = given if defn.sub_key == _NAME_GIVEN_KEY else surname
+        elif defn.sub_key == _WC_OFFICER_TREATMENT_KEY:
+            try:
+                from services.coverage_evidence import officer_treatment_code
+                val = officer_treatment_code(item)
+            except Exception:                                 # noqa: BLE001
+                val = None
         else:
             val = item.get(defn.sub_key)
         if val in (None, "") and defn.sub_key in _VEHICLE_SYMBOL_SUBKEYS:
@@ -2062,6 +2154,9 @@ def _resolve_phantom_schedule_row(field_name: str, facts: dict):
 # three. Unit tests missed it because they called `_deterministic_map` directly
 # and never exercised the routing above it.
 _AUTHORITATIVE_BLANK_RESOLVERS = (
+    # ACORD 130 rating factors: the experience mod or blank. A factor gap fill
+    # invents misstates the premium (V1 H3-D).
+    "_resolve_wc_premium_cell",
     "_resolve_prior_coverage_cell",
     "_resolve_current_policy_line_cell",
     # Section-form header identity: a policy number / carrier+NAIC pair /
@@ -6586,15 +6681,15 @@ _INDICATOR_RULES: Dict[str, Tuple[str, str]] = {
     "GeneralLiability_OccurrenceIndicator":    ("gl_form_type", "occurrence"),
     "GeneralLiability_ClaimsMadeIndicator":    ("gl_form_type", "claims"),
     # Named insured entity type — longer/more-specific substrings first
-    "NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator": ("entity_type", "llc"),
-    "NamedInsured_LegalEntity_SubchapterSCorporationIndicator": ("entity_type", "s-corp"),
-    "NamedInsured_LegalEntity_CorporationIndicator": ("entity_type", "corporation"),
-    "NamedInsured_LegalEntity_PartnershipIndicator": ("entity_type", "partnership"),
-    "NamedInsured_LegalEntity_IndividualIndicator":  ("entity_type", "individual"),
-    "NamedInsured_LegalEntity_NotForProfitIndicator": ("entity_type", "non-profit"),
-    "NamedInsured_LegalEntity_TrustIndicator": ("entity_type", "trust"),
-    "NamedInsured_LegalEntity_JointVentureIndicator": ("entity_type", "joint venture"),
-    "NamedInsured_LegalEntity_OtherIndicator": ("entity_type", "other"),
+    # THE NINE LEGAL-ENTITY RULES LIVED HERE AND WERE REMOVED (V1 H4,
+    # 2026-08-27). They were nine independent substring tests over one
+    # mutually-exclusive box group, which is the exact shape that ticked two
+    # ACORD 127 USE boxes (H1-F) - and they got "Sole Proprietorship",
+    # "S Corporation" and "Non-Profit Corporation" wrong, and asserted nine
+    # explicit "No"s on any value they did not recognise.
+    # `_resolve_legal_entity_indicator` now owns the whole group and runs
+    # BEFORE this table. Do not add an entity_type row back here: a tenth
+    # substring rule cannot see the other nine, which is the entire defect.
     # Lines of business — primary: flags booleans (has_*) from extraction; fallback: lines_of_business list
     "Policy_LineOfBusiness_BusinessAutoIndicator":          ("has_auto_coverage",      "yes"),
     # V1 H1 6.3: the ACORD 127 USE column is NOT here. Seven independent
@@ -6926,6 +7021,91 @@ def _derive_symbol_indicator(field_name: str, facts: dict) -> Optional[str]:
     return "Yes" if match.number in designated else "No"
 
 
+# ── ACORD legal-entity boxes: ONE owner, per family - V1 H4, 2026-08-27 ──────
+# Copied in contract from `_resolve_vehicle_use_indicator`, which exists because
+# "seven independent substring rules ticked two mutually exclusive boxes on an
+# ordinary multi-word value" (the ACORD 127 USE column, H1-F). The nine entity
+# boxes were the same shape one form over, and the substring rules got these
+# wrong, measured against the real schemas on 2026-08-27:
+#   "Sole Proprietorship"     -> NO box ticked at all (ACORD's box is Individual)
+#   "S Corporation"           -> Corporation, not SubchapterSCorporation
+#   "Non-Profit Corporation"  -> Corporation AND NotForProfit both ticked in
+#                                Pass 1 (Guard 1 then collapses to the WRONG one)
+#   "Association" / "Municipality or Government Entity" -> nothing ticked
+#   ANY unrecognised value, and even the EMPTY STRING -> nine explicit "No"s,
+#                                and the boxes never reach gap fill at all.
+# ACORD's own tooltip decides the shape: *"Indicates the legal entity CODE for
+# the named insured IS 'Corporation'"* - singular, mutually exclusive.
+#
+# THE TWO FORMS PRINT DIFFERENT SETS, verified by reading all 17 schemas:
+#   ACORD 125  Corporation Individual JointVenture LimitedLiabilityCorporation
+#              NotForProfit Partnership SubchapterSCorporation Trust Other
+#   ACORD 130  Corporation SoleProprietor JointVenture LimitedLiabilityCorporation
+#              Partnership SubchapterSCorporation Trust UnincorporatedAssociation
+#              Other        (no Individual, no NotForProfit)
+# so the family maps to a SET of acceptable box words, not to one name.
+_ENTITY_BOX_WORDS: Dict[str, frozenset] = {
+    "individual":     frozenset({"Individual", "SoleProprietor"}),
+    "partnership":    frozenset({"Partnership"}),
+    "llc":            frozenset({"LimitedLiabilityCorporation"}),
+    "corporation":    frozenset({"Corporation"}),
+    "s_corporation":  frozenset({"SubchapterSCorporation"}),
+    "not_for_profit": frozenset({"NotForProfit"}),
+    "joint_venture":  frozenset({"JointVenture"}),
+    "trust":          frozenset({"Trust"}),
+}
+_ENTITY_BOX_RE = re.compile(
+    r"^NamedInsured_LegalEntity_(?P<word>[A-Za-z]+)Indicator_[A-N]$")
+
+
+def _resolve_legal_entity_indicator(field_name: str, facts: dict) -> Optional[str]:
+    """Tick EXACTLY the box for this named insured's legal entity family.
+
+    Returns None - meaning "no opinion, leave it to the ordinary path" - in the
+    two cases where an opinion would be a guess:
+
+      * the entity type is absent, blank, or unrecognisable. Nine explicit
+        "No"s would assert the insured is none of the nine, which is core
+        principle 3 (missing does not mean No) written on a legal document, and
+        it also kept the boxes out of gap fill entirely. Returning None sends
+        them to the evidence-gated fill, and `_enforce_post_fill_guards`'
+        legal-entity collapse still stops the model ticking two.
+      * the family is `other` (Association, Municipality, a co-operative...).
+        Ticking `OtherIndicator` without its paired
+        `NamedInsured_LegalEntity_OtherDescription` is a naked affirmative, and
+        the post-fill guard blanks those anyway - so the tick would be silently
+        undone. Right-or-blank: leave it to gap fill, which can supply both.
+
+    Row scoping is inherited, not re-implemented: `_deterministic_map` passes
+    `allow_scalar_rules=False` for non-primary rows, so a policy-level scalar
+    can never answer the 2nd or 3rd Named Insured's boxes (the 2026-08-10
+    defect). This resolver is reached only on the primary row.
+    """
+    m = _ENTITY_BOX_RE.match(field_name or "")
+    if not m:
+        return None
+    try:
+        from services.normalization import entity_family
+        family = entity_family(_fv(facts, "entity_type"))
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("legal-entity resolver unavailable: %s", exc)
+        return None
+    if not family or family == "other":
+        return None
+    wanted = _ENTITY_BOX_WORDS.get(family)
+    if not wanted:
+        return None
+    word = m.group("word")
+    if word in wanted:
+        return "Yes"
+    # A box this form prints for a DIFFERENT family. "No" is the honest answer
+    # precisely because the family IS known and the nine are mutually exclusive.
+    if word in {w for ws in _ENTITY_BOX_WORDS.values() for w in ws} | {
+            "Other", "UnincorporatedAssociation"}:
+        return "No"
+    return None
+
+
 def _derive_indicator(field_name: str, facts: dict,
                       allow_scalar_rules: bool = True) -> Optional[str]:
     """Return 'Yes'/'No' for indicator/checkbox fields based on extracted facts.
@@ -6950,6 +7130,14 @@ def _derive_indicator(field_name: str, facts: dict,
     sym_ind = _derive_symbol_indicator(field_name, facts)
     if sym_ind is not None:
         return sym_ind
+
+    # Legal-entity boxes - one owner, for the same reason the symbol grid has
+    # one: a set of mutually exclusive checkboxes cannot be expressed as
+    # independent substring rules. See _resolve_legal_entity_indicator.
+    if allow_scalar_rules:
+        ent_ind = _resolve_legal_entity_indicator(field_name, facts)
+        if ent_ind is not None:
+            return ent_ind
 
     fn_lower = field_name.lower()
     # Loss-history "No Prior Losses" is evidence-driven and multi-input — resolve
@@ -8118,6 +8306,48 @@ def _resolve_umbrella_hired_nonowned(field_name: str, facts: dict):
             f"premium schedules.")
 
 
+_WC_RATING_FACTOR_RE = re.compile(
+    r"^WorkersCompensationStateCoverage_(\w+?)_ModificationFactor_[A-N]$")
+_WC_PREMIUM_STATE_RE = re.compile(
+    r"^WorkersCompensation_RateState_StateOrProvinceName_[A-N]\d$")
+
+
+def _resolve_wc_premium_cell(field_name: str, facts: dict):
+    """The ACORD 130 premium block: a rating factor is stated or blank.
+
+    V1 H3-D, from the first live run. Every
+    `WorkersCompensationStateCoverage_*_ModificationFactor_*` box was unbound
+    and went to gap fill, which filled them from whatever number was nearest:
+
+      * INCREASED LIMITS  = `1,000,000` - the EMPLOYERS LIABILITY limit, stamped
+        as a rating MULTIPLIER;
+      * ASSIGNED RISK SURCHARGE = `0.92` / `1.05` - the experience mod copied
+        into a surcharge that has nothing to do with it.
+
+    A rating factor is the carrier's arithmetic. The ONE we hold as a fact is
+    the experience modification (`wc_xmod`, D43); every other row is blank
+    until a carrier states it. Same right-or-blank contract as D45 - a wrong
+    multiplier on a rating sheet misstates the premium.
+
+    Also owns the premium block's own STATE label (`..._A1`), which does not
+    match `_SCHED_ROW_RE` (two trailing characters) and so escaped the
+    schedule binding: live, it printed "CO" on a two-state package where the
+    rating sheet immediately above it had correctly refused to name a state.
+    """
+    m = _WC_RATING_FACTOR_RE.match(field_name or "")
+    if m:
+        if m.group(1) == "ExperienceOrMerit":
+            return _fv(facts, "wc_xmod") or None
+        return None                       # owned blank - never gap fill
+    if _WC_PREMIUM_STATE_RE.match(field_name or ""):
+        try:
+            from services.coverage_evidence import wc_class_shared_state
+            return wc_class_shared_state(_fv(facts, "wc_class_codes"))
+        except Exception:                                 # noqa: BLE001
+            return None                                   # fail closed: blank
+    return _SCHED_SKIP
+
+
 def _deterministic_map(field_name: str, facts: dict):
     # ── Conflicted facts: the picker owns the decision, the box stays blank ─
     # Before EVERY other door - a withheld fact must not stamp through the
@@ -8125,6 +8355,11 @@ def _deterministic_map(field_name: str, facts: dict):
     conflicted = _resolve_conflicted_fact_blank(field_name, facts)
     if conflicted is not _SCHED_SKIP:
         return conflicted
+
+    # ── ACORD 130 premium block: a stated factor or a blank, never a guess ──
+    wc_prem = _resolve_wc_premium_cell(field_name, facts)
+    if wc_prem is not _SCHED_SKIP:
+        return wc_prem
 
     # ── Coverage declared ABSENT: the whole family is an owned blank ─────────
     # Before every line-scoped resolver: a "No Coverage" line must not fill a

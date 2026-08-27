@@ -435,6 +435,60 @@ stored Resolve/Dismiss marks (it never did - a refresh forgot them). **The label
 generation** (C75 re-promotion + fill rate) - D6, tell Brent. Tests:
 `tests/test_h2_readiness_presentation.py` (33).
 
+### Workers Compensation Data Capture (client section 8, V1 H3) - SHIPPED + LIVE-VERIFIED 2026-08-27
+**Read `v1-20AUG.md` H3-A (audit) / H3-B (build) / H3-D (live run 1 - SEVEN defects) /
+H3-E (live run 2) and D44-D47 before touching any WC path, `schedule_capture`, the ACORD
+130 bindings, or `underwriting_consistency`'s text scan.** The client: capture WC exposure per
+EMPLOYEE GROUP (group + duties, full-time, part-time, annual payroll, state, known class
+code), keep the 8.2 facts, and NEVER generate or recommend a WC class code.
+
+**Root cause was one class:** WC exposure existed only as a rating table the FORM reads,
+never as a fact a HUMAN can enter - every WC input was a free-text box over a list fact,
+invisible to the stamper, the scorer and the 130 checklist. Same class as Figure 15 / H1-E.
+
+**What shipped:** two tables on the EXISTING facts (Principle 1) - `wc_class_codes`
+(client; `code` / `rate` columns producer-only) and `wc_officers` (whole table producer-only,
+4 rows; new `ScheduleDef(producer_only, row_capacity)`); extraction v17 adds the two
+per-class employee counts; new ACORD 130 bindings for FT / PT counts, Part 1 states (the
+DISTINCT row states), the rating-sheet state (only when every row shares one), officer
+state and INC / EXC (from the booleans or a typed word - `coverage_evidence.
+officer_treatment_code`, the same reader the 6.4 check uses); `wc_payroll_by_state` DERIVED
+from a COMPLETE table (every row has state + payroll), labelled derived, never over a stated
+value, recomputed on every save (`extraction_service.derive_wc_facts_from_class_rows`, run
+from the merge tail AND both schedule-save paths); compound code cells ("8810 Clerical")
+split into code + wording; rating rows de-duplicate across chunks on code + state + payroll.
+
+**Bugs fixed on the way:** `_check_wc_multi_state_payroll_breakdown` reconciled only a
+LIST while the merge has always written a DICT - the 10% state-total hard stop had never
+run live (it can now cap packages at 60 - D6, scores DOWN); the officer and description
+code boxes reached the LLM with no table (8.3 leak, now owned blanks - D45); the
+multi-state hard stop's Resolve opened a note, now the table.
+
+**Scores move (D6):** filling the table retires the -10 "no WC class codes" and the -3
+payroll-period item (a typed annual column is annual by construction). No new score rule -
+section 8 defines none (Principle 7). Q29 (rows do not sum to stated payroll) NOT built.
+
+**LIVE RUN 1 FOUND SEVEN DEFECTS (H3-D), all fixed and pinned.** The FORM was right on
+the first attempt; everything that had to reach a HUMAN was not. Headlines: **both WC
+tables were built, routed, then hidden** because `question_text`'s default template began
+with `_MACHINE_QUESTION_PREFIX` (D46) - so the client's whole section 8 capture was
+invisible while 54 unit tests passed; the officer row's four unbound columns were filled
+from the employee-group table beside them (**W2 printed three officers on a package with
+none**); Part 3 Other-States copied Part 1; rating factors were invented (INCREASED LIMITS
+carried the $1,000,000 EL limit); and the X-Mod's effective date was read as the POLICY's,
+raising a false conflict and an 85 cap on every WC package printing a mod date (D47).
+**Round 2 (H3-E) confirmed six of the seven live**; the seventh needs the pre-form screen.
+
+**Still to test (H3-E):** the pre-form screen; the W3 producer step (8.3 "retain
+producer-entered codes", the only clause never seen live); the client questionnaire link.
+**Observed, NOT fixed, none of them section 8:** an invented `# CLAIMS` in the
+prior-carrier grid, label text in the premium block's Other cells, a second officer's
+title that extraction missed.
+
+Tests: `tests/test_h3_wc_data_capture.py` (64, all against the real ACORD 130 schema).
+Suite **4761 passed / 1 failed** (the documented `httpx` ImportError). No frontend change -
+both tables render through the existing spec-driven `ScheduleTable`.
+
 ### Coverage-Specific SQS Gap Closure (client section 6, V1 H1) - SHIPPED 2026-08-26
 **Read `v1-20AUG.md` H1-A / H1-B / H1-C and D39-D43 before touching any auto or WC
 scoring, the coverage flags, or `services/coverage_evidence.py`.** The client's
@@ -2098,6 +2152,24 @@ environment.
 Both exist in the repo but neither runs automatically at startup (confirmed: only
 `init_db()` is called from `main.py`) — they are legacy/inactive paths. Adding a
 column there will not reach a real deployment.
+
+## SUITE BASELINE - corrected 2026-08-27
+
+`py -m pytest -q -p no:randomly` from `backend/` -> **4824 passed, 1 failed, 14 skipped.**
+
+The ONE failure is `test_arq_acord125_missing_only` (the documented `httpx`/`openai`
+`ImportError: cannot import name 'URL' from 'httpx'`).
+
+**Every older note in this file claiming TWO pre-existing failures is STALE.**
+`test_normalization` was the second one and it is GREEN at HEAD (28 passed, verified
+2026-08-27). Do not use the old "2 failed" line as cover for a red `test_normalization` -
+that would be waving through a real regression.
+
+**Always baseline with `-p no:randomly`.** The default run reports more failures because the
+suite uses `pytest-randomly` and carries pre-existing cross-test pollution; those pass
+individually and file-at-a-time.
+
+---
 
 ## Working Rules (owner)
 

@@ -50,8 +50,8 @@ logger = logging.getLogger(__name__)
 # model still filled one of them from the operations text, which turned a
 # -15 into a -10. No schema change; the version moves so the five live
 # packages re-extract under the stricter rule instead of serving v15 replies.
-PROMPT_VERSION = "v16"
-SCHEMA_VERSION = "v16"
+PROMPT_VERSION = "v17"
+SCHEMA_VERSION = "v17"
 
 # ── Extraction chunk sizing ───────────────────────────────────────────────────
 # This used to be one hand-typed literal:
@@ -277,7 +277,9 @@ _EXTRACT_SCHEMA = (
     '  "auto_vin_schedule": [{"year": string, "make": string, "model": string, "vin": string, "body_type": string or null, "gvw": string or null, "comp_symbol": string or null, "coll_symbol": string or null}],\n'
     '  "auto_garaging_addresses": [string],\n'
     # WC class codes: one object per class code row
-    '  "wc_payroll": string or null, "wc_payroll_by_state": {}, "wc_class_codes": [{"code": string, "description": string, "state": string or null, "payroll": string or null, "rate": string or null}],\n'
+    # v17 (V1 H3, client 8.1): the per-class employee counts ACORD 130 prints
+    # beside every rating row. Read only when the table prints them (RULE 3).
+    '  "wc_payroll": string or null, "wc_payroll_by_state": {}, "wc_class_codes": [{"code": string, "description": string, "state": string or null, "payroll": string or null, "rate": string or null, "full_time_employees": string or null, "part_time_employees": string or null}],\n'
     '  "wc_xmod": string or null, "wc_xmod_effective_date": string or null,\n'
     '  "wc_officer_exclusions": string or null,\n'
     '  "wc_monopolistic_payroll": {"state": "amount"},\n'
@@ -3075,9 +3077,42 @@ def _coverage_line_dedup_keys(item: dict) -> List[str]:
 # Bespoke key functions, for schedules needing MORE than the generic identifier
 # scan (auto_drivers also matches on name+dob so a row missing its licence
 # number still merges). Every other schedule uses _natural_id_keys.
+def _wc_class_dedup_keys(item: dict) -> List[str]:
+    """Identity of ONE employee-group / rating row: class code + state +
+    payroll (V1 H3, 2026-08-27).
+
+    `_natural_id_keys` finds nothing on these rows (no VIN, no licence), so a
+    class table printed on the dec page AND the rating sheet survived the chunk
+    union twice. Code + state alone would be WRONG: ACORD 130 prints one row
+    per class per LOCATION, so two 5551 rows in CO with different payrolls are
+    two real rows, and folding them keeps only the first payroll. The payroll
+    figure is the third key, so only an exact reprint of the same row folds.
+    A row missing any of the three gets NO key and is never merged.
+
+    THE CODE IS READ THROUGH `coverage_evidence.wc_class_code_token`, the same
+    door the normaliser uses. A raw strip was tried first and was WRONG: the
+    identity runs BEFORE normalisation, so a premium summary printing
+    "8810 Clerical" and a rating sheet printing "8810" produced two different
+    keys, both rows survived, and the payroll-by-state derived from them
+    doubled. Caught on the H3 live dry run, not by a unit test - the unit test
+    fed both printings in the same shape.
+    """
+    try:
+        from services.coverage_evidence import wc_class_code_token
+        code = wc_class_code_token(item).upper()
+    except Exception:                                     # noqa: BLE001
+        code = re.sub(r"[^0-9A-Za-z]", "", str(item.get("code") or "")).upper()
+    state = str(item.get("state") or "").strip().upper()
+    pay = re.sub(r"[^\d]", "", str(item.get("payroll") or ""))
+    if not (code and state and pay):
+        return []
+    return [f"wc_class:{code}:{state}:{pay}"]
+
+
 _SCHEDULE_DEDUP_KEYS: Dict[str, Any] = {
     "auto_drivers": _driver_dedup_keys,
     "coverage_lines": _coverage_line_dedup_keys,
+    "wc_class_codes": _wc_class_dedup_keys,
 }
 
 
@@ -7876,6 +7911,71 @@ def _union_list_fact(list_key: str, primary_rows: list, merged_rows: list) -> li
         return list(primary_rows)
 
 
+_WC_BY_STATE_RULE = "wc_payroll_by_state_from_class_rows"
+
+
+def derive_wc_facts_from_class_rows(facts: dict) -> bool:
+    """V1 H3 (client 8.1 / 8.2 / 8.3): what the employee-group rows already say.
+
+    Two things, both deterministic, both from POSITIVE evidence only:
+      1. every `wc_class_codes` row is tidied (`coverage_evidence.
+         normalize_wc_class_row` - "8810 Clerical" becomes code 8810 + wording;
+         client 8.3 "normalize known formatting");
+      2. `wc_payroll_by_state` is DERIVED as {state: summed payroll} when EVERY
+         row carries both a state and a payroll - a complete table is a
+         statement of payroll by state, a partial one is not (H1-F class).
+         Labelled `evidence_state: derived` with its rule (E&O 5.7). Never
+         overwrites a STATED value; a value this rule wrote earlier is
+         re-computed, so an edited table never leaves a stale derivation.
+
+    Called from the merge tail (documents) and from both schedule-save paths
+    (a producer pre-load, a client answer), so the fact is the same whoever
+    supplied the rows. Returns True when anything changed.
+    """
+    try:
+        from services.coverage_evidence import (
+            normalize_wc_class_row, wc_payroll_by_state_from_rows,
+        )
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("wc row derivations unavailable: %s", exc)
+        return False
+    if not isinstance(facts, dict):
+        return False
+    raw = facts.get("wc_class_codes")
+    rows = raw.get("value") if isinstance(raw, dict) and "value" in raw else raw
+    if not isinstance(rows, list):
+        return False
+    changed = False
+    for row in rows:
+        if isinstance(row, dict):
+            before = (row.get("code"), row.get("description"))
+            normalize_wc_class_row(row)
+            changed = changed or before != (row.get("code"), row.get("description"))
+
+    existing = facts.get("wc_payroll_by_state")
+    env = existing if isinstance(existing, dict) and "value" in existing else None
+    stated = (existing if env is None else env.get("value"))
+    ours = bool(env) and (env.get("derivation") or {}).get("rule") == _WC_BY_STATE_RULE
+    if not _is_empty(stated) and not ours:
+        return changed                      # a stated / human value stands
+    derived = wc_payroll_by_state_from_rows(rows)
+    if derived:
+        if not (ours and env.get("value") == derived):
+            facts["wc_payroll_by_state"] = {
+                "value": derived,
+                "confidence": "deterministic",
+                "source": "derived",
+                "evidence_state": "derived",
+                "derivation": {"rule": _WC_BY_STATE_RULE, "inputs": ["wc_class_codes"]},
+            }
+            logger.info("derived wc_payroll_by_state=%r from the employee-group rows", derived)
+            changed = True
+    elif ours:
+        facts["wc_payroll_by_state"] = None   # the rows no longer support it
+        changed = True
+    return changed
+
+
 def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     """
     Multi-document merge with field-level source confidence.
@@ -7976,11 +8076,20 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
         elif not _is_empty(v):
             mg[k] = v
 
+    # V1 H3: tidy the employee-group rows and derive payroll-by-state from
+    # them - BEFORE the flag re-derivation below, which reads that fact.
+    try:
+        derive_wc_facts_from_class_rows(mf)
+    except Exception as exc:  # noqa: BLE001 - never block the pipeline
+        logger.warning("merge_facts: wc row derivations skipped: %s", exc)
+
     # Deterministic re-derivation of WC monopolistic / multi-state flags
     # (Decision_Tree.txt §137-150). The LLM may omit these, so we always
     # cross-check from wc_payroll_by_state keys to avoid silent fail-open.
     _MONOPOLISTIC_STATES = {"ND", "OH", "WA", "WY"}
     wc_by_state = mf.get("wc_payroll_by_state")
+    if isinstance(wc_by_state, dict) and "value" in wc_by_state:
+        wc_by_state = wc_by_state.get("value")           # the derived envelope
     if isinstance(wc_by_state, dict) and wc_by_state:
         state_codes = set()
         for raw_state in wc_by_state.keys():

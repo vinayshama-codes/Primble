@@ -414,8 +414,40 @@ def test_vehicle_use_is_a_client_question_and_payroll_period_is_the_producers():
          "_is_curated_client": True}
     p.update(classify_question("wc_payroll_period", ["ACORD_130"], is_curated_client=True,
                                canonical_key="wc_payroll_period"))
-    decorate_questions([p], facts={})
+    # FIXTURE CORRECTED 2026-08-27 (V1 H4). It used to pass `facts={}`, which is
+    # a package with NO PAYROLL FIGURE AT ALL - and for that package the payroll
+    # period is genuinely Not Applicable (there is no figure whose period could
+    # be stated; the -12 "WC coverage with no payroll" bucket owns that gap).
+    # So the fixture was asserting the routing of a question that should not be
+    # asked, and it passed only because the Not Applicable branch used to leak
+    # `audience: client`. A BARE payroll figure is the state this test means:
+    # the one branch where the client's -3 fires and the producer must be asked.
+    # The property is unchanged - "payroll period is producer-only"; the fixture
+    # now actually reaches it.
+    decorate_questions([p], facts={"wc_payroll": {"value": "$210,000", "source": "ai"}})
     assert p["audience"] == AUDIENCE_PRODUCER, "master plan 4.4: payroll period is producer-only"
+    assert not p.get("suppressed") or p.get("producer_review"), (
+        "the -3 is charged on exactly this state, so the producer must still be "
+        "asked - a deduction with no route to remediation is worse than the gap")
+
+    # ...and the adversarial half, written because H1-F's standing lesson says
+    # the case that must NOT fire is the one to write first: a package whose
+    # payroll is already annual by construction asks nobody, and is charged
+    # nothing. The two must move together.
+    p2 = {"field_name": "wc_payroll_period", "_canonical_key": "wc_payroll_period",
+          "_is_curated_client": True}
+    p2.update(classify_question("wc_payroll_period", ["ACORD_130"], is_curated_client=True,
+                                canonical_key="wc_payroll_period"))
+    _annual = {"wc_payroll": {"value": "$800,000", "source": "producer"}}
+    decorate_questions([p2], facts=_annual)
+    assert p2["audience"] == AUDIENCE_PRODUCER, (
+        "principle 5 is unconditional - a producer-only fact never reports the "
+        "client audience, whatever its value state")
+    assert p2.get("suppressed"), "an already-annual figure needs no period question"
+    assert not any(k == "wc_payroll_period"
+                   for k, _pts, _lbl in ce.wc_supplemental_gaps(
+                       _annual, {"has_workers_comp": True})), (
+        "and it must not be charged the -3 either")
 
 
 def test_payroll_period_validator_accepts_meaning():

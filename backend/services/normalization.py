@@ -136,6 +136,40 @@ _ENTITY_SUFFIXES = (
 # single words they contain.
 _ENTITY_TYPE_SYNONYMS = {
     "limited liability company": "llc",
+    # ── V1 H4 (client section 9), 2026-08-27 ────────────────────────────────
+    # Section 9.1's Entity Type key rule is *"Normalize equivalent legal
+    # formats"*, and it was failing on ACORD'S OWN WORDING. Measured before
+    # this line existed:
+    #     values_conflict("entity_type", ["LLC", "Limited Liability Corporation"])
+    #         -> True
+    # because the full phrase was not a key here, so the longest-first pass
+    # matched the bare words instead: "limited" -> "ltd" and "corporation" ->
+    # "corp", giving "ltd liability corp". ACORD 125's own checkbox is labelled
+    # "Limited Liability Corporation", so the single most likely spelling on a
+    # real form raised a false Data Consistency conflict against "LLC" - and
+    # `entity_type` IS a reconcilable field, so that reached a producer as a
+    # review item on two values that are the same company.
+    # It also mis-classified the FORM: `entity_family` reads this function's
+    # output, so "Limited Liability Corporation" came back `corporation` and
+    # would have ticked the Corporation box for an LLC.
+    # Four more equivalences on the same footing, each measured as a live false
+    # conflict: Sole Proprietor / Sole Proprietorship, Nonprofit / Non-Profit /
+    # Not For Profit, Corporation / Incorporated, Partnership / General
+    # Partnership.
+    # DELIBERATELY NOT FOLDED, because they are genuinely different entities and
+    # principle 4 says a real disagreement stays visible: Limited Partnership
+    # and Limited Liability Partnership keep their own tokens (an LP is not a
+    # GP), S Corporation keeps its own (its own ACORD box, and a different tax
+    # election), and Municipality / Government Entity are left to the producer
+    # rather than folded on our own authority (principle 7).
+    "limited liability corporation": "llc",
+    "limited liability co": "llc",
+    "sole proprietorship": "sole prop",
+    "sole proprietor": "sole prop",
+    "not for profit": "nonprofit",
+    "non profit": "nonprofit",
+    "nonprofit": "nonprofit",
+    "general partnership": "partnership",
     "llc": "llc",
     "professional limited liability company": "pllc",
     "pllc": "pllc",
@@ -143,8 +177,13 @@ _ENTITY_TYPE_SYNONYMS = {
     "llp": "llp",
     "limited partnership": "lp",
     "lp": "lp",
-    "incorporated": "inc",
-    "inc": "inc",
+    # "Acme Inc" and "Acme Corporation" are the same LEGAL ENTITY TYPE, and
+    # ACORD prints one Corporation box for both. Folded 2026-08-27 (V1 H4);
+    # safe because this table is read by `normalize_entity_type` alone, which
+    # is dispatched only for entity_type values - company NAME comparison uses
+    # `normalize_name` / `strict_entity_key` and is untouched.
+    "incorporated": "corp",
+    "inc": "corp",
     "corporation": "corp",
     "corp": "corp",
     "professional corporation": "pc",
@@ -385,6 +424,111 @@ def normalize_entity_type(value: Any) -> str:
     for variant, canon in _ENTITY_TYPE_SYNONYMS_SORTED:
         s = re.sub(rf"\b{re.escape(variant)}\b", canon, s)
     return re.sub(r"\s+", " ", s).strip()
+
+
+# ── Legal-entity FAMILIES - V1 H4 (client section 9), 2026-08-27 ─────────────
+# `normalize_entity_type` above answers "are these two the same entity type?"
+# (the COMPARATOR's question, D3). It does NOT answer "which of ACORD's nine
+# legal-entity boxes is this?", and three separate places were each guessing at
+# that in their own vocabulary:
+#
+#   * FACT_REGISTRY["entity_type"]["validate"] - a literal 16-item uppercase set
+#     that REFUSED 8 of the 13 options `answer_options` itself offers
+#     ("Limited Liability Company", "S Corporation", "Joint Venture", ...), so a
+#     producer picking from our own dropdown was told "that does not look right";
+#   * `answer_options.ENTITY_TYPE_OPTIONS` - a third list, written independently;
+#   * `pdf_service._derive_indicator` - an inline "limited liability company ->
+#     llc" phrase loop plus substring matching, which ticked NO box for
+#     "Sole Proprietorship" (ACORD's box is Individual), ticked Corporation for
+#     "S Corporation", ticked BOTH Corporation and NotForProfit for "Non-Profit
+#     Corporation", and ticked nothing at all for "Association" / "Municipality"
+#     while asserting "No" on the Other box that exists precisely for them.
+#
+# ACORD's own tooltip settles the shape and it is quoted here so nobody has to
+# re-derive it: *"Indicates the legal entity CODE for the named insured IS
+# 'Corporation'"* - singular. The nine indicators are MUTUALLY EXCLUSIVE, and
+# `NamedInsured_LegalEntity_OtherIndicator_*` pairs with
+# `NamedInsured_LegalEntity_OtherDescription_*` for anything not listed.
+#
+# THIS IS ADDITIVE AND MUST STAY ADDITIVE. `normalize_entity_type` is untouched,
+# so every conflict / equivalence decision that reads it (fact_comparison ->
+# fact_equivalence -> underwriting_consistency, D3's one comparator door) behaves
+# exactly as before. This function only ever CLASSIFIES.
+#
+# Verified 2026-08-27 to be a strict SUPERSET of the validator it replaces:
+# all 16 values the old literal set accepted still map to a family, and all 13
+# offered options now validate. Nothing that validated before stops validating.
+ENTITY_FAMILY_INDIVIDUAL = "individual"
+ENTITY_FAMILY_PARTNERSHIP = "partnership"
+ENTITY_FAMILY_LLC = "llc"
+ENTITY_FAMILY_CORPORATION = "corporation"
+ENTITY_FAMILY_S_CORPORATION = "s_corporation"
+ENTITY_FAMILY_NOT_FOR_PROFIT = "not_for_profit"
+ENTITY_FAMILY_JOINT_VENTURE = "joint_venture"
+ENTITY_FAMILY_TRUST = "trust"
+ENTITY_FAMILY_OTHER = "other"
+
+ENTITY_FAMILIES = (
+    ENTITY_FAMILY_INDIVIDUAL, ENTITY_FAMILY_PARTNERSHIP, ENTITY_FAMILY_LLC,
+    ENTITY_FAMILY_CORPORATION, ENTITY_FAMILY_S_CORPORATION,
+    ENTITY_FAMILY_NOT_FOR_PROFIT, ENTITY_FAMILY_JOINT_VENTURE,
+    ENTITY_FAMILY_TRUST, ENTITY_FAMILY_OTHER,
+)
+
+# ORDER IS LOAD-BEARING - most specific family first. Every one of these three
+# orderings is a real case that the previous substring matching got wrong:
+#   not_for_profit BEFORE corporation   -> "Non-Profit Corporation" is not a
+#                                          plain Corporation (it ticked BOTH)
+#   s_corporation  BEFORE corporation   -> "S Corporation" has its own ACORD box
+#   llc            BEFORE partnership   -> guards the LLC/LLP pair
+# Matched on WHOLE WORDS of the canonical token `normalize_entity_type` returns,
+# never as bare substrings, so "corp" inside "s corp" cannot win by position.
+_ENTITY_FAMILY_RULES = (
+    (ENTITY_FAMILY_NOT_FOR_PROFIT, ("not for profit", "nonprofit", "non profit",
+                                    "charitable", "501 c 3")),
+    (ENTITY_FAMILY_S_CORPORATION, ("s corp", "subchapter s", "scorp")),
+    (ENTITY_FAMILY_JOINT_VENTURE, ("joint venture", "jv")),
+    (ENTITY_FAMILY_LLC, ("llc", "pllc", "limited liability co",
+                         "limited liability company", "limited liability corp")),
+    (ENTITY_FAMILY_TRUST, ("trust",)),
+    (ENTITY_FAMILY_PARTNERSHIP, ("partnership", "llp", "lp",
+                                 "limited partnership", "general partnership")),
+    (ENTITY_FAMILY_INDIVIDUAL, ("individual", "sole proprietor", "sole prop",
+                                "sole proprietorship", "proprietor",
+                                "self employed")),
+    (ENTITY_FAMILY_CORPORATION, ("corporation", "corp", "incorporated", "inc", "pc")),
+    # Everything ACORD does not print a box for. These are REAL entity types, so
+    # they belong on the form's Other box with their own wording in
+    # OtherDescription - not silently unticked, which is what happened before.
+    (ENTITY_FAMILY_OTHER, ("association", "municipality", "government",
+                           "governmental", "public entity", "unincorporated",
+                           "cooperative", "co op", "religious", "church",
+                           "school district", "other")),
+)
+
+
+def entity_family(value: Any) -> Optional[str]:
+    """Which ACORD legal-entity family is this, or None when we cannot tell.
+
+    None is a real answer and callers MUST honour it: core principle 3 says a
+    value we cannot classify never becomes a "No". The stamper ticks NOTHING for
+    None rather than asserting the named insured is none of the nine, and the
+    validator refuses it rather than storing an entity type no form can express.
+
+    Positive evidence only, and never a guess: "Ltd" alone stays None (a UK
+    private company and a US "Acme Ltd" trade name are not distinguishable here),
+    which is the right-or-blank rule this codebase applies everywhere else.
+    """
+    s = normalize_entity_type(value)
+    if not s:
+        return None
+    # Pad and strip punctuation so every probe below is a WHOLE-WORD test.
+    s = " " + re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", s)).strip() + " "
+    for family, words in _ENTITY_FAMILY_RULES:
+        for word in words:
+            if f" {word} " in s:
+                return family
+    return None
 
 
 def normalize_address(value: Any) -> str:

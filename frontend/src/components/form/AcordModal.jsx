@@ -28,6 +28,33 @@ const SQS_WEIGHTS = {
 // back to true to re-introduce the section exactly as it was. Do not delete the block.
 const SHOW_COMPLETION_METRICS = false;
 
+// TEMPORARILY HIDDEN (owner request, 2026-08-27): the "Quality Fill Rate: N% → N%"
+// delta line under the score-improvement panel. Same treatment as
+// SHOW_COMPLETION_METRICS above - the markup below is intentionally kept intact,
+// and the BACKEND is untouched: `fill_rate_before` / `fill_rate_after` are still
+// computed, still persisted and still carried on the package payload, so the
+// §6.2 remediation delta keeps working and flipping this back to true restores
+// the line exactly as it was. Do not delete the block.
+const SHOW_FILL_RATE_DELTA = false;
+
+// TEMPORARILY HIDDEN (owner request, 2026-08-27): the whole "Session delta" card -
+// "+N pts this session" and "Started at X → now Y".
+//
+// WHY: it is not a client requirement. Checked against the sources, not our notes -
+// SQS_Scoring_Specification has ZERO hits for "this session" / "delta" / "started at"
+// / "progress", and client section 7 (the score-PRESENTATION section) asks for three
+// things only: a qualitative status label, remediation progress shown separately, and
+// the numeric SQS kept in the dedicated results experience. A session delta is none of
+// them. It is our own panel, and it had been structurally dead since it shipped
+// (`sqs_history` was never persisted, so `delta_this_session` was permanently 0) until
+// C5-A fixed the history - which is the only reason it became visible at all.
+//
+// The BACKEND is untouched: `delta_this_session` and `sqs_history` are still computed
+// and persisted. They feed the 5.12 audit snapshots and the SQS narrative's model
+// context, so removing them would break the E&O record. Markup kept intact; flip to
+// true to restore. Do not delete the block.
+const SHOW_SESSION_SCORE_DELTA = false;
+
 const PACKAGE_PILLAR_LABELS = {
   // Spec-compliant pillar keys returned by calculate_package_sqs.
   structural_completeness: "Structural Completeness",
@@ -932,11 +959,38 @@ const isUnderwriting = (q) => !isClientFacing(q) && !isNeverSend(q) && !isAgency
 // than the client's, in the client's own vocabulary. Keys match
 // `services/question_eligibility.py`'s REASON_* constants - keep the two in step.
 // No em-dashes in UI copy (project rule).
+// SQS panel sub-rows that are computed and scored but NOT drawn.
+// Owner's call, 2026-08-27 (V1 H4): the Structural Completeness breakdown showed
+// "Core Application (Tier 1)" and "Underwriting Profile (Tier 2)" beside
+// "Form Fill Rate", and the two tier rows read as jargon on the producer's screen.
+//
+// DISPLAY ONLY - do not "tidy this up" into the backend. Tier 1 and Tier 2 are the
+// client's own vocabulary (SQS spec section 3.1 prints the formula
+// `Structural = Tier 1 x 0.40 + Tier 2 x 0.35 + Fill rate x 0.25`, and master-plan
+// section 9.1's "V1 Scoring Home" column names "Structural Tier 1" / "Structural
+// Tier 2" on ~15 rows). The scorer keeps computing both, the blend is unchanged,
+// and `sqs_service.build_score_trace` still emits the full C3 ledger, so section 3's
+// traceability requirement is met by the trace rather than by these two rows.
+// The same information also still reaches the producer in plain language on the
+// pre-form Review card, as "Key details in place / missing" (H2's `key_details`,
+// which reads the SAME Tier 1 + Tier 2 lists).
+//
+// Form Fill Rate is deliberately NOT hidden - it is the one Structural input that
+// is not tier jargon and the producer acts on it directly.
+const HIDDEN_SQS_CATEGORY_KEYS = new Set(["tier1", "tier2"]);
+
 const ARQ_ELIGIBILITY_META = {
   insurance_judgment_producer:   { label: "Producer decision",  bg: "#fefce8", fg: "#854d0e", bd: "#fef08a" },
   conflicting_route_to_producer: { label: "Conflict - resolve", bg: "#fef2f2", fg: "#991b1b", bd: "#fecaca" },
   not_applicable:                { label: "Not applicable",     bg: "#f1f5f9", fg: "#475569", bd: "#cbd5e1" },
   unable_to_determine:           { label: "Could not determine", bg: "#f5f3ff", fg: "#6d28d9", bd: "#ddd6fe" },
+  // V1 H4 (client section 9): "Any one contact method satisfies Tier 1", so
+  // once one is answered the other two stop being CRITICAL. They stay visible
+  // and suggested - the ACORD 125 name and email boxes are separate fields and
+  // still want filling - they just stop consuming a pre-ticked slot. Without a
+  // row here the badge renders nothing and two cards would silently change
+  // priority with no stated reason.
+  contact_already_provided:      { label: "Contact already provided", bg: "#f0fdf4", fg: "#166534", bd: "#bbf7d0" },
 };
 
 // TEMPORARILY HIDDEN (client request): the "Underwriting / Internal Review"
@@ -4693,6 +4747,81 @@ const AcordModal = forwardRef(function AcordModal({
     manual: "Entered manually",
   };
   const _auditSource = (s) => (s ? (_AUDIT_SOURCE_LABEL[s] || s) : "unspecified");
+  // V1 H7 (client section 12): the record named no human anywhere. Every store
+  // held a user_id; two readers even selected it; nothing rendered it and
+  // nothing resolved it to a person. "Producer edit" is a METHOD, not an actor.
+  const _auditActor = (row) => {
+    if (!row) return "";
+    const name = (row.actor_name || "").trim();
+    const email = (row.actor_email || "").trim();
+    if (name && email && name !== email) return `${name} <${email}>`;
+    return name || email || (row.actor_id ? String(row.actor_id) : "");
+  };
+  // "Vinay Sharma <v@x.com> (Producer)" - actor AND role, the two attributes
+  // his list pairs. Falls back to the role alone rather than printing an empty
+  // parenthesis when the id could not be resolved.
+  const _auditWho = (row, roleLabel) => {
+    const who = _auditActor(row);
+    const role = roleLabel || row?.role_label || "";
+    if (who && role) return `${who} (${role})`;
+    return who || role || "unknown";
+  };
+  const _CHANGE_KIND_LABEL = {
+    fill: "filled a blank field",
+    correction: "corrected an existing entry",
+    generated_value_override: "overrode an AI-generated value",
+    retraction: "removed a value",
+  };
+  // The spine's own event names, in the producer's language.
+  const _HISTORY_EVENT_LABEL = {
+    documents_uploaded: "Documents uploaded",
+    client_answers_applied: "Client questionnaire answers applied",
+    field_changed: "Field changed",
+    recommendation_answered: "Recommendation answered",
+    recommendation_dismissed: "Recommendation dismissed",
+    recommendation_reopened: "Recommendation reopened",
+    issue_status_changed: "Issue status changed",
+    issue_reopened: "Issue reopened",
+    conflict_resolved: "Data consistency conflict resolved",
+    producer_override: "Producer override",
+    package_downloaded: "Package downloaded with open items",
+    forms_generated: "Forms generated",
+    sqs_scored: "Submission scored",
+    questionnaire_sent: "Questionnaire sent to client",
+    questionnaire_opened: "Client opened the questionnaire",
+    questionnaire_in_progress: "Client started answering",
+    questionnaire_submitted: "Client submitted the questionnaire",
+    answers_applied: "Answers applied to forms",
+    reminder_sent: "Reminder sent to client",
+    download: "Package downloaded",
+  };
+  const _historyLabel = (t) => _HISTORY_EVENT_LABEL[t] || t;
+  // Per-event detail line. Carries over the bespoke wording the old EVENT LOG
+  // section had for the four pre-H7 event types (that section is gone - it
+  // rendered the same rows this one does, with less on each, and keeping two
+  // views of one history is the duplication client section 12 is about).
+  // Falls back to a generic key=value rendering so an event type added later
+  // is never silently blank.
+  const _historyDetail = (h) => {
+    const dt = h?.detail || {};
+    switch (h?.event_type) {
+      case "documents_uploaded":
+        return `${dt.document_count ?? "?"} document(s), ${dt.facts_extracted ?? "?"} value(s) captured`;
+      case "client_answers_applied":
+        return `${dt.fields_changed ?? 0} field(s) changed${dt.held_for_producer ? `, ${dt.held_for_producer} held for producer` : ""}${dt.client_name ? ` - from ${dt.client_name}` : ""}`;
+      case "recommendation_reopened":
+        return `${dt.rec_id || ""}; prior action: ${dt.prior_action || "-"} at ${dt.prior_action_at || "-"}${dt.answer_retracted ? " (answer retracted)" : ""}`;
+      case "issue_reopened":
+        return dt.rule_code ? `${dt.rule_code}` : "";
+      default: {
+        const bits = Object.entries(dt)
+          .filter(([, v]) => v !== null && v !== undefined && v !== "" &&
+                             !(Array.isArray(v) && v.length === 0))
+          .map(([k, v]) => `${k}=${Array.isArray(v) ? `${v.length} item(s)` : (typeof v === "object" ? "[detail]" : String(v).slice(0, 120))}`);
+        return bits.join(", ");
+      }
+    }
+  };
   // "Package Policy.pdf - page 14" / "COI.pdf (3 row(s))" - mirrors
   // backend services/fact_lineage.format_source.
   const _auditEvidence = (src) => {
@@ -4745,6 +4874,7 @@ const AcordModal = forwardRef(function AcordModal({
           lines.push(`  - ${r.message}`);
           lines.push(`    Reason: ${r.override_reason || "(none given)"}`);
           lines.push(`    Form: ${r.form_id || "-"}  |  Dismissed: ${r.action_at}`);
+          lines.push(`    By: ${_auditWho(r, "Producer")}`);
         }
       } else {
         lines.push("  (none)");
@@ -4756,6 +4886,7 @@ const AcordModal = forwardRef(function AcordModal({
           lines.push(`  - ${r.message || r.rec_id}`);
           lines.push(`    Answer: ${r.producer_answer}`);
           lines.push(`    Field: ${r.field || "-"}  |  Answered: ${r.answered_at || r.action_at || "(before answer timestamps were recorded)"}`);
+          lines.push(`    By: ${_auditWho(r, "Producer")}`);
         }
       } else {
         lines.push("  (none)");
@@ -4779,7 +4910,7 @@ const AcordModal = forwardRef(function AcordModal({
           }
           if (c.reason) lines.push(`    Conflict: ${c.reason}`);
           if (c.note) lines.push(`    Note: ${c.note}`);
-          lines.push(`    Resolved: ${c.confirmed_at}`);
+          lines.push(`    Resolved: ${c.confirmed_at}  |  By: ${_auditWho(c, "Producer")}`);
         }
       } else {
         lines.push("  (none)");
@@ -4790,7 +4921,7 @@ const AcordModal = forwardRef(function AcordModal({
         for (const s of d.issue_status_overrides) {
           lines.push(`  - ${s.message || s.issue_id} [${s.status}]`);
           lines.push(`    Reason: ${s.reason}`);
-          lines.push(`    Updated: ${s.updated_at}`);
+          lines.push(`    Updated: ${s.updated_at}  |  By: ${_auditWho(s, "Producer")}`);
         }
       } else {
         lines.push("  (none)");
@@ -4800,7 +4931,32 @@ const AcordModal = forwardRef(function AcordModal({
       if (d.download_anyway_log?.length) {
         for (const dl of d.download_anyway_log) {
           lines.push(`  - ${dl.override_note || "(no note given)"}  (${dl.open_rec_count} open at the time)`);
-          lines.push(`    Downloaded: ${dl.downloaded_at}`);
+          lines.push(`    Downloaded: ${dl.downloaded_at}  |  By: ${_auditWho(dl, "Producer")}`);
+        }
+      } else {
+        lines.push("  (none)");
+      }
+      lines.push("");
+      // V1 H7 / F: submission_integrity_audit's first reader. These are two of
+      // the client's "producer override" events - keeping a package the system
+      // flagged, and correcting the document type the classifier chose. Both
+      // were recorded at three writers and shown nowhere.
+      lines.push("PRODUCER OVERRIDES");
+      if (d.integrity_overrides?.length) {
+        for (const ov of d.integrity_overrides) {
+          if (ov.event_type === "document_reclassified") {
+            lines.push(`  - Document type corrected${ov.doc_id ? ` (document ${ov.doc_id})` : ""}`);
+            lines.push(`    ${ov.previous_doc_type || "(unclassified)"} -> ${ov.new_doc_type || "(none)"}  [${ov.action || "set_type"}]`);
+          } else {
+            lines.push(`  - Submission integrity review: ${ov.action || "-"}`);
+            if (ov.overridden) lines.push("    The producer kept a package the system had flagged for review.");
+            if (ov.integrity_status) lines.push(`    Verdict at the time: ${ov.integrity_status}${ov.confidence != null ? ` (confidence ${ov.confidence})` : ""}`);
+            const ents = ov.detected_entities;
+            if (Array.isArray(ents) && ents.length) lines.push(`    Insured names detected: ${ents.join("; ")}`);
+            const rem = ov.removed_doc_ids;
+            if (Array.isArray(rem) && rem.length) lines.push(`    Documents removed: ${rem.length}`);
+          }
+          lines.push(`    ${ov.created_at}  |  By: ${_auditWho(ov, "Producer")}`);
         }
       } else {
         lines.push("  (none)");
@@ -4868,7 +5024,9 @@ const AcordModal = forwardRef(function AcordModal({
         for (const m of d.field_modifications) {
           lines.push(`  - ${m.field_name}${m.form_id ? ` (${m.form_id})` : ""}${m.fact_key && m.fact_key !== m.field_name ? `  [fact: ${m.fact_key}]` : ""}`);
           lines.push(`    ${m.previous_value ? `"${m.previous_value}"` : "(blank)"} -> ${m.new_value ? `"${m.new_value}"` : "(blank)"}`);
-          lines.push(`    Changed by: ${_auditSource(m.source)}  |  ${m.changed_at}`);
+          lines.push(`    Changed by: ${_auditWho(m, m.source === "client_arq" ? "Client" : "Producer")}  |  ${m.changed_at}`);
+          lines.push(`    How: ${_auditSource(m.source)}${m.previous_source ? ` (previous value: ${_auditSource(m.previous_source)})` : ""}`);
+          if (m.reason) lines.push(`    Reason: ${m.reason}`);
         }
       } else {
         lines.push("  (no modifications recorded)");
@@ -4957,17 +5115,28 @@ const AcordModal = forwardRef(function AcordModal({
         lines.push("  (no downloads recorded)");
       }
       lines.push("");
-      lines.push("EVENT LOG");
-      if (d.audit_events?.length) {
-        for (const ev of d.audit_events) {
-          if (ev.event_type === "sqs_snapshot") continue; // rendered above
-          const data = ev.event_data || {};
-          let extra = "";
-          if (ev.event_type === "documents_uploaded") extra = ` (${data.document_count} document(s), ${data.facts_extracted} value(s) captured)`;
-          else if (ev.event_type === "client_answers_applied") extra = ` (${data.fields_changed} field(s) changed${data.held_for_producer ? `, ${data.held_for_producer} held for producer` : ""})`;
-          else if (ev.event_type === "recommendation_reopened") extra = ` (${data.rec_id}; prior action: ${data.prior_action || "-"} at ${data.prior_action_at || "-"})`;
-          else if (ev.event_type === "issue_reopened") extra = data.rule_code ? ` (${data.rule_code})` : "";
-          lines.push(`  - ${ev.created_at}  ${ev.event_type}${extra}`);
+      // V1 H7 (client section 12): THE chronological history, built from the
+      // append-only spine with every actor resolved to a person. This is the
+      // half the record was missing - the sections above are detail views of
+      // CURRENT state, and before H7 the order of events had to be inferred
+      // from them. Nothing here is reconstructed: each row was written by the
+      // workflow at the moment the act happened.
+      lines.push("COMPLETE HISTORY (chronological)");
+      if (d.history?.length) {
+        for (const h of d.history) {
+          const what = h.field_name || h.fact_key || "";
+          lines.push(`  - ${h.occurred_at}  ${_historyLabel(h.event_type)}${what ? `: ${what}` : ""}`);
+          if (h.previous_value != null || h.new_value != null) {
+            lines.push(`    ${h.previous_value ? `"${h.previous_value}"` : "(blank)"} -> ${h.new_value ? `"${h.new_value}"` : "(blank)"}`);
+          }
+          if (h.change_kind) {
+            lines.push(`    Change: ${_CHANGE_KIND_LABEL[h.change_kind] || h.change_kind}`);
+          }
+          lines.push(`    By: ${_auditWho(h)}`);
+          if (h.reason) lines.push(`    Reason: ${h.reason}`);
+          if (h.form_id) lines.push(`    Form: ${h.form_id}`);
+          const extra = _historyDetail(h);
+          if (extra) lines.push(`    ${extra}`);
         }
       } else {
         lines.push("  (no events recorded - session predates the event log)");
@@ -6788,7 +6957,7 @@ const AcordModal = forwardRef(function AcordModal({
                     )}
 
                     {/* ── Session delta ── */}
-                    {packageSqs && packageSqs.sqs_history?.length > 1 && (() => {
+                    {SHOW_SESSION_SCORE_DELTA && packageSqs && packageSqs.sqs_history?.length > 1 && (() => {
                       // Prefer the genuine initial_extract baseline (matches
                       // backend delta computation); fall back to first entry.
                       const baseline = packageSqs.sqs_history.find(h => h?.stage === "initial_extract")
@@ -6813,7 +6982,7 @@ const AcordModal = forwardRef(function AcordModal({
                             </div>
                           </div>
                           {/* §6.2 / Req 4: form completion delta after ARQ remediation */}
-                          {fillDelta != null && (
+                          {SHOW_FILL_RATE_DELTA && fillDelta != null && (
                             <div style={{ marginTop: 5, paddingTop: 5, borderTop: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 4 }}>
                               <span style={{ width: 9, height: 9, background: "rgb(187,247,208)", border: "1px solid #86efac", borderRadius: 2, display: "inline-block", flexShrink: 0 }} />
                               <span style={{ fontSize: 10, color: "#047857", fontWeight: 600 }}>
@@ -6947,8 +7116,15 @@ const AcordModal = forwardRef(function AcordModal({
                             const isNA = val === null || val === undefined;
                             const catsRaw = packageSqs.category_breakdown?.[key];
                             // _rollup (if present from an older payload) is metadata, not a sub-row.
+                            //
+                            // HIDDEN_SQS_CATEGORY_KEYS - owner's call 2026-08-27 (V1 H4).
+                            // Display only: the scorer still computes Tier 1 and Tier 2,
+                            // still blends them into Structural, and still emits them in
+                            // `score_trace`. Nothing behind the panel changed. See the
+                            // constant for the reasoning and for what still surfaces them.
                             const cats = catsRaw
-                              ? Object.fromEntries(Object.entries(catsRaw).filter(([k]) => k !== "_rollup"))
+                              ? Object.fromEntries(Object.entries(catsRaw).filter(
+                                  ([k]) => k !== "_rollup" && !HIDDEN_SQS_CATEGORY_KEYS.has(k)))
                               : null;
                             const hasCats = cats && Object.keys(cats).length > 0;
                             const expanded = expandedPillars.has(key);

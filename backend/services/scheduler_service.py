@@ -207,17 +207,31 @@ async def run_audit_log_retention():
 
     processing_sessions.facts retention is handled by run_facts_retention() at 04:00 UTC.
 
-    audit_events (the C5 E&O event spine) is swept here too, on its own knob:
-    OWNER RULING 2026-08-26 (Q18): "keep the record for 6 months" - so
-    AUDIT_EVENTS_RETENTION_DAYS defaults to 180 and is FLOORED at 180; the
-    three operational tables above keep their 365-day SOC 2 floor, which
-    already exceeds the 6-month E&O window.
+    audit_events (the E&O event spine) is swept here too, on its own knob.
+
+    OWNER RULING 2026-08-27 (V1 H7 / D48): AUDIT_EVENTS_RETENTION_DAYS defaults
+    to 365 and is FLOORED at 365, matching AUDIT_LOG_RETENTION_DAYS. This
+    SUPERSEDES the 180-day half of the 2026-08-26 Q18 ruling.
+
+    Why it had to move: at 180 days the spine expired BEFORE the mutable tables
+    it exists to explain (field_source_audit / sqs_recommendation_audit /
+    acord_audit_log, all 365) and before six tables that are never swept at all.
+    From month 7 to month 12 the E&O record would have been current state with
+    its history already deleted - precisely the failure the client's section 12
+    describes. Q18's "keep the record for 6 months" is a FLOOR, so this extends
+    it rather than weakening it; the facts-retention half (free/essentials =
+    180 in run_facts_retention) is unchanged and still honours it directly.
+
+    NOTE (D50): the spine is now also the product-history store, so the navbar
+    Activity Log inherits this 365-day window. The retired `activity_events`
+    table was never swept; its remaining rows are still not swept, and they only
+    shrink.
     """
     import os as _os
 
     audit_days = int(_os.getenv("AUDIT_LOG_RETENTION_DAYS", "365"))
     cutoff     = (datetime.now(timezone.utc) - timedelta(days=audit_days)).isoformat()
-    events_days = max(int(_os.getenv("AUDIT_EVENTS_RETENTION_DAYS", "180")), 180)
+    events_days = max(int(_os.getenv("AUDIT_EVENTS_RETENTION_DAYS", "365")), 365)
     events_cutoff = (datetime.now(timezone.utc) - timedelta(days=events_days)).isoformat()
 
     def _row_count(status: str) -> int:

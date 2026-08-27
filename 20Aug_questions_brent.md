@@ -128,3 +128,62 @@ months stands.
    not one exact spelling. The 3-point deduction fires only for a payroll figure that has
    no period wording anywhere: a bare number in a narrative, a payroll report with no
    basis, and so on.
+
+---
+
+## Section 9 - Core Submission Information
+
+7. **Physical address: should it count against a submission that does not need one?**
+   Your section 9 says the physical address applies "when the exposure requires it" and
+   tells us not to require it universally. The warning already works that way - it only
+   fires on property, multi-location or auto accounts that have not given us an operating
+   address. But the ACORD 125 completeness count still lists the physical address as a
+   field the submission owes, on every account. So a single-location general liability
+   risk, whose mailing address is its premises, is measured as missing something it does
+   not need.
+
+   We have not changed it, because taking it out of that count raises the score on those
+   accounts and that is your call, not ours. Two options:
+   (a) leave it - every submission owes the same list, which is simple to explain;
+   (b) count it only when the exposure requires it - the same test the warning already
+       uses - so an account that genuinely does not need a separate premises address is
+       not marked down for it.
+
+   Which do you want?
+
+8. **Workers comp: we ask for the payroll breakdown twice.**
+   Since section 8 shipped, the client fills in an employee-group table - group, duties,
+   headcount, annual payroll, state - and the producer owns the class code beside it.
+   That table IS the payroll breakdown. But we still separately ask the producer to
+   "provide your WC payroll breakdown by class code", and we ask for the experience
+   modifier twice as well (once as its own question, once inside a narrative question).
+
+   We can drop the duplicates. The reason we have not is that the second question is
+   currently what credits the submission for having explained its payroll and its mod -
+   so removing it, on its own, would cost a WC account a few points of narrative quality
+   for information it has actually supplied. Fixing that properly means crediting it from
+   the table instead.
+
+   Do you want us to do that - one question per thing, credited from the table? We think
+   yes, but it changes scores on WC accounts and we would rather you knew first.
+
+9. **A declarations page's OLD dates are landing in the NEW policy's date box.**
+   When a broker uploads their current declarations page alongside a new application - the
+   most ordinary submission there is - Primble takes the dates from the declarations page,
+   because a declarations page is normally the more reliable document. For dates it is the
+   wrong one: those are the dates of the policy that is ENDING, and the application is
+   proposing the new term. So ACORD 125's "proposed effective date" box can come out
+   showing last year's date.
+
+   Primble does currently flag it - the two documents disagree, the difference is shown in
+   Data Consistency with both dates and which file each came from, and the producer can
+   pick the right one in a click. What we have not done is make the right one the default.
+
+   We can fix that: when one document is a bound policy (declarations page, policy,
+   certificate, binder) and another is proposing a term (application, quote), the proposed
+   term wins the date boxes and the bound one is filed as the prior policy's term. We would
+   rather flag it to you first, because it changes which date lands on generated forms for
+   any submission that includes a current declarations page.
+
+   Do you want that changed, or is the producer picking it in Data Consistency the right
+   place for that decision to be made?

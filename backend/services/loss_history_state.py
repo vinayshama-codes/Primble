@@ -261,6 +261,157 @@ def new_venture_confirmed(facts: dict, flags: dict) -> bool:
     return new_venture_answer(_fv(facts, NEW_VENTURE_FIELD)) is True
 
 
+# ── New-venture derivations (V1 H4, client section 9, 2026-08-27) ───────────
+# Section 9.1's Years in Business row: Applies When = "Applicable business
+# submission", Scoring Home = "Structural Tier 2 + Narrative context",
+# Key Rule = **"New venture is valid state"**.
+#
+# It was not a valid state anywhere. Measured before this shipped: with the
+# producer's New Venture confirmed, `value_state_of(facts,'years_in_business')`
+# returned `not_stated`, `sqs_service._tier2_items` listed "Years in business"
+# as MISSING - charging 1/6 of Tier 2 - and the questionnaire still asked "How
+# many years has your business been open?" of a business the producer had just
+# confirmed has no operating history. The state existed; the FACT never learned
+# it (the same shape as H1's X-Mod and H3's payroll-by-state).
+_NEW_VENTURE_DERIVED_KEYS = ("years_in_business",)
+_NEW_VENTURE_DERIVATION_RULE = "not_applicable_on_confirmed_new_venture"
+
+
+def _is_our_new_venture_derivation(raw: Any) -> bool:
+    """Is this fact OUR conclusion rather than someone's evidence?
+
+    Only a value this module wrote may be withdrawn by this module. A
+    document-sourced or human-entered years figure is evidence and is never
+    touched - if it disagrees with a New Venture confirmation that is a genuine
+    conflict for the producer (principle 4), not something to overwrite.
+    """
+    if not isinstance(raw, dict):
+        return False
+    return ((raw.get("derivation") or {}).get("rule")
+            == _NEW_VENTURE_DERIVATION_RULE)
+
+
+def apply_new_venture_derivations(facts: dict, flags: dict,
+                                  has_loss_run_doc: bool = False) -> List[str]:
+    """Keep the derived new-venture facts in step with the confirmation.
+
+    Mutates `facts` in place and returns the list of keys the caller must pass
+    to `upd_processing_session(delete_facts=[...])`. Returning them rather than
+    popping is deliberate: D18 - the facts merge is ADDITIVE, so a bare `pop`
+    is a silent no-op and the stale value survives the write.
+
+    NOT APPLICABLE, NOT ZERO. The first cut of this wrote `years_in_business =
+    "0"` and adversarial review measured what that does: `years_in_business_band`
+    returns BAND_YOUNG, `too_young_for_loss_runs` becomes True, and route 2 of
+    `loss_history_not_applicable` fires ON THE BAND ALONE - so the moment the
+    New Venture confirmation was withdrawn, `calculate_p4_loss_history` returned
+    None (the Loss History pillar DELETED) where it had returned 60. The band
+    also buys nothing while the confirmation stands, because route 1 already
+    covers it. All risk, no benefit - and it argues with Brent's own ruling
+    (2026-08-24): *"we can't treat 'N/A' as '0'. These are not the same."*
+    An N/A envelope gives band=unknown, leaves the pillar at 60, still retires
+    the Tier 2 charge (C3 3.6 removes a Not Applicable fact from the
+    DENOMINATOR), still retires the question, and displays as "NOT APPLICABLE" -
+    which is literally what the client calls this state.
+    """
+    facts = facts if isinstance(facts, dict) else {}
+    delete: List[str] = []
+    applicable = new_venture_applicable(facts, flags or {}, has_loss_run_doc)
+    for key in _NEW_VENTURE_DERIVED_KEYS:
+        raw = facts.get(key)
+        if applicable:
+            # Never over a stated value, whoever stated it. A real years figure
+            # beside a New Venture confirmation is a CONFLICT for the producer.
+            if _is_our_new_venture_derivation(raw):
+                continue                     # already ours and still correct
+            if raw is not None and not _is_blank_fact(raw):
+                continue
+            facts[key] = {
+                "value": "",
+                "confidence": "deterministic",
+                "source": "derived",
+                "evidence_state": "derived",
+                "value_state": "not_applicable",
+                # E&O 5.7: the rule and its inputs live on the envelope, so
+                # "Source: derived" always explains itself.
+                "derivation": {"rule": _NEW_VENTURE_DERIVATION_RULE,
+                               "inputs": [NEW_VENTURE_FIELD]},
+            }
+        elif _is_our_new_venture_derivation(raw):
+            # THE PREMISE WENT AWAY, SO THE CONCLUSION MUST TOO. A withdrawn or
+            # contradicted confirmation has to take the derived N/A with it, or
+            # Tier 2 keeps excusing a field the submission genuinely owes.
+            delete.append(key)
+    return delete
+
+
+def _is_blank_fact(raw: Any) -> bool:
+    value = raw.get("value") if isinstance(raw, dict) else raw
+    if value is None:
+        return True
+    return str(value).strip().lower() in ("", "null", "none")
+
+
+_CLAIM_ROW_MONEY_COLUMNS = ("paid", "reserved_amount", "incurred", "amount")
+_CLAIM_ROW_DETAIL_COLUMNS = ("date", "description", "line_of_business")
+
+
+def asserted_claims(facts: Any) -> tuple:
+    """How many claims does this package assert, and for how much?
+
+    THE ONE DOOR for that question - V1 BETA EXIT (2026-08-28).
+
+    The client's beta-exit criterion is *"contradictory no-loss evidence remains
+    visible and appropriately capped"*, and it did not hold. Every consumer read
+    the scalars `num_claims` / `total_incurred` and nothing read the
+    `loss_history` TABLE - the client's own claims schedule
+    (`schedule_capture.SCHEDULE_DEFS["loss_history"]`: date, line, description,
+    paid, reserved). Nothing derives one from the other: extraction only counts
+    claims out of loss-run TEXT, so a claim the insured or the producer TYPED
+    was invisible. Measured before this fix, on the real scorer:
+
+        attested "no prior losses" + one typed claim row  -> 60, no conflict
+        the same claim as num_claims=1                    -> 45 + conflict
+
+    - i.e. the more explicit the evidence, the less it counted. The same
+    blindness sat in `prior_operations_evidence`, so a typed claim could not
+    stop a New Venture confirmation from making Loss History Not Applicable.
+
+    Returns `(claims, incurred)`. Both are a MAXIMUM, never a sum of the two
+    sources: a loss run stating 3 claims and a table listing those same 3 rows
+    is one set of facts printed twice, and adding them would manufacture 6.
+
+    Counts a row only on POSITIVE content - a real date, description, line or
+    money figure. A half-typed or empty row asserts nothing, and inventing a
+    claim from one would be the mirror of the bug: a false conflict capping a
+    clean submission at 45.
+    """
+    claims = _to_int(_fv(facts, "num_claims")) or 0
+    incurred = _to_float(_fv(facts, "total_incurred")) or 0.0
+
+    rows = _fv(facts, "loss_history")
+    if isinstance(rows, list):
+        row_count = 0
+        row_incurred = 0.0
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            money = 0.0
+            for column in _CLAIM_ROW_MONEY_COLUMNS:
+                money += _to_float(row.get(column)) or 0.0
+            has_detail = any(
+                not _is_blank_fact(row.get(column))
+                for column in _CLAIM_ROW_DETAIL_COLUMNS
+            )
+            if has_detail or money > 0:
+                row_count += 1
+                row_incurred += money
+        claims = max(claims, row_count)
+        incurred = max(incurred, row_incurred)
+
+    return claims, incurred
+
+
 def prior_operations_evidence(facts: dict, flags: dict,
                               has_loss_run_doc: bool = False) -> List[str]:
     """POSITIVE evidence that prior operations existed (client 2.10's
@@ -274,9 +425,14 @@ def prior_operations_evidence(facts: dict, flags: dict,
         out.append("loss runs uploaded")
     if _fv(facts, "prior_carrier"):
         out.append("a prior carrier is named")
-    if (_to_int(_fv(facts, "num_claims")) or 0) > 0:
+    # Through the one door (2026-08-28) so a claim TYPED into the client's own
+    # claims table contradicts a New Venture confirmation exactly as a claim
+    # counted out of a loss run does. Before this, a confirmed new venture with
+    # a typed claim row still resolved to Not Applicable.
+    _claims, _incurred = asserted_claims(facts)
+    if _claims > 0:
         out.append("prior claims recorded")
-    if (_to_float(_fv(facts, "total_incurred")) or 0.0) > 0:
+    if _incurred > 0:
         out.append("incurred losses recorded")
     if (_to_int(_fv(facts, "loss_history_years")) or 0) > 0:
         out.append("loss-history years recorded")
@@ -289,6 +445,35 @@ def prior_operations_evidence(facts: dict, flags: dict,
 def new_venture_contradicted(facts: dict, flags: dict,
                              has_loss_run_doc: bool = False) -> bool:
     return bool(prior_operations_evidence(facts, flags, has_loss_run_doc))
+
+
+def new_venture_answered(facts: dict, flags: dict) -> bool:
+    """Has the producer ANSWERED the New Venture question - either way?
+
+    Deliberately separate from `new_venture_confirmed`, which asks "is the
+    answer YES". C2-G's whole point is that "what is the value?" and "did they
+    answer?" are two different questions, and conflating them is what produced
+    the defect this exists to fix:
+
+    LIVE RUN 2026-08-27 (H7 S1). The "confirm New Venture status" recommendation
+    was emitted whenever loss history was absent, with no reference to whether
+    it had already been answered. Answering YES makes the pillar Not Applicable,
+    the rec stops being generated and the card closes. Answering NO - the honest
+    answer for most accounts - changes nothing the scorer looks at, so the rec
+    was re-emitted identically, the auto-resolve pass never stamped it, and the
+    card sprang straight back to Open with an empty dropdown. The producer's
+    answer WAS saved (fact, envelope and audit row all correct); it just looked
+    like it had not been, so the owner answered it three times.
+
+    "Only one of the two answers can ever retire this card" is the class. A
+    confirm-X prompt must stop asking once X has been confirmed EITHER way; the
+    genuine underlying gap (no loss history) keeps its own separate rec, which
+    is correct and still open.
+    """
+    facts, flags = facts or {}, flags or {}
+    if "new_venture_confirmed" in flags:
+        return True
+    return new_venture_answer(_fv(facts, NEW_VENTURE_FIELD)) is not None
 
 
 def new_venture_applicable(facts: dict, flags: dict,

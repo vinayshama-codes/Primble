@@ -90,6 +90,36 @@ _SPECIALTY: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
     (LIQUOR,             ("liquor",)),
 )
 
+# BARE ABBREVIATIONS - OWNER RULING 2026-08-28, the product approval D9 requires.
+#
+# Client beta-exit criterion: *"Equivalent coverage terminology does not create
+# false warnings."* `GL`, `WC` and `BAP` are the three abbreviations a broker
+# actually types, and all three returned None - so the most common shorthand in
+# the business was "terminology not covered by a known rule". Logged as O2 in
+# the C4 backlog since 2026-08-26 and left for a ruling because D9 reserves
+# "folding a phrase into an existing family" for product. The owner ruled on
+# 2026-08-28: add them. NOTHING BEYOND THESE THREE - a fourth abbreviation is a
+# fresh D9 decision, not an obvious extension of this one.
+#
+# These are NOT in the tables above, and that is the whole point.
+# `_SPECIFIC` / `_GL_PHRASES` match by SUBSTRING (`p in s`), which is safe for a
+# multi-word phrase and catastrophic for a two-letter one. Measured before
+# writing this:
+#
+#     "burglary and theft" contains "gl"   -> a CRIME line read as GL
+#     "plate glass"        contains "gl"   -> a PROPERTY line read as GL
+#     "roofing shingles"   contains "gl"   -> a roofer's own trade read as GL
+#     "showcase"/"newcastle" contain "wc"  -> read as Workers Comp
+#
+# So abbreviations match WHOLE TOKENS only, using the same `s.split()` test the
+# bare-"liability" branch below already uses. This is the D9 risk in miniature:
+# the danger was never the equivalence, it was the matching mechanism.
+_ABBREVIATIONS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    (GENERAL_LIAB,  ("gl",)),
+    (WORKERS_COMP,  ("wc",)),
+    (AUTO,          ("bap",)),          # Business Auto Policy
+)
+
 # Phrases that name General Liability outright.
 _GL_PHRASES: Tuple[str, ...] = (
     "general liability", "cgl", "premises operations", "premises liability",
@@ -133,6 +163,15 @@ def canon_line(text: Any) -> Optional[str]:
             return key
     for key, phrases in _SPECIALTY:
         if any((p in s) if not p.endswith(" ") else (p in padded) for p in phrases):
+            return key
+    # Abbreviations are checked AFTER the specific table on purpose, so
+    # "Excess GL" stays UMBRELLA exactly as "Excess General Liability" does.
+    # Putting them first would let an excess policy masquerade as the primary
+    # line it sits over - the C23 defect, which put a $3M umbrella limit in the
+    # GL boxes. Deliberately never the other way round.
+    _tokens = set(s.split())
+    for key, abbreviations in _ABBREVIATIONS:
+        if _tokens.intersection(abbreviations):
             return key
     if any(p in s for p in _GL_PHRASES):
         return GENERAL_LIAB

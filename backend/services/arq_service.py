@@ -19,7 +19,9 @@ from services.question_classifier import (
     AUDIENCE_CLIENT,
     AUDIENCE_INTERNAL,
     AUDIENCE_PRODUCER,
+    BUCKET_AGENCY,
     BUCKET_CLIENT,
+    BUCKET_LABELS,
     BUCKET_UNDERWRITING,
     PRIORITY_IMPORTANT,
     PRIORITY_SUPPRESSED,
@@ -402,7 +404,13 @@ _FIELD_QUESTION_MAP = {
     "percent_subcontracted":    "What percentage of your total work is done by outside contractors rather than your own employees?",
     # Subcontractor usage broken out by class code (client example) - captured as a
     # free-text remark alongside the single overall percentage above.
-    "subcontractor_pct_by_class_code": "If you use subcontractors, what percentage of work is subcontracted for each type of work (class code)? For example: 'Roofing - 40%; Framing - 20%'.",
+    # WORDING ONLY (V1 H3-D): "(class code)" removed. The FACT stays
+    # client-eligible - client 4.3 names "Percentage subcontracted" and
+    # `question_eligibility.CLIENT_ELIGIBLE_DESPITE_TOPIC` pins it - but the
+    # parenthetical asked the insured to think in NCCI codes to answer a plain
+    # business question, which is what core principle 5 is about. The example
+    # already uses trade names, so nothing about the answer changes.
+    "subcontractor_pct_by_class_code": "If you use subcontractors, what percentage of work is subcontracted for each type of work? For example: 'Roofing - 40%; Framing - 20%'.",
     # Vehicle garaging / return-to-yard (client example) - context for the auto rater.
     "vehicles_return_to_premises": "At the end of the workday, do your vehicles return to your place of business or yard, or are they kept somewhere else? Please describe.",
     "num_claims":               "How many insurance claims has your business filed in the last 3 to 5 years?",
@@ -498,7 +506,10 @@ _FIELD_HINT_MAP = {
     "schedule_of_underlying_insurance": "Answer 'Yes' if the submission includes a Schedule of Underlying Insurance, or briefly list the underlying policies, e.g. 'GL $1M/$2M, Auto $1M CSL, EL $1M'. Leave blank if not provided.",
     "umbrella_follow_form":     "Enter 'Follows form' only if a document explicitly says so. Coverage is never assumed - leave blank if it is not stated and an underwriter will review.",
     "percent_subcontracted":    "Enter what percentage of your work is performed by subcontractors rather than your own employees, e.g. '30%'.",
-    "subcontractor_pct_by_class_code": "For each trade or class code, give the share of that work done by subcontractors, e.g. 'Roofing 5551 - 40%; Framing 5645 - 20%'. Leave blank if you use no subcontractors.",
+    # The HINT reaches the client too, so it carried the same jargon AND worked
+    # code examples ("Roofing 5551 - 40%") that the question text has now
+    # dropped. Trade names only (V1 H3-D).
+    "subcontractor_pct_by_class_code": "For each type of work, give the share of that work done by subcontractors, e.g. 'Roofing - 40%; Framing - 20%'. Leave blank if you use no subcontractors.",
     "vehicles_return_to_premises": "Tell us where your vehicles are parked overnight, e.g. 'All vehicles return to our main yard at 123 Industrial Rd' or 'Drivers take vehicles home'.",
     "num_claims":               "Enter the total number of insurance claims your business has filed in the past 3–5 years, e.g. '2'. Enter '0' if none.",
     "loss_history_years":       "Enter how many years of claims history you can provide documentation for, e.g. '5'.",
@@ -609,7 +620,7 @@ _FIELD_PRODUCER_LABEL_MAP = {
     "schedule_of_underlying_insurance": "Schedule of underlying insurance",
     "umbrella_follow_form":     "Follow-form confirmation",
     "percent_subcontracted":    "Subcontracted work %",
-    "subcontractor_pct_by_class_code": "Subcontracted % by class code",
+    "subcontractor_pct_by_class_code": "Subcontracted % by type of work",
     "vehicles_return_to_premises": "Vehicle garaging / return-to-yard",
     "num_claims":               "Claim count - last 3-5 years",
     "loss_history_years":       "Loss history years available",
@@ -1177,6 +1188,14 @@ def _blocks_submit(field_type: str, field_name: str) -> bool:
     return _field_format_type(field_name) in ("email", "phone")
 
 
+# An answer that is only punctuation says nothing, whatever field it is on.
+# Kept as an explicit drop ABOVE the semantics door (V1 H4) so "-", "--" and a
+# lone "?" behave exactly as they did before that door existed - the checkbox
+# branch sits between them and the door, and would otherwise keep a bare "-"
+# as a flagged free-text reply to a Yes/No question.
+_NON_ANSWER_PUNCTUATION_RE = re.compile(r"^[\s\?\.\-–—_/\\*]+$")
+
+
 def _clean_answer(raw: str, field_name: str) -> Optional[str]:
     """Backwards-compatible wrapper: cleaned value only, review flag dropped."""
     val, _ = _clean_answer_ex(raw, field_name)
@@ -1207,7 +1226,11 @@ def _clean_answer_ex(raw: str, field_name: str) -> Tuple[Optional[str], str]:
     if is_not_sure_value(val):
         return None, ""
 
-    if not val or val.lower() in ("n/a", "na", "?", "unknown", "none", "null", "-", "--", "tbd", "unsure"):
+    # A serialization artifact or pure punctuation is not a human answer and
+    # never becomes one. `interpret_answer` would read "null" as ordinary free
+    # text (measured: intent=VALUE, reason=free_text), so this stays an explicit
+    # drop ABOVE the door rather than being delegated to it.
+    if not val or val.lower() in ("null",) or _NON_ANSWER_PUNCTUATION_RE.match(val):
         return None, ""
 
     val = re.sub(r"<[^>]*>", "", val).strip()
@@ -1231,12 +1254,88 @@ def _clean_answer_ex(raw: str, field_name: str) -> Tuple[Optional[str], str]:
 
         if val.lower() in yes_values:
             return "Yes", ""
+        # NOTE FOR ANY FUTURE EDIT: this branch MUST stay above the semantics
+        # door added below. `interpret_answer` reads a bare "no" on an ordinary
+        # fact as an ABSENCE ("there is none"), which is right for
+        # `prior_carrier` and catastrophically wrong for a Yes/No ACORD box,
+        # where "No" is the ANSWER and has to reach the checkbox as "No".
         elif val.lower() in no_values:
             return "No", ""
         else:
             # Kept, not discarded - a free-text reply to a Yes/No question is
             # still information the producer can act on.
             return val, "Expected Yes or No"
+
+    # ── THE SEMANTICS DOOR - V1 H4 (client section 9), 2026-08-27 ────────────
+    # Closes F15 (recorded in v1-20AUG.md C3-C on 2026-08-25 and never fixed).
+    #
+    # This function used to drop `("n/a", "na", "?", "unknown", "none", "null",
+    # "-", "--", "tbd", "unsure")` outright, so a CLIENT answering "None" to
+    # "Who provided your business insurance most recently? (If none, write
+    # 'None')" - our own question, our own instruction - had the answer thrown
+    # away. It never became a fact, never got `value_state: explicit_no`, and
+    # the gap stayed open. The PRODUCER path reads the identical word correctly
+    # through `answer_semantics.interpret_answer`. Two doors, two meanings, on
+    # the exact question Brent ruled on 2026-08-24: *"we can't treat 'N/A' as
+    # '0'. These are not the same. 'No known losses' is a legitimate answer."*
+    #
+    # `answer_semantics` is now THE one door for what a human answer MEANS, as
+    # C2-G always claimed it was. It separates the two questions this code
+    # conflated: "what is the value?" and "did they answer?"
+    #
+    # PLACEMENT IS LOAD-BEARING - three things must stay ABOVE it, and each is
+    # a measured failure, not a precaution:
+    #   * `is_not_sure_value` (line ~1218). `_UNCERTAIN_RE` is \b-anchored and
+    #     underscore is a word character, so "__NOT_SURE__" does NOT match
+    #     "not sure" - the door returns intent=VALUE and the sentinel would be
+    #     stored and stamped as a real answer.
+    #   * the "null" / punctuation drop - the door reads "null" as free text.
+    #   * the checkbox / indicator branch above - the door reads a bare "no" as
+    #     an ABSENCE, which would empty every ACORD Yes/No box answered "No".
+    #
+    # WHAT IT RETURNS, and why an absence keeps the person's own words:
+    #   ABSENCE / NOT_APPLICABLE -> the raw words, and NO review_reason. The
+    #     words are what `apply_arq_answers_to_session` re-interprets into
+    #     `value_state: explicit_no` / `not_applicable`; returning "" instead
+    #     would be dropped by submit's own `if cleaned_val is not None` gate.
+    #     The empty review_reason is what keeps it away from `_blocks_submit`,
+    #     which today REFUSES THE WHOLE SUBMISSION for a client with no
+    #     umbrella typing "nil" into a currency box - a 422 with no answer they
+    #     could give instead. Skipping the format branches below is the point:
+    #     "N/A" is not a malformed dollar amount, it is a different kind of
+    #     answer.
+    #   UNKNOWN, empty / uncertainty -> dropped exactly as before. This is
+    #     WIDER than the old literal tuple and fixes a live data-destruction
+    #     bug in the other direction: "I will confirm later", "no idea",
+    #     "waiting on my accountant" are in none of the old tokens, so today
+    #     they are STAMPED onto the ACORD box as a client-supplied value while
+    #     `build_fact_envelope` writes an empty envelope over the extracted
+    #     fact - wrong in both directions in one pass.
+    #   Anything else (including UNKNOWN "unreadable:<kind>") -> falls through
+    #     to the format branches below, byte-identical to today. That
+    #     exemption is deliberate: `answer_semantics._declared_kind` infers a
+    #     kind from the KEY SHAPE, so a legitimate composite like
+    #     "$1,000,000 per occurrence / $2,000,000 aggregate" on `gl_limits`
+    #     reads as unreadable-currency. Dropping those would silently stop
+    #     accepting the two composite-limit answers the questionnaire
+    #     deliberately keeps free-text.
+    try:
+        from services.answer_semantics import (
+            ABSENCE, NOT_APPLICABLE, UNKNOWN, interpret_answer,
+        )
+        _canon = _canonical_key(field_name) or field_name
+        _interp = interpret_answer(_canon, val)
+        if _interp.intent in (ABSENCE, NOT_APPLICABLE):
+            return val, ""
+        if _interp.intent == UNKNOWN and _interp.reason in (
+                "empty", "uncertainty", "required_cannot_be_absent"):
+            return None, ""
+    except Exception as _ase:                                 # noqa: BLE001
+        # Fail OPEN to the pre-existing behaviour. An answer that reaches the
+        # producer flagged for review is recoverable; one silently discarded
+        # is the defect this door exists to close.
+        logger.warning("answer interpretation skipped for %s (%s) - "
+                       "falling back to format validation only", field_name, _ase)
 
     # Structured types first: these normalize, and only flag when they cannot.
     if input_type == "code":
@@ -1788,6 +1887,22 @@ def _hide_machine_worded_questions(questions: List[dict]) -> int:
     """
     moved = 0
     for q in questions:
+        # A TABLE IS NEVER A RAW SCHEMA PROMPT - the structural second condition
+        # (V1 H3-D, 2026-08-27). A `field_type: "schedule"` question is built by
+        # `_build_schedule_questions` from a curated `ScheduleDef`: it carries a
+        # column spec, a human label and a singular, and it renders as an
+        # editable grid rather than a text box. It cannot be "a PDF box with a
+        # sentence wrapped round its name", which is the only thing this filter
+        # exists to catch.
+        #
+        # Found live: the WC employee-group and owners/officers tables were
+        # built, routed to Client/Agency by `_finalize_schedule_taxonomy`, and
+        # then hidden HERE, because `schedule_capture.question_text`'s default
+        # template began with this very prefix. The client's whole section 8
+        # capture was invisible while every unit test passed - the tests drove
+        # the router directly and never ran the step after it.
+        if q.get("field_type") == "schedule":
+            continue
         if not str(q.get("question", "")).startswith(_MACHINE_QUESTION_PREFIX):
             continue
         if q.get("audience") not in (AUDIENCE_CLIENT, AUDIENCE_PRODUCER):
@@ -2354,6 +2469,32 @@ def _partition_schedule_fields(missing_fields: dict, field_current_values: dict)
     return schedule_forms
 
 
+def _apply_new_venture_derivations(facts: dict, flags: dict) -> List[str]:
+    """V1 H4: keep the facts a New Venture confirmation settles in step with it,
+    on whichever save path the confirmation arrived through. Returns the keys
+    the caller must pass to `upd_processing_session(delete_facts=...)`.
+    Never raises - a derivation that fails must not lose the answer itself."""
+    try:
+        from services.loss_history_state import apply_new_venture_derivations
+        return apply_new_venture_derivations(facts, flags)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("new-venture derivations skipped on save: %s", exc)
+        return []
+
+
+def _derive_wc_row_facts(facts: dict, list_key: str) -> None:
+    """V1 H3: a saved employee-group table re-derives what it states
+    (payroll by state, tidied codes) - the SAME rule the merge tail runs, so
+    the fact does not depend on who supplied the rows. Never raises."""
+    if list_key != "wc_class_codes":
+        return
+    try:
+        from services.extraction_service import derive_wc_facts_from_class_rows
+        derive_wc_facts_from_class_rows(facts)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("wc row derivations skipped on save: %s", exc)
+
+
 def _build_schedule_questions(schedule_forms: dict, facts: dict) -> List[dict]:
     """One table-style question per schedule, pre-loaded with known rows.
 
@@ -2388,7 +2529,8 @@ def _build_schedule_questions(schedule_forms: dict, facts: dict) -> List[dict]:
             "columns":           defn["columns"],
             "dedup_keys":        defn["dedup_keys"],
             "vin_decode":        bool(defn["vin_decode"]),
-            "row_capacity":      schedule_capture.ROW_CAPACITY,
+            "row_capacity":      schedule_capture.capacity_for(list_key),
+            "producer_only":     bool(defn.get("producer_only")),
             "current_rows":      rows,
             "_group_label":       None,
             "_is_curated_client": True,
@@ -2416,9 +2558,19 @@ def _finalize_schedule_taxonomy(questions: List[dict]) -> None:
     for q in questions:
         if q.get("field_type") != "schedule":
             continue
-        q["audience"]          = AUDIENCE_CLIENT
-        q["bucket"]            = BUCKET_CLIENT
-        q["bucket_label"]      = "Client"
+        # V1 H3 (2026-08-27): a table flagged producer_only on its
+        # `ScheduleDef` is the PRODUCER's - it renders in the Agency bucket and
+        # the send path refuses it (core principle 5). Everything else is
+        # exactly as before.
+        if schedule_capture.is_producer_only(q.get("schedule_key") or ""):
+            q["audience"]      = AUDIENCE_PRODUCER
+            q["bucket"]        = BUCKET_AGENCY
+            q["bucket_label"]  = BUCKET_LABELS.get(BUCKET_AGENCY, "Agency")
+            q["producer_review"] = True
+        else:
+            q["audience"]      = AUDIENCE_CLIENT
+            q["bucket"]        = BUCKET_CLIENT
+            q["bucket_label"]  = "Client"
         q["priority"]          = PRIORITY_IMPORTANT
         q["suppressed"]        = False
         q["suppressed_reason"] = ""
@@ -3899,6 +4051,9 @@ async def apply_arq_answers_to_session(
     # questionnaire" source; the producer picks.
     held_conflicts = dict(proc_session.get("client_answer_conflicts") or {})
     held_this_run: List[str] = []
+    # Fact keys whose DERIVATION no longer holds and must be retracted with
+    # delete_facts rather than popped (D18). See _apply_new_venture_derivations.
+    _nv_delete_keys: List[str] = []
 
     for field_name, form_ids in field_to_forms.items():
         new_val = answers[field_name]
@@ -3941,6 +4096,7 @@ async def apply_arq_answers_to_session(
             _c5_prev_rows = facts.get(list_key)
             _c5_prev_n = len(_c5_prev_rows) if isinstance(_c5_prev_rows, list) else 0
             facts[list_key] = schedule_capture.rows_for_facts(list_key, rows)
+            _derive_wc_row_facts(facts, list_key)
             _c5_change_log.append({
                 "field": f"schedule::{list_key}", "fact_key": list_key,
                 "previous": f"{_c5_prev_n} row(s)",
@@ -3953,22 +4109,82 @@ async def apply_arq_answers_to_session(
                 logger.info(
                     "ARQ apply: schedule %s has %d row(s) beyond the form's "
                     "%d-row capacity; full list retained in facts.",
-                    list_key, _report["overflow"], schedule_capture.ROW_CAPACITY,
+                    list_key, _report["overflow"], schedule_capture.capacity_for(list_key),
                 )
             if field_name not in updated:
                 updated.append(field_name)
             continue
 
+        # ── What does this answer MEAN, decided ONCE - V1 H4, 2026-08-27 ─────
+        # Read BEFORE the stamping loop because the answer's meaning decides
+        # what may be printed, and the loop below used to write the RAW STRING
+        # into the box independently of the envelope built at the bottom of
+        # this block. Since the F15 fix let absences through `_clean_answer_ex`,
+        # that raw string can be "N/A" / "none" / "nil" / "not applicable" -
+        # and `pdf_service._fill_and_highlight` only skips the literal tuple
+        # ('', 'null', 'None'), CASE SENSITIVELY, so only a capital-N "None"
+        # was ever stopped by accident. Everything else would PRINT on an ACORD
+        # PDF, labelled `client_arq` (green - "client supplied") on a legal
+        # document.
+        #
+        # An absence has NO VALUE by definition - `build_fact_envelope` stores
+        # `value: ""` for exactly this reason - so the box gets "" and the
+        # MEANING is carried by the fact's `value_state`. That also makes this
+        # path agree with the producer path, which stamps through
+        # `_restamp_canonical_into_forms` -> `_deterministic_map` and therefore
+        # already prints nothing for an absence. One fact, one answer, both
+        # doors (principle 1).
+        _stamp_val, _state_label = new_val, None
+        try:
+            from services.answer_semantics import (
+                ABSENCE, NOT_APPLICABLE, interpret_answer as _ia,
+            )
+            # A YES/NO ANSWER IS NEVER AN ABSENCE - the structural second
+            # condition, and it is not a precaution. `_clean_answer_ex`'s
+            # checkbox branch CANONICALISES a Yes/No reply to the literal
+            # "No", and re-reading that same string here reads it as "there is
+            # none" for every Yes/No field on every form - so the box that
+            # prints "No" today would ship BLANK. Measured against real fields:
+            # Building_SprinkleredIndicator_A, LossHistory_NoPriorLossesIndicator_A,
+            # and the canonical Yes/No facts (is_renewal, sprinkler_system,
+            # new_venture_indicator, hired_auto_indicator...). This is the exact
+            # regression the door in `_clean_answer_ex` is ordered to prevent,
+            # and it would have been re-committed one layer down on the identical
+            # string. Positive evidence only: when in any doubt we stamp what the
+            # person actually said, which is today's behaviour.
+            _yes_no_field = (
+                _field_format_type(field_name) == "checkbox"
+                or "indicator" in field_name.lower()
+                or str(new_val).strip() in ("Yes", "No")
+            )
+            _pre = _ia(_canonical_key(field_name) or field_name, str(new_val))
+            if _pre.intent in (ABSENCE, NOT_APPLICABLE) and not _yes_no_field:
+                _stamp_val = ""
+                # C3 3.8's fill-rate vocabulary, which this path never reached.
+                # `apply_fact_state_confidence_labels` sets these labels, but it
+                # runs only from `map_facts_to_form` - so an absence answered
+                # through the questionnaire sat as an EMPTY `client_arq` box:
+                # not counted as filled, not excluded from the denominator, and
+                # earning nothing. `explicit_no` scores 1.00 (3.8: "Explicit No
+                # may count as a valid completed response") and
+                # `not_applicable` leaves the fill rate entirely (3.8: "Not
+                # Applicable fields must not reduce fill rate").
+                _state_label = ("not_applicable"
+                                if _pre.intent is NOT_APPLICABLE else "explicit_no")
+        except Exception as _pse:                             # noqa: BLE001
+            logger.warning("ARQ apply: pre-stamp interpretation skipped for "
+                           "%s (%s) - stamping the raw answer", field_name, _pse)
+
         for fid, form_data in generated.items():
             field_state = form_data.get("field_state") or form_data.get("mapped", {})
             schema      = form_data.get("schema", {})
             if field_name in schema or field_name in field_state or fid in form_ids:
-                field_state[field_name] = new_val
+                field_state[field_name] = _stamp_val
                 form_data["field_state"] = field_state
                 # Label as client-supplied (scores 1.00 in SQS, distinct from
                 # source-document evidence — Beta Report §6 evidence labelling).
                 conf = form_data.get("confidence") or {}
-                conf[field_name] = "client_arq"
+                conf[field_name] = _state_label or "client_arq"
                 form_data["confidence"] = conf
                 cff = set(form_data.get("client_filled_fields", []))
                 cff.add(field_name)
@@ -4071,6 +4287,10 @@ async def apply_arq_answers_to_session(
                 from services.loss_history_state import new_venture_answer
                 flags["new_venture_confirmed"] = new_venture_answer(new_val) is True
                 flags_changed = True
+                # V1 H4 - see the producer path for the reasoning. Both save
+                # paths recompute it so the derivation cannot depend on WHICH
+                # door the confirmation came through (principle 1).
+                _nv_delete_keys.extend(_apply_new_venture_derivations(facts, flags))
             elif canon == CARRIER_MARKETING_FIELD:
                 # Derive prior_carrier_adverse_action from the selected reason.
                 # Adverse options escalate ACORD 101 and impact Narrative Quality.
@@ -4094,10 +4314,14 @@ async def apply_arq_answers_to_session(
     if flags_changed:
         _update_payload["flags"] = flags
     # See B13: the facts merge is additive, so clearing the last held answer
-    # needs an explicit retraction, not a pop.
+    # needs an explicit retraction, not a pop. Same rule carries the withdrawn
+    # new-venture derivations (V1 H4).
+    _deletes = list(_nv_delete_keys)
+    if not held_conflicts:
+        _deletes.append("_client_answer_conflicts")
     await upd_processing_session(
         processing_session_id, _update_payload,
-        delete_facts=(None if held_conflicts else ["_client_answer_conflicts"]),
+        delete_facts=(_deletes or None),
     )
     # E&O 5.8/5.9/5.11: durably record what the questionnaire changed. The
     # per-answer respondent identity lives on the immutable receipt
@@ -4106,7 +4330,10 @@ async def apply_arq_answers_to_session(
     # and nothing ever wrote until 2026-08-26. Best-effort AFTER the persist:
     # an audit failure must never take down the apply.
     try:
-        from services.audit_service import log_field_change, log_audit_event
+        from services.audit_service import log_field_change, record_material_change
+        from services.audit_history import (
+            EVENT_CLIENT_ANSWERS_APPLIED, ACTION_APPLIED, ROLE_CLIENT,
+        )
         from services.sqs_service import SQS_MODEL_VERSION as _C5_MV
         _owner = str(proc_session.get("user_id") or "")
         for _chg in _c5_change_log:
@@ -4117,14 +4344,24 @@ async def apply_arq_answers_to_session(
                 previous_value=_chg["previous"], new_value=_chg["new"] or "",
                 confidence=None, model_version=_C5_MV,
             )
-        await log_audit_event(
-            processing_session_id, _owner, "client_answers_applied",
-            {"arq_id": arq_id,
-             "client_name": arq.get("client_name") or "",
-             "client_email": arq.get("email") or arq.get("client_email") or "",
-             "fields_changed": len(_c5_change_log),
-             "answers_received": len(answers),
-             "held_for_producer": len(held_this_run)},
+        # V1 H7: through the one writer so the summary event carries the same
+        # seven attributes every other material event does. `role` is forced to
+        # CLIENT: this runs under the SESSION OWNER's user id (the client has no
+        # account), so left to derive it would file the client's answers as a
+        # producer action - the attribution error section 12 is about. The
+        # client's own identity is on the immutable receipt and is repeated in
+        # `detail` so the record does not need the join to name them.
+        await record_material_change(
+            processing_session_id, EVENT_CLIENT_ANSWERS_APPLIED,
+            action=ACTION_APPLIED, source="client_arq", role=ROLE_CLIENT,
+            user_id=_owner,
+            new_value=f"{len(_c5_change_log)} field(s) changed",
+            detail={"arq_id": arq_id,
+                    "client_name": arq.get("client_name") or "",
+                    "client_email": arq.get("email") or arq.get("client_email") or "",
+                    "fields_changed": len(_c5_change_log),
+                    "answers_received": len(answers),
+                    "held_for_producer": len(held_this_run)},
         )
     except Exception as _c5_ex:                               # noqa: BLE001
         logger.warning("ARQ %s: client-answer audit logging failed: %s",
@@ -4153,6 +4390,29 @@ def _client_answer_conflicts_with_source(canon: str, source_raw, source_val, cli
         from services.fact_state import derive_evidence_state, USER_CONFIRMED
         if derive_evidence_state(source_raw)[0] == USER_CONFIRMED:
             return False                      # a human already owns this value
+        # ── STRUCTURAL FIRST CONDITION - V1 H4, 2026-08-27 ──────────────────
+        # "The documents say X, the client says there is none" is a
+        # DISAGREEMENT whatever the comparator makes of the two strings, and it
+        # must reach the producer (principle 4).
+        # The comparator alone cannot see it: `verdict("operations_description",
+        # "Roofing contractor", "None")` returns SAME, because prose values fall
+        # into the incomparable/soft branch rather than DIFFERENT. So before
+        # F15 was fixed this was unreachable - `_clean_answer_ex` discarded the
+        # word "None" before it ever got here - and closing F15 opened it: a
+        # client answering "None" would have SILENTLY DELETED an extracted
+        # operations description, replacing it with an empty envelope.
+        # Necessary-but-not-sufficient tests need a structural second condition
+        # (H1-F's standing lesson); this is that condition, in the one direction
+        # the comparator provably cannot judge.
+        try:
+            from services.answer_semantics import (
+                ABSENCE, NOT_APPLICABLE, interpret_answer,
+            )
+            if interpret_answer(canon, str(client_val)).intent in (
+                    ABSENCE, NOT_APPLICABLE):
+                return True                   # documents state it; client denies it
+        except Exception:                                     # noqa: BLE001
+            pass                              # fall through to the comparator
         from services.fact_comparison import verdict, DIFFERENT
         return verdict(canon, source_val, client_val) == DIFFERENT
     except Exception as exc:                                  # noqa: BLE001
@@ -4214,7 +4474,7 @@ async def get_session_schedules(
             "columns":           defn["columns"],
             "dedup_keys":        defn["dedup_keys"],
             "vin_decode":        bool(defn["vin_decode"]),
-            "row_capacity":      schedule_capture.ROW_CAPACITY,
+            "row_capacity":      schedule_capture.capacity_for(list_key),
             "rows":              rows,
             "row_count":         report["row_count"],
             "overflow":          report["overflow"],
@@ -4256,6 +4516,7 @@ async def save_session_schedule(
     generated = proc.get("generated_forms", {}) or {}
 
     facts[list_key] = schedule_capture.rows_for_facts(list_key, clean_rows)
+    _derive_wc_row_facts(facts, list_key)
     touched = _restamp_schedule_into_forms(generated, list_key, facts)
 
     # Producer-sourced, not client-sourced: relabel what the shared re-stamp
@@ -4377,6 +4638,11 @@ async def apply_producer_answer_to_session(
         from services.loss_history_state import new_venture_answer
         flags["new_venture_confirmed"] = new_venture_answer(new_val) is True
         flags_changed = True
+        # V1 H4: and the facts that confirmation settles - "New venture is a
+        # valid state" for Years in Business. Recomputed on EVERY save (never
+        # only on the way in), so withdrawing the confirmation withdraws the
+        # derivation with it.
+        _nv_delete = _apply_new_venture_derivations(facts, flags)
     elif canon == CARRIER_MARKETING_FIELD:
         _val_lower = new_val.lower()
         if _val_lower.startswith("other:"):
@@ -4392,7 +4658,10 @@ async def apply_producer_answer_to_session(
     _update_payload = {"generated_forms": generated, "facts": facts}
     if flags_changed:
         _update_payload["flags"] = flags
-    await upd_processing_session(processing_session_id, _update_payload)
+    # D18: a stale derivation is REMOVED with delete_facts, never by popping it
+    # out of `facts` - the merge is additive and a pop is a silent no-op.
+    await upd_processing_session(processing_session_id, _update_payload,
+                                 delete_facts=_nv_delete or None)
     logger.info(
         f"Producer answer applied: session={processing_session_id} "
         f"field={field_name} canon={canon} forms={_stamped}"
@@ -4497,10 +4766,28 @@ async def clear_producer_answer_from_session(
     # without asserting we affirmatively determined it.
     flags = dict(proc_session.get("flags", {}) or {})
     flags_changed = False
+    _also_delete: List[str] = []
     if canon == NO_LOSS_INDICATOR_FIELD:
         flags_changed = flags.pop("no_prior_losses", None) is not None
     elif canon == CARRIER_MARKETING_FIELD:
         flags_changed = flags.pop("prior_carrier_adverse_action", None) is not None
+    elif canon == NEW_VENTURE_FIELD:
+        # PRE-EXISTING BUG, fixed here (V1 H4, 2026-08-27). This function's own
+        # comment above says *"a conclusion must not outlive the premise it was
+        # drawn from"* - and `new_venture_confirmed` was the one conclusion it
+        # never retracted. `apply_producer_answer_to_session` sets that flag,
+        # and `loss_history_state.new_venture_confirmed` reads the FLAG FIRST
+        # and only falls back to the fact - so reopening a New Venture answer
+        # deleted the fact and left Loss History Not Applicable forever, with
+        # nothing on the screen explaining why.
+        flags_changed = flags.pop("new_venture_confirmed", None) is not None
+        # ...and the derived facts drawn from it go too. Same rule, one layer on.
+        try:
+            from services.loss_history_state import apply_new_venture_derivations
+            _facts_after = {k: v for k, v in facts.items() if k != canon}
+            _also_delete = apply_new_venture_derivations(_facts_after, flags)
+        except Exception as exc:                              # noqa: BLE001
+            logger.warning("new-venture derivation retraction skipped: %s", exc)
 
     _update_payload = {"generated_forms": generated}
     if flags_changed:
@@ -4508,7 +4795,8 @@ async def clear_producer_answer_from_session(
     # delete_facts, not {"facts": facts}: the facts merge is additive and would
     # simply preserve the key we are trying to retract.
     await upd_processing_session(
-        processing_session_id, _update_payload, delete_facts=[canon],
+        processing_session_id, _update_payload,
+        delete_facts=[canon] + _also_delete,
     )
     logger.info(
         f"Producer answer cleared: session={processing_session_id} "

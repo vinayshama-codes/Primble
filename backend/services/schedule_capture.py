@@ -89,7 +89,19 @@ class Column(dict):
 
 
 class ScheduleDef(dict):
-    """Client-facing shape of one repeating schedule."""
+    """Client-facing shape of one repeating schedule.
+
+    `producer_only` (V1 H3, 2026-08-27): the WHOLE table is the producer's -
+    it is never raised as a client question and never sent to the insured
+    (core principle 5). The officers table is the live case: names are facts,
+    but included / excluded is an insurance decision, and one table cannot
+    split its audience by column. Default False - the four original tables
+    are untouched.
+
+    `row_capacity`: physical rows the ACORD form prints for THIS schedule.
+    Defaults to the 14-row (A..N) convention; ACORD 130 prints only four
+    officer rows, and an overflow notice counted against 14 would be wrong.
+    """
 
     def __init__(
         self,
@@ -100,11 +112,14 @@ class ScheduleDef(dict):
         dedup_keys: Tuple[str, ...] = (),
         scalar_key: Optional[str] = None,
         vin_decode: bool = False,
+        producer_only: bool = False,
+        row_capacity: int = ROW_CAPACITY,
     ):
         super().__init__(
             list_key=list_key, label=label, singular=singular,
             columns=columns, dedup_keys=list(dedup_keys),
             scalar_key=scalar_key, vin_decode=vin_decode,
+            producer_only=producer_only, row_capacity=row_capacity,
         )
 
 
@@ -188,15 +203,79 @@ SCHEDULE_DEFS: Dict[str, ScheduleDef] = {
             Column("reserved_amount",  "Amount reserved", "currency", placeholder="$2,000", width=135),
         ],
     ),
+    # ── V1 H3 (client section 8.1) - WC exposure at the employee-group level ──
+    # ONE table on the EXISTING `wc_class_codes` fact (Principle 1: the stamper,
+    # the scorer, the ACORD 130 checklist and the class-code vote all read this
+    # key). Column keys are the extraction row keys, so a row the model read
+    # from a rating sheet and a row the insured typed are the same shape.
+    #
+    # The client's group = one ACORD 130 rating row: "Field Employees /
+    # Roofing installation / 8 employees / $520,000 / CO". ACORD prints no
+    # separate job-title box - its DutiesDescription tooltip asks for "the
+    # classification description or a brief statement regarding the duties" -
+    # so group and duties are ONE cell (owner 2026-08-27, Q25). Employee count
+    # is full-time + part-time because those are the two boxes the form has
+    # (Q24). The class code is the PRODUCER's column - core principle 5 - and
+    # `rate` rides along producer-only so an extracted manual rate survives a
+    # round trip through the table instead of being dropped by `rows_from_facts`.
+    "wc_class_codes": ScheduleDef(
+        list_key="wc_class_codes",
+        label="Employee groups and payroll",
+        singular="employee group",
+        dedup_keys=("description", "state"),
+        columns=[
+            Column("description",         "Employee group and what they do", "text",
+                   required=True, placeholder="Field employees - roofing installation", width=240),
+            Column("full_time_employees", "Full-time",     "number",   placeholder="8", width=85),
+            Column("part_time_employees", "Part-time",     "number",   placeholder="0", width=85),
+            Column("payroll",             "Annual payroll", "currency", required=True,
+                   placeholder="$520,000", width=130),
+            Column("state",               "State",         "state",    placeholder="CO", width=80),
+            Column("code",                "WC class code", "text",     placeholder="5551", width=110,
+                   producer_only=True),
+            Column("rate",                "Rate",          "text",     placeholder="12.10", width=90,
+                   producer_only=True),
+        ],
+    ),
+    # ── V1 H3 (client section 8.2) - owners / officers and their treatment ────
+    # PRODUCER-ONLY, whole table: C4 routes `wc_officers` to the producer (4.4
+    # "owner/officer inclusion/exclusion" is insurance judgment) and one table
+    # cannot split its audience by row (Q27). The treatment cell is free text
+    # read by `coverage_evidence.officer_treatment_code` - "Included" /
+    # "Excluded" (or INC / EXC); anything else leaves the ACORD box blank and
+    # the officer counted as unresolved by the 6.4 check. Four rows on the
+    # form (Q26 / capacity).
+    "wc_officers": ScheduleDef(
+        list_key="wc_officers",
+        label="Owners and officers",
+        singular="owner or officer",
+        dedup_keys=("name",),
+        producer_only=True,
+        row_capacity=4,
+        columns=[
+            Column("name",            "Full name",          "text",    required=True, placeholder="Jane Smith", width=170),
+            Column("title",           "Title",              "text",    placeholder="President", width=120),
+            Column("ownership_pct",   "Ownership %",        "percent", placeholder="50", width=100),
+            Column("state",           "State",              "state",   placeholder="CO", width=80),
+            Column("include_exclude", "Included / Excluded", "text",   placeholder="Included", width=130),
+            # ACORD 130 prints these beside every officer and the form's own
+            # note says an INCLUDED officer's remuneration must appear in the
+            # rating section. Added 2026-08-27 (H3-D) so the producer can fill
+            # what the model was previously inventing here from the group table.
+            Column("duties",          "Duties",             "text",    placeholder="Estimating and sales", width=180),
+            Column("remuneration",    "Remuneration",       "currency", placeholder="$85,000", width=125),
+        ],
+    ),
 }
 # NOTE: only schedules with LIVE bindings in `pdf_service._SCHEDULE_REGISTRY`
-# (verified field-by-field against all 17 real schemas on 2026-07-21) are
-# defined here. wc_class_codes / wc_officers / underlying_policies /
-# prior_coverage_by_line / inland_marine_items / additional_named_insureds are
-# registered in pdf_service but every one of their entries matches ZERO real
-# schema field, so a capture table for them could never stamp anything. They are
-# deliberately omitted rather than shipped as tables that quietly discard input.
-# Adding one back is a two-line change once its ACORD field names are mapped.
+# are defined here. The 2026-07-21 audit found wc_class_codes / wc_officers /
+# underlying_policies / prior_coverage_by_line / inland_marine_items /
+# additional_named_insureds bound to ZERO real schema fields; the two WC
+# schedules had their real ACORD 130 names bound on 2026-08-15/16 and joined
+# this table on 2026-08-27 (V1 H3). The other four are still unbound and still
+# deliberately omitted rather than shipped as tables that quietly discard
+# input. `tests/test_schedule_capture.py::test_every_schedule_column_binds_to_
+# a_live_acord_field` is the guard.
 
 # Curated `_FIELD_PREFIX_MAP` group labels (arq_service) → schedule list key.
 # These cover questions generated from the curated prefix map rather than from a
@@ -211,6 +290,23 @@ GROUP_LABEL_TO_LIST_KEY: Dict[str, str] = {
 
 def get_def(list_key: str) -> Optional[ScheduleDef]:
     return SCHEDULE_DEFS.get(list_key)
+
+
+def capacity_for(list_key: str) -> int:
+    """Physical rows the form prints for this schedule (see `ScheduleDef`)."""
+    defn = SCHEDULE_DEFS.get(list_key)
+    if defn is None:
+        return ROW_CAPACITY
+    try:
+        return int(defn.get("row_capacity") or ROW_CAPACITY)
+    except (TypeError, ValueError):
+        return ROW_CAPACITY
+
+
+def is_producer_only(list_key: str) -> bool:
+    """Whole-table producer ownership - never a client question, never sent."""
+    defn = SCHEDULE_DEFS.get(list_key)
+    return bool(defn and defn.get("producer_only"))
 
 
 def answer_key(list_key: str) -> str:
@@ -316,6 +412,7 @@ _YEAR_RE = re.compile(r"^(19|20)\d{2}$")
 _DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$|^\d{4}-\d{2}-\d{2}$")
 _STATE_RE = re.compile(r"^[A-Za-z]{2}$")
 _NUMERIC_RE = re.compile(r"^\d+(\.\d+)?$")
+_COUNT_RE = re.compile(r"^\d+$")
 
 
 def _clean_cell(raw: Any) -> str:
@@ -355,6 +452,10 @@ def validate_cell(col: dict, value: str) -> str:
         stripped = val.replace("$", "").replace(",", "").replace("%", "").strip()
         if not _NUMERIC_RE.match(stripped):
             return f"{col['label']} must be a number"
+    elif ctype == "number":
+        # A count (employees per group). Whole number only - "8", "1,200".
+        if not _COUNT_RE.match(val.replace(",", "").strip()):
+            return f"{col['label']} must be a whole number"
     return ""
 
 
@@ -457,7 +558,7 @@ def validate_rows(list_key: str, rows: Any) -> Tuple[List[dict], dict]:
         "errors":     {str(k): v for k, v in errors.items()},
         "duplicates": duplicates,
         "row_count":  len(clean_rows),
-        "overflow":   max(0, len(clean_rows) - ROW_CAPACITY),
+        "overflow":   max(0, len(clean_rows) - capacity_for(list_key)),
         "truncated":  truncated,
     }
 
@@ -475,6 +576,15 @@ def rows_for_facts(list_key: str, rows: List[dict]) -> List[Any]:
     scalar_key = defn.get("scalar_key")
     if scalar_key:
         return [str(r.get(scalar_key, "")) for r in rows if str(r.get(scalar_key, "")).strip()]
+    if list_key == "wc_class_codes":
+        # Client 8.3 "normalize known formatting" - the same tidy-up the merge
+        # tail applies to extracted rows, so a producer typing "5551 Roofing"
+        # into the code column gets the code in the code box.
+        try:
+            from services.coverage_evidence import normalize_wc_class_row
+            rows = [normalize_wc_class_row(dict(r)) for r in rows]
+        except Exception:                                     # noqa: BLE001
+            pass
     return rows
 
 
@@ -503,7 +613,16 @@ def rows_from_facts(list_key: str, facts: dict) -> List[dict]:
     out: List[dict] = []
     for item in raw[:MAX_ROWS]:
         if isinstance(item, dict):
-            out.append({c["key"]: _clean_cell(item.get(c["key"])) for c in defn["columns"]})
+            row = {c["key"]: _clean_cell(item.get(c["key"])) for c in defn["columns"]}
+            if list_key == "wc_officers" and not row.get("include_exclude"):
+                # The extractor records treatment as two booleans; the table
+                # shows one word. ONE reader decides (coverage_evidence).
+                try:
+                    from services.coverage_evidence import officer_treatment_label
+                    row["include_exclude"] = officer_treatment_label(item)
+                except Exception:                             # noqa: BLE001
+                    pass
+            out.append(row)
         else:
             row = {c["key"]: "" for c in defn["columns"]}
             row[scalar_key] = _clean_cell(item)
@@ -552,6 +671,18 @@ _QUESTION_OVERRIDES = {
         "Please list every business location to be insured. Add one row per "
         "location, or upload your location list as a CSV or Excel file."
     ),
+    # V1 H3 8.1. Deliberately worded as the CLIENT would describe their own
+    # people - groups of employees and what they do - never as a rating table.
+    "wc_class_codes": (
+        "Please list your employees by group - for example office staff, sales, "
+        "and field crews. Add one row per group, or upload the list as a CSV or "
+        "Excel file."
+    ),
+    "wc_officers": (
+        "Please list the owners and officers, and whether each one is included "
+        "in or excluded from Workers Compensation coverage. Add one row per "
+        "person, or upload the list as a CSV or Excel file."
+    ),
 }
 
 _HINT_OVERRIDES = {
@@ -567,6 +698,14 @@ _HINT_OVERRIDES = {
         "Your prior insurance company can provide loss runs if you do not have "
         "them handy."
     ),
+    "wc_class_codes": (
+        "One row per group of employees who do similar work - for example "
+        "office staff, sales, field crew. Give the yearly payroll for each "
+        "group and the state they work in. Your agent will handle the class codes."
+    ),
+    "wc_officers": (
+        "Type Included or Excluded for each owner or officer."
+    ),
 }
 
 
@@ -576,8 +715,18 @@ def question_text(list_key: str) -> str:
         return ""
     if list_key in _QUESTION_OVERRIDES:
         return _QUESTION_OVERRIDES[list_key]
+    # "Please list your ..." and NOT "Please provide your ...", which is
+    # `arq_service._MACHINE_QUESTION_PREFIX` - the marker for a question nobody
+    # managed to word properly, which `_hide_machine_worded_questions` routes
+    # out of the client AND producer workflow. This default template was that
+    # exact string, so ANY schedule added without an override above was built,
+    # routed, and then silently suppressed (V1 H3-D, found on the first live
+    # run). The four original schedules escaped only because each happened to
+    # have a hand-written override starting "Please list".
+    # `tests/test_h3_wc_data_capture.py::test_no_schedule_question_is_hidden_
+    # as_machine_worded` fails the build if this drifts back.
     return (
-        f"Please provide your {defn['label'].lower()}. Add one row per "
+        f"Please list your {defn['label'].lower()}. Add one row per "
         f"{defn['singular']}, or upload the list as a CSV or Excel file."
     )
 

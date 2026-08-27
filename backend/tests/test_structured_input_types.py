@@ -182,9 +182,52 @@ def test_bad_email_and_phone_are_kept_and_flagged():
 
 
 def test_not_sure_and_blank_still_yield_no_answer():
-    assert _clean_answer_ex("__NOT_SURE__", "effective_date") == (None, "")
-    assert _clean_answer_ex("", "effective_date")             == (None, "")
-    assert _clean_answer_ex("n/a", "total_payroll")           == (None, "")
+    """A NON-answer is still discarded - and there are now three kinds of input,
+    not two.
+
+    SUPERSEDED ASSERTION, recorded rather than deleted (V1 H4, 2026-08-27):
+    this test used to assert `_clean_answer_ex("n/a", "total_payroll") ==
+    (None, "")`. That line was the test-side pin of defect F15 (v1-20AUG.md
+    C3-C, 2026-08-25): the client questionnaire DESTROYED "None" / "N/A" /
+    "none" before `answer_semantics` ever saw them, so a client answering our
+    own question "Who provided your business insurance most recently? (If none,
+    write 'None')" had the answer thrown away, while the PRODUCER path read the
+    identical word correctly. Brent, 2026-08-24: *"we can't treat 'N/A' as '0'.
+    These are not the same. 'No known losses' is a legitimate answer."*
+
+    The property this test protects - "a non-answer never becomes data" - is
+    unchanged and is now asserted more widely than before.
+    """
+    # 1. NON-ANSWERS: still discarded, and the net is now WIDER. The three
+    #    phrases at the end used to sail through and get STAMPED onto an ACORD
+    #    box while an empty envelope was written over the extracted fact.
+    for raw in ("__NOT_SURE__", "", "   ", "null", "-", "--", "?",
+                "tbd", "unknown", "not sure",
+                "I will confirm later", "no idea", "waiting on my accountant"):
+        assert _clean_answer_ex(raw, "effective_date") == (None, ""), raw
+
+    # 2. ABSENCES / INAPPLICABILITY: real answers, KEPT, and deliberately with
+    #    NO review_reason - that empty string is what keeps them away from
+    #    `_blocks_submit`, which used to refuse the WHOLE submission (422) when
+    #    a client with no umbrella typed "nil" into a currency box.
+    for raw, field in (("n/a", "total_payroll"), ("N/A", "fein"),
+                       ("None", "prior_carrier"), ("none", "num_claims"),
+                       ("nil", "umbrella_limit")):
+        value, reason = _clean_answer_ex(raw, field)
+        assert value == raw, f"{raw!r} on {field} was discarded again (F15)"
+        assert reason == "", f"{raw!r} on {field} would block the submission"
+
+    # 3. A REQUIRED IDENTITY FACT IS NEITHER. The submission does not exist
+    #    without an applicant name, so "N/A" there is refused rather than
+    #    counted as an answer - otherwise one word in every box scored a
+    #    perfect Structural pillar.
+    for field in ("applicant_name", "mailing_address", "effective_date"):
+        assert _clean_answer_ex("N/A", field) == (None, ""), field
+
+    # 4. AND A YES/NO ANSWER IS NEVER AN ABSENCE. "No" on a checkbox is the
+    #    ANSWER; reading it as "there is none" would blank the box.
+    assert _clean_answer_ex("no", "Building_SprinkleredIndicator_A") == ("No", "")
+    assert _clean_answer_ex("yes", "Building_SprinkleredIndicator_A") == ("Yes", "")
 
 
 def test_clean_answer_wrapper_stays_backwards_compatible():

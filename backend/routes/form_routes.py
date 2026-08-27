@@ -1755,6 +1755,55 @@ async def get_pdf(
     )
 
 
+def _prior_provenance(prev_facts: dict, fact_key, highlight_label):
+    """What produced the value an edit is about to replace (V1 H7).
+
+    Preference order, and the reason for it:
+      1. the FACT envelope's own `confidence` / `source` - it STATES provenance
+         ({"source": "ai", "confidence": "ai_high"}) rather than implying it;
+      2. the form-field highlight label - only an implication, but it is all
+         there is for the many PDF fields that map to no canonical fact.
+
+    Returns None when neither knows, and None means "no opinion": a change with
+    no recorded prior provenance is classified by whether a value was there at
+    all, never guessed as an override. Blank-over-wrong, applied to the audit.
+    """
+    if fact_key and isinstance(prev_facts, dict):
+        raw = prev_facts.get(fact_key)
+        if isinstance(raw, dict):
+            # An empty envelope value is an absence, not an AI-produced value -
+            # overwriting a blank is a fill, however the blank got labelled.
+            if str(raw.get("value") or "").strip():
+                # V1 BETA EXIT (2026-08-28) - "Derived values retain derivation
+                # lineage." `confidence` was consulted FIRST, and a derived fact
+                # carries both ({"source": "derived", "confidence":
+                # "deterministic" | "low_confidence"}), so the derivation was
+                # overwritten by the confidence label on every override:
+                # `years_in_business` and `wc_payroll_by_state` recorded
+                # "corrected an existing entry" with their derived origin lost,
+                # and a renewal-routed date (D28 / RC1b) was recorded as an AI
+                # override. `source` is the axis that STATES how the value was
+                # produced (client 1.4's four evidence states); confidence only
+                # grades an AI value's strength, so for a derived fact it
+                # describes nothing.
+                #
+                # Deliberately NOT added to `audit_history._AI_SOURCES`: a
+                # derivation is deterministic and document-grounded, so filing
+                # it as "overrode an AI-generated value" would be a false
+                # statement about the producer in an E&O record - the same
+                # class of defect H7-B fixed when an empty field was called an
+                # override. It classifies as a correction, and the record now
+                # names `derived` as what was corrected.
+                if str(raw.get("source") or "").strip().lower() == "derived":
+                    return "derived"
+                return (raw.get("confidence") or raw.get("source") or None)
+        elif isinstance(raw, str) and raw.strip():
+            # Legacy bare string (pre-C5 sessions): provenance was destroyed by
+            # the writer that produced it. Say nothing rather than guess.
+            return None
+    return highlight_label or None
+
+
 # ASYNC-SAFE
 @router.post("/api/update-pdf")
 async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_current_user)):
@@ -1789,6 +1838,13 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         r             = generated[form_id]
         current_state = r.get("field_state", dict(r.get("mapped", {})))
         prev_state    = dict(current_state)
+        # V1 H7 (client section 12): the confidence labels as they stood BEFORE
+        # this edit. `confidence` below is the same dict but is mutated
+        # immediately (stale-label correction, then per-edit promotion), so the
+        # prior provenance has to be taken here or it is gone. Used only for the
+        # audit's generated-value-override classification - never for display.
+        prev_confidence = dict(r.get("confidence", {}))
+        prev_facts_for_audit = dict(session.get("facts") or {})
         current_state.update(req.field_updates)
         confidence = dict(r.get("confidence", {}))
 
@@ -1823,10 +1879,23 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
 
         from services.pdf_service import _ACORD_FIELD_RULES
         updated_facts = dict(session.get("facts") or {})
+        # V1 BETA EXIT (2026-08-28) - "Overrides preserve prior values".
+        # A CLEAR sets the fact to None below, and the facts merge is
+        # deliberately ADDITIVE (`session_repository.resolve_facts_write` skips
+        # None so an in-flight writer can never blank another's value), so the
+        # clear was audited as "removed a value" and then silently dropped: the
+        # store kept the old value, the next `recalculate_session_scores` scored
+        # it as present, and `_restamp_canonical_into_forms` could put it back
+        # on the form. The E&O record and the fact store disagreed - the mirror
+        # image of the C5-A envelope destruction.
+        # D18 is the standing rule for exactly this and was not being followed:
+        # a genuine retraction goes through `delete_facts`, never a bare None.
+        _touched_fact_keys: set = set()
         for pdf_field, new_val in req.field_updates.items():
             val_str = str(new_val).strip() if new_val is not None else ""
             for pattern, fact_key in _ACORD_FIELD_RULES:
                 if fact_key and not fact_key.startswith("_") and pattern in pdf_field:
+                    _touched_fact_keys.add(fact_key)
                     # E&O 5.9 (2026-08-26): a producer edit keeps a provenance
                     # ENVELOPE, never a bare string. The bare string destroyed
                     # source/confidence, made the fact print "Source:
@@ -1842,6 +1911,14 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                         if val_str not in ("", "null", "None") else None
                     )
                     break
+
+        # Read off the FINAL state, never off the loop: two ACORD fields can map
+        # to one fact, and a request that clears one and fills the other must
+        # keep the value. `delete_facts` is applied AFTER the additive merge, so
+        # collecting a key here that later holds a value would delete it.
+        _cleared_fact_keys = sorted(
+            k for k in _touched_fact_keys if updated_facts.get(k) is None
+        )
 
         # Re-evaluate stops against the LATEST facts so SQS can actually improve
         # when the producer fixes a field. Without this, stale hard_stops from
@@ -2004,6 +2081,23 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                     new_value=new_str,
                     confidence="filled" if new_str else None,
                     model_version=SQS_MODEL_VERSION,
+                    # V1 H7 (client section 12): what produced the value this
+                    # edit replaced. It is the ONLY thing separating the
+                    # client's "generated-value override" from an ordinary edit
+                    # of a human entry or a blank, and
+                    # `audit_history.change_kind` derives the distinction so no
+                    # UI has to declare it.
+                    #
+                    # The FACT envelope is preferred and the form-field
+                    # highlight label is the fallback: the envelope states
+                    # provenance directly ({"source": "ai", "confidence":
+                    # "ai_high"}), while the highlight label only implies it -
+                    # and not every PDF field maps to a canonical fact, so the
+                    # fallback is what covers the rest of the form.
+                    previous_source=_prior_provenance(
+                        prev_facts_for_audit, _canon_key,
+                        prev_confidence.get(field_name),
+                    ),
                 )
             except Exception as _fe:
                 logger.warning(f"field_source_audit log failed for {field_name}: {_fe}")
@@ -2162,7 +2256,7 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                if isinstance(pkg_sqs, dict) and pkg_sqs.get("sqs_history") else {}),
             "cross_issues_last": _display_cross,
             "underwriting_stamp_consistency": _stamp_check,
-        })
+        }, delete_facts=_cleared_fact_keys or None)
 
         # E&O 5.12: snapshot the score when a field edit materially moved it.
         try:

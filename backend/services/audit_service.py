@@ -294,7 +294,43 @@ async def log_field_change(
     new_value: str,
     confidence: Optional[str],
     model_version: str,
+    previous_source: Optional[str] = None,
+    reason: Optional[str] = None,
+    record_unchanged: bool = False,
 ) -> None:
+    """Record one field modification - the index row AND the history event.
+
+    `previous_source` is the confidence the value carried BEFORE this change.
+    It is what separates the client's "generated-value override" from an
+    ordinary producer edit; `audit_history.change_kind` derives the distinction
+    rather than asking each call site to label it. Optional so the eight
+    existing call sites keep working unchanged; only `update_pdf` has the prior
+    confidence to hand and passes it.
+
+    The spine event is emitted HERE, not at the routes (D49): every path that
+    modifies a fact already comes through this function, so this is the one
+    place a material change cannot be forgotten.
+
+    A NO-OP IS NOT A MODIFICATION. Re-submitting an identical answer is not a
+    change, and recording it as one puts `"No" -> "No" / corrected an existing
+    entry` into an E&O record - a statement that the producer altered something
+    they did not. `update_pdf` has always skipped unchanged fields; the
+    producer-answer and resolve-issue paths did not, and the live run
+    2026-08-27 produced exactly that row. Guarded here rather than at each
+    route so a future writer inherits it.
+
+    ``record_unchanged=True`` is the deliberate exception for the SCHEDULE save
+    paths, whose before/after is a ROW COUNT: editing a VIN in row 2 of a
+    three-row fleet leaves "3 row(s)" -> "3 row(s)" while genuinely changing
+    the data, so suppressing it there would lose a real modification.
+    """
+    if not record_unchanged:
+        _prev_cmp = str(previous_value).strip() if previous_value is not None else ""
+        _new_cmp  = str(new_value).strip() if new_value is not None else ""
+        if _prev_cmp == _new_cmp:
+            logger.debug("field change skipped (unchanged): %s", field_name)
+            return
+
     try:
         async with get_pool().acquire() as conn:
             await conn.execute(
@@ -302,18 +338,40 @@ async def log_field_change(
                 INSERT INTO field_source_audit (
                     id, session_id, user_id, form_id, field_name, fact_key,
                     source, previous_value, new_value, confidence,
-                    changed_at, model_version
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                    previous_source, reason, changed_at, model_version
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                 """,
                 f"field_{uuid.uuid4().hex}",
                 session_id, user_id, form_id, field_name, fact_key,
                 source, previous_value, new_value, confidence,
+                previous_source, reason,
                 datetime.now(timezone.utc).isoformat(),
                 model_version,
             )
         logger.debug(f"Logged field change: {field_name} → {str(new_value)[:50]}")
     except Exception as ex:
         logger.error(f"Failed to log field change: {ex}")
+
+    # The append-only half. Separate try/except on purpose (D35): the index row
+    # above has already committed, and losing the history event must not be
+    # reported as "the change was not recorded".
+    try:
+        from services.audit_history import (
+            EVENT_FIELD_CHANGED, ACTION_EDITED, ACTION_RETRACTED,
+        )
+        _retracting = not str(new_value or "").strip() and bool(str(previous_value or "").strip())
+        await record_material_change(
+            session_id, EVENT_FIELD_CHANGED,
+            action=ACTION_RETRACTED if _retracting else ACTION_EDITED,
+            fact_key=fact_key, field_name=field_name, form_id=form_id,
+            previous_value=previous_value, new_value=new_value,
+            previous_source=previous_source, source=source,
+            user_id=user_id, reason=reason,
+            detail={"confidence": confidence} if confidence else None,
+        )
+    except Exception as ex:                                    # pragma: no cover
+        logger.warning(f"field change event not recorded for {field_name}: {ex}",
+                       exc_info=True)
 
 
 # ASYNC-SAFE
@@ -343,10 +401,27 @@ async def log_download_with_open_recs(
                     override_reason or "", count, now, model_version,
                 )
         logger.info(f"Logged download for session {session_id}: {count} open recs stamped")
-        return count
     except Exception as ex:
         logger.error(f"Failed to log download: {ex}")
         return 0
+
+    # E&O section 12: downloading with open items is an override of the
+    # pre-download gate, and the note the producer typed is its reason. The
+    # per-file checksum + full open-items list stay in acord_audit_log (state);
+    # this is the act (history).
+    try:
+        from services.audit_history import EVENT_PACKAGE_DOWNLOADED, ACTION_DOWNLOADED
+        await record_material_change(
+            session_id, EVENT_PACKAGE_DOWNLOADED,
+            action=ACTION_DOWNLOADED, field_name="package",
+            new_value=f"{count} open item(s) at download",
+            source="producer", user_id=user_id, reason=override_reason,
+            detail={"open_rec_count": count, "overrode_open_items": count > 0},
+        )
+    except Exception as ex:                                    # pragma: no cover
+        logger.warning(f"download event not recorded for {session_id}: {ex}",
+                       exc_info=True)
+    return count
 
 
 # ASYNC-SAFE
@@ -466,7 +541,36 @@ async def mark_recommendation_dismissed(
                         -- (the dropdown filters by form). Preferring the dismiss form_id
                         -- makes it appear where the producer dismissed it.
                         form_id=COALESCE(EXCLUDED.form_id, sqs_recommendation_audit.form_id)
+                    -- V1 BETA EXIT (2026-08-28) - "Downloads with unresolved
+                    -- issues preserve the open-item state."
+                    --
+                    -- This clause used to read `action IS NULL`. A download
+                    -- with open items stamps `action='downloaded_anyway'` on
+                    -- every unresolved row (`log_download_with_open_recs`), so
+                    -- after ONE Download Anyway every later dismiss on this
+                    -- session was a silent no-op: the UPDATE matched nothing
+                    -- while the function still logged "Marked rec dismissed",
+                    -- returned True, and appended `recommendation_dismissed`
+                    -- to the event spine. The DISMISSED ITEMS table and
+                    -- COMPLETE HISTORY then contradicted each other, the item
+                    -- stayed "unresolved" on every later download record, and
+                    -- `active_score_credits` (which reads action='dismissed')
+                    -- never re-applied the credit - so a typed-reason credit
+                    -- was granted once and silently reverted on the next
+                    -- rescore.
+                    --
+                    -- `downloaded_anyway` is a MARKER that the producer shipped
+                    -- with the item open, not a terminal resolution, so it must
+                    -- not freeze the row. Its two siblings on this same table -
+                    -- `mark_recommendation_resolved` and
+                    -- `mark_recommendation_answer_recorded` - already accept
+                    -- it; the dismiss writer was the odd one out.
+                    --
+                    -- Still guarded: a genuinely terminal action (resolved,
+                    -- dismissed, answer_recorded) is never overwritten, so a
+                    -- dismiss cannot undo a resolution or double-credit itself.
                     WHERE sqs_recommendation_audit.action IS NULL
+                       OR sqs_recommendation_audit.action = 'downloaded_anyway'
                 """,
                 f"audit_{uuid.uuid4().hex}",
                 session_id, user_id, form_id, rec_id,
@@ -475,10 +579,34 @@ async def mark_recommendation_dismissed(
                 "dismissed", now, sqs_score_at_action, override_reason,
             )
         logger.info(f"Marked rec {rec_id} dismissed (session {session_id})")
-        return True
     except Exception as ex:
         logger.error(f"Failed to dismiss recommendation: {ex}")
         return False
+
+    # E&O section 12: the row above is a latest-wins UPSERT - it holds the
+    # CURRENT action and nothing else, so a dismiss -> reopen -> dismiss cycle
+    # left one row and no history. The spine keeps each act (D49).
+    try:
+        from services.audit_history import (
+            EVENT_RECOMMENDATION_DISMISSED, ACTION_DISMISSED,
+        )
+        await record_material_change(
+            session_id, EVENT_RECOMMENDATION_DISMISSED,
+            action=ACTION_DISMISSED, fact_key=field, field_name=field,
+            form_id=form_id, source="producer", user_id=user_id,
+            # "No reason provided" is the UI's SENTINEL for an unexplained
+            # dismissal - `dismiss_earned_credit` already treats it as no
+            # reason. Printing it as `Reason: No reason provided` in an E&O
+            # record states that the producer gave one.
+            reason=(override_reason if override_reason not in _NO_REASON_SENTINELS
+                    else None),
+            detail={"rec_id": rec_id, "message": message,
+                    "component": component, "score_impact": score_impact,
+                    "sqs_score_at_action": sqs_score_at_action},
+        )
+    except Exception as ex:                                    # pragma: no cover
+        logger.warning(f"dismissal event not recorded for {rec_id}: {ex}", exc_info=True)
+    return True
 
 
 # ASYNC-SAFE
@@ -487,7 +615,7 @@ async def get_dismissed_recommendations(session_id: str) -> List[dict]:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
                 """SELECT rec_id, form_id, field, message, score_impact,
-                          override_reason, action_at
+                          override_reason, action_at, user_id
                    FROM sqs_recommendation_audit
                    WHERE session_id=$1 AND action='dismissed'
                    ORDER BY action_at ASC""",
@@ -507,6 +635,12 @@ async def get_dismissed_recommendations(session_id: str) -> List[dict]:
 # calling itself the single source of truth while the rescore path knew nothing
 # about credits at all, which is why every recalculation silently erased them.
 
+# The values that all mean "the producer dismissed this without explaining".
+# Named once so the score credit and the E&O record cannot disagree about what
+# counts as a reason.
+_NO_REASON_SENTINELS = (None, "", "No reason provided")
+
+
 def dismiss_earned_credit(override_reason, score_impact) -> bool:
     """Did this dismissal earn a score credit?
 
@@ -514,7 +648,7 @@ def dismiss_earned_credit(override_reason, score_impact) -> bool:
     credits. A plain "Dismiss" hides the card and leaves the gap on record.
     """
     return (
-        override_reason not in (None, "", "No reason provided")
+        override_reason not in _NO_REASON_SENTINELS
         and score_impact is not None
         and score_impact > 0
     )
@@ -670,10 +804,28 @@ async def mark_recommendation_answer_recorded(
                 now, model_version, producer_answer, now,
             )
         logger.info(f"Recorded producer answer for rec {rec_id} (session {session_id})")
-        return True
     except Exception as ex:
         logger.error(f"Failed to record recommendation answer: {ex}")
         return False
+
+    # E&O section 12. `producer_answer` / `answered_at` are OVERWRITTEN by the
+    # UPDATE branch above, so answer -> reopen -> re-answer kept only the last
+    # value. Each answer is now its own immutable event.
+    try:
+        from services.audit_history import (
+            EVENT_RECOMMENDATION_ANSWERED, ACTION_ANSWERED,
+        )
+        await record_material_change(
+            session_id, EVENT_RECOMMENDATION_ANSWERED,
+            action=ACTION_ANSWERED, fact_key=field, field_name=field,
+            form_id=form_id, new_value=producer_answer,
+            source="producer", user_id=user_id,
+            detail={"rec_id": rec_id, "message": message,
+                    "score_impact": score_impact},
+        )
+    except Exception as ex:                                    # pragma: no cover
+        logger.warning(f"answer event not recorded for {rec_id}: {ex}", exc_info=True)
+    return True
 
 
 # ASYNC-SAFE
@@ -762,7 +914,7 @@ async def get_download_audit_log(session_id: str) -> List[dict]:
     try:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
-                """SELECT override_note, open_rec_count, downloaded_at
+                """SELECT override_note, open_rec_count, downloaded_at, user_id
                    FROM download_audit
                    WHERE session_id=$1
                    ORDER BY downloaded_at ASC""",
@@ -783,7 +935,8 @@ async def get_field_change_log(session_id: str) -> List[dict]:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
                 """SELECT form_id, field_name, fact_key, source, previous_value,
-                          new_value, confidence, changed_at
+                          new_value, confidence, previous_source, reason,
+                          changed_at, user_id
                    FROM field_source_audit
                    WHERE session_id=$1
                    ORDER BY changed_at ASC""",
@@ -806,19 +959,34 @@ async def log_audit_event(
     user_id: Optional[str],
     event_type: str,
     event_data: Optional[dict] = None,
+    package_label: str = "",
+    visibility: Optional[str] = None,
 ) -> bool:
     """Append one meaningful package event. Best-effort like every audit write:
     a failed row must never block the action it records - but it is logged with
-    the traceback (D35)."""
+    the traceback (D35).
+
+    `visibility` defaults to the event type's own class (D50): the nine
+    product-history types render in the navbar Activity Log, everything else is
+    E&O record / debugging only. Passing it explicitly is for the adapter in
+    `activity_service`, not for ordinary callers.
+    """
+    try:
+        from services.audit_history import visibility_for
+        vis = visibility or visibility_for(event_type)
+    except Exception:                                          # pragma: no cover
+        vis = visibility or "audit"
     try:
         async with get_pool().acquire() as conn:
             await conn.execute(
                 """INSERT INTO audit_events
-                   (id, session_id, user_id, event_type, event_data, created_at)
-                   VALUES ($1,$2,$3,$4,$5::jsonb,$6)""",
+                   (id, session_id, user_id, event_type, event_data,
+                    package_label, visibility, created_at)
+                   VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)""",
                 f"evt_{uuid.uuid4().hex}",
                 session_id, user_id, event_type,
                 json.dumps(event_data or {}, default=str),
+                (package_label or "")[:120], vis,
                 datetime.now(timezone.utc).isoformat(),
             )
         return True
@@ -826,6 +994,92 @@ async def log_audit_event(
         logger.error(f"Failed to log audit event {event_type} for {session_id}: {ex}",
                      exc_info=True)
         return False
+
+
+# ── THE ONE WRITER for a material change (client section 12, D49) ─────────────
+
+# ASYNC-SAFE
+async def record_material_change(
+    session_id: str,
+    event_type: str,
+    *,
+    action: Optional[str] = None,
+    fact_key: Optional[str] = None,
+    field_name: Optional[str] = None,
+    form_id: Optional[str] = None,
+    previous_value=None,
+    new_value=None,
+    previous_source: Optional[str] = None,
+    source: Optional[str] = None,
+    user_id: Optional[str] = None,
+    role: Optional[str] = None,
+    reason: Optional[str] = None,
+    detail: Optional[dict] = None,
+) -> bool:
+    """Append ONE immutable envelope to the spine for one material act.
+
+    Every call site goes through `audit_history.build_change_envelope`, so the
+    client's seven attributes (fact/field, original value, new value, actor,
+    role, timestamp, reason/action) are present in a fixed shape on every event
+    and can never migrate into free-form `detail` the way they did before H7.
+
+    Called from INSIDE the existing audit writers, never from a route: a route
+    can forget, a writer the action must already go through cannot. Same
+    one-door reasoning as `fact_comparison` (D3) and `coverage_evidence` (H1).
+
+    Best-effort by contract - the act has already happened and been persisted by
+    the time this runs; a failed history row must never undo it.
+    """
+    if not session_id:
+        return False
+    try:
+        from services.audit_history import build_change_envelope
+        envelope = build_change_envelope(
+            event_type=event_type, action=action, fact_key=fact_key,
+            field_name=field_name, form_id=form_id,
+            previous_value=previous_value, new_value=new_value,
+            previous_source=previous_source, source=source,
+            user_id=user_id, role=role, reason=reason, detail=detail,
+        )
+    except Exception as ex:                                    # pragma: no cover
+        logger.error(f"record_material_change: envelope build failed for "
+                     f"{event_type}/{session_id}: {ex}", exc_info=True)
+        return False
+    return await log_audit_event(session_id, user_id, event_type, envelope)
+
+
+# ASYNC-SAFE
+async def resolve_actors(user_ids) -> dict:
+    """Map user ids to a display identity for the E&O record.
+
+    Resolved at READ time, once per export, over the DISTINCT ids - not stamped
+    on every event at write time. The id is the immutable anchor; the name is a
+    display convenience, and every field edit writing an extra user lookup would
+    put a query on the hottest path in the app for something the reader can do
+    in one round trip.
+
+    Never raises: an unresolvable id still renders, as the id.
+    """
+    ids = sorted({str(u).strip() for u in (user_ids or []) if str(u or "").strip()})
+    if not ids:
+        return {}
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, full_name, email FROM users WHERE id = ANY($1::text[])",
+                ids,
+            )
+        return {
+            str(r["id"]): {
+                "id":    str(r["id"]),
+                "name":  (r["full_name"] or "").strip(),
+                "email": (r["email"] or "").strip(),
+            }
+            for r in rows
+        }
+    except Exception as ex:
+        logger.warning(f"resolve_actors failed: {ex}")
+        return {}
 
 
 # ASYNC-SAFE
@@ -1130,6 +1384,52 @@ async def get_audit_trail_export(session_id: str) -> dict:
     package_downloads = await get_package_download_log(session_id)
     events = await get_audit_events(session_id)
     sqs_snapshots = [e for e in events if e.get("event_type") == "sqs_snapshot"]
+    # F (client section 12): submission_integrity_audit's first reader. Two of
+    # the client's "producer override" events were written here and never shown.
+    integrity_overrides = await get_integrity_audit_log(session_id)
+
+    # ── The chronological history (client section 12's Desired Outcome) ───────
+    # ONE list, built from the append-only spine, with every actor resolved to a
+    # person. This is the half the record was missing: the twelve sections below
+    # are DETAIL VIEWS of current state, and before H7 the modification history
+    # had to be inferred from them. Nothing here is reconstructed - each row was
+    # written by the workflow at the moment the act happened (D49).
+    history: List[dict] = []
+    actors: dict = {}
+    try:
+        from services.audit_history import (
+            normalize_event, actor_ids_in, EVENT_SQS_SNAPSHOT,
+        )
+        _actor_ids = actor_ids_in(events)
+        # Every other section names an actor too, and they are the same people.
+        for _row in (list(field_changes) + list(conflict_resolutions)
+                     + list(answered) + list(dismissed) + list(issue_statuses)
+                     + list(downloads) + list(integrity_overrides)):
+            if isinstance(_row, dict) and _row.get("user_id"):
+                _actor_ids.add(str(_row["user_id"]))
+        actors = await resolve_actors(_actor_ids)
+        # Score snapshots have their own SCORE HISTORY section with their own
+        # rendering; repeating them here would bury the human acts.
+        history = [normalize_event(e, actors) for e in events
+                   if e.get("event_type") != EVENT_SQS_SNAPSHOT]
+    except Exception as ex:                                    # noqa: BLE001
+        logger.warning(f"Audit export: history assembly failed for {session_id}: {ex}",
+                       exc_info=True)
+
+    def _with_actor(rows):
+        """Attach the resolved person to any row carrying a user_id."""
+        out = []
+        for r in rows or []:
+            if not isinstance(r, dict):
+                out.append(r)
+                continue
+            r = dict(r)
+            who = actors.get(str(r.get("user_id") or ""))
+            if who:
+                r["actor_name"]  = who.get("name") or who.get("email") or ""
+                r["actor_email"] = who.get("email") or ""
+            out.append(r)
+        return out
 
     documents: List[dict] = []
     inputs: List[dict] = []
@@ -1226,17 +1526,22 @@ async def get_audit_trail_export(session_id: str) -> dict:
     return {
         "session_id": session_id,
         "marketing_reason": marketing_reason,
-        "dismissed_recommendations": dismissed,
-        "answered_recommendations": answered,
-        "issue_status_overrides": issue_statuses,
-        "download_anyway_log": downloads,
+        "dismissed_recommendations": _with_actor(dismissed),
+        "answered_recommendations": _with_actor(answered),
+        "issue_status_overrides": _with_actor(issue_statuses),
+        "download_anyway_log": _with_actor(downloads),
         "package_downloads": package_downloads,
-        "conflict_resolutions": conflict_resolutions,
+        "conflict_resolutions": _with_actor(conflict_resolutions),
+        "integrity_overrides": _with_actor(integrity_overrides),
         "documents": documents,
         "inputs": inputs,
         "rejected_facts": rejected_facts,
         "client_receipts": client_receipts,
-        "field_modifications": field_changes,
+        "field_modifications": _with_actor(field_changes),
+        # The one chronological history (client section 12). `audit_events` is
+        # kept alongside it so the existing EVENT LOG section and any consumer
+        # written against the raw rows keeps working.
+        "history": history,
         "audit_events": events,
         "sqs_snapshots": sqs_snapshots,
         "generated_forms": generated_forms,
@@ -1285,10 +1590,33 @@ async def set_issue_status(
                 rule_code, source_fact, message, status, reason, now,
             )
         logger.info(f"Issue {issue_id} status={status} (session {session_id})")
-        return True
     except Exception as ex:
         logger.error(f"Failed to set issue status: {ex}")
         return False
+
+    # E&O section 12: another latest-wins UPSERT. open -> resolved -> reopened
+    # -> dismissed left ONE row carrying only the last status, and the export
+    # showed the row only when it happened to carry a reason - so a resolve
+    # without a note was invisible. Each transition is now an event.
+    try:
+        from services.audit_history import (
+            EVENT_ISSUE_STATUS_CHANGED, ACTION_RESOLVED, ACTION_DISMISSED,
+            ACTION_REOPENED,
+        )
+        _action = {"resolved": ACTION_RESOLVED, "dismissed": ACTION_DISMISSED,
+                   "open": ACTION_REOPENED}.get(status, status)
+        await record_material_change(
+            session_id, EVENT_ISSUE_STATUS_CHANGED,
+            action=_action, fact_key=source_fact, field_name=field,
+            form_id=form_id, new_value=status,
+            source="producer", user_id=user_id, reason=reason,
+            detail={"issue_id": issue_id, "rule_code": rule_code,
+                    "message": message},
+        )
+    except Exception as ex:                                    # pragma: no cover
+        logger.warning(f"issue status event not recorded for {issue_id}: {ex}",
+                       exc_info=True)
+    return True
 
 
 # ASYNC-SAFE
@@ -1297,7 +1625,7 @@ async def get_issue_statuses(session_id: str) -> List[dict]:
         async with get_pool().acquire() as conn:
             rows = await conn.fetch(
                 """SELECT issue_id, status, reason, form_id, field, rule_code,
-                          source_fact, message, updated_at
+                          source_fact, message, updated_at, user_id
                    FROM submission_issue_status
                    WHERE session_id=$1
                    ORDER BY updated_at ASC""",
@@ -1581,6 +1909,28 @@ async def log_integrity_resolution(
     except Exception as ex:
         logger.error(f"Failed to log integrity resolution: {ex}")
 
+    # E&O section 12: keeping a package the system flagged IS the client's
+    # "producer override". Only the override reaches the spine - an ordinary
+    # "remove the odd document" resolution is housekeeping, not an override of
+    # a system determination, and the full row stays in submission_integrity_audit
+    # either way (which now has a reader - see get_integrity_audit_log).
+    if overridden:
+        try:
+            from services.audit_history import EVENT_PRODUCER_OVERRIDE, ACTION_OVERRIDDEN
+            await record_material_change(
+                session_id, EVENT_PRODUCER_OVERRIDE,
+                action=ACTION_OVERRIDDEN,
+                field_name="submission_integrity",
+                new_value=action, source="producer", user_id=user_id,
+                detail={"kind": "submission_integrity",
+                        "integrity_status": integrity.get("status"),
+                        "review_required": bool(integrity.get("review_required")),
+                        "detected_entities": integrity.get("detected_entities") or [],
+                        "removed_doc_ids": list(removed_doc_ids or [])},
+            )
+        except Exception as ex:                                # pragma: no cover
+            logger.warning(f"integrity override event not recorded: {ex}", exc_info=True)
+
 
 # ASYNC-SAFE
 async def log_document_reclassified(
@@ -1615,6 +1965,68 @@ async def log_document_reclassified(
         )
     except Exception as ex:
         logger.error(f"Failed to log document reclassification: {ex}")
+
+    # E&O section 12: correcting the type the classifier chose is an override of
+    # a generated value - the same act as editing an AI-filled field, one level
+    # up. The record used to print only "Document type was manually corrected by
+    # the user" off the CURRENT session blob, with no actor, no timestamp and no
+    # previous type, while all three sat unread in submission_integrity_audit.
+    try:
+        from services.audit_history import EVENT_PRODUCER_OVERRIDE, ACTION_OVERRIDDEN
+        await record_material_change(
+            session_id, EVENT_PRODUCER_OVERRIDE,
+            action=ACTION_OVERRIDDEN, field_name="document_type",
+            previous_value=previous_doc_type, new_value=new_doc_type,
+            previous_source="ai_high", source="producer", user_id=user_id,
+            detail={"kind": "document_reclassified",
+                    "doc_id": str(doc_id), "reclassify_action": action},
+        )
+    except Exception as ex:                                    # pragma: no cover
+        logger.warning(f"reclassification event not recorded for {doc_id}: {ex}",
+                       exc_info=True)
+
+
+# ASYNC-SAFE
+async def get_integrity_audit_log(session_id: str) -> List[dict]:
+    """Submission Integrity verdicts, resolutions and document reclassifications.
+
+    FIRST READER of `submission_integrity_audit`. The table had three writers
+    and no reader anywhere in the codebase - exactly the defect C5-A fixed for
+    `underwriting_confirmation_audit`, recurring one table over. Two of the
+    client's section-12 "producer override" events lived here, recorded and
+    invisible: keeping a package the system flagged for multiple insureds, and
+    correcting the document type the classifier chose.
+
+    `integrity_assessed` rows are excluded - they are the system's own verdict,
+    not a human act, and the resolution row carries the verdict it acted on.
+    """
+    try:
+        async with get_pool().acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT event_type, action, overridden, integrity_status,
+                          confidence, review_required, detected_entities,
+                          removed_doc_ids, created_submissions,
+                          doc_id, previous_doc_type, new_doc_type,
+                          user_id, created_at
+                   FROM submission_integrity_audit
+                   WHERE session_id=$1 AND event_type <> 'integrity_assessed'
+                   ORDER BY created_at ASC""",
+                session_id,
+            )
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k in ("detected_entities", "removed_doc_ids", "created_submissions"):
+                if isinstance(d.get(k), str):
+                    try:
+                        d[k] = json.loads(d[k])
+                    except Exception:                          # noqa: BLE001
+                        d[k] = []
+            out.append(d)
+        return out
+    except Exception as ex:
+        logger.error(f"Failed to get integrity audit log: {ex}")
+        return []
 
 
 # ASYNC-SAFE
@@ -1670,3 +2082,32 @@ async def log_underwriting_confirmation(
         )
     except Exception as ex:
         logger.error(f"Failed to log underwriting confirmation: {ex}")
+
+    # E&O section 12: this table is genuinely append-only, but it was NOT on the
+    # spine - so a conflict resolution changed a fact and never appeared in the
+    # chronological modification history, only in its own section. The competing
+    # values stay in `candidates` on the row above (C1 F10); the event carries
+    # the decision.
+    try:
+        from services.audit_history import EVENT_CONFLICT_RESOLVED, ACTION_CONFIRMED
+        # D16 stamps the suggested value BEFORE confirmation, so confirming the
+        # suggestion leaves previous == confirmed. C5-D fix 7 suppressed that
+        # "(was: same thing)" in the resolutions section; printing it here as
+        # `"$3,000,000" -> "$3,000,000"` is the same defect one layer up, and it
+        # reads as a change that never happened.
+        _prev = (previous_value
+                 if str(previous_value or "").strip() != str(confirmed_value or "").strip()
+                 else None)
+        await record_material_change(
+            session_id, EVENT_CONFLICT_RESOLVED,
+            action=ACTION_CONFIRMED, fact_key=fact_key, field_name=label,
+            previous_value=_prev, new_value=confirmed_value,
+            source="producer", user_id=user_id,
+            reason=note or reason,
+            detail={"label": label, "conflict_reason": reason,
+                    "producer_note": note,
+                    "candidate_count": len(candidates or [])},
+        )
+    except Exception as ex:                                    # pragma: no cover
+        logger.warning(f"conflict resolution event not recorded for {fact_key}: {ex}",
+                       exc_info=True)

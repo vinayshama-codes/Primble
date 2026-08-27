@@ -3621,3 +3621,21 @@ of an already-extracted document is still gated.
 a rule's violation is silently scoreable - here it converted a -3 into a pass - it needs a
 deterministic guard downstream, not louder prompt wording. Preferring the deterministic fix is the
 standing rule; this is the case that shows why.
+
+
+## C83 - 2026-08-27 V1 H3: two row keys on `wc_class_codes`, v16 -> v17
+
+**Call-count change: ZERO.** Client section 8.1 asks for the number of employees per
+employee group; ACORD 130 prints a full-time and a part-time count beside every rating
+row, and the extractor never read them - the boxes went to gap fill with the COMPANY-WIDE
+headcount in view. The `wc_class_codes` row schema gains `full_time_employees` /
+`part_time_employees` (string or null, RULE 3 applies - read only when the table prints
+them). ~15 tokens on the cached prefix; the prompt text is otherwise unchanged.
+
+**Cache:** v16 replies stay in the cache under their own version; the first re-upload of an
+already-processed package re-extracts once (~14 calls). Same handling as C80.
+
+**Downstream is deterministic, no new call:** the counts stamp through the schedule
+registry, `derive_wc_facts_from_class_rows` (merge tail) tidies compound code cells and
+derives `wc_payroll_by_state` from a complete table, and the chunk union now folds an exact
+reprint of a rating row on code + state + payroll. See `v1-20AUG.md` H3-B.

@@ -64,16 +64,36 @@ SQS_RECOMMENDATION_AUDIT_STATEMENTS = [
 AUDIT_EVENT_STATEMENTS = [
     """
     CREATE TABLE IF NOT EXISTS audit_events (
-        id          TEXT PRIMARY KEY,
-        session_id  TEXT NOT NULL,
-        user_id     TEXT,
-        event_type  TEXT NOT NULL,
-        event_data  JSONB,
-        created_at  TEXT NOT NULL
+        id            TEXT PRIMARY KEY,
+        session_id    TEXT NOT NULL,
+        user_id       TEXT,
+        event_type    TEXT NOT NULL,
+        event_data    JSONB,
+        package_label TEXT DEFAULT '',
+        visibility    TEXT DEFAULT 'audit',
+        created_at    TEXT NOT NULL
     )
     """,
+    # V1 H7 / D50 - "one model", owner ruling 2026-08-27. `activity_events` and
+    # `audit_events` were two near-identical append-only logs recording the SAME
+    # acts under different names (answers_applied / client_answers_applied,
+    # sqs_scored / sqs_snapshot, and ONE download writing three rows across
+    # three stores). `activity_service` is now an adapter over this table, so
+    # the spine needs the two columns the product feed reads:
+    #   package_label - the human package name the navbar Activity Log groups by
+    #   visibility    - 'product' (Activity Log + E&O record) or 'audit'
+    #                   (E&O record / debugging only). Without it the producer's
+    #                   activity feed would render every field edit and score
+    #                   snapshot as an unlabelled raw event type.
+    # ALTERs as well as the CREATE, so existing databases pick them up on the
+    # next restart (config/database.py convention).
+    "ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS package_label TEXT DEFAULT ''",
+    "ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'audit'",
     "CREATE INDEX IF NOT EXISTS idx_audit_events_session ON audit_events(session_id, created_at)",
     "CREATE INDEX IF NOT EXISTS idx_audit_events_type    ON audit_events(event_type)",
+    # The Activity Log is USER-scoped and cross-session, newest-first, LIMIT N -
+    # the session index above cannot serve it.
+    "CREATE INDEX IF NOT EXISTS idx_audit_events_user    ON audit_events(user_id, created_at DESC)",
 ]
 
 DOWNLOAD_AUDIT_STATEMENTS = [
@@ -104,10 +124,28 @@ FIELD_SOURCE_AUDIT_STATEMENTS = [
         previous_value TEXT,
         new_value      TEXT,
         confidence     TEXT CHECK(confidence IN ('deterministic','filled','ai_high','ai_low')),
+        previous_source TEXT,
+        reason          TEXT,
         changed_at     TEXT NOT NULL,
         model_version  TEXT NOT NULL
     )
     """,
+    # V1 H7 (client section 12): the two attributes his "for material changes
+    # retain" list names that this table could not hold.
+    #   previous_source - the confidence the value carried BEFORE the change.
+    #     This is what separates a "generated-value override" (the client's 8th
+    #     event) from a producer correcting a human entry or filling a blank.
+    #     `form_routes.update_pdf` already has the prior confidence dict in hand
+    #     before the edit applies, so it costs one argument, not a new path.
+    #     Deliberately no CHECK: it mirrors `confidence`'s vocabulary but must
+    #     also accept NULL and any legacy spelling already on a session.
+    #   reason - PLUMBED on every material change and PROMPTED on none (D52,
+    #     owner ruling 2026-08-27, consistent with Q17's standing "not now").
+    #     Dismissals / issue resolutions / conflict resolutions already capture
+    #     a reason; this closes the schema gap so the modification history can
+    #     carry one wherever a path chooses to supply it.
+    "ALTER TABLE field_source_audit ADD COLUMN IF NOT EXISTS previous_source TEXT",
+    "ALTER TABLE field_source_audit ADD COLUMN IF NOT EXISTS reason TEXT",
     "CREATE INDEX IF NOT EXISTS idx_field_audit_session ON field_source_audit(session_id)",
     "CREATE INDEX IF NOT EXISTS idx_field_audit_field   ON field_source_audit(field_name)",
     "CREATE INDEX IF NOT EXISTS idx_field_audit_source  ON field_source_audit(source)",

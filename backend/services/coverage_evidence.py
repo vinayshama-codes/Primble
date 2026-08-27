@@ -143,6 +143,40 @@ def _recorded_state(facts: Optional[dict], key: str) -> Optional[str]:
     return str(state) if state else None
 
 
+def _human_recorded_state(facts: Optional[dict], key: str) -> Optional[str]:
+    """`_recorded_state`, but ONLY when a person put it there.
+
+    `_recorded_state`'s docstring says "a value_state a HUMAN or the answer door
+    recorded", and that stopped being the whole truth once
+    `fact_state.annotate_fact_states` began writing DERIVED states back onto the
+    envelope it annotates. That closes a loop wherever a status function both
+    feeds the Not Applicable axis and reads the recorded state back:
+
+        h1 says Not Applicable -> annotate persists value_state=not_applicable
+        -> the status function reads it as authoritative -> Not Applicable
+        FOREVER, even after the evidence that produced it is edited away.
+
+    Measured for `wc_payroll_period` (2026-08-27): once a package with no
+    payroll figure had been annotated, adding a real bare payroll figure could
+    never make the client's -3 fire again. Gating on provenance breaks the loop
+    at the only place it can be broken - a human's "this does not apply" is a
+    statement about the world and must persist; our own derivation is a
+    conclusion and must be recomputed from the evidence every time.
+    """
+    if not isinstance(facts, dict):
+        return None
+    _, env = _unwrap(facts.get(key))
+    state = env.get("value_state")
+    if not state:
+        return None
+    try:
+        from services.fact_state import _HUMAN_SOURCES
+        human = _HUMAN_SOURCES
+    except Exception:                                         # noqa: BLE001
+        human = {"producer", "client_arq", "client"}
+    return str(state) if str(env.get("source") or "").lower() in human else None
+
+
 def _answered(facts: Optional[dict], key: str) -> bool:
     """Did anyone ANSWER this - a value, an explicit "none", or an N/A?
 
@@ -569,7 +603,80 @@ def h1_fact_not_applicable(fact_key: str, facts: Optional[dict],
                 return True
         except Exception:                                     # noqa: BLE001
             return False
+    # ── V1 H4 (client section 9), 2026-08-27: WC Payroll Period ──────────────
+    # The client's own key rule is *"N/A if annual basis is clear"*, and 6.4's
+    # four branches ALREADY decide that - `wc_payroll_period_status` returns
+    # NOT_APPLICABLE when there is no WC line or no payroll figure at all, and
+    # SATISFIED when the figure's own label, its source or a class-code row
+    # means annual (D43). But that verdict only ever reached the SCORE. The
+    # QUESTION is generated off the fact, which stayed `not_stated`, so the
+    # producer was asked "what period does the stated payroll figure cover?"
+    #   * on a package with NO payroll figure at all - a question about the
+    #     period of a number that does not exist; and
+    #   * on a package whose H3 employee-group table states annual payroll per
+    #     row BY CONSTRUCTION, which is the very evidence that satisfied 6.4.
+    # Same shape as the X-Mod branch above: the deduction rule alone never
+    # stopped the asking.
+    #
+    # ONLY the MISSING branch still asks - that is the -3, and it must keep
+    # asking, because the producer's answer is exactly what retires it.
+    #
+    # SAFE ON THE FILL RATE, unlike the split-limit case documented above:
+    # NOTHING stamps `wc_payroll_period` onto any ACORD box (verified by grep
+    # over pdf_service, 2026-08-27), so no stamped value can be relabelled
+    # `not_applicable` and dropped out of `confidence_fill_rate`.
+    #
+    # NO RECURSION: `wc_payroll_period_status` reads the stored envelope via
+    # `_recorded_state`, never `fact_state.value_state_of`, so the door cannot
+    # call back into the axis that called it.
+    if fact_key == "wc_payroll_period":
+        return _payroll_period_already_settled(facts)
     return False
+
+
+def _payroll_period_already_settled(facts: Optional[dict]) -> bool:
+    """Is the WC payroll period a question nobody needs to answer - decided
+    WITHOUT reading a single coverage flag?
+
+    THE FLAG-INDEPENDENCE IS THE WHOLE POINT, and it is not a style choice.
+    `fact_state._owned_vehicle_fact_not_applicable` calls
+    `h1_fact_not_applicable(fact_key, facts)` with NO flags, and `_flags_of`
+    then falls back to `facts["_flags"]` - a key `fact_state.annotate_fact_states`
+    stashes for the duration of ONE pass and pops again in a `finally`. So at
+    `overlay_for`, `_tier2_not_applicable` and `is_not_applicable_for` time,
+    every flag is invisible.
+    The first line of `wc_payroll_period_status` is
+    `if not _flag(flags, "has_workers_comp"): return STATUS_NOT_APPLICABLE`, so
+    routing this decision through the SCORER marked the fact Not Applicable on
+    EVERY package - including WC packages that were simultaneously being charged
+    the -3 for the very gap the question exists to close. A deduction with no
+    route to remediation is worse than the original defect, and it is exactly
+    what shipped in the first cut of this fix (caught by adversarial review,
+    2026-08-27, before it reached the owner). The X-Mod branch above survives the
+    same blindness only because it fails OPEN.
+    So this reads FACTS ONLY, and it is POSITIVE EVIDENCE ONLY:
+      * no payroll figure anywhere -> there is no period to state (the -12 "WC
+        coverage with no payroll" bucket owns that gap, not this one);
+      * the figure's own source or label already MEANS annual (D43) - a typed
+        annual-payroll column, a producer/client answer to a question that asks
+        for the ANNUAL figure by name, or a class-code row stating annual
+        remuneration.
+    Anything else - including "we cannot tell" - returns False and the producer
+    is asked, which is the branch the client's -3 is attached to.
+
+    THE SCORER AND THIS FUNCTION CANNOT DISAGREE, and that is checkable rather
+    than hoped for: `wc_payroll_period_status` returns MISSING only when a
+    payroll figure EXISTS and neither annual test passes - the exact complement
+    of the two clauses below. So the -3 fires if and only if the question is
+    still asked.
+    """
+    if _fv(facts, "wc_payroll_period"):
+        return False                      # stated; ordinary `present` value
+    if not (_fv(facts, "wc_payroll") or _fv(facts, "total_payroll")):
+        return True
+    if _payroll_source_is_annual(facts):
+        return True
+    return bool(payroll_label_states_annual(_fv(facts, "dec_page_entries")))
 
 
 # ── 2. The five Auto Completeness items ──────────────────────────────────────
@@ -808,10 +915,7 @@ def wc_officer_treatment_status(facts: Optional[dict], flags: Optional[dict]) ->
             if not str(row.get("name") or "").strip():
                 continue
             named += 1
-            code = str(row.get("include_exclude") or row.get("treatment")
-                       or row.get("status") or "").strip().lower()
-            if _truthy(row.get("include")) or _truthy(row.get("exclude")) \
-                    or code in ("include", "included", "exclude", "excluded", "inc", "exc"):
+            if officer_treatment_code(row):
                 continue
             unresolved += 1
         else:
@@ -820,6 +924,151 @@ def wc_officer_treatment_status(facts: Optional[dict], flags: Optional[dict]) ->
     if named == 0:
         return STATUS_UNKNOWN
     return STATUS_MISSING if unresolved else STATUS_SATISFIED
+
+
+# ── V1 H3 (client section 8) - the WC row vocabulary, read in ONE place ──────
+# The employee-group table (`wc_class_codes` rows) and the officer table
+# (`wc_officers` rows) are edited by people AND extracted from documents, so
+# every reader below - the ACORD 130 stamper, the table renderer, the merge
+# tail, the 6.4 officer check above - asks these helpers rather than
+# re-parsing the row shape. Principle 1: one canonical fact, one reading.
+
+_OFFICER_INCLUDE_WORDS = frozenset({"include", "included", "inc", "in", "yes", "y"})
+_OFFICER_EXCLUDE_WORDS = frozenset({"exclude", "excluded", "exc", "ex", "out", "no", "n"})
+OFFICER_INCLUDED = "INC"
+OFFICER_EXCLUDED = "EXC"
+
+
+def officer_treatment_code(row: Any) -> Optional[str]:
+    """The ACORD 130 INC / EXC code for one officer row, or None.
+
+    Reads the extractor's two booleans (`include` / `exclude`) and any text a
+    person typed (`include_exclude`, `treatment`, `status`). A row that says
+    BOTH, or says neither, or says something unrecognised, gets None - the box
+    stays blank and the 6.4 check keeps counting the officer as unresolved.
+    Right-or-blank; never a guess.
+    """
+    if not isinstance(row, dict):
+        return None
+    inc = _truthy(row.get("include"))
+    exc = _truthy(row.get("exclude"))
+    text = str(row.get("include_exclude") or row.get("treatment")
+               or row.get("status") or "").strip().lower()
+    if text:
+        words = set(re.findall(r"[a-z]+", text))
+        if words & _OFFICER_INCLUDE_WORDS and not words & _OFFICER_EXCLUDE_WORDS:
+            inc, exc = True, False
+        elif words & _OFFICER_EXCLUDE_WORDS and not words & _OFFICER_INCLUDE_WORDS:
+            inc, exc = False, True
+        elif not (inc or exc):
+            return None
+    if inc and not exc:
+        return OFFICER_INCLUDED
+    if exc and not inc:
+        return OFFICER_EXCLUDED
+    return None
+
+
+def officer_treatment_label(row: Any) -> str:
+    """The table-cell wording for one officer row ("Included" / "Excluded" / "")."""
+    code = officer_treatment_code(row)
+    return {OFFICER_INCLUDED: "Included", OFFICER_EXCLUDED: "Excluded"}.get(code or "", "")
+
+
+_STATE_CODE_RE = re.compile(r"^[A-Za-z]{2}$")
+# ONE reading of "what class code does this cell carry?", used by the
+# normaliser AND by the chunk-union identity in `extraction_service`. They MUST
+# agree: the identity is computed on the raw row, before the normaliser runs, so
+# a code read two different ways is a row that never folds against itself.
+# Live dry run 2026-08-27 caught exactly that - a premium summary printing
+# "8810 Clerical" and a rating sheet printing "8810" survived as TWO rows, and
+# the payroll-by-state derived from them DOUBLED.
+_WC_CODE_HEAD_RE = re.compile(r"^\s*(\d{4}[A-Za-z0-9]{0,2})\s*(?:[-:.,]\s*|\s+)?(.*)$")
+
+
+def wc_class_code_token(row: Any) -> str:
+    """The bare class code a row (or a raw cell) carries - "8810" out of
+    "8810 Clerical", "5551" out of "5551 - Roofing", "8810A" unchanged.
+    Empty string when the cell names no code at all, which every caller must
+    read as "cannot tell", never as a match."""
+    cell = row.get("code") if isinstance(row, dict) else row
+    m = _WC_CODE_HEAD_RE.match(str(cell or ""))
+    return m.group(1) if m else ""
+
+
+def _row_state(row: Any) -> str:
+    if not isinstance(row, dict):
+        return ""
+    st = str(row.get("state") or "").strip().upper()
+    return st if _STATE_CODE_RE.match(st) else ""
+
+
+def _row_amount(row: Any) -> Optional[float]:
+    if not isinstance(row, dict):
+        return None
+    raw = str(row.get("payroll") or "").strip()
+    if not re.search(r"\d", raw):
+        return None
+    try:
+        return float(re.sub(r"[^\d.]", "", raw) or "0")
+    except ValueError:
+        return None
+
+
+def wc_class_row_states(rows: Any) -> List[str]:
+    """The DISTINCT two-letter states the employee-group rows name, in row
+    order. Rows without a real state code contribute nothing."""
+    out: List[str] = []
+    for row in (rows if isinstance(rows, list) else []):
+        st = _row_state(row)
+        if st and st not in out:
+            out.append(st)
+    return out
+
+
+def wc_class_shared_state(rows: Any) -> Optional[str]:
+    """The ONE state every stated row shares - what the single ACORD 130 rating
+    sheet may be labelled with. Two states, or none, -> None (blank; the
+    producer sees it)."""
+    states = wc_class_row_states(rows)
+    return states[0] if len(states) == 1 else None
+
+
+def wc_payroll_by_state_from_rows(rows: Any) -> Optional[Dict[str, str]]:
+    """{state: summed payroll} from the employee-group rows - ONLY when every
+    real row carries both a state and a payroll figure (positive, complete
+    evidence). A partial table yields None: a state total built from half the
+    rows is a wrong value, not a derived one (H1-F class)."""
+    real = [r for r in (rows if isinstance(rows, list) else [])
+            if isinstance(r, dict) and any(str(v or "").strip() for v in r.values()
+                                            if not isinstance(v, bool))]
+    if not real:
+        return None
+    totals: Dict[str, float] = {}
+    for row in real:
+        st, amt = _row_state(row), _row_amount(row)
+        if not st or amt is None:
+            return None
+        totals[st] = totals.get(st, 0.0) + amt
+    return {st: f"${int(round(v)):,}" for st, v in totals.items()}
+
+
+def normalize_wc_class_row(row: Any) -> Any:
+    """Tidy ONE employee-group row's known formatting (client 8.3 "normalize
+    known formatting"). Splits a compound code cell - "8810 Clerical",
+    "5551 - Roofing" - into the code and its wording, filling `description`
+    only when it is empty. Never invents, never alters a bare code, never
+    touches a suffix ("8810A" stays "8810A"). Returns the same object."""
+    if not isinstance(row, dict):
+        return row
+    m = _WC_CODE_HEAD_RE.match(str(row.get("code") or ""))
+    if not m:
+        return row                              # names no code - left alone
+    row["code"] = m.group(1)
+    rest = (m.group(2) or "").strip()
+    if rest and not str(row.get("description") or "").strip():
+        row["description"] = rest
+    return row
 
 
 # "Clearly annual" - by MEANING, not one spelling (owner 2026-08-26). Any of
@@ -944,7 +1193,11 @@ def wc_payroll_period_status(facts: Optional[dict], flags: Optional[dict]) -> st
         return STATUS_NOT_APPLICABLE
     if not (_fv(facts, "wc_payroll") or _fv(facts, "total_payroll")):
         return STATUS_NOT_APPLICABLE
-    if _recorded_state(facts, "wc_payroll_period") in ("not_applicable",):
+    # HUMAN-recorded only (V1 H4, 2026-08-27). A derived not_applicable that
+    # `annotate_fact_states` wrote back onto the envelope must never be read
+    # here as authoritative - see `_human_recorded_state` for the loop that
+    # closes and the measured case it silences.
+    if _human_recorded_state(facts, "wc_payroll_period") in ("not_applicable",):
         return STATUS_NOT_APPLICABLE
     period = _fv(facts, "wc_payroll_period")
     if period is not None and payroll_period_meaning(period):

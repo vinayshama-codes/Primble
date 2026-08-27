@@ -96,9 +96,56 @@ INSURANCE_JUDGMENT_FACTS = frozenset({
     "lines_of_business",          # "Lines of insurance requested"
     "effective_date",             # "Final proposed effective date when unresolved"
 
+    # ── Policy period and policy administration - V1 H4 (section 9), 2026-08-27
+    # Section 9.1's Proposed Effective Date row carries the key rule *"Client
+    # does not need to interpret policy period"*, and 4.4 lists policy
+    # interpretation as producer-only. `effective_date` was already here; its
+    # three siblings were not, and all three reached the CLIENT:
+    #   expiration_date - asked as "What date would you like your insurance
+    #     coverage to end?", which invites the insured to invent a policy term.
+    #     It is a yellow REQUIRED box on ACORD 125
+    #     (`pdf_service._ACORD125_REQUIRED_ALWAYS`), it drives the
+    #     effective-before-expiration HARD STOP, and on a renewal
+    #     `_route_renewal_dates` reassigns it - none of which an insured can
+    #     reason about.
+    #   audit_period / billing_plan - pure policy administration. The client's
+    #     own ACORD 125 walkthrough names the payment plan among the boxes to
+    #     populate "only from a verified source".
+    # D32 STILL HOLDS: all three keep their questions and their ACORD 125
+    # inventory entries - they move to the Agency bucket, they do not stop being
+    # asked. Removing a field from the CLIENT is not removing it from the
+    # questionnaire.
+    "expiration_date",
+    "audit_period",
+    "billing_plan",
+
+    # `gl_form_type` - "Is your GL policy written on an 'occurrence' or
+    # 'claims-made' basis?" reached the CLIENT. That is the definition of policy
+    # interpretation (core principle 5), it decides whether a retro date is even
+    # meaningful, and an insured guessing it wrong silently changes how the GL
+    # section is read. 4.7 puts General Liability form/trigger with the producer.
+    "gl_form_type",
+
     # Classification (4.4 "Classification" + core principle 5)
     "gl_class_codes_by_location",
     "wc_class_codes",
+    # V1 BETA EXIT (2026-08-28) - the beta-exit criterion "GL/WC class codes
+    # never reach the client" was FALSE on this one key. `gl_class_code_schedule`
+    # is a registry fact whose question reads verbatim: "Provide the GL rating
+    # schedule per class code (class code, premium/exposure basis, exposure
+    # amount i.e. payroll or gross sales, territory, and subcontracted %)" -
+    # five insurance classifications in one box, routed to the CLIENT.
+    #
+    # It escaped every existing guard for a reason worth keeping: it is NOT in
+    # `SCHEDULE_DEFS` (so D44's table-level audience split never applied - that
+    # rule protects `wc_class_codes` by stripping its producer-only `code`
+    # column, and there is no table here to strip), and its key contains
+    # "schedule" rather than the `_codes` suffix the sibling entries share.
+    # A hand-maintained list cannot see that; `test_no_classification_question
+    # _ever_reaches_the_client` (tests/test_question_eligibility.py) now DERIVES
+    # the check from every registry question's own text, so a 51st cannot slip
+    # in the way this one did.
+    "gl_class_code_schedule",
 
     # Commercial Auto (4.4 "Commercial Auto")
     "auto_covered_symbols",
@@ -134,6 +181,28 @@ INSURANCE_JUDGMENT_FACTS = frozenset({
     "deductible_application",
     "bop_deductible",
     "crime_deductible",
+
+    # New Venture status - V1 H4-B, 2026-08-27, found on the owner's live run.
+    # The registry entry for `new_venture_indicator` sets `question: None` and
+    # `forms: set()` and its own comment reads *"Producer confirmation (client
+    # 2.2: 'if the producer confirms') - it is answered from the Loss History
+    # card, NEVER ASKED TO THE CLIENT."* It was being asked to the client
+    # anyway: `arq_service._FIELD_QUESTION_MAP` carries curated wording for it,
+    # which makes `is_curated_client` true, which routes it CLIENT / optional.
+    # Observed live on two of the three H4 test packages, including a 12-year-old
+    # business with a stated prior carrier.
+    #
+    # It is not a cosmetic mis-route. `apply_arq_answers_to_session` sets
+    # `flags["new_venture_confirmed"]` from this answer exactly as the producer
+    # path does, and a confirmed New Venture takes the whole Loss History pillar
+    # to Not Applicable (C2 2.2) and now also marks Years in Business Not
+    # Applicable (H4-A). That is a scoring-material determination about the
+    # ACCOUNT, and client 2.2 gives it to the producer in terms.
+    #
+    # The producer keeps answering it exactly where C2 put it - the Loss History
+    # recommendation card - which is a different surface from the questionnaire
+    # and is untouched by this entry.
+    "new_venture_indicator",
 
     # Workers Compensation (4.4 "Workers Compensation")
     "wc_xmod",
@@ -180,6 +249,22 @@ INSURANCE_JUDGMENT_FACTS = frozenset({
 # reached the CLIENT bucket. X-Mod is producer-only under 4.4 and 4.10.
 INSURANCE_JUDGMENT_QUESTION_KEYS = frozenset({
     "narrative_target_markets",
+    # THE SAME DEFECT, ONE SLOT OVER - found on the H3 live run (2026-08-27),
+    # after C4-S found the first one and did not sweep for siblings.
+    # `narrative_growth_trends` has been repurposed to ask
+    #   "Provide your WC payroll breakdown by class code - list each class
+    #    code, its description, and the associated payroll amount.
+    #    (For example: 5183 Plumbing - $320,000; 5190 Electrical - $180,000)"
+    # It is a CLASSIFICATION question wearing a narrative key, so `wc_class_codes`
+    # in the table above never matched it and it reached the CLIENT bucket -
+    # asking the insured to supply NCCI codes, with worked examples. That is
+    # core principle 5 and client 8.3 breached in one question.
+    # The employee-group TABLE (`wc_class_codes`) is how this is asked now: the
+    # client describes the group and its payroll, the producer owns the code.
+    # `tests/test_h3_wc_data_capture.py::test_no_client_question_asks_for_a_
+    # classification_code` sweeps the whole question map so a third slot cannot
+    # ship.
+    "narrative_growth_trends",
 })
 
 # Facts the client's 4.3 keeps CLIENT-ELIGIBLE even though they sit next to an
@@ -201,6 +286,7 @@ CLIENT_ELIGIBLE_DESPITE_TOPIC = frozenset({
 
 # Reasons, so the producer UI and the audit trail can say WHY, in the client's
 # own vocabulary rather than an engineering one.
+REASON_CONTACT_SATISFIED = "contact_already_provided"
 REASON_NOT_APPLICABLE = "not_applicable"
 REASON_ALREADY_KNOWN = "already_provided"
 REASON_INSURANCE_JUDGMENT = "insurance_judgment_producer"
@@ -220,6 +306,49 @@ def is_insurance_judgment(*keys: Optional[str]) -> bool:
                     or key in INSURANCE_JUDGMENT_QUESTION_KEYS):
             return True
     return False
+
+
+def _contact_requirement_already_met(facts: Optional[dict],
+                                     canonical_key: Optional[str]) -> bool:
+    """Is this a Tier 1 contact question whose requirement ANOTHER contact
+    method has already satisfied?
+
+    Client section 9.1, Contact Name / Phone / Email, key rule verbatim:
+    *"Any one contact method satisfies Tier 1"* - and `sqs_service._tier1_items`
+    implements exactly that, crediting the whole requirement on
+    `any(_answered(facts, f) for f in TIER1_CONTACT)`. The QUESTIONNAIRE never
+    learned it: all three are in `question_classifier.CRITICAL_FIELDS`, so with
+    a phone already known the client was still asked for the name and the email
+    as CRITICAL questions, and both were pre-ticked into the send list -
+    spending two of the 28 `DEFAULT_SELECT_CAP` slots on a requirement that was
+    already met.
+
+    THE FIELD SET AND THE ANSWERED TEST ARE BOTH BORROWED, NEVER RETYPED.
+    `TIER1_CONTACT` comes from the scorer, and "answered" is
+    `answer_semantics.fact_answered` - the same predicate `sqs_service._answered`
+    uses. That matters more than it looks: `fact_answered` is asymmetric on
+    absence strings (measured: "N/A" -> True, "None" -> False), so a locally
+    written "is it filled" test would disagree with Tier 1 on exactly those
+    values and the card would contradict the score again.
+
+    Fail-closed: anything unreadable returns False and the question stays
+    exactly as critical as it is today.
+    """
+    if not canonical_key:
+        return False
+    try:
+        from services.answer_semantics import fact_answered
+        from services.sqs_service import TIER1_CONTACT
+    except Exception as exc:                                  # noqa: BLE001
+        logger.debug("question_eligibility: contact rule unavailable - %s", exc)
+        return False
+    if canonical_key not in TIER1_CONTACT or not isinstance(facts, dict):
+        return False
+    # Another METHOD, not this one. A question whose own fact is answered is
+    # already handled by the existing "already_provided" suppression, and this
+    # rule must never be the thing that retires it.
+    return any(fact_answered(facts.get(f))
+               for f in TIER1_CONTACT if f != canonical_key)
 
 
 def _states(facts: Optional[dict], canonical_key: Optional[str]) -> tuple:
@@ -258,8 +387,19 @@ def overlay_for(
     it before Step 5 could ever route it to the producer.
     """
     from services.question_classifier import (
-        AUDIENCE_CLIENT, AUDIENCE_PRODUCER, PRIORITY_INTERNAL,
+        AUDIENCE_CLIENT, AUDIENCE_PRODUCER, PRIORITY_CRITICAL,
+        PRIORITY_IMPORTANT, PRIORITY_INTERNAL, _SCORE_POINTS,
     )
+
+    # V1 H3 (2026-08-27): a TABLE question owns its own audience split - a
+    # producer-only column (WC class code, covered-auto symbol) is stripped
+    # from the client's copy by `arq_routes.client_view`, and a producer-only
+    # TABLE is routed by `arq_service._finalize_schedule_taxonomy`. Judging the
+    # whole table by its canonical key (`wc_class_codes` IS an
+    # insurance-judgment fact) would flag the client's payroll table
+    # "producer review" for the one column the client never sees.
+    if question.get("field_type") == "schedule":
+        return {}
 
     canon = question.get("_canonical_key") or question.get("canonical_key")
     field = question.get("field_name") or ""
@@ -302,6 +442,22 @@ def overlay_for(
         out["priority"] = PRIORITY_INTERNAL
         out["eligibility_step"] = 1
         out["eligibility_reason"] = REASON_NOT_APPLICABLE
+        # THE AUDIENCE STILL HAS TO MOVE (V1 H4, 2026-08-27). This module's
+        # docstring promises every overlay does one of three things, the first
+        # being "moves a question's audience from CLIENT to PRODUCER" - but
+        # this branch set only suppression, so an INSURANCE-JUDGMENT fact that
+        # happened to be Not Applicable was still reported `audience: client`,
+        # `bucket: client`. `test_overlay_never_widens_client_exposure` cannot
+        # see it because that test only drives facts which STARTED non-client.
+        # Harmless while the question is suppressed, and wrong the moment
+        # anything reads the audience - which is exactly what
+        # `test_vehicle_use_is_a_client_question_and_payroll_period_is_the_
+        # producers` does, and why it caught this.
+        # Core principle 5 is unconditional: a classification / policy-
+        # interpretation fact is the producer's in EVERY state, not only the
+        # states we happened to enumerate.
+        if judgment and audience == AUDIENCE_CLIENT:
+            out["audience"] = AUDIENCE_PRODUCER
         return out
 
     # ── STEPS 2/3/4 - routing for anything still askable ─────────────────────
@@ -325,6 +481,41 @@ def overlay_for(
         else:
             out["eligibility_step"] = 3
         out["eligibility_reason"] = REASON_INSURANCE_JUDGMENT
+        return out
+
+    # ── Tier 1 contact - one requirement, three questions (V1 H4, 2026-08-27) ─
+    # DEMOTED, NEVER SUPPRESSED, and the difference is the whole design.
+    # `apply_default_selection` sends PRIORITY_OPTIONAL to its final
+    # `else: default_selected = False; suggested = False`, so demoting that far
+    # would leave `NamedInsured_Contact_FullName_A` and
+    # `..._PrimaryEmailAddress_A` blank AND unasked - the exact "blank box,
+    # nobody asked" outcome the coverage-guarantee injector was rewritten to
+    # stop. A filled contact_phone stamps neither of those boxes (measured
+    # through `pdf_service.fact_to_form_fields`), and all three are separate
+    # entries in the ACORD 125 fill-rate inventory.
+    #
+    # PRIORITY_IMPORTANT is the whole fix: the cards stay client-facing, stay
+    # visible and stay `suggested`, and only stop consuming a CRITICAL
+    # pre-ticked slot - which was the entire measured cost.
+    if (not question.get("suppressed")
+            and audience == AUDIENCE_CLIENT
+            and question.get("priority") == PRIORITY_CRITICAL
+            and _contact_requirement_already_met(facts, canon)):
+        out["priority"] = PRIORITY_IMPORTANT
+        out["eligibility_reason"] = REASON_CONTACT_SATISFIED
+        # The score badge is computed by `classify_question` FROM the priority,
+        # so a demotion that leaves it alone keeps advertising "Submission
+        # readiness" and 15 points on a question that no longer carries either.
+        # `apply_eligibility` only ever recomputes the bucket, and only when the
+        # audience moves - so the correction has to happen here.
+        _impact = dict(question.get("score_impact") or {})
+        if _impact:
+            _impact["submission_readiness"] = False
+            _impact["points"] = _SCORE_POINTS.get(PRIORITY_IMPORTANT,
+                                                  _impact.get("points", 0))
+            _impact["labels"] = [lbl for lbl in (_impact.get("labels") or [])
+                                 if lbl != "Submission readiness"]
+            out["score_impact"] = _impact
         return out
 
     # ── STEP 4 - UNABLE TO DETERMINE, recorded but NOT suppressed ────────────
