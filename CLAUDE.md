@@ -413,6 +413,143 @@ value. An offline probe proves the FUNCTION, never the SEAM around it.
 
 ## Critical Issues & Roadmap
 
+### Early Score / Readiness Presentation (client section 7, V1 H2) - SHIPPED 2026-08-27
+**Read `v1-20AUG.md` H2-A before touching the pre-form Review card or any pre-generation
+scoring.** The card printed `tier2_score` as "Submission Readiness NN%" - the Tier 2
+completeness ratio, ONE category of the Structural pillar, under a name and a percentage
+format that read as the SQS (the owner's screenshot: 100% beneath "12 warnings", which cap
+the score at 85). Now: **"Current Submission Readiness: <tier>"** read off the package scorer's
+own `tier`, plus **"Key details in place / missing"** from the score's own Tier 1 + Tier 2
+lists (`sqs_service.key_details`). No percentage, no bar; the number stays on the SQS panel.
+
+**One door for "the package SQS as it stands": `sqs_service.current_package_sqs`.** Forms
+generated -> the persisted, credit-bearing `package_sqs`; integrity review pending -> None;
+otherwise the reclassify recipe run STATELESSLY (nothing persisted, no `sqs_history`, no 5.12
+snapshot - the session list and the delta baseline are untouched). `form_routes._pre_form_
+status` feeds all five pre-form responses (upload, integrity resolve, reclassify, confirm-
+value, `/extraction-result`); an AST test fails the build if one scores inline. Reclassify now
+demotes cross-form hard stops pre-selection (C75) - it used to cap at 60 through `hard_cross`
+while the card said "warning". Remediation counts ("N items still need attention · M handled")
+live on the Hard Stops / Warnings sections by owner's call, and the Review step now re-loads
+stored Resolve/Dismiss marks (it never did - a refresh forgot them). **The label can move at
+generation** (C75 re-promotion + fill rate) - D6, tell Brent. Tests:
+`tests/test_h2_readiness_presentation.py` (33).
+
+### Coverage-Specific SQS Gap Closure (client section 6, V1 H1) - SHIPPED 2026-08-26
+**Read `v1-20AUG.md` H1-A / H1-B / H1-C and D39-D43 before touching any auto or WC
+scoring, the coverage flags, or `services/coverage_evidence.py`.** The client's
+complaint: a half-empty ACORD 127 or 130 scored badly on its own form and barely moved
+the package, because per-form scores never feed the package (spec section 10, D29).
+
+**One door - `services/coverage_evidence.py`** - answers, once, for the scorer, the
+ceiling engine, the 127 checklist, the fact-state axis and the edit path: is this auto
+line OWNED / HNOA-only / UNKNOWN (positive evidence only; UNKNOWN is presumed owned by
+owner ruling, D41); which of the five 6.3 items are missing; what state each 6.4 item is
+in (X-Mod, officer treatment, payroll period - SATISFIED / NOT_APPLICABLE / MISSING /
+UNKNOWN, and UNKNOWN never deducts); and whether a coverage flag still has any evidence.
+
+**What moved:** two new Exposure buckets, `auto_completeness` (-15/-10/-5/-5/-5, cap 25)
+and `wc_supplemental` (-5/-5/-3, cap 10); the vehicle / driver "+ Warning" items go
+through the LEGACY engine (`evaluate_stops`) so they cap at 85 without also charging the
+cross-document bucket (D40); new fact `auto_vehicle_use` (extraction v15 - see
+`improving-ll.md` C80) stamped onto the ACORD 127 USE column for every real vehicle row;
+`wc_payroll_period` now has a definition, a producer question, options and a meaning-
+based validator; HNOA-only accounts mark the five owned-vehicle facts Not Applicable
+and stop asking for them (even with ACORD 127 selected - that override is line-level).
+
+**Bugs fixed on the way, all measured (H1-C has the full ledger):**
+1. `form_routes.update_pdf` demoted `has_auto_coverage` / `has_workers_comp` /
+   `has_property_coverage` / `has_umbrella` when the two-or-three facts whose ABSENCE is
+   the penalty were blank - the most incomplete submission lost its penalties on the first
+   edit of any field. Now through `coverage_flag_supported` (D42).
+2. `_finalize_pipeline` re-runs discarded the human-set `new_venture_confirmed` /
+   `prior_carrier_adverse_action` flags - now carried while their fact survives.
+3. Split-limit hard stop read `bi_per_person` etc. - keys nothing writes - so it fired on
+   EVERY split-limit policy and could never be satisfied. Now `auto_bi_per_person` etc.,
+   and the Resolve button types the three limits.
+4. `property_deductible_basis` (phantom) -> `deductible_basis`; the warning fired on every
+   property policy with a deductible and could only be "resolved" by a note.
+5. Minimum Viable COPE's building/BPP test collapsed to `has_x and not has_x` via two
+   phantom flags - a property submission with NEITHER value was never told so.
+6. ACORD 127 checklist read `auto_garaging_address` (singular, phantom).
+
+**Scores move in BOTH directions - D6, tell Brent first:** auto and WC packages with gaps go
+DOWN; the split-limit, deductible-basis and garaging fixes move some packages UP.
+
+**Live run 2026-08-26 (c6 kit, 5 packages) - 4 of 5 passed; seven more fixes, all in
+`v1-20AUG.md` H1-E:** NCCI standard-exception class codes (8810 / 8742 / 8871 / 7380) no
+longer decide the industry **when a real class sits beside them** (the exclusion is
+CONDITIONAL - a LONE 8810 on a roofing contractor is still the client's own mismatch
+example, and the first over-broad cut broke three tests); a stored sentence saying a
+document "was not supplied" is an ABSENCE, not a value (`coverage_evidence.
+umbrella_schedule_present`); SPLIT auto liability limits count as a stated limit
+everywhere the CSL was read alone (`auto_liability_stated` - the CSL box is empty by
+design on a split policy); the HNOA-only Not Applicable set gained the physical-damage
+facts and the return-to-yard question; a schedule-backed fact is asked ONCE as its table,
+never also as a free-text scalar; a confirmed New Venture retires BOTH X-Mod questions;
+extraction v16 forbids inferring vehicle use / radius / garaging (`improving-ll.md` C81).
+
+**Then an adversarial review found SEVEN defects in those fixes, two worse than the bug
+they fixed** - see `v1-20AUG.md` H1-F. The headline: the "a negation is an absence"
+rule deleted 13 of 14 REAL broker schedules (any schedule naming a line the umbrella
+does not cover), and was defeated upstream by a raw-text backfill that manufactured
+the evidence. Both now have a STRUCTURAL first condition and one door. Also fixed:
+the class-code vote ran over a stringified blob (a payroll of 540300 matched class
+5403) and could CREATE a -15 by narrowing an ambiguous vote - an unmapped governing
+class now means no verdict; a producer could clear a 60 cap over a blank form
+(`_restamp_canonical_into_forms` could not find the split boxes); and the ACORD 127
+checklist docked HNOA-only accounts for facts nobody is asked for; and the ACORD 127
+USE column ticked TWO mutually-exclusive boxes on a multi-word value (the example in
+our own extraction prompt) while also swallowing the radius pair.
+
+**Read H1-F's standing lesson before writing any free-text or lookup rule here:** a
+test that is necessary but not sufficient needs a structural second condition, and the
+adversarial case must be written FIRST.
+
+**A live run then lost its Total Package Score entirely (H1-G).** The trigger was NOT
+found - the scorer is pure and survived 2,574 fuzzed shapes - but the reason it never
+recovered was: all three sites PERSISTED the failed `None`, and `upd_processing_session`
+replaces `package_sqs` wholesale, so one transient failure wiped the last good score for
+the rest of the session (the reload path reads it from there). A failed score is now
+never written, and both failure logs name session/forms/trace. **If a package score ever
+goes missing again, grep the backend log for `calculate_package_sqs failed`.**
+
+**And the class-code fix turned out to be UNREACHABLE on a second path (H1-H).** Two
+clean live packages scored a false -15 "class code does not match operations", because
+`_codes_to_industry` kept a "legacy blob read, unchanged" fallback for unrecognised fact
+shapes - preserving H1-F's defect (a payroll of 540300 voting as class 5403) exactly
+where the input is least understood. The fallback now returns None, honouring the
+contract `_class_code_tokens`' own docstring had always stated. **Scores go UP - D6.**
+
+**Two more from the same live run (H1-I), neither moving a score.** `UNKNOWN_KEYS`
+measured against ONE BATCH's slice, so a real ACORD field already stamped by Pass 1/1.5
+was reported as an invented name - it warned on an 1,877-char document and advised
+lowering CONTEXT_UTILISATION, the opposite of the long-context condition. It now
+classifies against `eligible_fields | already_filled`; the benign case logs
+`OUT_OF_BATCH_KEYS` at INFO. And the ACORD 101 "operations description is insufficient"
+advisory counted CHARACTERS (`< 30`), so it asked for a narrative from "Tree trimming and
+removal" and stayed silent on a 59-char sentence that says nothing - now words (`< 4`).
+
+**D43 was being defeated upstream (H1-K).** The live run's dec index printed the bare
+label `Payroll = $210,000` and the extractor returned `wc_payroll_period = "annual"`, so
+the 6.4 check read a stated period and the client's -3 could never fire - the rule was
+right, its INPUT was manufactured (the same shape as H1-F). v16's prompt already forbids
+it in terms; a prompt is not a guarantee. `_gate_inferred_payroll_period` now drops an
+AI-sourced period the document does not name, corroborated STRUCTURALLY (the period word
+must qualify the payroll word in the same phrase - a "Policy Period" row sits one line
+above "Payroll" on a real dec page). Provenance decides: producer / client / derived
+values are never gated. **Scores move DOWN on WC accounts whose payroll states no period
+- D6.**
+
+Tests: `tests/test_h1_coverage_gap_closure.py` (210) and
+`tests/test_h1_coverage_regression.py` (GL / Property / Umbrella pins, 30).
+**Suite: 4680 passed / 1 failed** (the documented `httpx` ImportError).
+**Live kit:** `py backend/scripts/make_c6_test_pdfs.py` -> `c6_test_data/` with
+five self-verified packages covering every 6.3 / 6.4 clause, every fix and the 6.1 / 6.2 / 6.5
+regression controls and `README-HOW-TO-TEST.md` (H1-D). 6.1 / 6.2 / 6.5 are
+regression-only by the client's own instruction - nothing to implement unless beta
+reports a failure.
+
 ### SQS Scoring Integrity & Critical-Field Weighting (client section 3) - SHIPPED 2026-08-25
 **The client's ask was TRACEABILITY, not a better number:** *"Every material score
 should be traceable through: Canonical Fact -> Validation Rule -> Pillar -> Raw SQS
@@ -1970,6 +2107,15 @@ column there will not reach a real deployment.
 
 ## UI / Copy Rules
 
+- **Info (`i`) icons belong on the 6 SQS pillars only, never on the category sub-rows.**
+  Owner, 2026-08-27. The client's ask was traceability (C3), not an icon per row.
+- **Keep tooltip text SHORT.** When the sub-row icons were removed, the per-category
+  arithmetic was folded into the pillar tooltip to "preserve traceability" and rendered
+  as a wall of text over the panel; the owner rejected it on sight. The pillar tooltip
+  says only what the pillar weighs and what it contributed. The categories are already
+  listed underneath with their own percentages, and `score_trace` carries the full C3
+  ledger - so nothing was lost. Removing a UI element for clutter is not a reason to
+  relocate its content into a hover.
 - **No em-dashes (`—`) in UI text.** Use a plain hyphen-minus (`-`) instead. This applies to all labels, titles, banners, tooltips, and inline copy throughout the frontend.
 
 <!-- code-review-graph MCP tools -->

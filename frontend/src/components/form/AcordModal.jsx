@@ -2398,8 +2398,11 @@ const AcordModal = forwardRef(function AcordModal({
   const [groupedIssues, setGroupedIssues] = useState(null);
   // Fig 24: what the last client questionnaire resolved / worsened / left open.
   const [issueDiff, setIssueDiff] = useState(null);
-  const [tier2Score, setTier2Score] = useState(null);
-  const [tier2Missing, setTier2Missing] = useState([]);
+  // V1 H2 (client section 7, 2026-08-27): the pre-form screen no longer holds
+  // a percentage. It prints the package SQS's STATUS LABEL (read off
+  // packageSqs.tier, the same object the editor uses) and the Tier 1 + Tier 2
+  // checklist split into "in place" / "missing" - {satisfied: [], missing: []}.
+  const [keyDetails, setKeyDetails] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
   const [accountProfile, setAccountProfile] = useState(null);
   const [allAvailableForms, setAllAvailableForms] = useState([]);
@@ -2690,7 +2693,7 @@ const AcordModal = forwardRef(function AcordModal({
       setIssueDiff(data.issue_diff || null);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
-      setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
+      setKeyDetails(data.key_details || null); setPackageSqs(data.package_sqs || null);
       setRecommendations(data.recommendations || []); setAllAvailableForms(data.all_available_forms || []);
       setAccountProfile(data.account_profile || null);
       setCheckedFormIds(new Set());
@@ -2980,6 +2983,30 @@ const AcordModal = forwardRef(function AcordModal({
     );
   };
 
+  // V1 H2 (client section 7, 2026-08-27): remediation progress for a whole
+  // section - "N items still need attention · M handled" - summed over the
+  // SAME per-item statuses the cluster pills below read, so the section line
+  // and the pills can never disagree. Lives on the Hard Stops / Warnings
+  // sections themselves (owner's call), never on the status card above.
+  const sectionProgress = (clusters) => {
+    const list = Array.isArray(clusters) ? clusters : [];
+    let total = 0, done = 0;
+    for (const c of list) {
+      const items = Array.isArray(c.items) ? c.items : [];
+      total += Number(c.count) || items.length;
+      for (const it of items) {
+        const st = issueStatuses.get(issueIdOf(it))?.status;
+        if (st === "resolved" || st === "dismissed") done += 1;
+      }
+    }
+    if (!total) return null;
+    const remaining = Math.max(0, total - done);
+    const text = remaining > 0
+      ? `${remaining} item${remaining !== 1 ? "s" : ""} still need${remaining === 1 ? "s" : ""} attention${done > 0 ? ` · ${done} handled` : ""}`
+      : `All ${done} handled`;
+    return <span className="stops-progress" style={{ color: remaining > 0 ? "#475569" : "#166534" }}>{text}</span>;
+  };
+
   // Collapsed-cluster progress pill: how many of a cluster's sub-items are
   // already handled (resolved or dismissed). Shown in the section header so a
   // collapsed cluster still reports progress without exposing any buttons.
@@ -3006,10 +3033,15 @@ const AcordModal = forwardRef(function AcordModal({
   // rendered independently and no promotion/filtering state is needed here.
 
   useEffect(() => {
-    if ((step !== "editor" && step !== "lite") || !sessionId) return;
+    if (!sessionId) return;
+    // V1 H2 (2026-08-27): Resolve / Dismiss marks are stored server-side but
+    // were only re-loaded on the editor - a refresh on the Review step forgot
+    // every "handled" mark its Hard Stops / Warnings sections count. Load
+    // them on every step that renders the controls.
+    if (step === "review" || step === "editor" || step === "lite") loadIssueStatuses(sessionId);
+    if (step !== "editor" && step !== "lite") return;
     refreshArqData();
     loadDismissedRecs(sessionId);
-    loadIssueStatuses(sessionId);
   }, [step, sessionId]); // eslint-disable-line
 
   const refreshArqData = async () => {
@@ -3076,7 +3108,7 @@ const AcordModal = forwardRef(function AcordModal({
     setFiles([]); setSessionId(null); setStep("upload"); setError(null);
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]); setGroupedIssues(null);
     setCanProceedWithWarning(false); setWarningStops([]);
-    setTier2Score(null); setTier2Missing([]); setRecommendations([]); setAccountProfile(null);
+    setKeyDetails(null); setRecommendations([]); setAccountProfile(null);
     setAllAvailableForms([]); setCheckedFormIds(new Set());
     setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setCrossGrouped(null); setIssueStatuses(new Map());
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
@@ -3091,7 +3123,7 @@ const AcordModal = forwardRef(function AcordModal({
   const goToDashboard = () => {
     setFiles([]); setSessionId(null); setStep("dashboard"); setError(null);
     setDocSummary([]); setFlags({}); setHardStops([]); setSoftStops([]); setGroupedIssues(null);
-    setTier2Score(null); setTier2Missing([]); setRecommendations([]); setAccountProfile(null);
+    setKeyDetails(null); setRecommendations([]); setAccountProfile(null);
     setAllAvailableForms([]); setCheckedFormIds(new Set());
     setGeneratedForms({}); setActiveFormId(null); setCrossIssues([]); setCrossGrouped(null); setIssueStatuses(new Map());
     setPdfLoading({}); setEpicLoading(false); setEpicSuccess(false);
@@ -3665,7 +3697,7 @@ const AcordModal = forwardRef(function AcordModal({
       setGroupedIssues(data.grouped_issues || null);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
-      setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
+      setKeyDetails(data.key_details || null); setPackageSqs(data.package_sqs || null);
       setRecommendations(data.recommendations || []); setAllAvailableForms(data.all_available_forms || []);
       setAccountProfile(data.account_profile || null);
       setCheckedFormIds(new Set());
@@ -3743,7 +3775,7 @@ const AcordModal = forwardRef(function AcordModal({
       setUnderwriting(data.underwriting_consistency || null);
       // Readiness number was withheld while the review was pending; restore it now
       // that the package is cleared so the bar shows on the recommendations screen.
-      setTier2Score(data.tier2_score ?? null); setTier2Missing(data.tier2_missing || []);
+      setKeyDetails(data.key_details || null); setPackageSqs(data.package_sqs || null);
       // Workstream 6 §9.1 - integrity resolved → announce the now-current status
       // (hard stops / warnings / ready) as the user lands on the recommendations
       // screen, so they immediately know what to do next. When the package was
@@ -3799,13 +3831,11 @@ const AcordModal = forwardRef(function AcordModal({
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
       setFlags(data.flags || flags);
-      // Refresh the live Submission Readiness score + missing items so the
-      // corrected classification visibly updates downstream scoring (§4.2).
-      if (data.tier2_score !== undefined) setTier2Score(data.tier2_score);
-      if (data.tier2_missing) setTier2Missing(data.tier2_missing);
-      // Recomputed Submission Readiness (SQS) returned by the reclassify call
-      // (§4.2 item #5) — keep the package score in sync so it is never stale.
-      if (data.package_sqs) setPackageSqs(data.package_sqs);
+      // Recomputed package SQS + key-details split returned by the reclassify
+      // call (§4.2 item #5, V1 H2). Null when the scorer failed or the review
+      // is pending: the status label goes blank rather than stale.
+      setKeyDetails(data.key_details || null);
+      setPackageSqs(data.package_sqs || null);
       if (data.integrity) setIntegrity(data.integrity);
       if (data.underwriting_consistency) setUnderwriting(data.underwriting_consistency);
     } catch (e) {
@@ -3996,7 +4026,7 @@ const AcordModal = forwardRef(function AcordModal({
       setGroupedIssues(data.grouped_issues || null);
       setCanProceedWithWarning(!!data.can_proceed_with_warning);
       setWarningStops(data.warning_stops || []);
-      setTier2Score(data.tier2_score ?? tier2Score); setTier2Missing(data.tier2_missing || tier2Missing);
+      setKeyDetails(data.key_details || keyDetails); setPackageSqs(data.package_sqs || null);
       setFlags(data.flags || flags);
     } catch (e) {
       setError("Could not confirm the value: " + (e?.message || "network error"));
@@ -4064,7 +4094,11 @@ const AcordModal = forwardRef(function AcordModal({
       _notifyJobDone("generate", true);
       setGeneratedForms(data.generated || {}); setCrossIssues(data.cross_issues || []);
       setCrossGrouped(data.grouped_cross_issues || null);
-      if (data.package_sqs) setPackageSqs(data.package_sqs);
+      // Replace, never keep: packageSqs may hold the PRE-generation score the
+      // Review screen's label was read from (V1 H2). If the generation scorer
+      // failed, that number must not surface as the Total Package Score - null
+      // hides the section, exactly as before pre-generation scoring existed.
+      setPackageSqs(data.package_sqs || null);
       const firstId = data.form_ids?.[0] || null; setActiveFormId(firstId); setStep("editor");
       const readyMap = {}; (data.form_ids || []).forEach(fid => { readyMap[fid] = false; }); setPdfLoading(readyMap);
       // Generating forms now consumes a credit for the free tier (client
@@ -5888,26 +5922,35 @@ const AcordModal = forwardRef(function AcordModal({
                 return <NextStepBanner text={text} />;
               })()}
             </div>
-            {/* Submission Readiness (client feedback item 11): sits directly
-                below the next-step banner and above Submission integrity, so
-                the score leads the screen instead of being buried under the
-                stop lists. Same data/condition as before - position and
-                surface only. */}
-            {tier2Score !== null && (
+            {/* Current Submission Readiness (V1 H2, client section 7, 2026-08-27;
+                label wording is the owner's, 2026-08-27 live review).
+                This card used to print "Submission Readiness NN%" with a bar.
+                That number was tier2_score - the Tier 2 completeness ratio,
+                one category of one pillar - shown under a name and a format
+                that read as the SQS, so the screen blurred the score, the
+                submission status and information-gathering progress into one
+                figure (a 100% beside 12 warnings). Now:
+                  - the STATUS LABEL of the package SQS as it stands at this
+                    moment (packageSqs.tier - the same ladder and the same
+                    object the SQS panel uses; before forms exist the backend
+                    scores the facts through the same scorer). No percentage,
+                    no bar; the number stays on the SQS panel.
+                  - the Tier 1 + Tier 2 checklist, split into what is in place
+                    and what is missing. Audience-neutral wording on purpose:
+                    NAICS / SIC are producer-only (master-plan 4.4, principle
+                    5), so this line must never read as "ask the client".
+                Hard stops and warnings are NOT summarised here - their
+                handled / remaining counts live on their own sections below. */}
+            {(packageSqs?.tier || keyDetails?.satisfied?.length > 0 || keyDetails?.missing?.length > 0) && (
               <div className="tier2-bar">
-                <div className="tier2-header"><span className="tier2-label">Submission Readiness</span><span className="tier2-score" style={{ color: barColor(tier2Score) }}>{tier2Score}%</span></div>
-                <div className="metric-bar"><div className="metric-fill" style={{ width: `${tier2Score}%`, background: barColor(tier2Score) }} /></div>
-                {/* Single line, no "Missing" vs "Needs client input" split (client
-                    feedback: the two-line version was confusing).
-                    RELABELLED 2026-08-26 (C4 test S5): the old copy read "Needs
-                    client input", and its comment claimed every field here "ends
-                    up asked via the client questionnaire". That stopped being
-                    true - NAICS and SIC are producer-only under master-plan 4.4
-                    and core principle 5, so the banner was telling the producer
-                    to go and ask the insured for a classification code Primble
-                    now deliberately routes to the agency. "Still needed" is
-                    accurate for both audiences and keeps the one-line format. */}
-                {tier2Missing.length > 0 && <div className="tier2-missing">Still needed: {tier2Missing.join(" · ")}</div>}
+                {packageSqs?.tier && (
+                  <div className="tier2-header">
+                    <span className="tier2-label">Current Submission Readiness</span>
+                    <span className="tier2-status" style={{ color: gradeColor(sqsGradeFromScore(packageSqs.package_sqs_score)) }}>{packageSqs.tier}</span>
+                  </div>
+                )}
+                {keyDetails?.satisfied?.length > 0 && <div className="tier2-detail tier2-detail-ok">Key details in place: {keyDetails.satisfied.join(" · ")}</div>}
+                {keyDetails?.missing?.length > 0 && <div className="tier2-missing">Key details missing: {keyDetails.missing.join(" · ")}</div>}
               </div>
             )}
             {/* Submission Integrity status (Beta Report §4.1): advisory banner for
@@ -6246,6 +6289,7 @@ const AcordModal = forwardRef(function AcordModal({
                     <div className="stops-title">
                       Hard Stops
                       <span className="stops-title-meta">Required before submission - Caps your SQS at 60</span>
+                      {sectionProgress(groupedIssues?.hard_stops)}
                     </div>
                     {/* Hard-stop cards stay expanded by default: these block
                         submission, so collapsing them behind a chevron risks a
@@ -6272,6 +6316,7 @@ const AcordModal = forwardRef(function AcordModal({
                     <div className="stops-title">
                       Warnings
                       <span className="stops-title-meta">Caps your SQS at 85</span>
+                      {sectionProgress(Object.values(groupedIssues?.warnings || {}).flat())}
                     </div>
                     {/* "Important" preview - the top 3 warning clusters, shown as
                         a read-only summary so the producer sees at a glance which
@@ -6929,6 +6974,12 @@ const AcordModal = forwardRef(function AcordModal({
                                     if (row.not_applicable) return "Not applicable to this submission, so it is removed from the score and the other pillars carry more weight.";
                                     const eff = Math.round(row.effective_weight * 1000) / 10;
                                     const nom = Math.round(row.nominal_weight * 100);
+                                    // Kept SHORT (owner, 2026-08-27). A first attempt appended
+                                    // every category's arithmetic here when the sub-row icons were
+                                    // removed; on screen that is a wall of text over the panel.
+                                    // The categories are already listed underneath with their own
+                                    // percentages - the tooltip only has to say what the PILLAR
+                                    // weighs and what it contributed.
                                     return eff === nom
                                       ? `Weight: ${nom}% of the package score. Scored ${row.score}, contributing ${row.contribution} points.`
                                       : `Weight: ${eff}% of the package score (${nom}% nominal, rescaled because another pillar is Not Applicable). Scored ${row.score}, contributing ${row.contribution} points.`;
@@ -6961,21 +7012,13 @@ const AcordModal = forwardRef(function AcordModal({
                                     const deducted = typeof cv?.deducted === "number" ? cv.deducted : null;
                                     return (
                                       <div key={ck} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 9.5, gap: 8 }}>
-                                        <span style={{ color: "#475569", display: "inline-flex", alignItems: "center", gap: 3 }}>
-                                          {cv?.label || ck}
-                                          {/* The arithmetic lives in the tooltip, not on the row
-                                              (owner, 2026-08-25). The reconciliation is the point,
-                                              not the clutter: hover to see score x weight, or what
-                                              a bucket deducted. */}
-                                          {weighted && (
-                                            <InfoTip text={`${Math.round(cv.weight * 100)}% of this pillar. ${cv.score}% x ${Math.round(cv.weight * 100)}% = ${cv.contribution} points. The rows add up to the pillar score.`} />
-                                          )}
-                                          {!weighted && deducted !== null && (
-                                            <InfoTip text={deducted > 0
-                                              ? `Deducted ${deducted} points from this pillar. The pillar is 100 minus every bucket's deduction.`
-                                              : "Nothing deducted from this pillar by this category."} />
-                                          )}
-                                        </span>
+                                        {/* NO icon on a sub-row (owner, 2026-08-27). An "i" on
+                                            every category row is clutter, and the client never
+                                            asked for one - their ask was TRACEABILITY (C3), which
+                                            the PILLAR tooltip now carries in full: it lists each
+                                            category's arithmetic there, so the reconciliation is
+                                            one hover instead of seven. */}
+                                        <span style={{ color: "#475569" }}>{cv?.label || ck}</span>
                                         {(weighted || deducted !== null)
                                           ? <span style={{ color: barColor(cv.score), fontWeight: 700, whiteSpace: "nowrap" }}>{cv.score}%</span>
                                           : <span style={{ color: comp.color, fontWeight: 700, whiteSpace: "nowrap" }}>{comp.label}</span>}

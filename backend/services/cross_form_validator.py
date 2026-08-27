@@ -676,7 +676,12 @@ def _check_gl_missing_when_umbrella(
         return issues
 
     has_gl   = "ACORD_126" in triggered_ids or bool(_fv(facts, "gl_limits"))
-    has_auto = "ACORD_127" in triggered_ids or bool(_fv(facts, "auto_liability_limit"))
+    try:
+        from services.coverage_evidence import auto_liability_stated as _auto_stated
+        _auto_limit = _auto_stated(facts)          # CSL or split limits (live P5)
+    except Exception:                                          # noqa: BLE001
+        _auto_limit = bool(_fv(facts, "auto_liability_limit"))
+    has_auto = "ACORD_127" in triggered_ids or _auto_limit
 
     if not has_gl and not has_auto:
         issues.append(_issue(
@@ -996,10 +1001,15 @@ def _check_auto_symbol_to_exposure_alignment(
     liability_struct = _fv(facts, "auto_liability_structure")
     if liability_struct in ("split", "combined"):
         if liability_struct == "split":
-            # Must have all three components
-            bi_pp = _fv(facts, "bi_per_person")
-            bi_pa = _fv(facts, "bi_per_accident")
-            pd_pa = _fv(facts, "pd_per_accident")
+            # Must have all three components. THE REAL KEYS (H1 audit,
+            # 2026-08-26): this read the unprefixed `bi_per_person` family,
+            # which nothing writes - the extractor, registry and stamper use
+            # `auto_bi_per_person` / `auto_bi_per_accident` /
+            # `auto_pd_per_accident` - so every split-limit policy raised this
+            # HARD STOP and none could ever clear it. Legacy names read last.
+            bi_pp = _fv(facts, "auto_bi_per_person") or _fv(facts, "bi_per_person")
+            bi_pa = _fv(facts, "auto_bi_per_accident") or _fv(facts, "bi_per_accident")
+            pd_pa = _fv(facts, "auto_pd_per_accident") or _fv(facts, "pd_per_accident")
             if not all([bi_pp, bi_pa, pd_pa]):
                 # Spec: split limits incomplete = HARD STOP
                 issues.append(_issue(
@@ -1458,6 +1468,21 @@ def _check_umbrella_auto_minimum_limits(
     # Client Q1 baseline: $1M Auto CSL underlying for umbrella attachment.
     _AUTO_MINIMUM = 1_000_000
 
+    # V1 H1 (2026-08-26): a SPLIT-limit policy states its liability without a
+    # CSL figure, so "the Auto combined single limit could not be determined"
+    # is false on a fully-stated policy - and its Resolve button asked for the
+    # CSL fact. The CSL comparison below is not attempted on split parts
+    # (comparing a per-person figure to a combined baseline is not a rule
+    # either document defines); the umbrella scorer surfaces it for producer
+    # review instead. Principle 7: preserve, do not invent.
+    if auto_limit is None:
+        try:
+            from services.coverage_evidence import auto_split_limits_stated
+            if auto_split_limits_stated(facts):
+                return issues
+        except Exception:                                      # noqa: BLE001
+            pass
+
     if auto_limit is not None and auto_limit < _AUTO_MINIMUM:
         issues.append(_issue(
             "soft_warning",
@@ -1635,7 +1660,15 @@ def _check_acord101_triggers(
     # GL class code / operations mismatch
     gl_codes = _fv(facts, "gl_class_codes_by_location")
     ops_desc = _fv(facts, "operations_description") or ""
-    if gl_codes and isinstance(gl_codes, list) and gl_codes and len(ops_desc) < 30:
+    # WORDS, not characters. `len(ops_desc) < 30` asked for an ACORD 101
+    # narrative from "Tree trimming and removal" (25 chars - a complete trade
+    # description) while staying silent on "We provide a wide variety of
+    # services to our valued clients" (59 chars, which says nothing). Character
+    # count is a proxy for "does this explain the operations" that is wrong in
+    # BOTH directions. A named trade takes very few characters and several
+    # words; a bare "Bakery" or "Roofing" is still one word and still needs the
+    # narrative. Advisory only - this costs no score either way (verified).
+    if gl_codes and isinstance(gl_codes, list) and gl_codes and len(ops_desc.split()) < 4:
         needs_101 = True
         reason_parts.append("GL class codes present but operations description is insufficient")
 
@@ -1751,7 +1784,13 @@ def _check_property_deductible_structure(
     # Check deductible basis (if deductible present, basis should be clear)
     has_any_ded = aop_ded or has_wind or has_earth or has_flood
     if has_any_ded:
-        basis = _fv(facts, "property_deductible_basis")
+        # `deductible_basis` is the canonical fact (schema + FACT_REGISTRY).
+        # `property_deductible_basis` was a phantom nothing wrote, so this
+        # warning fired on every property policy with any deductible and its
+        # resolution said "narrative only". Fixed 2026-08-26 (H1 audit).
+        basis = (_fv(facts, "deductible_basis")
+                 or _fv(facts, "deductible_application")
+                 or _fv(facts, "property_deductible_basis"))
         if not basis:
             issues.append(_issue(
                 "soft_warning",
@@ -1932,10 +1971,18 @@ def _check_identity_address_distinction(
                 and re.search(r"\d", text) is not None
                 and re.search(r"[A-Za-z]{3}", text) is not None)
 
+    # V1 H1 6.3 (2026-08-26): a GARAGING address satisfies the requirement
+    # exactly as a location row does - 3.12 names auto garaging as the reason
+    # the requirement exists, so the garaging schedule stating where the fleet
+    # sits IS the physical location. Without this, 6.3's "no garaging" -5 and
+    # this warning fired together on one gap and stayed together after the
+    # garaging address was supplied.
+    garaging = _fv(facts, "auto_garaging_addresses") or []
+    _address_rows = list(locations if isinstance(locations, list) else []) + \
+        list(garaging if isinstance(garaging, list) else [])
     _schedule_has_address = any(
         _looks_like_street_address(_a)
-        for _a in (_row_address(r)
-                   for r in (locations if isinstance(locations, list) else []))
+        for _a in (_row_address(r) for r in _address_rows)
         if _a
     )
 
@@ -2033,10 +2080,15 @@ def _check_minimum_viable_cope_unit(
         missing.append("occupancy type")
     if not _fv(facts, "construction_type"):
         missing.append("construction type")
-    if flags.get("has_building_coverage", has_bldg) and not has_bldg:
-        missing.append("building value")
-    if flags.get("has_bpp_coverage", has_bpp) and not has_bpp:
-        missing.append("BPP value")
+    # Spec 3.3 Minimum Viable COPE: "Building value OR required Business
+    # Personal Property value" - EITHER satisfies it, exactly as the legacy
+    # twin in `sqs_service.evaluate_stops` reads it. The previous two lines
+    # read `has_building_coverage` / `has_bpp_coverage`, flags nothing writes,
+    # with the fact itself as the default - so each collapsed to
+    # `has_x and not has_x` and a property submission with NEITHER value could
+    # never be told so here. Fixed 2026-08-26 (H1 audit).
+    if not (has_bldg or has_bpp):
+        missing.append("building or BPP value")
 
     if missing:
         issues.append(_issue(

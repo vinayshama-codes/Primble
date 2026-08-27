@@ -3546,3 +3546,78 @@ logs every answer the deterministic rules could not read, which is the evidence
 base for revisiting that decision. **Nobody is watching that log.** Grep for
 `answer_semantics: could not read` before concluding the deterministic approach
 is sufficient.
+
+---
+
+## C80 - 2026-08-26 V1 H1: one schema key (`auto_vehicle_use`), one rule (RULE 2c), v14 -> v15
+
+**Call-count change: ZERO.** Still 14 extraction calls; no new call site anywhere.
+Gap fill (call 2) is untouched - byte-identical prompt, same batching.
+
+**What changed in call 1 (`_EXTRACT_PROMPT_PREFIX` / `_EXTRACT_SCHEMA`):**
+
+| | before | after |
+|---|---|---|
+| schema keys | ... `auto_radius_of_operation`, `auto_physical_damage_valuation` ... | `auto_vehicle_use` inserted between them (`string or null`) |
+| rules | RULE 2b then RULE 3 | **RULE 2c** inserted: defines `auto_vehicle_use` (the ACORD 127 USE class, one value for the policy, the document's own word) and - for the first time - `wc_payroll_period` (read the period off the figure's OWN label; null when the label carries no period wording; never assume annual) |
+| `PROMPT_VERSION` / `SCHEMA_VERSION` | v14 | **v15** |
+
+**Why a prompt change and not a deterministic pass (the rule of this file):** the client's
+6.3 table deducts for "No vehicle-use information" and there was no fact anywhere -
+the USE boxes were ticked only by gap fill guessing per row. A deterministic pass has
+nothing to derive from. Owner chose "add the fact" (2026-08-26). `wc_payroll_period`
+had been in the schema for weeks with NO definition - the model saw a bare key - and
+the 6.4 payroll-period rule (-3 when the period is unresolved) would have fired on a
+figure the extractor never tried to label. Bundled into the same bump so it costs one
+cache invalidation, not two.
+
+**Cost:** +~120 tokens of rule text on the cached prefix; the reply gains at most two
+short strings. The extraction cache is keyed by version, so v14 replies stay valid
+for sessions that already have them and nothing is re-extracted until a session is
+re-run; a fresh upload pays exactly what it paid under v14.
+
+**Deterministic derivations added at the merge tail (no LLM, purge-safe):**
+`extraction_service._derive_from_dec_entries_h1` reads the verified declarations
+index WHILE IT STILL EXISTS and writes `auto_radius_of_operation` (one numeric
+radius on an auto entry), `wc_payroll_period = annual` (the payroll figure's own
+label means annual - synonyms, not one spelling), `wc_xmod` (a factor printed under
+"Experience Modification" - the generic entry backfill cannot route that label to
+the key) and `wc_xmod_applicability` (pending / not rated). Each is `evidence_state:
+derived` with its rule and inputs.
+
+**Stale artefact, not regenerated:** `LLM_CALL1_PROMPT_FACTS_FLAGS.txt` at the repo
+root is a hand-made dump that already reads "v13"; it does not reflect v14 or v15.
+Regenerate from the running code if it is needed, do not read it as current.
+
+---
+
+## C81 - 2026-08-26 v15 -> v16: RULE 2c "never infer" sentences, no schema change
+
+**Call-count change: ZERO.** Live package P5 (c6 kit) printed no radius, no use and
+no garaging, and the model filled one of them anyway from the operations text -
+a -15 became a -10 and the questionnaire stopped asking for it. RULE 2c gained
+three sentences: never infer `auto_vehicle_use` from operations,
+`auto_radius_of_operation` from anything but a printed radius, or
+`auto_garaging_addresses` from the mailing address. ~40 tokens on the cached
+prefix; v15 replies stay in the cache under their own version.
+
+
+## C82 - A DETERMINISTIC GUARD ON AN LLM INFERENCE (2026-08-27)
+
+**No prompt changed, no call added or removed, `PROMPT_VERSION`/`SCHEMA_VERSION` stay v16.**
+Logged here because it governs what the extractor's OUTPUT is allowed to assert.
+
+v16 already instructs, in terms: *"Set null when the payroll figure carries no period wording at
+all - never assume annual."* On the 2026-08-27 live run the model set `wc_payroll_period = "annual"`
+against a document whose only wording is the bare label `Payroll  $210,000`. The instruction was
+explicit and was not followed.
+
+`extraction_service._gate_inferred_payroll_period` now drops an AI-sourced period the document does
+not name (`coverage_evidence.payroll_period_corroborated`). **Zero token cost - it runs in
+`merge_facts`, after extraction, and never triggers a call.** The cache is unaffected, so a re-test
+of an already-extracted document is still gated.
+
+**The lesson for every prompt rule in this file: an explicit instruction is not a guarantee.** Where
+a rule's violation is silently scoreable - here it converted a -3 into a pass - it needs a
+deterministic guard downstream, not louder prompt wording. Preferring the deterministic fix is the
+standing rule; this is the case that shows why.

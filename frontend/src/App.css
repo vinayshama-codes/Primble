@@ -1754,10 +1754,12 @@ body {
 }
 
 /* ==================== TIER 2 BAR ==================== */
-/* Submission Readiness. Sits at the top of Select Forms, directly above the
+/* Current Submission Readiness card on the Review step, directly above the
    Submission integrity card - white surface + neutral border deliberately
    mirror that card so the two read as one pair (client feedback item 11).
-   The score/fill keep their own red-amber-green scale via barColor(). */
+   V1 H2 (2026-08-27): no percentage and no bar any more - a status label
+   (Submission Ready / Almost There / Needs Work / Major Gaps / Not Ready)
+   plus the "Key details in place" / "Key details missing" lines. */
 .tier2-bar {
   background: #fff;
   border: 1.5px solid #e2e8f0;
@@ -1780,10 +1782,31 @@ body {
   font-weight: 600;
   color: var(--text-primary);
 }
-.tier2-score {
-  font-size: 20px;
+.tier2-status {
+  font-size: 16px;
   font-weight: 800;
   line-height: 1.2;
+}
+.tier2-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.tier2-detail-ok {
+  color: #166534;
+}
+/* Section-level remediation progress under the Hard Stops / Warnings titles
+   ("3 items still need attention · 2 handled"). Plain sentence case under the
+   uppercase title. */
+.stops-progress {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
 }
 .tier2-missing {
   font-size: 12px;
@@ -1803,8 +1826,8 @@ body {
   .tier2-bar {
     padding: 12px 14px;
   }
-  .tier2-score {
-    font-size: 18px;
+  .tier2-status {
+    font-size: 14px;
   }
 }
 

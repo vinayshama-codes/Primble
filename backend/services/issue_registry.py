@@ -122,7 +122,10 @@ CLUSTER_MAP: Dict[str, str] = {
     "auto_symbols_not_captured": "Auto symbols / coverage alignment",
     "auto_owned_fleet_not_covered_by_symbol": "Auto symbols / coverage alignment",
     "auto_doc_symbol_missing": "Auto symbols / coverage alignment",
-    "auto_agreed_value_requires_schedule": "Auto symbols / coverage alignment",
+    # Re-clustered 2026-08-26 (V1 H1): it is about the vehicle SCHEDULE, and
+    # it is the coded twin of the new legacy "Vehicle schedule not provided"
+    # warning (see _LEGACY_SUPERSEDED_BY_CODE), so both land in one cluster.
+    "auto_agreed_value_requires_schedule": "Auto completeness",
     "auto_um_uim_not_specified": "Auto optional coverage gaps",
     "auto_pip_medpay_not_specified": "Auto optional coverage gaps",
     "auto_drive_other_car_not_specified": "Auto optional coverage gaps",
@@ -288,9 +291,13 @@ RESOLUTION_MAP: Dict[str, dict] = {
     "property_peril_deductible_incomplete": _r_field(
         "property_deductible_wind", "property_deductible_earthquake", "property_deductible_flood",
     ),
-    # `property_deductible_basis` is not a writable canonical fact, so this is
-    # resolved by an ACORD 101 note rather than a direct value entry.
-    "property_deductible_basis_missing": _R_NARRATIVE,
+    # `deductible_basis` IS a writable canonical fact (FACT_REGISTRY, extraction
+    # schema). The rule used to read the phantom `property_deductible_basis`
+    # - a key nothing writes - so it fired on every property policy with a
+    # deductible and this row said it could only be cleared by a note. Fixed
+    # 2026-08-26 (H1 audit): the rule reads the real key and the fix is to
+    # type the basis.
+    "property_deductible_basis_missing": _r_field("deductible_basis"),
     # ── Property valuation ──
     "property_valuation_method_missing": _r_field("valuation_method"),
     "acv_high_value_building": _R_NONE,   # advisory: consider RCV (coverage choice)
@@ -358,7 +365,13 @@ RESOLUTION_MAP: Dict[str, dict] = {
     # resolve anything. Corrected 2026-08-07: the carrier has already made and
     # documented the coverage decision, so the fix is a TRANSFER of an existing
     # value, which is precisely what a field resolution is for.
-    "auto_split_limits_incomplete": _R_NONE,
+    # The three split components ARE writable canonical facts
+    # (`auto_bi_per_person` / `auto_bi_per_accident` / `auto_pd_per_accident`
+    # - schema, registry, stamped by pdf_service). Both engines read the
+    # unprefixed phantom names until 2026-08-26 (H1 audit), which is why this
+    # was marked unresolvable and why the hard stop could never be satisfied.
+    "auto_split_limits_incomplete": _r_field(
+        "auto_bi_per_person", "auto_bi_per_accident", "auto_pd_per_accident"),
     "auto_symbols_not_captured": _r_field("auto_covered_symbols"),
     "auto_hired_nonowned_symbols_missing": _r_field("auto_covered_symbols"),
     "auto_physical_damage_symbols_missing": _r_field("auto_covered_symbols"),
@@ -722,18 +735,27 @@ _LEGACY_MESSAGE_RULES: List[tuple] = [
     ("WC payroll", "WC payroll reconciliation", "recommended",
      "legacy_wc_payroll_format", _r_field("wc_payroll")),
     # ── Auto ─────────────────────────────────────────────────────────────────
-    # bi_per_person / bi_per_accident / pd_per_accident are NOT writable
-    # canonical facts (verified against arq_service._canonical_key) - they are
-    # set on ACORD 127 directly. Same call as the cross-form twin.
+    # The three components are the canonical facts auto_bi_per_person /
+    # auto_bi_per_accident / auto_pd_per_accident (the old note here named the
+    # unprefixed phantoms both engines were reading - fixed 2026-08-26, H1
+    # audit). Same resolution as the cross-form twin: type the three limits.
     ("Split liability limits incomplete", "Auto liability structure", "required",
-     "legacy_auto_split_limits_incomplete", _r_review(
-         "Split limits are entered as three components on ACORD 127. Set them "
-         "there, then mark this resolved - they cannot be typed here.")),
+     "legacy_auto_split_limits_incomplete", _r_field(
+         "auto_bi_per_person", "auto_bi_per_accident", "auto_pd_per_accident")),
     ("Physical damage coverage present but deductibles not specified", "Auto symbols / coverage alignment", "recommended",
      "legacy_auto_physical_damage_deductibles", _r_field(
          "auto_deductible_comp", "auto_deductible_collision")),
     ("Auto liability limit", "Auto symbols / coverage alignment", "recommended",
      "legacy_auto_liability_limit", _r_field("auto_liability_limit")),
+    # V1 H1 6.3 (2026-08-26): the two Auto Completeness items that also warn.
+    # Both clear by editing the schedule the message names - the same
+    # resolution shape as the cross-form agreed-value rule. Phrases chosen so
+    # neither is a substring of any other row and neither contains "Auto
+    # liability limit" (the row above is matched by substring).
+    ("Vehicle schedule not provided", "Auto completeness", "recommended",
+     "legacy_auto_vehicle_schedule_missing", _r_schedule("auto_vin_schedule")),
+    ("Driver schedule not provided", "Auto completeness", "recommended",
+     "legacy_auto_driver_schedule_missing", _r_schedule("auto_drivers")),
     # ── Prior carrier / narrative ────────────────────────────────────────────
     # This rule is gated on _narrative_remarks_text(facts) being empty, so an
     # ACORD 101 note is LITERALLY what clears it - narrative, not a typed value.
@@ -857,6 +879,14 @@ _LEGACY_SUPERSEDED_BY_CODE: Dict[str, str] = {
     # date twin is `..._period_misaligned`), and guessing the wrong one is a
     # silent no-op - suppression is keyed on the code actually present.
     "umbrella_gl_expiration_misaligned":         "Umbrella and GL expiration dates misaligned",
+    # V1 H1 6.3 (2026-08-26). "Vehicle schedule not provided" (legacy, the
+    # -15 + Warning) and "Agreed-value auto coverage with no vehicle schedule"
+    # (coded) are ONE gap when both fire - the same schedule closes both. The
+    # coded twin is kept: it carries the stricter condition and the same
+    # schedule resolution. Scoring is untouched on both sides (the legacy
+    # string still caps at 85; the coded issue still feeds the cross bucket as
+    # spec section 7 defines) - this only stops two cards for one gap.
+    "auto_agreed_value_requires_schedule":       "Vehicle schedule not provided",
     "umbrella_auto_expiration_misaligned":       "Umbrella and Auto expiration dates misaligned",
     "umbrella_gl_period_misaligned":             "Umbrella and GL effective dates misaligned",
     "umbrella_auto_period_misaligned":           "Umbrella and Auto effective dates misaligned",

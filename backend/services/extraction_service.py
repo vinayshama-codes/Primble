@@ -37,8 +37,21 @@ logger = logging.getLogger(__name__)
 # identical to v12 again, but the version must still move FORWARD rather than
 # back: v13 replies (facts and flags with no dec entries) are sitting in the
 # cache, and reusing "v12" would serve them as if they were current.
-PROMPT_VERSION = "v14"
-SCHEMA_VERSION = "v14"
+# v15 (2026-08-26, V1 H1 client section 6): ONE new schema key,
+# `auto_vehicle_use` (the client's "No vehicle-use information = -5" had no
+# fact to read), plus RULE 2c defining it and giving `wc_payroll_period` - a
+# key that had been in the schema with no definition at all - the "read the
+# period off the figure's own label, never assume annual" instruction the 6.4
+# payroll-period rule depends on. Same 14 calls, zero extra tokens beyond the
+# rule text; v14 replies stay in the cache under their own version.
+# improving-ll.md C80 is the registry entry.
+# v16 (2026-08-26, same day, after the c6 live run): RULE 2c gained the three
+# "never infer" sentences - P5 printed no radius, use or garaging and the
+# model still filled one of them from the operations text, which turned a
+# -15 into a -10. No schema change; the version moves so the five live
+# packages re-extract under the stricter rule instead of serving v15 replies.
+PROMPT_VERSION = "v16"
+SCHEMA_VERSION = "v16"
 
 # ── Extraction chunk sizing ───────────────────────────────────────────────────
 # This used to be one hand-typed literal:
@@ -286,6 +299,9 @@ _EXTRACT_SCHEMA = (
     # Driver schedule: one object per driver row
     '  "auto_drivers": [{"name": string, "dob": string or null, "license_number": string or null, "license_state": string or null, "hire_date": string or null, "experience_years": string or null, "vehicle_use_percent": string or null}],\n'
     '  "auto_radius_of_operation": string or null,\n'
+    # V1 H1 6.3 (2026-08-26, v15): how the fleet is used - the ACORD 127 USE
+    # column. One value for the policy; see RULE 15.
+    '  "auto_vehicle_use": string or null,\n'
     '  "auto_physical_damage_valuation": string or null,\n'
     # Covered-auto symbols, attributed to the coverage line they sit against on
     # the declarations. A bare [1, 7] cannot tell a validator or a form field
@@ -655,6 +671,18 @@ _EXTRACT_PROMPT_PREFIX = (
     'making the coverage line clear, use "coverage": "unspecified" rather than guessing. NEVER infer a '
     'symbol that is not printed — a covered-auto symbol is a coverage designation with legal effect, so '
     'an absent symbol must stay absent.\n\n'
+    'RULE 2c — Vehicle use and payroll period (v15). auto_vehicle_use is the USE CLASS the '
+    'document states for the vehicles, as ACORD 127 prints it: "service", "retail", "commercial", '
+    '"for hire", "farm" or "pleasure" - copy the document\'s own word ("Service Use", '
+    '"Commercial - Retail Delivery", "Contractor service vehicles" -> "service"). One value for the '
+    'policy; if vehicles genuinely differ, give the use that applies to most of them. NEVER infer '
+    'auto_vehicle_use from the description of operations, auto_radius_of_operation from anything but '
+    'a printed radius, or auto_garaging_addresses from the mailing address - each stays null unless '
+    'the document states it for the vehicles. '
+    'wc_payroll_period is the PERIOD the stated payroll figure covers, read from its own label: '
+    '"Estimated Annual Payroll", "Annual Remuneration", "per year" -> "annual"; a quarterly '
+    'report or a monthly figure -> "quarterly" / "monthly". Set null when the payroll figure carries '
+    'no period wording at all - never assume annual.\n\n'
     'RULE 3 — Never hallucinate. If a value is not visible in the document, set the field to null '
     '(or [] for list fields). Do not invent or infer values that are not explicitly stated.\n\n'
     'RULE 4 — Extract ALL financial figures exactly as printed: limits, premiums, payrolls, '
@@ -8089,6 +8117,18 @@ def merge_facts(docs: List[dict], primary: dict) -> Tuple[dict, dict]:
     # questionnaire never asks for it. Runs AFTER renewal routing so it reads
     # the settled dates.
     _derive_years_in_business(mf)
+    # V1 H1 (2026-08-26): three more derivations from the verified dec index,
+    # computed HERE - while the entries still exist - so they survive the C57
+    # purge exactly like `dec_states_payroll_basis` does. Each is positive
+    # evidence only and never overwrites a stated value.
+    # BEFORE the derivations below, deliberately: they never overwrite a stated
+    # value, so an INVENTED period would keep the real one from ever being
+    # derived from its own label.
+    try:
+        _gate_inferred_payroll_period(mf, docs)
+    except Exception as exc:  # noqa: BLE001 - never block the pipeline
+        logger.warning("merge_facts: payroll-period gate skipped: %s", exc)
+    _derive_from_dec_entries_h1(mf)
 
     # C1b / D19 (owner-directed): scope is STORED on the fact, not re-derived
     # at each point of use. Runs LAST, so it reads the settled `coverage_lines`
@@ -8152,6 +8192,130 @@ def _derive_years_in_business(mf: dict) -> None:
             years, str(raw)[:40])
     except Exception as exc:                                  # noqa: BLE001
         logger.warning("years_in_business derivation skipped: %s", exc)
+
+
+_PERIOD_NAMED_SOURCES = ("producer", "client_arq", "client", "derived", "human")
+
+
+def _gate_inferred_payroll_period(mf: dict, docs) -> None:
+    """Drop a `wc_payroll_period` the model INFERRED rather than read.
+
+    D43 (owner ruling 2026-08-26, answering Q21): *"'clearly annual' ... read
+    from NAMED evidence, never inferred from a category ... a payroll figure is
+    annual when its OWN label / source MEANS annual"*, and the -3 "fires only
+    for a bare figure with no period anywhere".
+
+    LIVE RUN 2026-08-27 (session 6a60e036): the dec index printed
+    `Payroll = $210,000` - no period word anywhere in 1,877 characters - and the
+    merged fact came back `wc_payroll_period = "annual"`. The extraction prompt
+    already forbids exactly this in terms ("Set null when the payroll figure
+    carries no period wording at all - never assume annual"); it assumed anyway.
+    A prompt is not a guarantee, so the guarantee is deterministic and lives
+    here. This is CLAUDE.md's documented GAP 1 - `answer_semantics` guards what
+    a HUMAN types, and nothing guarded what the model extracts.
+
+    PROVENANCE DECIDES (Principle 6). A producer or client answer IS the named
+    evidence and is never gated; neither is a derived value, which was computed
+    from a corroborating label to begin with. Only the model's own inference is
+    stripped, and only when the document names the period nowhere.
+
+    Dropping it invents no penalty - it hands the question back to
+    `wc_payroll_period_status`, which still satisfies the check from a
+    class-code schedule (D43's other half) before charging anything.
+    """
+    try:
+        from services.coverage_evidence import payroll_period_corroborated
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("payroll-period gate unavailable: %s", exc)
+        return
+    env = (mf or {}).get("wc_payroll_period")
+    value = env.get("value") if isinstance(env, dict) else env
+    if not value:
+        return
+    source = str((env.get("source") if isinstance(env, dict) else "") or "").lower()
+    if source in _PERIOD_NAMED_SOURCES:
+        return
+    entries = (mf or {}).get("dec_page_entries")
+    text = " ".join(str(_d.get("text") or "") for _d in (docs or []))
+    if payroll_period_corroborated(value, entries, text):
+        return
+    mf["wc_payroll_period"] = None
+    logger.info(
+        "payroll-period gate: dropped wc_payroll_period=%r - no wording in the "
+        "document names that period for the payroll figure (D43). The 6.4 check "
+        "now decides from the payroll's own label / class schedule.", value)
+
+
+def _derive_from_dec_entries_h1(mf: dict) -> None:
+    """V1 H1 (client section 6): three purge-safe derivations off the verified
+    declarations index. Read by `services.coverage_evidence`, the one door the
+    6.3 / 6.4 scoring, the ACORD 127 checklist and the questionnaire consult.
+
+      * `auto_radius_of_operation` - the ONE numeric radius the auto dec
+        prints (the same entry `pdf_service._resolve_vehicle_rating_cell`
+        stamps onto Vehicle_RadiusOfUse), so the package can never deduct for
+        a radius that is on the generated form. "RADIUS: NA" derives nothing.
+      * `wc_payroll_period` = "annual" when the payroll figure's own printed
+        label means annual ("Estimated Annual Payroll", "per year", "12
+        months" ...) - the owner's "clearly annual by MEANING" ruling.
+      * `wc_xmod` - the factor a mod-labelled entry PRINTS ("Experience
+        Modification: 0.95"). The generic entry backfill cannot reach it: its
+        label rule wants the key's own tokens ("wc", "xmod") in the label.
+      * `wc_xmod_applicability` - "applicable" when a mod entry says pending /
+        see worksheet, "not_applicable" when it says not rated / none / N/A;
+        only when no factor is stated.
+
+    Every write is labelled `evidence_state: derived` with its rule and
+    inputs (E&O 5.7), and is skipped when the fact already has a value.
+    """
+    try:
+        from services.coverage_evidence import (
+            payroll_label_states_annual, radius_from_dec_entries,
+            xmod_applicability_from_entries, xmod_from_entries,
+        )
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("H1 dec-entry derivations unavailable: %s", exc)
+        return
+    entries = (mf or {}).get("dec_page_entries")
+    if not isinstance(entries, list) or not entries:
+        return
+
+    def _derive(key: str, value: str, rule: str) -> None:
+        if _fv(mf, key):
+            return                              # never overwrite a stated value
+        mf[key] = {
+            "value": value,
+            "confidence": "deterministic",
+            "source": "derived",
+            "evidence_state": "derived",
+            "derivation": {"rule": rule, "inputs": ["dec_page_entries"]},
+        }
+        logger.info("derived %s=%r from the declarations index (%s)", key, value, rule)
+
+    try:
+        radius = radius_from_dec_entries(entries)
+        if radius:
+            _derive("auto_radius_of_operation", radius, "auto_dec_radius_entry")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("radius derivation skipped: %s", exc)
+    try:
+        if payroll_label_states_annual(entries) and \
+                (_fv(mf, "wc_payroll") or _fv(mf, "total_payroll")):
+            _derive("wc_payroll_period", "annual", "payroll_label_means_annual")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("payroll period derivation skipped: %s", exc)
+    try:
+        # The FACTOR first: the generic backfill cannot route "Experience
+        # Modification: 0.95" to `wc_xmod` (its label rule wants the key's own
+        # tokens), so the printed factor is read by the label's meaning here.
+        factor = xmod_from_entries(entries)
+        if factor:
+            _derive("wc_xmod", factor, "experience_mod_entry_factor")
+        applicability = xmod_applicability_from_entries(entries)
+        if applicability and not _fv(mf, "wc_xmod"):
+            _derive("wc_xmod_applicability", applicability, "experience_mod_entry_meaning")
+    except Exception as exc:                                  # noqa: BLE001
+        logger.warning("x-mod derivation skipped: %s", exc)
 
 
 def _route_renewal_dates(mf: dict) -> None:

@@ -165,7 +165,29 @@ VEHICLES_RETURN_OPTIONS = _with_other(
     "Mixed - it varies by vehicle",
 )
 
+# ADDED 2026-08-26 (V1 H1 6.3). The ACORD 127 USE column, as the form prints
+# it - Pleasure / Farm / Commercial / Retail / Service / For Hire / Other.
+# One answer for the fleet; the stamper inherits it into every real row.
+VEHICLE_USE_OPTIONS = _with_other(
+    "Service - technicians or crews driving to job sites",
+    "Retail - deliveries to customers",
+    "Commercial - general business use, hauling own goods",
+    "For hire - carrying goods or passengers for a fee",
+    "Farm - agricultural use",
+    "Pleasure - personal use only, driving to and from work",
+)
+
 # ── Workers Compensation ────────────────────────────────────────────────────
+# ADDED 2026-08-26 (V1 H1 6.4). The producer states what period the payroll
+# figure covers; "Other" still lets a free-text period through, and
+# `coverage_evidence.payroll_period_meaning` reads whichever is typed.
+WC_PAYROLL_PERIOD_OPTIONS = _with_other(
+    "Annual - the figure covers a full year",
+    "Quarterly",
+    "Monthly",
+    "Year to date",
+)
+
 WC_OFFICER_EXCLUSION_OPTIONS = _with_other(
     "No - all owners and officers are included",
     "Yes - some owners or officers are excluded",
@@ -244,7 +266,9 @@ _CATALOGUE: Dict[str, Tuple[List[str], bool]] = {
     "gl_form_type":                (GL_FORM_TYPE_OPTIONS, False),
     "umbrella_follow_form":        (UMBRELLA_FOLLOW_FORM_OPTIONS, False),
     "vehicles_return_to_premises": (VEHICLES_RETURN_OPTIONS, False),
+    "auto_vehicle_use":            (VEHICLE_USE_OPTIONS, False),
     "wc_officer_exclusions":       (WC_OFFICER_EXCLUSION_OPTIONS, False),
+    "wc_payroll_period":           (WC_PAYROLL_PERIOD_OPTIONS, False),
     "additional_insured":          (ADDITIONAL_INSURED_OPTIONS, True),
     "additional_named_insureds":   (ADDITIONAL_INSURED_OPTIONS, True),
 }

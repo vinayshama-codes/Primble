@@ -1,7 +1,7 @@
 # Questions for Brent - 24 Aug 2026
 
 Brent - five judgment calls that belong to you, not to us. I've laid out each one as the
-real-world situation, what the choices mean, and where we lean. After that, three things
+real-world situation, what the choices mean, and where we lean. After that, the things
 we've assumed - only reply on those if you disagree.
 
 ---
@@ -98,7 +98,7 @@ months stands.
 
 ---
 
-## Three things I've assumed - only reply if you disagree
+## Things I've assumed - only reply if you disagree
 
 1. When the insured tells us no loss runs exist, that alone scores the same as providing
    nothing (25). If they also attest to no known losses, the attestation earns the credit
@@ -109,3 +109,22 @@ months stands.
 3. A business that has operated for years and never carried insurance still gets the
    missing-prior-carrier deduction. Only genuine new ventures are exempt. No coverage on an
    operating business is exactly the gap an underwriter wants to see flagged.
+4. **Commercial auto with nothing saying owned or hired/non-owned.** Your section 6.3 says
+   the new vehicle / driver / garaging / radius / use deductions apply only to accounts with
+   owned vehicles, and that a genuinely hired/non-owned-only account must not be penalised
+   for having no vehicle list. When the package requests auto but nothing tells us either
+   way - no vehicle list, no covered-auto symbols, no comp/collision - we treat it as
+   owned and apply the deductions. Our reasoning: an HNOA-only account normally says so
+   (symbols 8/9, or "hired and non-owned" as the line), so silence is usually an owned
+   fleet nobody listed - which is exactly the submission you want caught. If you would
+   rather we ask the producer first and deduct nothing until they answer, say so.
+5. **"Owners or officers known to exist."** We only count people who are actually named -
+   on the application's officer table, or by the producer. We do not assume every
+   corporation or LLC has officers by law. The broader reading would fire the deduction on
+   nearly every WC account and turn a real check into noise.
+6. **"Clearly annual" payroll.** Dec pages and applications print "Estimated Annual
+   Payroll", "Annual Remuneration", "per year" and the like, and a class-code schedule
+   states annual remuneration by definition. We read those as clearly annual - by meaning,
+   not one exact spelling. The 3-point deduction fires only for a payroll figure that has
+   no period wording anywhere: a bare number in a narrative, a payroll report with no
+   basis, and so on.

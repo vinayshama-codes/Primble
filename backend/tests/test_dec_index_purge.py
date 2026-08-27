@@ -125,6 +125,17 @@ def test_every_consumer_of_the_index_runs_at_or_before_generation():
         # is a no-op. Nothing here reads the entries' content, so the purge
         # stays safe.
         "audit_service.py",
+        # coverage_evidence (V1 H1, 2026-08-26). DOES run after generation
+        # (every recalculation re-scores the package) and is therefore built
+        # the same way sqs_service's GL exposure warning is: each of its two
+        # entry reads is the LAST fallback behind a fact `merge_facts` derives
+        # WHILE THE ENTRIES STILL EXIST (`_derive_from_dec_entries_h1`:
+        # auto_radius_of_operation, wc_payroll_period, wc_xmod_applicability).
+        # After the purge the derived fact answers first and the entry read
+        # finds nothing - same answer both sides of the purge by construction,
+        # pinned by test_h1_coverage_gap_closure.py::
+        # test_dec_entry_signals_survive_the_purge_through_derived_facts.
+        "coverage_evidence.py",
     }
     unexpected = [h for h in hits if h.split(":")[0] not in known_files]
     assert not unexpected, (

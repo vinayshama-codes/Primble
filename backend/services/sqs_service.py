@@ -519,19 +519,30 @@ def producer_fields_exempt(flags: dict | None) -> bool:
     return (flags or {}).get("_only_dec_page") is True
 
 
-def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
+def _tier1_items(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
+    """Tier 1 as (applicable labels, missing labels), in checklist order.
+
+    The ONE place the Tier 1 rules live. `check_tier1` is its historical
+    (ok, missing) projection and `key_details` reads both sides, so the
+    "in place" list on the pre-form screen can never disagree with the score
+    (V1 H2, 2026-08-27). Missing is a subset of applicable, always.
+    """
+    flags = flags or {}
     if flags.get("is_certificate_doc") or flags.get("has_certificate_request"):
+        applicable = ["Applicant legal name", "Proposed effective date"]
         missing = []
         if not _fv(facts, "applicant_name"):
             missing.append("Applicant legal name")
         if not _fv(facts, "effective_date"):
             missing.append("Proposed effective date")
-        return len(missing) == 0, missing
-    missing = []
+        return applicable, missing
+    applicable: List[str] = []
+    missing: List[str] = []
     skip_producer_name = producer_fields_exempt(flags)
     for field, label in TIER1_FIELDS.items():
         if skip_producer_name and field == "producer_name":
             continue
+        applicable.append(label)
         # C3 3.4: "Not Applicable fields are removed rather than treated as
         # missing." `_answered` already returns True for a not_applicable state,
         # so an N/A requirement contributes no -20 - which is the same score a
@@ -545,8 +556,14 @@ def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
     # C3 3.3 (2026-08-25): contact information is required on EVERY submission.
     # It used to be waived alongside producer name on a dec page; neither the
     # client's 3.3 nor spec section 3.1 grants that. See producer_fields_exempt.
+    applicable.append("Contact information")
     if not any(_answered(facts, f) for f in TIER1_CONTACT):
         missing.append("Contact information")
+    return applicable, missing
+
+
+def check_tier1(facts: dict, flags: dict) -> Tuple[bool, List[str]]:
+    _, missing = _tier1_items(facts, flags)
     return len(missing) == 0, missing
 
 
@@ -571,6 +588,41 @@ def _tier2_not_applicable(facts: dict, field: str) -> bool:
         return False
 
 
+def _tier2_items(facts: dict) -> Tuple[List[str], List[str]]:
+    """Tier 2 as (applicable labels, missing labels), in checklist order.
+
+    The ONE place the Tier 2 rules live - `check_tier2` scores from it and
+    `key_details` lists from it (V1 H2, 2026-08-27). A Not Applicable fact is
+    in NEITHER list: 3.6 removes it from the denominator, so it is neither
+    owed nor satisfied.
+    """
+    # The industry-classification requirement is satisfied by EITHER a NAICS or a
+    # SIC code (client 3.13: "NAICS or SIC"; spec section 3.1 lists them as
+    # interchangeable). A submission carrying a SIC code but no NAICS is
+    # credited, and when both are absent the gap is surfaced as one combined
+    # "NAICS or SIC" item rather than ignoring SIC.
+    applicable: List[str] = []
+    missing: List[str] = []
+    for field, label in TIER2_FIELDS.items():
+        if field == "naics_code":
+            # N/A only when BOTH keys are N/A - either one satisfies the
+            # requirement, so either one being merely absent is not N/A.
+            if (_tier2_not_applicable(facts, "naics_code")
+                    and _tier2_not_applicable(facts, "sic_code")):
+                continue
+            applicable.append("NAICS or SIC industry code")
+            if not (_answered(facts, "naics_code") or _answered(facts, "sic_code")):
+                missing.append("NAICS or SIC industry code")
+            continue
+        if _tier2_not_applicable(facts, field):
+            continue                       # 3.6: removed from the denominator
+        applicable.append(label)
+        # ANSWERED, not "has a value" - see check_tier1.
+        if not _answered(facts, field):
+            missing.append(label)
+    return applicable, missing
+
+
 def check_tier2(facts: dict, flags: dict | None = None) -> Tuple[int, List[str]]:
     """C3 3.5 / 3.6 - Tier 2 = six general business facts, equally weighted.
 
@@ -579,36 +631,34 @@ def check_tier2(facts: dict, flags: dict | None = None) -> Tuple[int, List[str]]
     C3 3.14 removed those fields from Tier 2 outright, so the gate has nothing
     left to gate. Kept rather than removed so no caller has to change.
     """
-    # The industry-classification requirement is satisfied by EITHER a NAICS or a
-    # SIC code (client 3.13: "NAICS or SIC"; spec section 3.1 lists them as
-    # interchangeable). A submission carrying a SIC code but no NAICS is
-    # credited, and when both are absent the gap is surfaced as one combined
-    # "NAICS or SIC" item rather than ignoring SIC.
-    missing: List[str] = []
-    applicable = 0
-    for field, label in TIER2_FIELDS.items():
-        if field == "naics_code":
-            # N/A only when BOTH keys are N/A - either one satisfies the
-            # requirement, so either one being merely absent is not N/A.
-            if (_tier2_not_applicable(facts, "naics_code")
-                    and _tier2_not_applicable(facts, "sic_code")):
-                continue
-            applicable += 1
-            if not (_answered(facts, "naics_code") or _answered(facts, "sic_code")):
-                missing.append("NAICS or SIC industry code")
-            continue
-        if _tier2_not_applicable(facts, field):
-            continue                       # 3.6: removed from the denominator
-        applicable += 1
-        # ANSWERED, not "has a value" - see check_tier1.
-        if not _answered(facts, field):
-            missing.append(label)
+    applicable_labels, missing = _tier2_items(facts)
+    applicable = len(applicable_labels)
     if applicable <= 0:
         # Every field N/A. Nothing is owed, so nothing is missing: 100, not a
         # division by zero and not a 0 that would read as a total failure.
         return 100, []
     score = max(0, round(100 - len(missing) * (100 / applicable)))
     return score, missing
+
+
+def key_details(facts: dict, flags: dict | None = None) -> dict:
+    """V1 H2 (client section 7, 2026-08-27): the Core Application (Tier 1) and
+    Underwriting Profile (Tier 2) facts, split into what the submission already
+    has and what it still lacks - for the pre-form screen, which no longer
+    prints a percentage.
+
+    Read from the SAME two item lists the score is built from, so "in place"
+    and "missing" can never disagree with the Structural pillar. Labels are the
+    checklist labels the score trace already prints. A Not Applicable fact
+    appears in neither list (3.6); a producer-exempt field (dec-page-only
+    package) appears in neither list (3.3).
+    """
+    t1_applicable, t1_missing = _tier1_items(facts or {}, flags or {})
+    t2_applicable, t2_missing = _tier2_items(facts or {})
+    missing = list(t1_missing) + list(t2_missing)
+    satisfied = [lbl for lbl in list(t1_applicable) + list(t2_applicable)
+                 if lbl not in missing]
+    return {"satisfied": satisfied, "missing": missing}
 
 
 def validate_effective_date_window(facts: dict) -> tuple | None:
@@ -977,23 +1027,64 @@ def evaluate_stops(facts: dict, flags: dict) -> Tuple[List[str], List[str]]:
     # and the pillar score from contradicting each other (§6.5 acceptance criterion).
     if (flags.get("has_umbrella")
             and not _fv(facts, "gl_each_occurrence") and not _fv(facts, "gl_limits")
-            and not _fv(facts, "auto_liability_limit")):
+            and not _auto_liability_stated(facts)):
         hard.append("Umbrella detected but no underlying GL or Auto limits found")
 
     # ── ACORD 127: Auto coverage integrity ────────────────────────────────────
     if flags.get("has_auto_coverage"):
         auto_limit_structure = _fv(facts, "auto_liability_structure")
-        bi_pp = _fv(facts, "bi_per_person")
-        bi_pa = _fv(facts, "bi_per_accident")
-        pd_pa = _fv(facts, "pd_per_accident")
+        # THE REAL KEYS (H1 audit, 2026-08-26). This read `bi_per_person` /
+        # `bi_per_accident` / `pd_per_accident` - three names nothing has ever
+        # written. The extractor, the registry and the ACORD 127 stamper all
+        # use `auto_bi_per_person` / `auto_bi_per_accident` /
+        # `auto_pd_per_accident`, so on every split-limit policy all three read
+        # None, the "incomplete" HARD STOP fired, and the package was held at
+        # 60 with no way to satisfy it. The legacy names are still read last
+        # so a session that somehow carries them is not made worse.
+        bi_pp = _fv(facts, "auto_bi_per_person") or _fv(facts, "bi_per_person")
+        bi_pa = _fv(facts, "auto_bi_per_accident") or _fv(facts, "bi_per_accident")
+        pd_pa = _fv(facts, "auto_pd_per_accident") or _fv(facts, "pd_per_accident")
+
+        # ── V1 H1 6.3: the two Auto Completeness items that also WARN ──────
+        # "No vehicle schedule = -15 + Warning", "No driver schedule = -10 +
+        # Warning". Emitted HERE (the legacy engine) and deliberately NOT as a
+        # cross-form issue: a cross-form soft warning lands in soft_stops AND
+        # in the Exposure cross-document bucket (extraction_pipeline merges
+        # both), so the same gap would be charged twice inside one pillar. A
+        # legacy soft stop only sets the 85 ceiling, which is what "+ Warning"
+        # means. Gated on the same door as the deduction, so an HNOA-only
+        # account never sees either message.
+        try:
+            from services.coverage_evidence import auto_completeness_gaps
+            _auto_gap_keys = {k for k, _p, _l in auto_completeness_gaps(facts, flags)}
+        except Exception as _agx:                              # noqa: BLE001
+            logger.warning("auto completeness warnings skipped: %s", _agx, exc_info=True)
+            _auto_gap_keys = set()
+        if "auto_vin_schedule" in _auto_gap_keys:
+            soft.append(
+                "Vehicle schedule not provided - a Business Auto submission with "
+                "owned vehicles needs the schedule (year, make, model, VIN)"
+            )
+        if "auto_drivers" in _auto_gap_keys:
+            soft.append(
+                "Driver schedule not provided - list the drivers of the scheduled "
+                "vehicles (name, licence, date of birth)"
+            )
         # Spec L185: "Incomplete liability structure → hard stop". Detect a
         # split-limit attempt even when auto_liability_structure / auto_split_limits
         # weren't extracted: if ANY of the three components is present, treat
         # this as split and require all three.
+        # V1 H1 (2026-08-26): `any(parts)` used to be dead - it read three
+        # phantom keys nothing wrote. Now that it reads the real facts, a CSL
+        # policy carrying ONE stray split figure (a merge or gap-fill artefact)
+        # would flip to "split", fire this hard stop and cap the package at 60
+        # on a policy that states its combined limit perfectly. A stated CSL
+        # means the policy is not split.
+        _csl_stated = bool(_fv(facts, "auto_liability_limit"))
         _split_indicated = (
             flags.get("auto_split_limits")
             or auto_limit_structure == "split"
-            or any([bi_pp, bi_pa, pd_pa])
+            or (any([bi_pp, bi_pa, pd_pa]) and not _csl_stated)
         )
         if _split_indicated:
             if not all([bi_pp, bi_pa, pd_pa]):
@@ -2659,10 +2750,122 @@ def _ops_to_industry(ops: str, naics2: str) -> Optional[str]:
     return _NAICS_SECTOR_INDUSTRY.get(naics2)
 
 
-def _codes_to_industry(code_str: str) -> Optional[str]:
-    """Industry bucket from class codes - only when the codes agree on ONE industry."""
-    found = {ind for code, ind in _CLASS_CODE_INDUSTRY.items() if code in code_str}
-    return next(iter(found)) if len(found) == 1 else None
+# NCCI STANDARD EXCEPTION classes - clerical (8810), outside sales (8742),
+# clerical telecommuter (8871) and drivers (7380). They sit BESIDE the
+# governing class on nearly every workers comp policy and say nothing about
+# what the business does.
+#
+# LIVE RUN 2026-08-26 (P2 printing company, P4 bakery): each printed its
+# governing class (4299 / 2003, neither in the table below) PLUS 8810. Only
+# 8810 mapped, so the account read as "office", disagreed with its own
+# operations, and Exposure charged -15 for a class/operations mismatch on two
+# clean submissions.
+#
+# THE EXCLUSION IS CONDITIONAL, and the distinction matters: a policy whose
+# ONLY class is 8810 has no governing class, so for a roofing contractor that
+# IS the mismatch the client asked us to catch (his own example, pinned by
+# tests/test_workstream3_closure.py::test_wi5_roofing_ops_with_office_code_is_
+# mismatch). A standard exception is discounted only when a real class sits
+# beside it.
+_WC_STANDARD_EXCEPTION_CODES: frozenset = frozenset({"8810", "8742", "8871", "7380"})
+
+# A class code as printed: 4 digits (WC / NCCI) or 5 (GL / ISO), standing on
+# its own. The word boundaries matter: a payroll of "540300" must NOT yield the
+# roofing code 5403, which is exactly the blob-substring defect rule 2 exists
+# to close.
+_CLASS_CODE_TOKEN_RE = re.compile(r"\b\d{4,5}\b")
+
+
+def _class_code_tokens(codes: Any) -> set:
+    """Every class code in a `wc_class_codes` / `gl_class_codes_by_location`
+    fact, read from the STRUCTURE rather than a stringified blob.
+
+    A cell often carries the description alongside the number ("2003 Bakeries"),
+    which is why this scans each cell for code-shaped tokens rather than
+    demanding the whole cell be one. Returns an empty set when the shape is
+    unrecognised, which the caller treats as "cannot tell".
+    """
+    out: set = set()
+
+    def _take(val: Any) -> None:
+        for tok in _CLASS_CODE_TOKEN_RE.findall(str(val or "")):
+            out.add(tok)
+
+    if isinstance(codes, str):
+        _take(codes)
+        return out
+    if isinstance(codes, dict):
+        # A state-keyed map ({"OR": [rows...]}) - recurse ONE level onto the
+        # rows so a legitimate shape is not silently unreadable.
+        for _v in codes.values():
+            out |= _class_code_tokens(_v)
+        return out
+    if not isinstance(codes, list):
+        return out
+    for row in codes:
+        if isinstance(row, dict):
+            # NAMED keys only. Deliberately NOT a scan of every cell: a
+            # description ("2026 remodel") or a payroll (540300) would then
+            # vote, which is the blob defect this function exists to prevent.
+            for _k in ("code", "class_code", "wc_class_code", "governing_class"):
+                _take(row.get(_k))
+            inner = row.get("codes")
+            if isinstance(inner, list):
+                for c in inner:
+                    _take(c)
+            elif inner is not None:
+                _take(inner)
+        else:
+            _take(row)
+    return out
+
+
+def _codes_to_industry(code_str: str, tokens: Optional[set] = None) -> Optional[str]:
+    """Industry bucket from class codes - only when the GOVERNING classes agree
+    on ONE industry and every one of them is mapped.
+
+    Three rules, and the third is the one that keeps this honest:
+
+    1. Standard exceptions do not vote when a governing class sits beside them
+       (they sit on nearly every WC policy and describe nobody's business). A
+       LONE exception IS the governing class and does vote.
+    2. The vote is taken over the TOKENS, never `code in code_str`. The blob
+       carries payroll, rates, ZIPs and descriptions, so a table code could be
+       matched inside a payroll figure - "5403" lives inside "540300".
+    3. **An unmapped governing class means NO VERDICT.** The table is a
+       deliberately conservative subset, so an unmapped primary class means we
+       do not know what this business does - and guessing from whatever
+       secondary class happens to be mapped is how a clean wholesale bakery
+       with a retail shop (2003 unmapped + 8017 retail + 8810) would be charged
+       -15 for "not a retailer". Silence is the only defensible answer, and it
+       makes the table monotone: adding a correct code can only ever ADD a
+       verdict, never move one sideways.
+    """
+    if not tokens:
+        # NO VERDICT. This branch used to keep "the legacy blob read, unchanged,
+        # so a fact we cannot parse behaves exactly as it did before this
+        # function existed" - which preserved the very defect rules 2 and 3
+        # exist to close, for precisely the inputs we understand least.
+        #
+        # LIVE RUN 2026-08-27: two clean packages (a bakery and a printer) were
+        # each charged -15 for a class/operations mismatch, because on this path
+        # NCCI 8810 "Clerical" was the only substring that matched and the
+        # account was declared an office. `{"class_code":"2003",
+        # "payroll":"540300"}` came back "construction" - class 5403 matched
+        # INSIDE the payroll figure, the exact H1-F defect.
+        #
+        # `_class_code_tokens`' docstring already promised the caller treats an
+        # empty set as "cannot tell"; the caller simply did not. A shape we
+        # cannot PARSE is strictly less knowable than an unmapped code, so
+        # rule 3 applies with more force here, not less.
+        return None
+
+    governing = {t for t in tokens if t not in _WC_STANDARD_EXCEPTION_CODES}
+    pool = governing or set(tokens)          # a lone exception is the governing class
+    if any(t not in _CLASS_CODE_INDUSTRY for t in pool):
+        return None                          # rule 3: unmapped primary -> no verdict
+    industries = {_CLASS_CODE_INDUSTRY[t] for t in pool}
+    return next(iter(industries)) if len(industries) == 1 else None
 
 
 def _is_ops_class_code_mismatch(facts: dict, flags: dict, coverage_type: str = "gl") -> bool:
@@ -2689,7 +2892,7 @@ def _is_ops_class_code_mismatch(facts: dict, flags: dict, coverage_type: str = "
     )
     if not codes or (isinstance(codes, list) and not codes):
         return False
-    code_ind = _codes_to_industry(str(codes))
+    code_ind = _codes_to_industry(str(codes), _class_code_tokens(codes))
     if not code_ind:
         return False
 
@@ -2706,6 +2909,37 @@ def _is_ops_class_code_mismatch(facts: dict, flags: dict, coverage_type: str = "
 # ACORD 101 recommended) are informational and have never carried a penalty.
 _CROSS_WARNING_TYPES = ("warning", "soft_warning")
 _CROSS_ISSUE_TYPES   = ("hard_stop",) + _CROSS_WARNING_TYPES
+
+
+def _auto_liability_stated(facts: dict) -> bool:
+    """CSL or split limits - one door (`coverage_evidence`), falls back to the
+    CSL-only read if the door is unavailable."""
+    try:
+        from services.coverage_evidence import auto_liability_stated
+        return auto_liability_stated(facts)
+    except Exception:                                          # noqa: BLE001
+        return bool(_fv(facts, "auto_liability_limit"))
+
+
+def _owned_vehicle_items_not_applicable(facts: dict, flags: Optional[dict] = None) -> bool:
+    """Is this a hired/non-owned-only auto account, so the owned-vehicle
+    checklist items do not apply? One door; fails toward "they apply", which
+    keeps today's scoring on anything the door cannot classify."""
+    try:
+        from services.coverage_evidence import AUTO_HNOA_ONLY, auto_exposure_kind
+        return auto_exposure_kind(facts, flags) == AUTO_HNOA_ONLY
+    except Exception:                                          # noqa: BLE001
+        return False
+
+
+def _umbrella_schedule_present(facts: dict) -> bool:
+    """A schedule of underlying insurance that is actually there - a stored
+    sentence saying "was not supplied" is an ABSENCE (live P1, Principle 3)."""
+    try:
+        from services.coverage_evidence import umbrella_schedule_present
+        return umbrella_schedule_present(facts)
+    except Exception:                                          # noqa: BLE001
+        return bool(_fv(facts, "schedule_of_underlying_insurance"))
 
 
 def _calculate_exposure_consistency(
@@ -2734,6 +2968,11 @@ def _calculate_exposure_consistency(
         "payroll_employee_information": 0,
         "revenue_sales_information":    0,
         "cross_document_consistency":   0,
+        # V1 H1 (client section 6, 2026-08-26): two SUBMISSION-level
+        # completeness buckets for facts that used to cost points only on the
+        # ACORD 127 / 130 form scores, which never feed the package (D29).
+        "auto_completeness":            0,   # 6.3, capped at 25
+        "wc_supplemental":              0,   # 6.4, capped at 10
     }
 
     # ── GL: class codes vs operations (L90, L92) ─────────────────────────────
@@ -2815,10 +3054,42 @@ def _calculate_exposure_consistency(
 
     # ── Auto: liability structure + symbols (L184-191) ───────────────────────
     if flags.get("has_auto_coverage"):
-        if not _fv(facts, "auto_liability_limit"):
+        # STATED as a CSL or as split limits - a split policy has no CSL by
+        # design and was charged -10 for "no liability limit" (live P5).
+        if not _auto_liability_stated(facts):
             ded["coverage_information"] += 10
         if not _fv(facts, "auto_covered_symbols"):
             ded["coverage_information"] += 5
+
+    # ── V1 H1 6.3 - Auto Completeness (owned / scheduled exposure only) ─────
+    # Client: "an incomplete ACORD 127 can receive a poor individual form score
+    # without necessarily reducing total submission quality enough." The five
+    # items and their points are his table verbatim; the cap is his -25; the
+    # owned-versus-HNOA gate and the "presumed owned" default are recorded in
+    # `services.coverage_evidence` (the ONE door - evaluate_stops, the 127
+    # checklist and the questionnaire read the same answer). "Existing Auto
+    # deductions remain separately applicable" - the two above are untouched.
+    # A genuinely hired/non-owned-only account deducts nothing here.
+    try:
+        from services.coverage_evidence import auto_completeness_deduction
+        ded["auto_completeness"] += auto_completeness_deduction(facts, flags)
+    except Exception as _ace:                                  # noqa: BLE001
+        logger.warning("auto completeness skipped: %s", _ace, exc_info=True)
+
+    # ── V1 H1 6.4 - Supplemental WC (X-Mod, officer treatment, payroll period)
+    # These left Structural Tier 2 under C3 3.14 and had NO package-level home
+    # (only the ACORD 130 checklist). Client's rules: X-Mod -5 only when
+    # applicability is INDICATED and the factor is missing (unknown -> producer,
+    # New Venture / not rated / N/A -> nothing); owner/officer -5 when named
+    # individuals exist and their treatment is unresolved; payroll period -3
+    # when a stated figure's period cannot be interpreted. Combined cap -10.
+    # "This cap does not replace existing WC payroll/class/multi-state
+    # deductions" - those stay in the buckets above.
+    try:
+        from services.coverage_evidence import wc_supplemental_deduction
+        ded["wc_supplemental"] += wc_supplemental_deduction(facts, flags)
+    except Exception as _wse:                                  # noqa: BLE001
+        logger.warning("wc supplemental skipped: %s", _wse, exc_info=True)
 
     # ── Exposure-coverage gaps (employees without WC, vehicles without auto) ─
     _num_emp = _to_int(_fv(facts, "num_employees"))
@@ -2915,6 +3186,12 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
 
     gl_val   = _to_int(_fv(facts, "gl_each_occurrence") or _fv(facts, "gl_limits"))
     auto_val = _to_int(_fv(facts, "auto_liability_limit"))
+    # V1 H1 (2026-08-26): split limits state the underlying auto without a CSL
+    # figure. The scorer and `evaluate_stops` were both updated to see that;
+    # this state machine was not, so a split policy read "unknown - underlying
+    # limits not found" while the score said 75 and no hard stop fired. This
+    # docstring's own promise is that the state stays consistent with the score.
+    _auto_split_stated = auto_val is None and _auto_liability_stated(facts)
 
     # Umbrella present but NO underlying GL/Auto value extracted. For this exact
     # input the scorer returns 0 and evaluate_stops raises a hard stop, so the
@@ -2923,7 +3200,7 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
     # Information state, not a reassuring or perfect one). Both the no-flags and
     # flags-present variants score identically (0), so both map to "unknown"
     # ("underlying limits not found") to stay consistent with the score and stop.
-    if not gl_val and not auto_val:
+    if not gl_val and not auto_val and not _auto_split_stated:
         return "unknown"
 
     # Required-but-absent underlying coverage (mirror the score's -20 deduction):
@@ -2932,8 +3209,11 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
     # Without this the state could report umbrella_coverage_present / adequately_
     # supported while the score is penalising the same missing limit (state/score
     # contradiction). Handled symmetrically for GL and Auto.
+    # `_auto_split_stated` exempts the auto half: the scorer no longer takes
+    # that -20 (the limit is stated, just not as a CSL), so mirroring it here
+    # would recreate the contradiction this branch exists to prevent.
     if (gl_val is None and flags.get("has_general_liability")) or \
-       (auto_val is None and flags.get("has_auto_coverage")):
+       (auto_val is None and flags.get("has_auto_coverage") and not _auto_split_stated):
         return "umbrella_coverage_needs_review"
 
     # GL must satisfy BOTH halves of the client baseline (occurrence $1M /
@@ -2958,11 +3238,7 @@ def _get_umbrella_state(facts: dict, flags: dict) -> str:
     #                       both missing; the old "Information Provided" state is retired)
     #   one present     → umbrella_coverage_present     (partially corroborated)
     #   both present    → adequately_supported
-    _has_schedule = bool(
-        _fv(facts, "schedule_of_underlying_insurance")
-        or _fv(facts, "underlying_schedule")
-        or _fv(facts, "underlying_insurance_schedule")
-    )
+    _has_schedule = _umbrella_schedule_present(facts)
     _ff_combined = " ".join([
         _narrative_remarks_text(facts),
         str(_fv(facts, "umbrella_follow_form") or ""),
@@ -3170,6 +3446,20 @@ def _derive_evidence_labels(
             labels[key] = "conflicting"
             continue
         raw = facts.get(key)
+        # V1 H1 (2026-08-26): a schedule fact holding a sentence that says the
+        # schedule was NOT supplied is absent. Without this the same payload
+        # carried a -15 for "no Schedule of Underlying Insurance" AND an
+        # evidence label of "extracted_from_source" for that fact - two doors
+        # contradicting each other on the traceability surface C3 exists to
+        # guarantee.
+        if key == "schedule_of_underlying_insurance" and raw is not None:
+            try:
+                from services.coverage_evidence import value_states_absence
+                _sv = raw.get("value") if isinstance(raw, dict) else raw
+                if value_states_absence(_sv):
+                    raw = None
+            except Exception:                                  # noqa: BLE001
+                pass
         if raw is None:
             labels[key] = _absent_label(key)
             continue
@@ -3644,14 +3934,29 @@ def _compute_category_breakdown(
                 "deducted": max(0, 100 - _s)}
 
     if exposure_subscores:
+        # EVERY bucket the scorer emitted, labelled from this table - a key
+        # missing from the table is still rendered (under its raw key) rather
+        # than silently dropped. Measured 2026-08-26 (H1 audit): the previous
+        # hardcoded five-tuple would have hidden the two new buckets from the
+        # panel while the trace and the headline both charged for them, making
+        # the "100 minus every bucket" tooltip untrue.
+        _exp_labels = {
+            "operations_description":       "Operations",
+            "coverage_information":         "Coverage Info",
+            "payroll_employee_information": "Payroll/Employee",
+            "revenue_sales_information":    "Revenue/Sales",
+            "cross_document_consistency":   "Cross-Document Consistency",
+            "auto_completeness":            "Auto Completeness",
+            "wc_supplemental":              "WC Supplemental",
+        }
+        # ONLY the keys the scorer actually emitted, in the table's order - a
+        # payload written before a bucket existed (a stored five-bucket
+        # session) must not render the missing bucket as "0%, deducted 100".
+        _ordered = [k for k in _exp_labels if k in exposure_subscores] + \
+                   [k for k in exposure_subscores if k not in _exp_labels]
         _exp_cats = {
-            k: _exp_cat(k, lbl) for k, lbl in (
-                ("operations_description",       "Operations"),
-                ("coverage_information",         "Coverage Info"),
-                ("payroll_employee_information", "Payroll/Employee"),
-                ("revenue_sales_information",    "Revenue/Sales"),
-                ("cross_document_consistency",   "Cross-Document Consistency"),
-            )
+            k: _exp_cat(k, _exp_labels.get(k, k.replace("_", " ").title()))
+            for k in _ordered
         }
     else:
         _exp_cats = {
@@ -3739,7 +4044,12 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
     # string ($1M/$2M) directly to _to_int when the clean field is available.
     gl_val   = _to_int(_fv(facts, "gl_each_occurrence") or _fv(facts, "gl_limits"))
     auto_val = _to_int(_fv(facts, "auto_liability_limit"))
-    has_underlying = bool(gl_val or auto_val)
+    # Split limits STATE the auto limit without a CSL figure (live P5). They
+    # satisfy "underlying auto exists" and the "required but absent" -20; the
+    # below-$1M comparison is CSL-only and is not attempted on split parts -
+    # no opinion, never a guess.
+    _auto_split = auto_val is None and _auto_liability_stated(facts)
+    has_underlying = bool(gl_val or auto_val or _auto_split)
 
     if not has_underlying:
         return 0  # hard-stop scenario per evaluate_stops()
@@ -3784,7 +4094,7 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
     # Auto - same logic: present-and-low OR required-but-absent.
     if auto_val is not None and auto_val < _UMB_AUTO_CSL_MIN:
         score -= 20              # Present but below $1M CSL - warn, don't block (Q1)
-    elif auto_val is None and flags.get("has_auto_coverage"):
+    elif auto_val is None and flags.get("has_auto_coverage") and not _auto_split:
         score -= 20              # Required underlying Auto missing (M4)
 
     # EL tiers (client Q2: $1M full, $500K acceptable, <$500K reduction)
@@ -3800,12 +4110,7 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
             score -= 25          # Below minimum (<$500K)
 
     # Schedule of Underlying Insurance: -15 when absent (client V1 requirement)
-    _has_schedule = bool(
-        _fv(facts, "schedule_of_underlying_insurance")
-        or _fv(facts, "underlying_schedule")
-        or _fv(facts, "underlying_insurance_schedule")
-    )
-    if not _has_schedule:
+    if not _umbrella_schedule_present(facts):
         score -= 15
 
     # Follow-form evidence: -10 when unable to confirm (Option B per client Q4)
@@ -4530,12 +4835,7 @@ def _build_umbrella_warnings(facts: dict, flags: dict, p5: Optional[int]) -> Lis
     # Client (DOUBTS-Workstream3): "No Schedule of Underlying Insurance -15" must
     # generate a warning. Mirror _calculate_umbrella_adequacy's detection so the
     # deduction is explained rather than silently applied.
-    _has_schedule = bool(
-        _fv(facts, "schedule_of_underlying_insurance")
-        or _fv(facts, "underlying_schedule")
-        or _fv(facts, "underlying_insurance_schedule")
-    )
-    if not _has_schedule:
+    if not _umbrella_schedule_present(facts):
         warnings.append(
             "No Schedule of Underlying Insurance provided - umbrella adequacy "
             "reduced. Add the schedule of underlying GL / Auto / EL policies."
@@ -4544,11 +4844,39 @@ def _build_umbrella_warnings(facts: dict, flags: dict, p5: Optional[int]) -> Lis
 
 
 def _build_umbrella_review_items(
-    flags: dict, follow_form: dict, p5: Optional[int]
+    flags: dict, follow_form: dict, p5: Optional[int],
+    facts: Optional[dict] = None,
 ) -> List[dict]:
     """Persistent review items that must never be dropped by the top_recs cap
-    (§6.5 item 5). Currently the follow-form gap when it cannot be confirmed."""
+    (§6.5 item 5): the follow-form gap, and an underlying auto whose limits
+    cannot be compared to the CSL baseline."""
     items: List[dict] = []
+    # V1 H1 (2026-08-26). A SPLIT-limit underlying auto states its limits but
+    # not a combined single limit, so the $1M baseline comparison cannot run.
+    # It carries NO deduction - comparing a per-person figure to a combined
+    # baseline is a rule neither the client's document nor the spec defines,
+    # and Principle 7 forbids inventing one - but it must not pass silently
+    # either, or an inadequate $100k/$300k/$50k policy would score exactly like
+    # an adequate one. It lives HERE rather than in `_build_umbrella_warnings`
+    # because that list is suppressed at full credit, which is precisely the
+    # case that needs saying.
+    if flags.get("has_umbrella") and flags.get("has_auto_coverage") and facts is not None:
+        try:
+            from services.coverage_evidence import auto_split_limits_stated
+            if auto_split_limits_stated(facts):
+                items.append({
+                    "pillar":  "umbrella_limit_adequacy",
+                    "score":   p5 if p5 is not None else 0,
+                    "action":  (
+                        "Underlying Auto is written on SPLIT limits, so it cannot be "
+                        f"compared to the ${_UMB_AUTO_CSL_MIN:,} combined-single-limit "
+                        "baseline - confirm the umbrella attaches over them."
+                    ),
+                    "missing": ["underlying auto combined single limit"],
+                    "review_item": True,
+                })
+        except Exception:                                      # noqa: BLE001
+            pass
     if flags.get("has_umbrella") and follow_form.get("status") == "unable_to_determine":
         items.append({
             "pillar":  "umbrella_limit_adequacy",
@@ -4876,7 +5204,7 @@ def calculate_package_sqs(
     # The follow-form review item is ALSO carried in a dedicated review_items array
     # (outside the 3-item top_recs cap) so a coverage-critical follow-form gap is
     # never silently dropped when higher-priority hard stops already fill top_recs.
-    review_items = _build_umbrella_review_items(flags, _follow_form, p5)
+    review_items = _build_umbrella_review_items(flags, _follow_form, p5, facts)
     # Surface the follow-form review item in top_recs too when there is still room
     # (max 3). It is never lost regardless - review_items carries it unconditionally.
     if review_items and len(top_recs) < 3:
@@ -4948,6 +5276,134 @@ def calculate_package_sqs(
 
 
 # ── SPEC-COMPLIANT SQS CALCULATION (v2.1.0+) ──────────────────────────────
+
+# ── V1 H2 (client section 7, 2026-08-27): the package score BEFORE forms ────
+# The pre-form Review screen used to print `tier2_score` as "Submission
+# Readiness NN%". That number is the Tier 2 completeness ratio - one CATEGORY
+# of one pillar - not the SQS, and the client's complaint was exactly that the
+# screen blurred the SQS, the submission status and information-gathering
+# progress into one figure. The screen now prints the STATUS LABEL of the
+# package SQS as it stands at that moment, and the label has to come from the
+# one scorer - never from a relabelled Tier 2 ratio (a 100% Tier 2 beside 12
+# warnings is "Almost There" at best, never "Submission Ready").
+#
+# Before generation the package is scored the way the reclassify path (§4.2
+# item #5) always has: the per-form facts scorer over the RECOMMENDED forms,
+# then `calculate_package_sqs`. STATELESS by design - nothing is persisted, no
+# `sqs_history` entry is written and no 5.12 snapshot is taken, so the session
+# list, the score-delta baseline and the E&O record are untouched; the
+# reclassify path keeps its own persist + snapshot and simply calls this.
+_PRE_GENERATION_STAGE = "initial_extract"
+
+
+def _pre_generation_cross_issues(session: dict) -> List[dict]:
+    """The pipeline's own cross-form issues for the recommended forms, de-
+    duplicated by message, with every hard stop DEMOTED to a warning.
+
+    C75 (owner): a form we merely SUGGESTED may not become a blocker. The
+    pipeline already demotes these in `hard_stops` / `soft_stops` and on the
+    structured cards before a form is selected; feeding the raw list to the
+    package scorer would cap the score at 60 through `hard_cross` while the
+    screen calls the same item a warning - the display/score mismatch C75
+    exists to prevent. They return to full force at generation, which
+    re-validates against the SELECTED ids.
+    """
+    seen, out = set(), []
+    for issue in (session or {}).get("cross_form_issues") or []:
+        if not isinstance(issue, dict):
+            continue
+        msg = str(issue.get("message") or "").strip()
+        if not msg or msg in seen:
+            continue
+        seen.add(msg)
+        if issue.get("type") == "hard_stop":
+            issue = {**issue, "type": "soft_warning"}
+        out.append(issue)
+    return out
+
+
+def score_package_pre_generation(
+    session: dict,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> dict:
+    """Package SQS from the facts as they stand, with no generated forms.
+
+    Pure: reads the session ROW (facts, flags, stops, recommendations,
+    cross_form_issues, docs, underwriting) and returns the scorer's dict.
+    Raises on scorer failure - the caller decides what a failure means
+    (`current_package_sqs` turns it into None and names the session).
+    """
+    session = session or {}
+    facts = session.get("facts") or {}
+    flags = session.get("flags") or {}
+    hard_stops = list(session.get("hard_stops") or [])
+    soft_stops = list(session.get("soft_stops") or [])
+    form_ids = [
+        r.get("form_id") for r in (session.get("recommendations") or [])
+        if isinstance(r, dict) and r.get("form_id")
+    ]
+    cross = _pre_generation_cross_issues(session)
+    tier2_score, _ = check_tier2(facts, flags)
+    per_form: List[dict] = []
+    for fid in form_ids:
+        try:
+            per_form.append(calculate_sqs_from_facts(
+                facts=facts, flags=flags, selected_form_ids=form_ids,
+                hard_stops=hard_stops, soft_stops=soft_stops,
+                tier2_score=tier2_score, form_id=fid,
+                session_id=session_id, user_id=user_id,
+                calculation_stage=_PRE_GENERATION_STAGE,
+                session_data=session, cross_issues_full=cross,
+            ))
+        except Exception as ex:                                  # noqa: BLE001
+            logger.warning(
+                "pre-generation per-form SQS failed [session=%s form=%s]: %s",
+                session_id, fid, ex,
+            )
+    # No recommended form at all -> the scorer's own 3.7 no-form path.
+    return calculate_package_sqs(
+        facts=facts, flags=flags, form_results=per_form,
+        cross_issues=cross, hard_stops=hard_stops, soft_stops=soft_stops,
+        session_data=session, session_id=session_id, user_id=user_id,
+        calculation_stage=_PRE_GENERATION_STAGE,
+    )
+
+
+def current_package_sqs(
+    session: dict,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Optional[dict]:
+    """The package SQS as it stands RIGHT NOW, for any screen that needs the
+    status label - the one door for every pre-form response.
+
+    * Forms generated -> the persisted `package_sqs`. Every post-generation
+      path (generate, edit, ARQ recalc, dismiss credit) maintains that key and
+      applies credits to it; recomputing here would drop the credits and be a
+      second score (D33).
+    * Integrity review pending -> None. Same withholding as `tier2_score`:
+      nothing derived from a possibly-mixed package is shown.
+    * Otherwise -> a fresh, unpersisted pre-generation score.
+    * Scorer failure -> None, and the log NAMES the session (H1-G: the only
+      evidence of a vanished score is this line). The screen shows no label
+      rather than a stale or invented one.
+    """
+    session = session or {}
+    if session.get("generated_forms"):
+        stored = session.get("package_sqs")
+        return stored if isinstance(stored, dict) and stored else None
+    if (session.get("integrity") or {}).get("review_required"):
+        return None
+    try:
+        return score_package_pre_generation(session, session_id, user_id)
+    except Exception as ex:                                      # noqa: BLE001
+        logger.error(
+            "pre-generation package SQS failed [session=%s]: %s",
+            session_id, ex, exc_info=True,
+        )
+        return None
+
 
 def calculate_package_sqs_spec_compliant(
     facts: dict,
@@ -5077,7 +5533,7 @@ def calculate_package_sqs_spec_compliant(
     _umbrella_state    = _get_umbrella_state(facts, flags)
     _follow_form       = _get_follow_form_status(facts)
     _umbrella_warnings = _build_umbrella_warnings(facts, flags, p5)
-    _review_items      = _build_umbrella_review_items(flags, _follow_form, p5)
+    _review_items      = _build_umbrella_review_items(flags, _follow_form, p5, facts)
 
     return {
         "package_sqs_score": raw,
@@ -5544,13 +6000,13 @@ def calculate_sqs(
     elif fid in ("ACORD_137_CA", "ACORD_137_CO"):
         # State commercial auto supplement: auto symbols and limits drive completeness.
         auto_chks = [
-            bool(_fv(facts, "auto_liability_limit")),
+            _auto_liability_stated(facts),
             bool(_fv(facts, "auto_covered_symbols")),
             bool(_fv(facts, "auto_um_uim_limit")),
             bool(_fv(facts, "auto_deductible_comp") or _fv(facts, "auto_deductible_collision")),
         ]
         struct = int(sum(auto_chks) / len(auto_chks) * 100)
-        if not _fv(facts, "auto_liability_limit"):
+        if not _auto_liability_stated(facts):
             issues.append("Commercial auto liability limit not specified")
             recommendations.append({
                 "rec_id": "rec_auto_liability_limit",
@@ -5685,15 +6141,34 @@ def calculate_sqs(
 
     elif fid == "ACORD_127":
         # Business Auto: vehicle schedule + liability limit + garaging + drivers + symbols.
-        chks = [
-            bool(_fv(facts, "auto_vin_schedule") or _fv(facts, "vehicle_schedule")),
-            bool(_fv(facts, "auto_liability_limit")),
-            bool(_fv(facts, "auto_garaging_address") or _fv(facts, "locations")),
-            bool(_fv(facts, "auto_drivers")),
-            bool(_fv(facts, "auto_covered_symbols")),
-            bool(_fv(facts, "auto_radius_of_operation")),
-        ]
-        struct = int(sum(chks) / len(chks) * 100)
+        # Two phantom reads fixed 2026-08-26 (H1 audit): `auto_garaging_address`
+        # (singular) is a key nothing writes - the fact is the PLURAL
+        # `auto_garaging_addresses` - so a package with garaging extracted
+        # still lost this check unless a location schedule happened to exist.
+        # And the radius is read through `coverage_evidence.auto_radius_known`,
+        # the same three sources the 127 stamper prints from, so a radius that
+        # is sitting on the generated form can never count as missing here.
+        try:
+            from services.coverage_evidence import auto_radius_known as _radius_known
+            _has_radius = _radius_known(facts)
+        except Exception:                                      # noqa: BLE001
+            _has_radius = bool(_fv(facts, "auto_radius_of_operation"))
+        # V1 H1 (2026-08-26): the owned-vehicle items leave the DENOMINATOR on a
+        # hired/non-owned-only account (C3 3.6's rule, applied to a per-form
+        # checklist). The questionnaire marks those five facts Not Applicable
+        # and refuses to ask for them, so counting them as gaps docked the form
+        # for data nobody can supply and nobody is asked for - the
+        # "blank and unaskable" defect this codebase has now fixed three times.
+        _owned_na = _owned_vehicle_items_not_applicable(facts, flags)
+        chks = [c for c, owned in (
+            (bool(_fv(facts, "auto_vin_schedule") or _fv(facts, "vehicle_schedule")), True),
+            (_auto_liability_stated(facts), False),
+            (bool(_fv(facts, "auto_garaging_addresses") or _fv(facts, "locations")), True),
+            (bool(_fv(facts, "auto_drivers")), True),
+            (bool(_fv(facts, "auto_covered_symbols")), False),
+            (_has_radius, True),
+        ) if not (owned and _owned_na)]
+        struct = int(sum(chks) / len(chks) * 100) if chks else 100
         if not _fv(facts, "auto_vin_schedule") and not _fv(facts, "vehicle_schedule"):
             recommendations.append({
                 "rec_id":      "rec_auto_vin_schedule",
@@ -5849,7 +6324,7 @@ def calculate_sqs(
 
     elif fid == "ACORD_127":
         chks = [
-            bool(_fv(facts, "auto_liability_limit")),
+            _auto_liability_stated(facts),
             bool(_fv(facts, "auto_liability_structure")),
             bool(_fv(facts, "auto_covered_symbols")),
             bool(_fv(facts, "auto_radius_of_operation")),
@@ -5871,7 +6346,7 @@ def calculate_sqs(
         chks = [
             bool(_fv(facts, "umbrella_limit")),
             bool(_fv(facts, "gl_limits") or _fv(facts, "gl_each_occurrence")),
-            bool(_fv(facts, "auto_liability_limit")),
+            _auto_liability_stated(facts),
             bool(_fv(facts, "umbrella_sir") or _fv(facts, "umbrella_attachment_point")),
         ]
         exp_score = int(sum(chks) / len(chks) * 100)
@@ -6395,6 +6870,16 @@ FORM_FIELD_INVENTORY: Dict[str, List[str]] = {
     "ACORD_127": [
         "auto_vin_schedule", "auto_drivers", "auto_garaging_addresses",
         "auto_radius_of_operation",
+        # V1 H1 6.3 (2026-08-26): the fifth Auto Completeness item.
+        "auto_vehicle_use",
+        # V1 H1 6.3: "Questionnaire behavior should instead focus on the
+        # applicable HNOA exposure." The two facts behind ACORD 127's own
+        # Hired / Non-Owned boxes (Vehicle_HiredIndicator /
+        # Vehicle_NonOwnedIndicator) were in NO inventory, so once the
+        # vehicle questions are suppressed on an HNOA-only account nothing
+        # asked about the exposure that IS there. Both are factual client
+        # questions with registry wording; both stamp deterministically.
+        "hired_auto_indicator", "non_owned_auto_indicator",
         "auto_liability_limit", "auto_covered_symbols",
         "auto_deductible_comp", "auto_deductible_collision",
         "auto_physical_damage_valuation",
@@ -6425,6 +6910,10 @@ FORM_FIELD_INVENTORY: Dict[str, List[str]] = {
     ],
     "ACORD_130": [
         "wc_payroll", "wc_class_codes", "wc_xmod", "wc_officer_exclusions",
+        # V1 H1 6.4 (2026-08-26): the payroll period is scored at package
+        # level now, so it must be ASKABLE - it was extracted and scored on the
+        # 130 checklist but absent from this inventory, i.e. asked of nobody.
+        "wc_payroll_period",
         "total_payroll", "num_employees", "applicant_name", "effective_date",
     ],
     "ACORD_137_CA": [

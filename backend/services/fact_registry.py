@@ -109,6 +109,15 @@ def _is_covered_auto_symbols(v: str) -> bool:
     return bool(nums) and bool(nums & ALL_NUMBERS)
 
 
+def _is_payroll_period(v: str) -> bool:
+    """A payroll period stated by MEANING - annual in any spelling, or another
+    recognised period. Owned by `coverage_evidence.payroll_period_meaning`, the
+    same reader the H1 6.4 scorer uses, so a value this accepts is one the
+    scorer can interpret."""
+    from services.coverage_evidence import payroll_period_meaning
+    return payroll_period_meaning(v) is not None
+
+
 # ---------------------------------------------------------------------------
 # FACT_REGISTRY
 # ---------------------------------------------------------------------------
@@ -688,6 +697,24 @@ FACT_REGISTRY: dict[str, dict] = {
         "validate":    None,
         "format_hint": None,
     },
+    # ADDED 2026-08-26 (V1 H1, client 6.3 "No vehicle-use information = -5").
+    # There was no fact for how the vehicles are used - the ACORD 127 USE
+    # boxes (Vehicle_Use_Service/Retail/Commercial/ForHire/...Indicator) were
+    # ticked only by gap fill guessing from the raw text, so the client's
+    # deduction had nothing to read. Policy-level on purpose: a declarations
+    # page states one use class for the fleet, and pdf_service inherits it
+    # into every REAL vehicle row (never a phantom one). Factual, not
+    # classification - the insured knows what their trucks do - so it stays
+    # client-eligible (master plan 4.3).
+    "auto_vehicle_use": {
+        "forms":       {"ACORD_127"},
+        "question":    "How are your business vehicles mainly used - service calls, "
+                       "retail delivery, general commercial use, for hire, farm, or "
+                       "personal use?",
+        "tier": None, "required": False,
+        "validate":    None,
+        "format_hint": "Service, Retail, Commercial, For hire, Farm, Pleasure or Other",
+    },
     "auto_physical_damage_valuation": {
         "forms":       {"ACORD_127"},
         "question":    "For physical damage coverage, how should vehicle value be determined?",
@@ -812,9 +839,12 @@ FACT_REGISTRY: dict[str, dict] = {
         "forms":       {"ACORD_130"},
         "question":    "What period does your WC payroll figure cover?",
         "tier": None, "required": False,
-        "validate":    lambda v: v.strip().lower() in {
-            "annual", "quarterly", "monthly", "semi-annual", "biannual"
-        },
+        # By MEANING, not one spelling (owner 2026-08-26, V1 H1 6.4): "per
+        # year", "12 months", "annualized", "yearly" all mean annual, and the
+        # five-word allow-list this used to be rejected every one of them.
+        # `coverage_evidence.payroll_period_meaning` is the ONE reader of the
+        # vocabulary - the scorer, the validator and the stamper all ask it.
+        "validate":    _is_payroll_period,
         "format_hint": "Annual, Quarterly, Monthly, etc.",
     },
 

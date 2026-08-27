@@ -371,6 +371,13 @@ _FIELD_QUESTION_MAP = {
     "wc_class_codes":           "What types of work do your employees perform? (Describe their job duties — your agent will assign the appropriate codes)",
     "wc_xmod":                  "Has your business received a workers compensation safety rating or modifier from your previous insurer? If yes, what is the number?",
     "wc_officer_exclusions":    "Are there any business owners or officers who should NOT be covered under Workers Compensation? If yes, list their names.",
+    # ADDED 2026-08-26 (V1 H1 6.4 / 6.3). Both had a registry question but no
+    # curated one, and the coverage-guarantee injector requires a curated
+    # question - so neither could be guaranteed onto a package that needed it.
+    # wc_payroll_period is PRODUCER-only (master plan 4.4, routed by
+    # question_eligibility); auto_vehicle_use is a factual client question.
+    "wc_payroll_period":        "What period does the stated payroll figure cover - a full year, a quarter, a month, or year to date?",
+    "auto_vehicle_use":         "How are your business vehicles mainly used - service calls, retail delivery, general commercial use, for hire, farm, or personal use?",
     # Umbrella / Excess
     "umbrella_limit":           "How much additional liability coverage would you like on top of your other policies? (For example: $1,000,000 or $5,000,000 extra)",
     "umbrella_sir":             "For this extra liability coverage, how much would you be willing to cover yourself before it kicks in?",
@@ -484,6 +491,8 @@ _FIELD_HINT_MAP = {
     "wc_class_codes":           "Describe your employees' job duties — your agent assigns the codes, e.g. 'office staff, field installers, drivers'.",
     "wc_xmod":                  "Enter your experience modification factor if you have one, e.g. '0.95'. Found on your current WC policy. Leave blank if unknown.",
     "wc_officer_exclusions":    "List any owners or officers who should be excluded from WC coverage by name, e.g. 'John Smith, Jane Doe'. Leave blank if none.",
+    "wc_payroll_period":        "State what period the payroll figure covers, e.g. 'annual'. A quarterly or monthly figure must be labelled as such so it is not read as a full year.",
+    "auto_vehicle_use":         "Pick the use that best describes most of your vehicles, e.g. 'Service' for crews driving to job sites or 'Retail' for customer deliveries.",
     "umbrella_limit":           "Enter the additional liability limit you want above your other policies, e.g. '$2,000,000'.",
     "umbrella_sir":             "Enter your self-insured retention (similar to a deductible) for this umbrella policy, e.g. '$10,000'.",
     "schedule_of_underlying_insurance": "Answer 'Yes' if the submission includes a Schedule of Underlying Insurance, or briefly list the underlying policies, e.g. 'GL $1M/$2M, Auto $1M CSL, EL $1M'. Leave blank if not provided.",
@@ -583,6 +592,8 @@ _FIELD_PRODUCER_LABEL_MAP = {
     "wc_class_codes":           "WC class codes",
     "wc_xmod":                  "Experience mod - EMOD / XMOD",
     "wc_officer_exclusions":    "Officer inclusions / exclusions",
+    "wc_payroll_period":        "WC payroll period / basis",
+    "auto_vehicle_use":         "Vehicle use class",
     "umbrella_limit":           "Umbrella limit",
     "umbrella_sir":             "Umbrella SIR",
     # ADDED 2026-08-26. Without a producer label the card falls back to the full
@@ -2177,6 +2188,18 @@ def _maybe_inject_umbrella_evidence_questions(questions: List[dict], facts: dict
         v = facts.get(key)
         if isinstance(v, dict):
             v = v.get("value")
+        # V1 H1 (2026-08-26): a stored sentence saying the schedule was NOT
+        # supplied is not an answer. Without this the scorer charged -15 and
+        # raised a warning telling the producer to attach the schedule, while
+        # THIS question - the only place they could - was suppressed as
+        # "already answered". The score moved and the remedy stayed hidden.
+        if v and key == "schedule_of_underlying_insurance":
+            try:
+                from services.coverage_evidence import value_states_absence
+                if value_states_absence(v):
+                    return None
+            except Exception:                                  # noqa: BLE001
+                pass
         return v
 
     for field_name in _UMBRELLA_EVIDENCE_FIELDS:
@@ -2438,6 +2461,47 @@ def _lines_the_producer_is_applying_for(form_ids) -> frozenset:
     except Exception:                                         # noqa: BLE001
         return frozenset()                # no opinion -> suppress nothing
     return frozenset(out)
+
+
+def _drop_scalar_duplicates_of_schedule_questions(questions: List[dict]) -> int:
+    """A schedule-backed fact is asked ONCE - as its editable table.
+
+    LIVE RUN P1 (2026-08-26): the client list carried BOTH "Please list the
+    vehicles to be insured" (the table, `field_type: schedule`) and "Please
+    list your business vehicles: year, make, model, and VIN" (a free-text
+    scalar), and the same pair for drivers.
+
+    THIS IS DELIBERATELY AT ASSEMBLY, NOT AT EACH PRODUCER. The first attempt
+    guarded the coverage-guarantee injector, and adversarial review showed the
+    scalar was coming from somewhere else entirely - the scorer's
+    recommendation seed, which inserts the FACT key straight into
+    `missing_fields`. There are several producers and one assembly point;
+    guarding the producers is how you fix four of five and ship the fifth.
+
+    It removes a scalar only when the table for that exact fact is REALLY in
+    this list, so with `ENABLE_SCHEDULE_CAPTURE` off - no tables emitted - the
+    curated scalar survives untouched, and a conflicted fact re-admitted for
+    the producer is never silently dropped.
+    """
+    tabled = {
+        q.get("_canonical_key")
+        for q in questions
+        if q.get("field_type") == "schedule" and q.get("_canonical_key")
+    }
+    if not tabled:
+        return 0
+    keep, dropped = [], 0
+    for q in questions:
+        if q.get("field_type") != "schedule" and (
+                q.get("_canonical_key") in tabled or q.get("field_name") in tabled):
+            dropped += 1
+            continue
+        keep.append(q)
+    if dropped:
+        questions[:] = keep
+        logger.info("arq: dropped %d scalar question(s) already asked as a schedule "
+                    "table: %s", dropped, sorted(tabled))
+    return dropped
 
 
 def _drop_not_applicable_questions(questions: List[dict], facts: dict,
@@ -2879,6 +2943,8 @@ async def generate_arq_questions(
     # Figure 15: ONE table question per repeating schedule, replacing the
     # per-field cards removed by _partition_schedule_fields above.
     questions.extend(_build_schedule_questions(schedule_forms, facts))
+    # ONE question per schedule-backed fact - the table, never also a scalar.
+    _drop_scalar_duplicates_of_schedule_questions(questions)
 
     # Curation layer (Beta Report §8): tag audience/priority/topic/score-impact,
     # then apply the curated default-selection policy.
@@ -3049,6 +3115,8 @@ def generate_arq_questions_from_facts(
 
     # Figure 15: ONE table question per repeating schedule.
     questions.extend(_build_schedule_questions(schedule_forms, facts))
+    # ONE question per schedule-backed fact - the table, never also a scalar.
+    _drop_scalar_duplicates_of_schedule_questions(questions)
 
     hard_stop_text = " ".join(str(s) for s in (hard_stops or []))
     decorate_questions(

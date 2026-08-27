@@ -51,6 +51,7 @@ from services.pdf_service import (
 from services.sqs_service import (
     check_tier1, check_tier2, cross_validate, evaluate_stops, calculate_sqs,
     check_doc_consistency, calculate_package_sqs, SQS_MODEL_VERSION, classify_stops,
+    current_package_sqs, key_details,
     _check_loss_run_insured_match, _extract_narrative_doc_text, doc_consistency_stops,
 )
 from services.issue_registry import (
@@ -124,6 +125,47 @@ def _humanize_fact(v):
         return ""
     s = str(v).strip()
     return "" if s.lower() in ("", "null", "none") else s
+
+
+async def _pre_form_status(
+    session_id: str,
+    facts: dict,
+    flags: dict,
+    integrity: dict,
+    current_user: dict,
+    session_row: Optional[dict] = None,
+) -> tuple:
+    """V1 H2 (client section 7, 2026-08-27): what the pre-form Review screen
+    prints instead of a percentage - `(package_sqs, key_details)`.
+
+    * `package_sqs` is the package SQS AS IT STANDS (the persisted one once
+      forms exist, a fresh unpersisted pre-generation score before that) -
+      the screen shows only its `tier` label. One door:
+      `sqs_service.current_package_sqs`.
+    * `key_details` is the Tier 1 + Tier 2 checklist split into "in place" /
+      "missing", from the same lists the score is built from.
+
+    Both are withheld while a Submission Integrity review is pending - the
+    same rule `tier2_score` has always followed on every one of these
+    responses. Never raises: a scorer failure is a None label, logged with
+    the session named (H1-G).
+    """
+    if (integrity or {}).get("review_required"):
+        return None, None
+    try:
+        row = session_row if session_row is not None else await get_processing_session(session_id)
+        pkg = current_package_sqs(row, session_id, str(current_user["id"]))
+    except Exception as _ex:                                     # noqa: BLE001
+        logger.error(f"pre-form status: package SQS unavailable [session={session_id} "
+                     f"trace={get_trace_id()}]: {_ex}", exc_info=True)
+        pkg = None
+    try:
+        kd = key_details(facts or {}, flags or {})
+    except Exception as _ex:                                     # noqa: BLE001
+        logger.error(f"pre-form status: key_details failed [session={session_id} "
+                     f"trace={get_trace_id()}]: {_ex}", exc_info=True)
+        kd = None
+    return pkg, kd
 
 
 def _doc_summary_entry(d: dict, primary_filename: str = "") -> dict:
@@ -453,6 +495,11 @@ async def upload_declaration(
         _final_soft_stops = soft_stops
         _grouped_issues = build_grouped_view(structured_issues, hard_stops, _final_soft_stops)
 
+        # V1 H2 (client section 7): the status label's score and the key-
+        # details split for the pre-form screen. Withheld exactly as
+        # tier2_score is below.
+        _pkg_now, _key_now = await _pre_form_status(sid, merged_facts, mflags, integrity, current_user)
+
         return JSONResponse({
             "success": True, "session_id": sid,
             "doc_summary": [_doc_summary_entry(d, primary["filename"]) for d in processed_docs],
@@ -465,6 +512,10 @@ async def upload_declaration(
             # review clears.
             "tier2_score": None if integrity.get("review_required") else tier2_score,
             "tier2_missing": [] if integrity.get("review_required") else tier2_missing,
+            # V1 H2: the package SQS as it stands (label only is shown) and the
+            # Tier 1 + Tier 2 "in place" / "missing" split. Not persisted here.
+            "package_sqs": _pkg_now,
+            "key_details": _key_now,
             "hard_stops": _remaining_hard,
             "soft_stops": _final_soft_stops,
             "can_proceed_with_warning": _can_proceed_warn,
@@ -665,6 +716,11 @@ async def submission_integrity_resolve(
         result.get("structured_issues") or [], result.get("hard_stops") or [],
         _final_soft_stops
     )
+    # V1 H2: status label + key details, same withholding as tier2_score.
+    _pkg_now, _key_now = await _pre_form_status(
+        result["session_id"], result.get("merged_facts") or {},
+        result.get("mflags") or {}, integrity, current_user,
+    )
     return JSONResponse({
         "success": True,
         "session_id": result["session_id"],
@@ -686,6 +742,8 @@ async def submission_integrity_resolve(
         # review step and never reads these.
         "tier2_score": None if bool(integrity.get("review_required")) else result.get("tier2_score"),
         "tier2_missing": [] if bool(integrity.get("review_required")) else (result.get("tier2_missing") or []),
+        "package_sqs": _pkg_now,
+        "key_details": _key_now,
         "doc_summary": [
             _doc_summary_entry(d, (result.get("primary") or {}).get("filename", ""))
             for d in (result.get("processed_docs") or [])
@@ -765,45 +823,38 @@ async def document_reclassify(
     # than left stale. Deterministic (no LLM). Non-fatal — a failure here never
     # blocks the reclassification itself.
     package_sqs = None
+    _key_now = None
     try:
-        from services.sqs_service import calculate_sqs_from_facts
-        _facts    = result.get("merged_facts") or {}
-        _flags    = result.get("mflags") or {}
-        _form_ids = [r.get("form_id") for r in (result.get("recommendations") or []) if r.get("form_id")]
-        if _form_ids:
-            _sess = await get_processing_session(result["session_id"])
-            _hard = result.get("hard_stops") or []
-            _soft = result.get("soft_stops") or []
-            _t2   = result.get("tier2_score") or 50
-            _seen, _cross = set(), []
-            for _iss in cross_validate(_facts, _flags, _form_ids):
-                _m = _iss.get("message", "")
-                if _m not in _seen:
-                    _seen.add(_m); _cross.append(_iss)
-            _per_form = []
-            for _fid in _form_ids:
+        # V1 H2 (2026-08-27): the pre-generation recipe that used to live
+        # inline here is now `sqs_service.current_package_sqs`, the one door
+        # every pre-form response reads - so the label the producer sees
+        # after a reclassify is the same score the upload and reload paths
+        # show. Two things changed with the move, both deliberate: the
+        # cross-form input is the pipeline's own `cross_form_issues` with
+        # hard stops demoted pre-selection (C75 - a suggested form's rule
+        # capped this score at 60 while the card beside it said "warning"),
+        # and a package with NO recommended form is scored through the 3.7
+        # no-form path instead of skipped. Persist + snapshot are unchanged.
+        _pkg_now, _key_now = await _pre_form_status(
+            result["session_id"], result.get("merged_facts") or {},
+            result.get("mflags") or {}, integrity, current_user,
+        )
+        package_sqs = _pkg_now
+        if package_sqs:
+            # Same guard as the generate path, and the SAME SHAPE on purpose -
+            # this key is replaced wholesale, so a falsy score must never be
+            # written over the last good one. One shape at all three write
+            # sites means one rule, which is what the AST test can enforce.
+            _rc_updates: dict = {}
+            if package_sqs:
+                _rc_updates["package_sqs"] = package_sqs
+                if isinstance(package_sqs, dict) and package_sqs.get("sqs_history"):
+                    _rc_updates["sqs_history"] = package_sqs["sqs_history"]
+            if _rc_updates:
                 try:
-                    _per_form.append(calculate_sqs_from_facts(
-                        facts=_facts, flags=_flags, selected_form_ids=_form_ids,
-                        hard_stops=_hard, soft_stops=_soft, tier2_score=_t2,
-                        form_id=_fid, session_data=_sess,
-                    ))
-                except Exception as _sf_ex:
-                    logger.warning(f"reclassify per-form SQS failed for {_fid}: {_sf_ex}")
-            package_sqs = calculate_package_sqs(
-                facts=_facts, flags=_flags, form_results=_per_form,
-                cross_issues=_cross, hard_stops=_hard, soft_stops=_soft,
-                session_data=_sess, session_id=result["session_id"],
-                user_id=str(current_user["id"]),
-            )
-            try:
-                await upd_processing_session(result["session_id"], {
-                    "package_sqs": package_sqs,
-                    **({"sqs_history": package_sqs.get("sqs_history")}
-                       if isinstance(package_sqs, dict) and package_sqs.get("sqs_history") else {}),
-                })
-            except Exception as _persist_ex:
-                logger.warning(f"reclassify persist package_sqs failed: {_persist_ex}")
+                    await upd_processing_session(result["session_id"], _rc_updates)
+                except Exception as _persist_ex:
+                    logger.warning(f"reclassify persist package_sqs failed: {_persist_ex}")
             # E&O 5.12: a reclassification that moved the score is a snapshot
             # trigger like any other material change.
             try:
@@ -839,6 +890,7 @@ async def document_reclassify(
         "tier2_score": result.get("tier2_score"),
         "tier2_missing": result.get("tier2_missing") or [],
         "package_sqs": package_sqs,
+        "key_details": _key_now,
         "integrity": integrity,
         "integrity_review_required": bool(integrity.get("review_required")),
         "underwriting_consistency": result.get("underwriting_consistency") or {},
@@ -970,6 +1022,11 @@ async def underwriting_confirm_value(
         result.get("structured_issues") or [], result.get("hard_stops") or [],
         _final_soft_stops
     )
+    # V1 H2: status label + key details, same withholding as tier2_score.
+    _pkg_now, _key_now = await _pre_form_status(
+        result["session_id"], result.get("merged_facts") or {},
+        result.get("mflags") or {}, integrity, current_user,
+    )
     return JSONResponse({
         "success": True,
         "session_id": result["session_id"],
@@ -986,6 +1043,8 @@ async def underwriting_confirm_value(
         "grouped_issues": _grouped_issues,
         "tier2_score": result.get("tier2_score"),
         "tier2_missing": result.get("tier2_missing") or [],
+        "package_sqs": _pkg_now,
+        "key_details": _key_now,
         "normalized_differences": result.get("normalized_differences") or [],
         "doc_conflicts": result.get("doc_conflicts") or [],
         "integrity": integrity,
@@ -1359,20 +1418,37 @@ async def select_forms_bulk(req: BulkFormSelectionRequest, current_user: dict = 
             )
             logger.info(f"package_sqs calculated: score={package_sqs.get('package_sqs_score')}, tier={package_sqs.get('tier')}")
         except Exception as _pkg_ex:
-            logger.error(f"calculate_package_sqs failed: {_pkg_ex}", exc_info=True)
+            # NAME THE SESSION AND THE FORMS. A live run lost its Total Package
+            # Score and this line was the only evidence of why - without the
+            # session id it cannot be tied to the run that reported it.
+            logger.error(
+                f"calculate_package_sqs failed [session={req.session_id} "
+                f"forms={combined_ids} trace={get_trace_id()}]: {_pkg_ex}",
+                exc_info=True)
             package_sqs = None
 
         # Persist so the async (202) refetch path and page reloads can recover it.
-        try:
-            await upd_processing_session(req.session_id, {
-                "package_sqs": package_sqs,
-                # Explicit key engages session_repository's append-only
-                # sqs_history merge - see the note on the update_pdf persist.
-                **({"sqs_history": package_sqs.get("sqs_history")}
-                   if isinstance(package_sqs, dict) and package_sqs.get("sqs_history") else {}),
-            })
-        except Exception as _persist_ex:
-            logger.warning(f"persist package_sqs failed: {_persist_ex}")
+        #
+        # A FAILED (None) SCORE IS NEVER WRITTEN. `upd_processing_session`
+        # replaces this key wholesale (session_repository, the `else` branch of
+        # the merge loop), so persisting None DESTROYS the last good score - and
+        # the modal's reload path reads it straight from the session
+        # (`sessData.package_sqs || null`), so one transient scoring failure made
+        # the Total Package Score section vanish for the REST of that session,
+        # long after the cause had passed. The facts merge already refuses to let
+        # one writer blank what another set; this key had no such protection.
+        _pkg_updates: dict = {}
+        if package_sqs:
+            _pkg_updates["package_sqs"] = package_sqs
+            # Explicit key engages session_repository's append-only
+            # sqs_history merge - see the note on the update_pdf persist.
+            if isinstance(package_sqs, dict) and package_sqs.get("sqs_history"):
+                _pkg_updates["sqs_history"] = package_sqs["sqs_history"]
+        if _pkg_updates:
+            try:
+                await upd_processing_session(req.session_id, _pkg_updates)
+            except Exception as _persist_ex:
+                logger.warning(f"persist package_sqs failed: {_persist_ex}")
 
         # E&O 5.12: the first scoring snapshot of the package.
         try:
@@ -1779,35 +1855,46 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
         # flag must drop so its dependent hard stops (e.g. property COPE)
         # don't keep the score capped. We never RAISE a flag here — raising
         # requires a fresh extraction pass.
+        #
+        # V1 H1 (2026-08-26) - THE DEMOTION KEYED ON THE PENALTY'S OWN FACTS.
+        # This block used to drop `has_auto_coverage` when the auto limit AND
+        # the vehicle schedule were both blank, `has_workers_comp` when payroll
+        # and class codes were, and so on - i.e. precisely the facts whose
+        # ABSENCE is the deduction. The most incomplete auto submission lost
+        # every auto deduction, warning and ceiling the moment ANY field on ANY
+        # form was edited (the block runs on every edit; the edited field need
+        # not be related). The score went UP for being incomplete, and because
+        # `fresh_flags` is persisted below, every later recalculation
+        # inherited the drop until a Data Consistency confirm rebuilt the
+        # flags - so the score oscillated between two paths. Measured in the
+        # H1 audit; the same shape for all four flags.
+        #
+        # A flag now drops only when NO positive evidence for the line remains
+        # - no section form selected for it, no `coverage_lines` grant, and no
+        # fact that belongs to that line carrying an answer - decided by the
+        # one door (`coverage_evidence.coverage_flag_supported`), which reads
+        # the registry rather than a hand-typed list of two or three facts.
+        # "Clearing the last backing fact" still demotes; "the penalty's facts
+        # were never there" no longer does.
         fresh_flags = dict(session.get("flags") or {})
-
-        def _fact(k):
-            return updated_facts.get(k) if updated_facts.get(k) not in ("", "null", "None") else None
-
-        if fresh_flags.get("has_property_coverage") and not (
-            _fact("property_building_value")
-            or _fact("property_bpp_value")
-            or _fact("locations")
-        ):
-            fresh_flags["has_property_coverage"] = False
-        if fresh_flags.get("has_umbrella") and not (
-            _fact("umbrella_limit")
-            or _fact("umbrella_attachment_point")
-            or _fact("umbrella_sir")
-        ):
-            fresh_flags["has_umbrella"] = False
-        if fresh_flags.get("has_auto_coverage") and not (
-            _fact("auto_liability_limit")
-            or _fact("auto_vin_schedule")
-            or _fact("vehicle_schedule")
-        ):
-            fresh_flags["has_auto_coverage"] = False
-        if fresh_flags.get("has_workers_comp") and not (
-            _fact("wc_payroll")
-            or _fact("wc_class_codes")
-            or _fact("total_payroll")
-        ):
-            fresh_flags["has_workers_comp"] = False
+        try:
+            from services.coverage_evidence import coverage_flag_supported
+            _selected_for_flags = list(
+                (session.get("selected_form_ids") or [])
+            ) + list((session.get("generated_forms") or {}).keys())
+            for _cov_flag in ("has_property_coverage", "has_umbrella",
+                              "has_auto_coverage", "has_workers_comp"):
+                if fresh_flags.get(_cov_flag) and not coverage_flag_supported(
+                        _cov_flag, updated_facts, _selected_for_flags):
+                    fresh_flags[_cov_flag] = False
+                    logger.info(
+                        "update_pdf: %s dropped - no section form selected, no "
+                        "coverage_lines grant and no fact of that line answered",
+                        _cov_flag)
+        except Exception as _cfx:                              # noqa: BLE001
+            # Fail toward KEEPING the flag: a penalty that stays is visible
+            # and fixable; one that silently vanishes is the defect above.
+            logger.warning("coverage flag recompute skipped: %s", _cfx, exc_info=True)
 
         _re_hard, _re_soft = evaluate_stops(updated_facts, fresh_flags)
         # Cross-DOCUMENT identity conflicts are a third detector that runs at
@@ -1993,7 +2080,9 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
                 calculation_stage="form_edited",
             )
         except Exception as _pkg_ex:
-            logger.error(f"package_sqs recompute (edit) failed: {_pkg_ex}", exc_info=True)
+            logger.error(
+                f"package_sqs recompute (edit) failed [session={req.session_id} "
+                f"trace={get_trace_id()}]: {_pkg_ex}", exc_info=True)
             pkg_sqs = None
 
         # ── C3 3.11 / spec section 8: credits SURVIVE a recalculation ────────
@@ -2061,7 +2150,9 @@ async def update_pdf(req: PDFUpdateRequest, current_user: dict = Depends(get_cur
             "flags": fresh_flags,
             "hard_stops": fresh_hard_stops,
             "soft_stops": fresh_soft_stops,
-            "package_sqs": pkg_sqs,
+            # Omitted when the recompute FAILED - see the generate path: this key
+            # is replaced wholesale, so writing None wipes the last good score.
+            **({"package_sqs": pkg_sqs} if pkg_sqs else {}),
             # The scorer appends to sqs_history and returns it inside
             # package_sqs, but session_repository's append-only merge only
             # runs when the key is passed EXPLICITLY - no caller ever did, so
@@ -2184,6 +2275,12 @@ async def get_extraction_result(
         cross_issues=proc_session.get("cross_issues_last") or [],
     )
 
+    # V1 H2: status label + key details. The row is already loaded; once
+    # forms exist this returns the persisted, credit-bearing score.
+    _pkg_now, _key_now = await _pre_form_status(
+        session_id, proc_session.get("facts") or {}, mflags, integrity,
+        current_user, session_row=proc_session,
+    )
     return JSONResponse({
         "success":               True,
         "session_id":            session_id,
@@ -2204,6 +2301,8 @@ async def get_extraction_result(
         # not re-transmit the readiness number derived from a possibly-mixed package.
         "tier2_score":           None if integrity.get("review_required") else proc_session.get("tier2_score"),
         "tier2_missing":         [] if integrity.get("review_required") else proc_session.get("tier2_missing", []),
+        "package_sqs":           _pkg_now,
+        "key_details":           _key_now,
         "recommendations":       proc_session.get("recommendations", []),
         "account_profile":       proc_session.get("account_profile", {}),
         "all_available_forms":   score_extra_forms(

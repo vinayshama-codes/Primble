@@ -197,6 +197,18 @@ def _asserted_absent(fact_key: str, facts: Optional[dict]) -> bool:
     return False
 
 
+def _owned_vehicle_fact_not_applicable(fact_key: str, facts: Optional[dict]) -> bool:
+    """H1: the five owned-vehicle facts on an HNOA-only auto line (6.3), and
+    `wc_xmod` when the documents or the producer say no mod applies (6.4).
+    One door decides (`coverage_evidence.h1_fact_not_applicable`). Fail-closed:
+    if the door cannot answer, the fact stays askable."""
+    try:
+        from services.coverage_evidence import h1_fact_not_applicable
+        return h1_fact_not_applicable(fact_key, facts)
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
 def _was_rejected(fact_key: str, facts: Optional[dict]) -> bool:
     """True when a value for this fact WAS found and deliberately discarded."""
     if not isinstance(facts, dict):
@@ -300,6 +312,19 @@ def derive_value_state(fact_key: str, raw: Any, facts: Optional[dict] = None,
     if _is_blank(value):
         line = _line_of_fact(fact_key)
         if line and line in denied_lines(facts):
+            return NOT_APPLICABLE
+        # ── V1 H1 6.3 (2026-08-26): owned-vehicle facts on an HNOA-only line ─
+        # "do not require an owned vehicle schedule; do not require
+        # owned-vehicle garaging; do not penalize ... a driver/vehicle schedule
+        # that is not applicable." The vehicle list, drivers, garaging, radius
+        # and use are Not Applicable when the auto line is POSITIVELY
+        # hired/non-owned only (symbols 8/9 alone, an explicit "no owned
+        # vehicles", or every granted auto line naming HNOA) - decided by the
+        # one door, `coverage_evidence.auto_exposure_kind`, from the same
+        # signals the scorer reads. Same axis as `denied_lines`, one level
+        # finer: the LINE applies, these FACTS under it do not. Silence never
+        # gets here (UNKNOWN is presumed owned - owner ruling).
+        if _owned_vehicle_fact_not_applicable(fact_key, facts):
             return NOT_APPLICABLE
         if _was_rejected(fact_key, facts):
             return UNABLE_TO_DETERMINE
@@ -610,6 +635,12 @@ def is_not_applicable_for(facts: Optional[dict], fact_key: str,
     if isinstance(raw, dict) and (raw.get("not_applicable") is True
                                   or raw.get("value_state") == NOT_APPLICABLE):
         return True                       # explicit about the fact itself
+    # V1 H1 6.3: an owned-vehicle fact on an HNOA-only line is about the FACT,
+    # not the line. The producer selecting ACORD 127 means they ARE applying
+    # for the auto line - and a hired/non-owned-only account still has no
+    # vehicle list to give. The override below is for line-level denial only.
+    if _owned_vehicle_fact_not_applicable(fact_key, facts):
+        return True
     line = _line_of_fact(fact_key)
     if line and line in lines_applied_for(form_ids):
         return False                      # they are applying for it - ask

@@ -335,6 +335,43 @@ async def run_extraction_pipeline(
                                     probe_umbrella=True)
 
 
+# Flags a HUMAN sets and nothing re-derives from the documents, paired with the
+# human fact each one was derived from. `merge_facts` rebuilds flags from the
+# documents alone, so every re-run (Data Consistency confirm, reclassify,
+# integrity resolve) silently forgot the producer's New Venture confirmation -
+# Loss History flipped from Not Applicable back to a penalty - and the
+# marketing-reason adverse-action classification. Found by the H1 audit
+# (2026-08-26) while chasing the edit-path flag demotion; same family.
+_HUMAN_SET_FLAGS: tuple = (
+    ("new_venture_confirmed",        "new_venture_indicator"),
+    ("prior_carrier_adverse_action", "carrier_marketing_reason"),
+)
+
+
+def _carry_human_flags(mflags: dict, merged_facts: dict,
+                       prior_flags: Optional[dict]) -> List[str]:
+    """Carry each human-set flag across a re-merge, ONLY while the human fact
+    it was derived from is still present with human provenance - a flag must
+    never outlive its evidence. Never overrides a flag the merge already set.
+    Returns the flags carried, for logging and tests."""
+    carried: List[str] = []
+    if not isinstance(prior_flags, dict) or not isinstance(mflags, dict):
+        return carried
+    try:
+        from services.fact_state import human_provenance_facts as _hpf
+        _human_now = _hpf(merged_facts)
+    except Exception as _hfx:                                  # noqa: BLE001
+        logger.warning("human-flag preservation skipped: %s", _hfx)
+        return carried
+    for _flag, _src_fact in _HUMAN_SET_FLAGS:
+        if _flag in prior_flags and _src_fact in _human_now and _flag not in mflags:
+            mflags[_flag] = bool(prior_flags[_flag])
+            carried.append(_flag)
+    if carried:
+        logger.info("human-set flag(s) carried through the re-merge: %s", carried)
+    return carried
+
+
 async def _finalize_pipeline(
     processed_docs: list[dict],
     user_id: Any,
@@ -363,6 +400,14 @@ async def _finalize_pipeline(
     # confirm, reclassify, integrity resolve). Principle 6. Pass the stored
     # facts and human-provenance entries are carried across.
     prior_facts: Optional[dict] = None,
+    # V1 H1 (2026-08-26): the session's PREVIOUS flags, for the two a HUMAN
+    # sets and nothing re-derives - `new_venture_confirmed` and
+    # `prior_carrier_adverse_action`. merge_facts rebuilds flags from the
+    # documents alone, so every re-run silently forgot the producer's New
+    # Venture confirmation (Loss History flipped from N/A back to a penalty)
+    # and the marketing-reason classification. Carried only when the fact
+    # each one was derived from survived the re-merge with human provenance.
+    prior_flags: Optional[dict] = None,
 ) -> dict:
     """Run everything AFTER per-document extraction: merge facts, cross-doc
     consistency, Submission Integrity Validation, and — only when integrity
@@ -449,6 +494,9 @@ async def _finalize_pipeline(
                         "the producer: %s", _newly_held)
     except Exception as _hex:                                  # noqa: BLE001
         logger.warning("human-fact preservation skipped: %s", _hex)
+
+    # ── Human-set flags survive the re-merge too (V1 H1, 2026-08-26) ────────
+    _carry_human_flags(mflags, merged_facts, prior_flags)
 
     if _held_client:
         merged_facts["_client_answer_conflicts"] = _held_client
@@ -637,16 +685,32 @@ async def _finalize_pipeline(
     # explicitly state it - never inferred). This is purely additive: it can only
     # ADD evidence the scorer already knows how to read, never remove it.
     if mflags.get("has_umbrella"):
+        def _schedule_referenced(_text: str) -> bool:
+            """Affirmatively referenced. Fails toward NOT writing a synthetic
+            fact - the safe direction, since writing one manufactures evidence."""
+            try:
+                from services.coverage_evidence import text_references_schedule_as_present
+                return text_references_schedule_as_present(_text)
+            except Exception:                                  # noqa: BLE001
+                return False
+
         def _fact_present(_key: str) -> bool:
             _v = merged_facts.get(_key)
             if isinstance(_v, dict):
                 _v = _v.get("value")
-            return _v not in (None, "", "null", "none")
+            if _v in (None, "", "null", "none"):
+                return False
+            # V1 H1 (2026-08-26): a stored sentence saying the document was NOT
+            # supplied is not the document. Without this the backfill below
+            # skipped as "already present" and the -15 never fired.
+            if _key == "schedule_of_underlying_insurance":
+                try:
+                    from services.coverage_evidence import value_states_absence
+                    return not value_states_absence(_v)
+                except Exception:                              # noqa: BLE001
+                    return True
+            return True
 
-        _schedule_phrases = (
-            "schedule of underlying", "underlying insurance schedule",
-            "schedule of underlying insurance",
-        )
         _need_schedule    = not _fact_present("schedule_of_underlying_insurance")
         _need_follow_form = not _fact_present("umbrella_follow_form")
         if _need_schedule or _need_follow_form:
@@ -656,7 +720,14 @@ async def _finalize_pipeline(
                 _utext = str(_udoc.get("text", "") or "").lower()
                 if not _utext:
                     continue
-                if _need_schedule and any(p in _utext for p in _schedule_phrases):
+                # V1 H1 (2026-08-26): AFFIRMATIVELY referenced, not merely
+                # mentioned. This was a bare substring test, so the live P1
+                # document's own sentence "the schedule of underlying insurance
+                # was not supplied" made it WRITE a synthetic "referenced in
+                # submitted documents" fact - manufacturing, at
+                # `confidence: filled`, the very evidence whose absence is the
+                # -15. One door decides (`coverage_evidence`).
+                if _need_schedule and _schedule_referenced(_utext):
                     merged_facts["schedule_of_underlying_insurance"] = {
                         "value": "Schedule of Underlying Insurance referenced in submitted documents",
                         "confidence": "filled", "source": "policy_doc_text",
@@ -1248,6 +1319,7 @@ async def resolve_submission_integrity(
             confirmations=session.get("underwriting_confirmations") or {},
             client_answer_conflicts=session.get("client_answer_conflicts") or {},
             prior_facts=session.get("facts") or {},
+            prior_flags=session.get("flags") or {},
         )
 
     if action == "continue_anyway":
@@ -1262,6 +1334,7 @@ async def resolve_submission_integrity(
             confirmations=session.get("underwriting_confirmations") or {},
             client_answer_conflicts=session.get("client_answer_conflicts") or {},
             prior_facts=session.get("facts") or {},
+            prior_flags=session.get("flags") or {},
         )
 
     if action == "create_separate_submissions":
@@ -1455,6 +1528,7 @@ async def reclassify_document(
         confirmations=session.get("underwriting_confirmations") or {},
         client_answer_conflicts=session.get("client_answer_conflicts") or {},
             prior_facts=session.get("facts") or {},
+            prior_flags=session.get("flags") or {},
     )
     # Surface the before/after classification so the route can record an accurate
     # §4.2 audit row without re-deriving the previous type.
@@ -1550,6 +1624,7 @@ async def confirm_underwriting_value(
         confirmations=confirmations, probe_umbrella=False,
         client_answer_conflicts=session.get("client_answer_conflicts") or {},
             prior_facts=session.get("facts") or {},
+            prior_flags=session.get("flags") or {},
     )
     result["_pre_confirm_candidates"] = pre_candidates
     result["_pre_confirm_reason"] = pre_reason

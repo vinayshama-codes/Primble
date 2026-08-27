@@ -1380,9 +1380,19 @@ _ACORD_FIELD_RULES = [
     ("Vehicle_CombinedSingleLimit_LimitIndicator",         "auto_liability_structure"),
     ("AutoLiability_CombinedSingleLimit",                  "auto_liability_limit"),
     ("Vehicle_CombinedSingleLimit",                        "auto_liability_limit"),
-    ("Vehicle_BodilyInjury_PerPerson",                     "auto_liability_limit"),
-    ("Vehicle_BodilyInjury_PerAccident",                   "auto_liability_limit"),
-    ("Vehicle_PropertyDamage_PerAccident",                 "auto_liability_limit"),
+    # V1 H1 (2026-08-26): each split box maps to ITS OWN fact, not to the
+    # combined single limit. Stamping is unaffected - `_resolve_auto_liability_
+    # limit_cell` intercepts these three boxes long before this rules loop - but
+    # `_canonical_key` reads this table, and it is what
+    # `_restamp_canonical_into_forms` uses to find the boxes a producer answer
+    # should fill. While all three pointed at `auto_liability_limit`, a producer
+    # who resolved the "Split liability limits incomplete" hard stop by typing
+    # the three limits cleared the stop and stamped NOTHING: the restamp looked
+    # for boxes whose canonical key was `auto_bi_per_person` and found none.
+    # A score that says fixed over a blank legal document.
+    ("Vehicle_BodilyInjury_PerPerson",                     "auto_bi_per_person"),
+    ("Vehicle_BodilyInjury_PerAccident",                   "auto_bi_per_accident"),
+    ("Vehicle_PropertyDamage_PerAccident",                 "auto_pd_per_accident"),
     ("Vehicle_OtherCoverage_CoverageDescription",          None),
     ("Vehicle_OtherCoverage_LimitAmount",                  None),
     ("Vehicle_OtherCoveredAutoDescription",                None),
@@ -1812,6 +1822,20 @@ def _resolve_auto_liability_limit_cell(field_name: str, facts: dict):
 
     raw_split = _fv(facts, "auto_split_limits")
     is_split = raw_split is True or str(raw_split).strip().lower() in {"true", "yes", "1"}
+    # V1 H1 (2026-08-26): the FACTS decide too, not the flag alone. The hard
+    # stop "Split liability limits incomplete" is now resolvable by typing the
+    # three limits (they are real canonical facts - the rule used to read three
+    # phantom keys), and `apply_producer_answer_to_session` writes FACTS. With
+    # the flag left at whatever the documents said, the stop cleared and the
+    # three boxes stayed blank forever - a score that says fixed over a legal
+    # document that is empty. One door answers "is this policy split"
+    # (`coverage_evidence.auto_split_limits_stated`: parts stated, no CSL).
+    if not is_split:
+        try:
+            from services.coverage_evidence import auto_split_limits_stated
+            is_split = auto_split_limits_stated(facts)
+        except Exception:                                      # noqa: BLE001
+            pass
 
     if is_csl_box:
         # A split-limit policy has no combined single limit to state.
@@ -6573,6 +6597,10 @@ _INDICATOR_RULES: Dict[str, Tuple[str, str]] = {
     "NamedInsured_LegalEntity_OtherIndicator": ("entity_type", "other"),
     # Lines of business — primary: flags booleans (has_*) from extraction; fallback: lines_of_business list
     "Policy_LineOfBusiness_BusinessAutoIndicator":          ("has_auto_coverage",      "yes"),
+    # V1 H1 6.3: the ACORD 127 USE column is NOT here. Seven independent
+    # substring rules ticked two mutually exclusive boxes on an ordinary
+    # multi-word value ("Commercial - Retail Delivery"), so the whole column
+    # has one owner instead: `_resolve_vehicle_use_indicator`.
     "Policy_LineOfBusiness_CommercialGeneralLiability":     ("has_general_liability",  "yes"),
     "Policy_LineOfBusiness_CommercialProperty":             ("has_property_coverage",  "yes"),
     "Policy_LineOfBusiness_UmbrellaIndicator":              ("has_umbrella",           "yes"),
@@ -7805,10 +7833,101 @@ def _resolve_vehicle_rating_cell(field_name: str, facts: dict):
             rv = str(rows[idx].get(k) or "").strip()
             if _RATING_CELL_VALUE_RE.match(rv):
                 return rv
-    # 3. Positive evidence only: an auto dec that describes the vehicle but
+    # 3. The policy-level radius fact, when the dec is SILENT on the column
+    # (a stated "NA" returned above and still vetoes). V1 H1 (2026-08-26):
+    # the fact is extracted, asked of the client, derived from the dec index
+    # and scored at package level, but a value the PRODUCER typed never
+    # reached this box - the questionnaire's answer was worth points and
+    # printed nothing. Only rows that hold a real vehicle inherit it; with no
+    # schedule at all, only row A can be said to exist.
+    if col == "RadiusOfUse":
+        scalar = str(_fv(facts, "auto_radius_of_operation") or "").strip()
+        if _RATING_CELL_VALUE_RE.match(scalar) and (
+                idx == 0 or (isinstance(rows, list) and idx < len(rows))):
+            return scalar
+    # 4. Positive evidence only: an auto dec that describes the vehicle but
     # not this cell means the figure is genuinely unstated. No auto dec at
     # all means we cannot say, and the legacy path stands.
     return None if saw_auto_dec else _SCHED_SKIP
+
+
+# The ACORD 127 USE column: SEVEN MUTUALLY EXCLUSIVE boxes, named explicitly so
+# the pattern cannot also swallow `Vehicle_Use_UnderFifteenMilesIndicator` /
+# `..._FifteenMilesOrOverIndicator` - same namespace, but they are the RADIUS
+# pair, and answering those "No" would assert a radius nobody stated.
+_VEHICLE_USE_INDICATOR_RE = re.compile(
+    r"^Vehicle_Use_(Pleasure|Farm|Commercial|Retail|Service|ForHire|Other)Indicator_([A-Z])$")
+
+# Box -> the words a document uses for it. Declaration order is irrelevant;
+# position in the VALUE decides (see `_vehicle_use_class`).
+_VEHICLE_USE_CLASSES: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("ForHire",    ("for hire", "for-hire", "forhire", "livery")),
+    ("Pleasure",   ("pleasure", "personal use", "commuting")),
+    ("Farm",       ("farm", "agricultur")),
+    ("Retail",     ("retail", "delivery", "deliveries")),
+    ("Service",    ("service",)),
+    ("Commercial", ("commercial", "hauling")),
+)
+
+
+def _vehicle_use_class(value: Any) -> Optional[str]:
+    """The ONE use class this value names, or None.
+
+    ADVERSARIAL REVIEW, 2026-08-26: these seven boxes were ticked by seven
+    INDEPENDENT substring rules, so an ordinary multi-word value stamped TWO
+    mutually exclusive boxes - "Commercial - Retail Delivery", the example in
+    this codebase's own extraction prompt, ticked Commercial AND Retail. A
+    vehicle has one use class.
+
+    The EARLIEST keyword wins, because that is how these values are written:
+    the leading word is the classification and the rest elaborates
+    ("Commercial - Retail Delivery" is commercial use, delivering at retail).
+    A longer keyword beats a shorter one starting at the same position, so
+    "for hire" can never be read as something else.
+    """
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    best: Optional[Tuple[int, int, str]] = None
+    for box, keywords in _VEHICLE_USE_CLASSES:
+        for kw in keywords:
+            pos = text.find(kw)
+            if pos >= 0:
+                candidate = (pos, -len(kw), box)
+                if best is None or candidate < best:
+                    best = candidate
+    return best[2] if best else None
+
+
+def _resolve_vehicle_use_indicator(field_name: str, facts: dict):
+    """V1 H1 6.3 - the ACORD 127 USE column. ALL rows, ONE owner.
+
+    `auto_vehicle_use` is POLICY-level: a declarations page states one use
+    class for the fleet. Row A resolves whenever a use is stated; rows B..
+    inherit it only where a real scheduled vehicle sits (the same policy-level
+    inheritance the comp/collision symbols use), so a phantom row is never
+    given a use. Returns _SCHED_SKIP whenever this resolver has nothing to
+    say, which leaves the box exactly as it was before H1.
+    """
+    m = _VEHICLE_USE_INDICATOR_RE.match(field_name)
+    if not m:
+        return _SCHED_SKIP
+    box, letter = m.group(1), m.group(2)
+    use = _fv(facts, "auto_vehicle_use")
+    if not use:
+        return _SCHED_SKIP
+    idx = _ROW_LETTER_TO_IDX.get(letter, 99)
+    if idx > 0:
+        rows = _fv(facts, "auto_vin_schedule")
+        if not isinstance(rows, list) or idx >= len(rows):
+            return _SCHED_SKIP
+    winner = _vehicle_use_class(use)
+    if winner is None:
+        # A use IS stated but this table does not recognise it. ACORD's own
+        # answer for that is the Other box (its OtherDescription is a text
+        # field and never reaches this resolver).
+        return "Yes" if box == "Other" else "No"
+    return "Yes" if box == winner else "No"
 
 
 # ── One policy, one printing, everywhere on the form ─────────────────────────
@@ -8298,6 +8417,13 @@ def _deterministic_map(field_name: str, facts: dict):
     #   • All other fields return None → treated as UNMATCHED by the caller
     #     → gap-fill LLM fills them only if a second entity exists in the doc.
     # The _A slot (idx=0) is the primary slot and always passes through below.
+    # V1 H1 6.3: the USE boxes of rows B.. inherit the fleet's use class for
+    # every REAL vehicle row (the guard below would otherwise send them to gap
+    # fill, where the model guesses a use per row from the raw text).
+    vehicle_use = _resolve_vehicle_use_indicator(field_name, facts)
+    if vehicle_use is not _SCHED_SKIP:
+        return vehicle_use
+
     _row_guard = _SCHED_ROW_RE.match(field_name)
     if _row_guard and _ROW_LETTER_TO_IDX[_row_guard.group(2)] >= 1:
         # allow_scalar_rules=False: a _B/_C row must never inherit the PRIMARY
@@ -10963,16 +11089,46 @@ def _fill_unmatched_with_gpt(
                 form_id, chunk_label, "; ".join(non_null_rejected),
             )
         if unknown_keys:
-            _unknown_total = sum(1 for f in values if f not in sent)
-            logger.warning(
-                "gpt_fill UNKNOWN_KEYS: form=%s chunk=%s — the model answered %d of %d "
-                "keys under names that were NOT in the field list, so those answers are "
-                "DISCARDED. This is the long-context failure mode: it stops copying the "
-                "ACORD field names and invents its own. If this is a large fraction of the "
-                "reply, lower CONTEXT_UTILISATION so each call carries less document. "
-                "Examples: %s",
-                form_id, chunk_label, _unknown_total, len(values), "; ".join(unknown_keys),
-            )
+            # `sent` is THIS BATCH's field list, so "not in sent" was answering a
+            # different question than the message claimed. A key can be absent
+            # from a batch for three very different reasons, and only ONE of them
+            # is the long-context failure:
+            #   * the field was already stamped deterministically (Pass 1/1.5) -
+            #     it is a REAL ACORD field, correctly discarded here, and the
+            #     model was right to know its name;
+            #   * the field belongs to another batch of this same invocation;
+            #   * the name exists on no form at all - the model invented it.
+            # LIVE RUN 2026-08-27: this warned about
+            # `NamedInsured_LegalEntity_LimitedLiabilityCorporationIndicator_A` on
+            # an 1,877-CHARACTER document (that batch logged already_filled_hits=9)
+            # and advised lowering CONTEXT_UTILISATION - the opposite of the
+            # long-context condition, and the `_B` sibling was accepted normally
+            # one batch later. A detector that fires on the ordinary case gets
+            # ignored, and then disbelieved on the day it is real.
+            _eligible  = set(eligible_fields)
+            _prefilled = set(already_filled or {})
+            _known     = _eligible | _prefilled
+            _fabricated  = [f for f in unknown_keys if f not in _known]
+            _other_batch = [f for f in unknown_keys if f in _known]
+            _unknown_total = sum(1 for f in values if f not in sent and f not in _known)
+            if _fabricated:
+                logger.warning(
+                    "gpt_fill UNKNOWN_KEYS: form=%s chunk=%s — the model answered %d of %d "
+                    "keys under names that exist on NO selected form, so those answers are "
+                    "DISCARDED. This is the long-context failure mode: it stops copying the "
+                    "ACORD field names and invents its own. If this is a large fraction of the "
+                    "reply, lower CONTEXT_UTILISATION so each call carries less document. "
+                    "Examples: %s",
+                    form_id, chunk_label, _unknown_total, len(values), "; ".join(_fabricated),
+                )
+            if _other_batch:
+                logger.info(
+                    "gpt_fill OUT_OF_BATCH_KEYS: form=%s chunk=%s — %d real ACORD field(s) "
+                    "answered outside their own batch (already stamped, or asked in another "
+                    "batch). Discarded here, which is correct; NOT a hallucination. "
+                    "Examples: %s",
+                    form_id, chunk_label, len(_other_batch), "; ".join(_other_batch[:6]),
+                )
 
     # ── Chunk sizing ──────────────────────────────────────────────────────────
     # Budget per call: model context minus reply headroom minus fixed overhead

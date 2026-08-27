@@ -162,13 +162,28 @@ def test_non_typeable_legacy_stops_never_get_a_typed_input():
     matters is unchanged and asserted below: never `field`, never `schedule`."""
     for msg in [
         "GL coverage detected but no class codes found. Fix: ...",
-        "Split liability limits incomplete - all three components required.",
         "Monopolistic WC state (ND/OH/WA/WY) requires the state fund.",
     ]:
         res = make_issue("legacy_soft_0", "soft_warning", msg).get("resolution")
         assert res and res["mode"] == "none", msg
         assert res.get("note"), f"{msg}: 'none' mode must explain why"
         assert "facts" not in res and "schedule_key" not in res, msg
+
+    # "Split liability limits incomplete" LEFT this list on 2026-08-26 (V1 H1
+    # audit). It was here because the rule read `bi_per_person` /
+    # `bi_per_accident` / `pd_per_accident` - keys nothing has ever written -
+    # and the note claimed those were "not writable canonical facts". The
+    # writable facts are `auto_bi_per_person` / `auto_bi_per_accident` /
+    # `auto_pd_per_accident` (schema, registry, stamped onto ACORD 127); both
+    # engines now read them, so the honest resolution is to TYPE the three
+    # limits. The old shape made the hard stop unsatisfiable on every
+    # split-limit policy.
+    res = make_issue("legacy_soft_0", "hard_stop",
+                     "Split liability limits incomplete - all three components required.",
+                     ).get("resolution")
+    assert res and res["mode"] == "field"
+    assert set(res["facts"]) == {"auto_bi_per_person", "auto_bi_per_accident",
+                                 "auto_pd_per_accident"}
 
     # A message no rule matches still gets nothing at all - never a fabricated
     # resolution invented from thin air.
