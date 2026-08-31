@@ -413,6 +413,131 @@ value. An offline probe proves the FUNCTION, never the SEAM around it.
 
 ## Critical Issues & Roadmap
 
+### OPEN - Three Score-Moving Defects Held For Brent (2026-08-31)
+
+**None of these are fixed. All three move customer-visible scores, so D6 applies -
+Brent sees the numbers before the change ships, not after.** Found while tracing a
+live report: three generated forms and the package all pinned at exactly 60 with an
+empty Hard Stops list on screen.
+
+**1. The umbrella gate turns Brent's own warnings into a hard stop.**
+`calculate_sqs`'s `umb_fail` (the `extra_hard_reason` block) caps a form at 60 whenever
+`_calculate_umbrella_adequacy` returns 0. That pillar starts at 100 and subtracts up to
+**135** points (-25 missing umbrella limit, -20 GL occurrence, -20 GL aggregate, -20
+auto CSL, -25 EL, -15 no schedule of underlying, -10 follow-form unconfirmed), so it
+reaches 0 by ACCUMULATION on a package whose underlying limits are all present and
+stated. Two of those seven fire on nearly every submission, so an umbrella package
+starts at 75 before anything is wrong.
+
+**This contradicts a ruling already on record, in three places in the same file:**
+`sqs_service.py:1105` - *"Client Q1: underlying limits below the umbrella baseline must
+be a WARNING + score reduction (handled in `_calculate_umbrella_adequacy`), NOT a hard
+stop. Carrier attachment points vary, so we never block."*; `:1219` - an entry was
+DELETED from `_ALWAYS_HARD_PATTERNS` for exactly this reason; `:5276` - *"client Q1/Q2:
+warn, not block"*. The ruling is honoured inside the pillar and undone by the gate that
+reads it.
+
+Provenance of the deductions, since it decides what may change: the THRESHOLDS
+($1M GL occ / $2M agg / $1M auto CSL / $1M-$500K EL) are **client-approved**
+(Beta Report section 6, Q1/Q2/Q3 - `sqs_service.py:23`); the -15 schedule of underlying
+is a **client V1 requirement**; the -10 follow-form is **client Q4 Option B**; the
+**-25 for a missing umbrella limit is NOT client-listed** - its own comment says so and
+calls it a display-consistency adjustment retained by owner decision. Brent sanctioned
+the REDUCTIONS. Nobody sanctioned the 60 cap.
+
+*Fix when approved:* cap only when `_umbrella_has_underlying(facts)` is False - the
+genuine broken-tower case the rule was written for, which already has its own hard stop
+in `evaluate_stops`. Everything else stays a pillar reduction. **Scores go UP.**
+
+**2. `confidence_fill_rate` truncates instead of rounding - a live off-by-one.**
+It ends `return int((weighted / filled_count) * 100)`. Binary floating point lands an
+exact 87 on `86.99999999999999`, and `int()` throws the fraction away. **Measured, not
+theorised - 11 real label combinations found inside n<=30**, e.g. 3x `deterministic` +
+`ai_high` + `ai_low` returns **86 where the exact value is 87**; 2x `deterministic` +
+3x `ai_high` returns **90 where it is 91**. `confidence_fill_rate` feeds the per-form
+Structural pillar, the package's Form Fill Quality component and the fill-rate deltas
+the questionnaire reports, so the error propagates into the headline SQS. One-character
+fix (`round`), but it moves every score that lands on such a boundary - **Brent
+conversation, not a drive-by.**
+
+**3. The package scorer manufactures a hard stop that never becomes a card.**
+`calculate_package_sqs` (the P2 block) injects its own
+`{"type": "hard_stop", "field": "property_building_value", ...}` into the local `_cross`
+list when `underwriting_consistency` has that fact `review_required`. It caps the
+package at 60 and its own comment claims *"so it shows in the Hard Stops section"* - it
+does not. The dict is created inside the function and is never written to
+`cross_issues_last` or `structured_issues`, so `build_grouped_view` cannot see it:
+`grouped_issues.hard_stops` is empty, `counts.hard_stops` is 0 and the frontend's
+`hasHardStops` gate is False, so the Hard Stops banner does not render at all. It
+survives ONLY as `cap_reason`, which the pre-form Review screen never prints (it renders
+`packageSqs.tier` alone) and the editor prints inside a COLLAPSED panel.
+
+Worse, it ignores the relevance rule the pipeline applies to the same fact.
+`extraction_pipeline.py` deliberately keeps a building-value conflict a WARNING when
+`has_property_coverage` is false (*"cannot block anything on a package that has no
+property coverage"*, C75); the scorer applies it unconditionally. Two files, opposite
+verdicts on one fact. **Reproduced: raw 68 -> displayed 60, `hard_stops == []`.**
+
+**Also open, non-scoring but same family:** the peril-deductible hard stop is a FALSE
+POSITIVE by construction. `property_has_peril_deductibles` is set by extraction when the
+document shows a wind/hail **or** earthquake **or** flood deductible (one is enough -
+`extraction_service.py:715`), and `evaluate_stops` (`sqs_service.py:948`) then
+hard-stops unless **all three** are defined. An ordinary policy with a wind/hail
+deductible and no earthquake or flood coverage is capped at 60 and told to "specify
+amounts" for perils it does not carry. The SAME rule exists in
+`cross_form_validator.py:1801` as a **soft warning** gated on `0 < present_count < 3` -
+two copies of one rule at opposite severities, the duplication class that let the
+Umbrella SIR and auto-symbol bugs survive their first fixes. **This was the live
+report's actual capper** (`80 earned, held at 60`), not the umbrella.
+
+### A 60 Cap Now Names Itself On The Form - SHIPPED 2026-08-31
+
+Three gates in `calculate_sqs` (`cope_hard`, `umb_fail`, `_prop_hard`) cap a form at 60
+through `_resolve_cap`'s `extra_hard_reason`, which lives OUTSIDE `hard_stops` /
+`soft_stops`. Nothing rendered them, so a form could sit at 60 with an empty Hard Stops
+list and no explanation anywhere.
+
+`calculate_sqs` now returns **`cap_hard_stops`** - the gate reason, populated only when
+that gate is what actually bound the score AND the reason is not already in
+`hard_stops` (`_resolve_cap` appends the gate LAST, so `cap_reason == _gate_hard_reason`
+proves the list was empty). The reason is also appended to `sqs["issues"]`, which
+`cover_service` already exports. The frontend renders it as a red **HARD STOPS** block
+on the per-form panel, outside the collapsible, and filters it out of Key Issues so the
+sentence never prints twice.
+
+**Display only. No cap fires that did not fire before, and no score moved** - verified
+by re-running the reported scenario before and after (60 / 45 / 60 both times).
+
+The umbrella reason string was also corrected: it claimed *"Umbrella present with no
+underlying GL or Auto limits"* on packages carrying both, because the pillar reaches 0
+two ways. New shared door **`_umbrella_has_underlying(facts)`** decides which sentence is
+true, and `_calculate_umbrella_adequacy` reads the same door so a second copy cannot
+drift.
+
+**Standing invariant, executable:** `tests/test_cap_60_is_visible.py` (10) fails the
+build if any `calculate_sqs` cap of 60 is neither in the passed `hard_stops` nor in
+`cap_hard_stops`. A future gate added to `extra_hard_reason` cannot go silent. Proved it
+bites by reverting the fix - 8 of 10 failed. Suite **5054 passed / 1 failed** (the
+documented `httpx` ImportError), zero regressions; frontend build clean.
+
+**The package half shipped the same day** - owner ruling *"the card must match the cap"*.
+`calculate_package_sqs` now returns `cap_hard_stops` + `cap_hard_stop_codes`;
+`build_grouped_view` gained `promote_codes`, which PROMOTES the existing card to
+hard-stop severity instead of drawing a duplicate (so it keeps its "Fix in Data
+Consistency" control - the only place a cross-document conflict can be cleared); all
+five pre-form routes score the package before building the view; the editor gained a
+package HARD STOPS block; and the essentials/lite screen folds the scorer reasons into
+its own box. Display only, no score moved. Tests: `tests/test_package_cap_is_visible.py`
+(8). Full detail in `v1-20AUG.md` H8-E.
+
+**Known STILL not covered:** `worker.py`'s async fallback averages already-capped form
+scores with no ceiling metadata; the credit re-application paths in
+`audit_routes._cap_from`, `form_routes.update_pdf` and `arq_service` recompute a ceiling
+from the stop LISTS only, so a gate-produced 60 is released the first time any credit
+lands; and generation does not refresh `groupedIssues` / `hardStops` / `softStops`
+(`select-forms-bulk` returns no `grouped_issues`).
+
+
 ### Early Score / Readiness Presentation (client section 7, V1 H2) - SHIPPED 2026-08-27
 **Read `v1-20AUG.md` H2-A before touching the pre-form Review card or any pre-generation
 scoring.** The card printed `tier2_score` as "Submission Readiness NN%" - the Tier 2

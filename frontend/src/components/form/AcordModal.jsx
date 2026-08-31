@@ -4217,6 +4217,14 @@ const AcordModal = forwardRef(function AcordModal({
   const hasWarnings  = reviewIssueCounts.warningCount  > 0;
 
   const activeSqs = activeFormId && generatedForms[activeFormId]?.sqs;
+  // A 60 cap that has no entry in the package Hard Stops list. The COPE,
+  // umbrella and property-integrity gates cap a form's score from OUTSIDE
+  // hard_stops, so the number sat there with nothing on screen explaining it
+  // (reported live 2026-08-31). They are rendered as hard stops below, and
+  // filtered out of Key Issues so the same sentence never prints twice.
+  const activeCapStops  = (activeSqs && activeSqs.cap_hard_stops) || [];
+  const activeKeyIssues = ((activeSqs && activeSqs.issues) || [])
+    .filter((s) => !activeCapStops.includes(s));
   // Short name of the form the pinned score belongs to. The pinned header is the
   // only thing left at the top of the panel once it scrolls, so it has to name
   // its own form - see the comment on that card.
@@ -5479,6 +5487,17 @@ const AcordModal = forwardRef(function AcordModal({
 
         {step === "lite" && (() => {
           const sqs = liteSqsData?.sqs;
+          // A cap held by a per-form gate or by the package scorer never reaches
+          // liteSqsData.hard_stops - that array is the session's legacy stop list
+          // only - so this screen printed a bare 60 with an EMPTY red box beside an
+          // amber box claiming "will cap at 85". Fold the scorer's own reasons in,
+          // skipping any the stop list already carries.
+          const _liteOwnStops = liteSqsData?.hard_stops || [];
+          const _liteCapStops = ((sqs?.cap_hard_stops && sqs.cap_hard_stops.length)
+            ? sqs.cap_hard_stops
+            : (sqs?.cap_applied === 60 && sqs?.cap_reason ? [sqs.cap_reason] : []))
+            .filter(m => m && !_liteOwnStops.some(o => String(o).startsWith(m) || m.startsWith(String(o))));
+          const liteHardStops = _liteOwnStops.concat(_liteCapStops);
           const liteReady = !liteGenerating && !!sqs;
           const liteGradeColor = g => ({ A: "#10b981", B: "#eab308", C: "#f59e0b", D: "#ef4444", F: "#ef4444" }[g] || "#94a3b8");
           const liteGradeBg = g => ({ A: "rgba(16,185,129,0.08)", B: "rgba(234,179,8,0.08)", C: "rgba(245,158,11,0.08)", D: "rgba(239,68,68,0.08)", F: "rgba(239,68,68,0.08)" }[g] || "rgba(148,163,184,0.08)");
@@ -5566,13 +5585,13 @@ const AcordModal = forwardRef(function AcordModal({
                     </div>
 
                     {/* Stops - side by side on desktop, stacked on mobile */}
-                    {(liteSqsData?.hard_stops?.length > 0 || liteSqsData?.soft_stops?.length > 0) && (
+                    {(liteHardStops.length > 0 || liteSqsData?.soft_stops?.length > 0) && (
                       <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: 16 }}>
                         <div className="lite-stops-grid">
-                          {liteSqsData?.hard_stops?.length > 0 && (
+                          {liteHardStops.length > 0 && (
                             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "12px 16px" }}>
                               <div style={{ fontSize: 11, fontWeight: 700, color: "#991b1b", marginBottom: 7 }}>Hard Stops - Caps Your Score at 60</div>
-                              {liteSqsData.hard_stops.map((s, i) => (
+                              {liteHardStops.map((s, i) => (
                                 <div key={i} style={{ fontSize: 12, color: "#7f1d1d", padding: "2px 0", display: "flex", gap: 6 }}>
                                   <span style={{ flexShrink: 0 }}>•</span><span>{s}</span>
                                 </div>
@@ -7028,6 +7047,30 @@ const AcordModal = forwardRef(function AcordModal({
                       );
                     })()}
 
+                    {/* Package-level hard stops. The Hard Stops section lives only on
+                        the review step, which cannot be reached once forms exist, so a
+                        package held at 60 had no card here - just a sentence inside a
+                        panel that is collapsed by default. Prefers cap_hard_stops (a cap
+                        with no card of its own) and falls back to cap_reason, which names
+                        the stop whatever its source. */}
+                    {packageSqs && packageSqs.cap_applied === 60 && (() => {
+                      const reasons = (packageSqs.cap_hard_stops && packageSqs.cap_hard_stops.length)
+                        ? packageSqs.cap_hard_stops
+                        : (packageSqs.cap_reason ? [packageSqs.cap_reason] : []);
+                      if (!reasons.length) return null;
+                      return (
+                        <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+                          <div style={{ fontSize: 10, fontWeight: 800, color: "#b91c1c", marginBottom: 4 }}>
+                            HARD STOPS
+                            <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps the package score at 60</span>
+                          </div>
+                          {reasons.map((s, i) => (
+                            <div key={i} style={{ fontSize: 11, color: "#7f1d1d", padding: "1px 0", lineHeight: 1.45 }}>• {s}</div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
                     {/* ── TOTAL PACKAGE SCORE (collapsible, white; score + LOB shown in header) ── */}
                     {packageSqs && (
                       <CollapsibleSection
@@ -7341,19 +7384,33 @@ const AcordModal = forwardRef(function AcordModal({
                       </CollapsibleSection>
                     )}
 
+                    {/* Hard stops that hold THIS form's score at 60. Shown outside the
+                        collapsible: a blocker behind a chevron is a blocker nobody reads. */}
+                    {activeCapStops.length > 0 && (
+                      <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: "#b91c1c", marginBottom: 4 }}>
+                          HARD STOPS
+                          <span style={{ fontWeight: 600, color: "#991b1b", marginLeft: 6 }}>Caps this form's SQS at 60</span>
+                        </div>
+                        {activeCapStops.map((s, i) => (
+                          <div key={i} style={{ fontSize: 11, color: "#7f1d1d", padding: "1px 0", lineHeight: 1.45 }}>• {s}</div>
+                        ))}
+                      </div>
+                    )}
+
                     {/* ── RECOMMENDATIONS (collapsible, white): Key Issues → Best Solutions →
                         active recommendation cards. Each sub-part hides itself when empty. ── */}
-                    {(activeSqs.issues?.length > 0
+                    {(activeKeyIssues.length > 0
                       || packageSqs?.top_recommendations?.length > 0
                       || activeSqs.risk_drivers?.length > 0
                       || activeSqs.recommendations?.length > 0) && (
                       <CollapsibleSection resetKey={activeFormId} title="Recommendations" tooltip="Prioritized issues and suggested fixes to raise the score.">
 
                         {/* Key Issues (renamed from Issues) - bullet list, hidden when empty */}
-                        {activeSqs.issues?.length > 0 && (
+                        {activeKeyIssues.length > 0 && (
                           <div style={{ marginBottom: 8 }}>
                             <div style={{ fontSize: 10, fontWeight: 700, color: "#000", marginBottom: 3 }}>Key Issues</div>
-                            {activeSqs.issues.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#000", padding: "1px 0" }}>• {s}</div>)}
+                            {activeKeyIssues.map((s, i) => <div key={i} style={{ fontSize: 11, color: "#000", padding: "1px 0" }}>• {s}</div>)}
                           </div>
                         )}
 

@@ -168,6 +168,50 @@ async def _pre_form_status(
     return pkg, kd
 
 
+def _grouped_with_package_caps(
+    structured_issues,
+    hard_stops,
+    soft_stops,
+    pkg,
+    cross_issues=None,
+):
+    """`build_grouped_view` plus any 60-cap the PACKAGE scorer holds privately.
+
+    OWNER RULE, 2026-08-31: the card must match the cap. `calculate_package_sqs`
+    can hold a score at 60 through a stop that never becomes a structured issue -
+    the `property_building_value` conflict it MANUFACTURES internally is the live
+    case, and a `hard_cross` entry is the other. Both survived only as
+    `cap_reason`, a sentence the pre-form Review screen never prints (it renders
+    `tier` alone). The producer saw warnings and a 60 with nothing joining them.
+
+    Two shapes, both from the scorer:
+      * `cap_hard_stop_codes` names a card that ALREADY EXISTS for the same
+        fact - it is promoted to hard-stop severity rather than duplicated, so
+        the row keeps its wording and its Resolve control (for a cross-document
+        conflict that control opens Data Consistency, the only place it can
+        actually be cleared);
+      * `cap_hard_stops` carries the message for a cap with no card at all -
+        appended to the DISPLAY copy of the hard-stop list, where
+        `build_grouped_view`'s safety net renders it and its `_covered_by`
+        check keeps it from doubling a row that is already there.
+
+    Display only. The caller's own arrays - which drive capping, dismiss credit
+    and issue_id hashing - are never touched, and no score moves.
+    """
+    pkg = pkg or {}
+    codes = [c for c in (pkg.get("cap_hard_stop_codes") or []) if c]
+    # A message whose card is being promoted must NOT also be appended, or the
+    # same problem prints twice under two different wordings.
+    extra = [] if codes else [m for m in (pkg.get("cap_hard_stops") or []) if m]
+    return build_grouped_view(
+        structured_issues or [],
+        list(hard_stops or []) + extra,
+        soft_stops or [],
+        cross_issues=cross_issues,
+        promote_codes=codes,
+    )
+
+
 def _doc_summary_entry(d: dict, primary_filename: str = "") -> dict:
     """Build a uniform per-document summary for the frontend (Beta Report §4.2).
 
@@ -493,12 +537,14 @@ async def upload_declaration(
         # penalty can never disagree. `_downgraded` still feeds `warning_stops`,
         # which is what powers the "proceed anyway" banner. See C75.
         _final_soft_stops = soft_stops
-        _grouped_issues = build_grouped_view(structured_issues, hard_stops, _final_soft_stops)
 
         # V1 H2 (client section 7): the status label's score and the key-
         # details split for the pre-form screen. Withheld exactly as
-        # tier2_score is below.
+        # tier2_score is below. Scored BEFORE the grouped view so any 60-cap the
+        # package scorer holds privately can be rendered as the hard stop it is.
         _pkg_now, _key_now = await _pre_form_status(sid, merged_facts, mflags, integrity, current_user)
+        _grouped_issues = _grouped_with_package_caps(
+            structured_issues, hard_stops, _final_soft_stops, _pkg_now)
 
         return JSONResponse({
             "success": True, "session_id": sid,
@@ -712,14 +758,15 @@ async def submission_integrity_resolve(
     )
     # A hard stop renders as a hard stop - see the note at the first call site.
     _final_soft_stops = result.get("soft_stops") or []
-    _grouped_issues = build_grouped_view(
-        result.get("structured_issues") or [], result.get("hard_stops") or [],
-        _final_soft_stops
-    )
     # V1 H2: status label + key details, same withholding as tier2_score.
+    # Scored BEFORE the grouped view - see _grouped_with_package_caps.
     _pkg_now, _key_now = await _pre_form_status(
         result["session_id"], result.get("merged_facts") or {},
         result.get("mflags") or {}, integrity, current_user,
+    )
+    _grouped_issues = _grouped_with_package_caps(
+        result.get("structured_issues") or [], result.get("hard_stops") or [],
+        _final_soft_stops, _pkg_now,
     )
     return JSONResponse({
         "success": True,
@@ -812,10 +859,6 @@ async def document_reclassify(
     )
     # A hard stop renders as a hard stop - see the note at the first call site.
     _final_soft_stops = result.get("soft_stops") or []
-    _grouped_issues = build_grouped_view(
-        result.get("structured_issues") or [], result.get("hard_stops") or [],
-        _final_soft_stops
-    )
 
     # §4.2 item #5: recompute the Submission Readiness (SQS) from the corrected,
     # re-scored session so the readiness score reflects the reclassification
@@ -823,6 +866,7 @@ async def document_reclassify(
     # than left stale. Deterministic (no LLM). Non-fatal — a failure here never
     # blocks the reclassification itself.
     package_sqs = None
+    _pkg_now = None
     _key_now = None
     try:
         # V1 H2 (2026-08-27): the pre-generation recipe that used to live
@@ -866,6 +910,14 @@ async def document_reclassify(
                 logger.warning(f"reclassify: sqs snapshot skipped: {_snap_ex}")
     except Exception as _sqs_ex:
         logger.warning(f"reclassify readiness recompute failed: {_sqs_ex}")
+
+    # Built AFTER the recompute so a privately-held 60 cap reaches the display -
+    # see _grouped_with_package_caps. A failed recompute leaves _pkg_now None,
+    # which folds in nothing and gives exactly the previous behaviour.
+    _grouped_issues = _grouped_with_package_caps(
+        result.get("structured_issues") or [], result.get("hard_stops") or [],
+        _final_soft_stops, _pkg_now,
+    )
 
     return JSONResponse({
         "success": True,
@@ -1018,14 +1070,15 @@ async def underwriting_confirm_value(
     )
     # A hard stop renders as a hard stop - see the note at the first call site.
     _final_soft_stops = result.get("soft_stops") or []
-    _grouped_issues = build_grouped_view(
-        result.get("structured_issues") or [], result.get("hard_stops") or [],
-        _final_soft_stops
-    )
     # V1 H2: status label + key details, same withholding as tier2_score.
+    # Scored BEFORE the grouped view - see _grouped_with_package_caps.
     _pkg_now, _key_now = await _pre_form_status(
         result["session_id"], result.get("merged_facts") or {},
         result.get("mflags") or {}, integrity, current_user,
+    )
+    _grouped_issues = _grouped_with_package_caps(
+        result.get("structured_issues") or [], result.get("hard_stops") or [],
+        _final_soft_stops, _pkg_now,
     )
     return JSONResponse({
         "success": True,
@@ -2364,16 +2417,16 @@ async def get_extraction_result(
     # into structured_issues, so without it every one of them lands in
     # build_grouped_view's uncoded safety net and collapses into a single
     # "Other validations" cluster instead of its real one.
-    _grouped_issues = build_grouped_view(
-        proc_session.get("structured_issues") or [], hard_stops, _final_soft_stops,
-        cross_issues=proc_session.get("cross_issues_last") or [],
-    )
-
     # V1 H2: status label + key details. The row is already loaded; once
-    # forms exist this returns the persisted, credit-bearing score.
+    # forms exist this returns the persisted, credit-bearing score. Scored
+    # BEFORE the grouped view - see _grouped_with_package_caps.
     _pkg_now, _key_now = await _pre_form_status(
         session_id, proc_session.get("facts") or {}, mflags, integrity,
         current_user, session_row=proc_session,
+    )
+    _grouped_issues = _grouped_with_package_caps(
+        proc_session.get("structured_issues") or [], hard_stops, _final_soft_stops,
+        _pkg_now, cross_issues=proc_session.get("cross_issues_last") or [],
     )
     return JSONResponse({
         "success":               True,

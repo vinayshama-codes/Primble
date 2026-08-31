@@ -1084,6 +1084,7 @@ def build_grouped_view(
     hard_stops: List[str],
     soft_stops: List[str],
     cross_issues: Optional[List[dict]] = None,
+    promote_codes: Optional[List[str]] = None,
 ) -> dict:
     """Group structured issues into clustered Hard Stop / tiered Warning
     sections plus a top-3 "fix this first" list.
@@ -1102,9 +1103,26 @@ def build_grouped_view(
     into the uncoded safety net below and collapses into one "Other
     validations" bucket. Injecting them here rather than persisting them keeps
     a single source of truth and makes double-counting structurally impossible.
+
+    `promote_codes` names issues that are HOLDING A SCORE AT 60 even though the
+    engine that emitted them called them a warning. Owner rule, 2026-08-31: the
+    card must match the cap. The package scorer can cap on a stop the display
+    engines classify as a soft warning - the manufactured
+    `property_building_value` conflict is the live case, since
+    `extraction_pipeline` draws it as a warning when the package has no property
+    coverage while `calculate_package_sqs` caps at 60 regardless - so the
+    producer read "warning" while the score read "blocker".
+
+    PROMOTES the existing card rather than adding a second one, deliberately:
+    that row already carries the right wording, the right cluster and, crucially,
+    the Resolve control that opens Data Consistency - the ONLY place a
+    cross-document conflict can actually be cleared. A freshly-minted row would
+    carry none of it. Nothing here changes a score; the caller's stop arrays are
+    untouched.
     """
     hard_stops = hard_stops or []
     soft_stops = soft_stops or []
+    _promote = {c for c in (promote_codes or []) if c}
 
     if cross_issues:
         _seen_msgs = {
@@ -1236,7 +1254,11 @@ def build_grouped_view(
         message = issue.get("message") or ""
         orig_severity = issue.get("severity") or issue.get("type") or "soft_warning"
 
-        if orig_severity == "hard_stop":
+        if code in _promote:
+            # This issue is what is holding the score at 60. Whatever the
+            # emitting engine called it, it renders as the blocker it is.
+            severity = "hard_stop"
+        elif orig_severity == "hard_stop":
             if _present_in(message, hard_stops):
                 severity = "hard_stop"
             elif _present_in(message, soft_stops):

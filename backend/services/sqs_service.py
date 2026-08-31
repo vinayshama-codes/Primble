@@ -4072,6 +4072,22 @@ def _compute_category_breakdown(
     }
 
 
+def _umbrella_has_underlying(facts: dict) -> bool:
+    """True when the package states an underlying GL or Auto liability limit.
+
+    ONE DOOR, deliberately. `_calculate_umbrella_adequacy` returns 0 for two
+    completely different reasons - genuinely no underlying limits, or ordinary
+    deductions stacking to zero - and `calculate_sqs`'s 60 cap could not tell
+    them apart, so it printed "no underlying GL or Auto limits" on packages
+    that plainly had both. A second local copy of this test is how that class
+    of defect survives, so both callers read this one.
+    """
+    gl_val   = _to_int(_fv(facts, "gl_each_occurrence") or _fv(facts, "gl_limits"))
+    auto_val = _to_int(_fv(facts, "auto_liability_limit"))
+    _auto_split = auto_val is None and _auto_liability_stated(facts)
+    return bool(gl_val or auto_val or _auto_split)
+
+
 def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
     """P5 - Umbrella & Limit Adequacy (10% of SQS).
 
@@ -4096,7 +4112,7 @@ def _calculate_umbrella_adequacy(facts: dict, flags: dict) -> Optional[int]:
     # below-$1M comparison is CSL-only and is not attempted on split parts -
     # no opinion, never a guess.
     _auto_split = auto_val is None and _auto_liability_stated(facts)
-    has_underlying = bool(gl_val or auto_val or _auto_split)
+    has_underlying = _umbrella_has_underlying(facts)
 
     if not has_underlying:
         return 0  # hard-stop scenario per evaluate_stops()
@@ -5014,14 +5030,23 @@ def calculate_package_sqs(
     # property_building_value as review_required, surface it as a hard cross-issue so it
     # shows in the "Hard Stops" section and caps SQS at 60 until resolved (client spec).
     _uw_data = (session_data or {}).get("underwriting_consistency") or {}
+    # The message and the code of the card `extraction_pipeline` ALREADY draws
+    # for this same fact. Kept so the display can promote that card to a hard
+    # stop rather than adding a second row with no Resolve control - the
+    # producer needs the one that opens Data Consistency, which is the only
+    # place a cross-document conflict can actually be cleared.
+    _bv_msg = None
+    _bv_code = "underwriting_reconciliation_property_building_value"
     if any(
         f.get("fact_key") == "property_building_value" and f.get("review_required")
         for f in (_uw_data.get("fields") or [])
     ):
+        _bv_msg = ("Building value differs across submitted documents - confirm "
+                   "the correct value before generating forms")
         _cross = _cross + [{
             "type": "hard_stop",
             "field": "property_building_value",
-            "message": "Building value differs across submitted documents - confirm the correct value before generating forms",
+            "message": _bv_msg,
         }]
     hard_cross = [i for i in _cross if isinstance(i, dict) and i.get("type") == "hard_stop"]
     warn_cross = [i for i in _cross if isinstance(i, dict) and i.get("type") in _CROSS_WARNING_TYPES]
@@ -5098,6 +5123,31 @@ def calculate_package_sqs(
     )
     raw = raw_uncapped if cap_applied is None else min(raw_uncapped, cap_applied)
     raw = max(0, min(100, raw))
+
+    # ── THE CARD MUST MATCH THE CAP (owner, 2026-08-31) ─────────────────────
+    # A 60 held by anything other than `hard_stops` had no card. Two shapes:
+    #   * the `property_building_value` hard stop this function MANUFACTURES
+    #     above - it is never written to `cross_issues_last` or
+    #     `structured_issues`, so `build_grouped_view` cannot see it. The
+    #     pipeline meanwhile draws the SAME fact as a soft warning, so the
+    #     producer read "warning" while the score read "blocker";
+    #   * a `hard_cross` entry on a route that does not inject cross issues.
+    # Both survived only as `cap_reason` - a sentence the pre-form Review
+    # screen never prints (it renders `tier` alone) and the editor buries in a
+    # collapsed panel.
+    #
+    # `_resolve_cap` reads `hard_stops` FIRST, so `cap_reason not in hard_stops`
+    # proves no existing card carries this message. Display only: the caller's
+    # arrays are untouched, no cap fires that did not fire before, and no score
+    # moves. Whether an IRRELEVANT building-value conflict should cap at all is
+    # a separate, score-moving question held for Brent (D6) - see v1-20AUG.md H8.
+    cap_hard_stops: List[str] = []
+    cap_hard_stop_codes: List[str] = []
+    if (cap_applied == HARD_STOP_CAP and cap_reason
+            and cap_reason not in (hard_stops or [])):
+        cap_hard_stops.append(cap_reason)
+        if _bv_msg and cap_reason == _bv_msg:
+            cap_hard_stop_codes.append(_bv_code)
 
     # Single tier ladder (tier_for_score). 90+ is "Submission Ready", matching
     # the frontend readiness surfaces and the "A" grade boundary.
@@ -5269,6 +5319,12 @@ def calculate_package_sqs(
         "raw_sqs_score":     raw_uncapped,
         "cap_applied":       cap_applied,
         "cap_reason":        cap_reason,
+        # A 60 cap with no card of its own - rendered as a hard stop by every
+        # display surface so the card can never disagree with the maths.
+        # `cap_hard_stop_codes` names an EXISTING card for the same fact, which
+        # the display promotes instead of drawing a duplicate row.
+        "cap_hard_stops":       cap_hard_stops,
+        "cap_hard_stop_codes":  cap_hard_stop_codes,
         "tier": tier,
         "lob": lob,
         "pillars": {
@@ -6665,17 +6721,51 @@ def calculate_sqs(
     # from a genuinely low one, and later credits had to compound off the capped
     # value instead of the real one.
     raw_uncapped = max(0, min(100, raw_score))
+    # ── A 60 CAP IS A HARD STOP, AND IT MUST SAY SO ──────────────────────────
+    # These three gates live OUTSIDE hard_stops/soft_stops, so they capped the
+    # form at 60 while the Hard Stops list stayed empty and nothing on screen
+    # explained the number (reported live 2026-08-31: three forms pinned at 60,
+    # zero hard stops, warnings only). The cap itself is UNCHANGED - only its
+    # visibility. The reason is returned in `cap_hard_stops` below so the UI can
+    # render it as the hard stop it already was.
+    #
+    # The umbrella wording used to be a single string claiming "no underlying
+    # GL or Auto limits". `_calculate_umbrella_adequacy` reaches 0 two ways -
+    # genuinely no underlying, or ordinary deductions stacking past 100 - so on
+    # a package carrying both limits the printed reason was simply false. It now
+    # names the real cause via the shared `_umbrella_has_underlying` door.
+    _gate_hard_reason = (
+        "Minimum Viable COPE incomplete" if cope_hard else
+        (
+            "Umbrella present with no underlying GL or Auto limits"
+            if not _umbrella_has_underlying(facts) else
+            "Umbrella coverage is present but its supporting detail is incomplete - "
+            "umbrella limit, underlying limits, schedule of underlying insurance "
+            "and follow-form status"
+        ) if umb_fail else
+        "Property integrity gate" if _prop_hard else None
+    )
     cap_applied, cap_reason = _resolve_cap(
         hard_stops, soft_stops,
-        extra_hard_reason=(
-            "Minimum Viable COPE incomplete" if cope_hard else
-            "Umbrella present with no underlying GL or Auto limits" if umb_fail else
-            "Property integrity gate" if _prop_hard else None
-        ),
+        extra_hard_reason=_gate_hard_reason,
         extra_soft_reason="Property integrity warning" if _prop_soft else None,
     )
     if cap_applied is not None:
         raw_score = min(raw_score, cap_applied)
+
+    # Surface the gate ONLY when it is what actually bound the score and no
+    # existing hard stop already says it. `_resolve_cap` appends the gate LAST,
+    # so `cap_reason == _gate_hard_reason` means hard_stops was empty - i.e.
+    # there is no card on screen for this cap. Display only: nothing here
+    # re-scores, and hard_stops/soft_stops (which drive every other cap, the
+    # dismiss credit and issue_id hashing) are never mutated.
+    cap_hard_stops: List[str] = []
+    if (cap_applied == HARD_STOP_CAP and _gate_hard_reason
+            and cap_reason == _gate_hard_reason
+            and _gate_hard_reason not in (hard_stops or [])):
+        cap_hard_stops.append(_gate_hard_reason)
+        if _gate_hard_reason not in issues:
+            issues.append(_gate_hard_reason)
 
     # fraud_penalty is applied AFTER the cap, exactly as before. It is currently
     # always 0 (never assigned anywhere), so this ordering is behaviour-neutral -
@@ -6797,6 +6887,9 @@ def calculate_sqs(
         "raw_sqs_score":       raw_uncapped,
         "cap_applied":         cap_applied,
         "cap_reason":          cap_reason,
+        # Gate-only 60 caps that have no entry in hard_stops - rendered by the
+        # UI as hard stops so a held score is never unexplained (2026-08-31).
+        "cap_hard_stops":      cap_hard_stops,
         "score_trace":         _score_trace,
         "tier":                tier,
         "tier_color":          tc,
